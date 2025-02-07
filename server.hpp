@@ -8,6 +8,9 @@
 #include <functional>
 #include <iostream>
 #include <map>
+#include <span>
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/spdlog.h>
 
 namespace beast = boost::beast;   // from <boost/beast.hpp>
 namespace http = beast::http;     // from <boost/beast/http.hpp>
@@ -42,38 +45,165 @@ auto make_string_response(const beast::http::request<RequestBody> &request,
 
 using http_stream = beast::tcp_stream;
 using ssl_http_stream = beast::ssl_stream<beast::tcp_stream>;
-using http_connection_t = util::http_variant_stream<http_stream, ssl_http_stream>;
+using http_variant_stream_type = util::http_variant_stream<http_stream, ssl_http_stream>;
 
 using ws_stream = websocket::stream<http_stream>;
 using ssl_ws_stream = websocket::stream<ssl_http_stream>;
-using ws_connection_t = util::websocket_variant_stream<ws_stream, ssl_ws_stream>;
+using ws_variant_stream_type = util::websocket_variant_stream<ws_stream, ssl_ws_stream>;
+
+class connection_ssl
+{
+public:
+    connection_ssl(std::unique_ptr<ssl::context> &&ssl_ctx)
+        : ssl_ctx_(std::move(ssl_ctx))
+    {}
+
+private:
+    std::unique_ptr<ssl::context> ssl_ctx_;
+};
 
 class websocket_conn : public std::enable_shared_from_this<websocket_conn>
 {
-public:
-    websocket_conn(ws_connection_t &&conn)
-        : ws_(std::move(conn))
-    {}
-    websocket_conn(http_stream &&stream)
-        : ws_(ws_stream(std::move(stream)))
-    {}
-    websocket_conn(ssl_http_stream &&stream)
-        : ws_(ssl_ws_stream(std::move(stream)))
-    {}
+private:
+    using binary_data_type = std::vector<uint8_t>;
+    using text_data_type = std::string;
+    using write_data_type = std::variant<binary_data_type, text_data_type>;
 
 public:
-    template<class Header>
-    net::awaitable<void> run(Header const &req)
+    websocket_conn(std::shared_ptr<spdlog::logger> logger, http_variant_stream_type &&stream)
+        : logger_(logger)
+        , strand_(stream.get_executor())
+    {
+        std::visit(
+            [this](auto &&t) {
+                using value_type = std::decay_t<decltype(t)>;
+                if constexpr (std::same_as<http_stream, value_type>) {
+                    ws_ = std::make_unique<ws_variant_stream_type>(ws_stream(std::move(t)));
+                } else if constexpr (std::same_as<ssl_http_stream, value_type>) {
+                    ws_ = std::make_unique<ws_variant_stream_type>(ssl_ws_stream(std::move(t)));
+                } else {
+                    static_assert(false, "unknown http_variant_stream_type");
+                }
+            },
+            stream);
+    }
+    void send_data(std::span<uint8_t> data)
+    {
+        binary_data_type binary_data(data.begin(), data.end());
+        send_data(std::move(binary_data));
+    }
+    void send_data(write_data_type &&data)
+    {
+        if (!ws_->is_open())
+            return;
+
+        net::post(strand_, [this, data = std::move(data), self = shared_from_this()]() {
+            bool send_in_process = !send_que_.empty();
+            send_que_.emplace_back(std::move(data));
+            if (send_in_process)
+                return;
+            net::co_spawn(strand_, process_write_data(), net::detached);
+        });
+    }
+    void close()
+    {
+        if (!ws_->is_open())
+            return;
+
+        net::co_spawn(
+            strand_,
+            [this, self = shared_from_this()]() -> net::awaitable<void> {
+                boost::system::error_code ec;
+                co_await net::post(strand_, net_awaitable[ec]);
+                if (ec)
+                    co_return;
+
+                websocket::close_reason reason("normal");
+                co_await ws_->async_close(reason, net_awaitable[ec]);
+            },
+            net::detached);
+    }
+
+public:
+    net::awaitable<void> process_write_data()
+    {
+        auto self = shared_from_this();
+
+        for (;;) {
+            boost::system::error_code ec;
+            co_await net::post(strand_, net_awaitable[ec]);
+            if (ec)
+                co_return;
+            if (send_que_.empty())
+                co_return;
+
+            write_data_type data = std::move(send_que_.front());
+            send_que_.pop_front();
+
+            co_await std::visit(
+                [&](auto &v) -> net::awaitable<void> {
+                    using value_type = std::decay_t<decltype(v)>;
+                    if constexpr (std::same_as<value_type, text_data_type>) {
+                        ws_->text(true);
+                    } else {
+                        ws_->binary(true);
+                    }
+                    co_await ws_->async_write(net::buffer(v), net_awaitable[ec]);
+                },
+                data);
+            if (ec)
+                co_return;
+        }
+    }
+    net::awaitable<void> run(http::request<http::empty_body> const &req, beast::flat_buffer buffer)
     {
         boost::system::error_code ec;
-        co_await ws_.async_accept(req, net_awaitable[ec]);
-        if (ec)
+        co_await ws_->async_accept(req, net_awaitable[ec]);
+        if (ec) {
+            logger_->error("websocket handshake failed: {}", ec.message());
             co_return;
-        beast::flat_buffer buffer;
+        }
+        auto remote_endp = ws_->remote_endpoint();
+
+        logger_->debug("websocket new connection: [{}:{}]",
+                       remote_endp.address().to_string(),
+                       remote_endp.port());
+
+        for (;;) {
+            auto bytes = co_await ws_->async_read(buffer, net_awaitable[ec]);
+            if (ec) {
+                logger_->debug("websocket disconnect: [{}:{}] what: {}",
+                               remote_endp.address().to_string(),
+                               remote_endp.port(),
+                               ec.message());
+                co_return;
+            }
+
+            if (ws_->got_text()) {
+                std::string_view data(net::buffer_cast<const char *>(buffer.data()),
+                                      net::buffer_size(buffer.data()));
+                //for (int i = 0; i < 1000; ++i)
+                send_data(std::string(data));
+                //co_await ws_->async_write(net::buffer(data), net_awaitable[ec]);
+                close();
+
+                //send_data(std::string(data));
+            }
+
+            buffer.consume(bytes);
+        }
+        //ws_stream w;
+        //w.async_write
+        //    w.set_option(websocket::stream_base::timeout::suggested(beast::role_type::server));
+        //w.async_read
     }
 
 private:
-    ws_connection_t ws_;
+    net::strand<net::any_io_executor> strand_;
+    std::shared_ptr<spdlog::logger> logger_;
+    std::unique_ptr<ws_variant_stream_type> ws_;
+
+    std::list<write_data_type> send_que_;
 };
 
 class server
@@ -93,7 +223,10 @@ public:
         : pool_(num_threads)
         , acceptor_(pool_)
     {
+        logger_ = spdlog::stdout_color_mt("server");
+        logger_->set_level(spdlog::level::debug);
         ssl_config_ = ssl_config{R"(D:\code\http\server.crt)", R"(D:\code\http\server.key)", "test"};
+        //ssl_config_ = ssl_config{};
     }
 
 public:
@@ -110,6 +243,7 @@ public:
         acceptor_.open(endp.protocol());
         acceptor_.bind(endp);
         acceptor_.listen(backlog);
+        logger_->info("Server Listen on: [{}:{}]", endp.address().to_string(), endp.port());
         return *this;
     }
     void run()
@@ -125,12 +259,15 @@ public:
     {
         boost::system::error_code ec;
 
-        auto executor = co_await net::this_coro::executor;
+        const auto &executor = co_await net::this_coro::executor;
         for (;;) {
             tcp::socket sock(executor);
             co_await acceptor_.async_accept(sock, net_awaitable[ec]);
             if (ec)
                 co_return;
+            logger_->debug("accept new connection [{}:{}]",
+                           sock.remote_endpoint().address().to_string(),
+                           sock.remote_endpoint().port());
 
             net::co_spawn(executor, do_session(std::move(sock)), net::detached);
         }
@@ -139,76 +276,75 @@ public:
 private:
     std::unique_ptr<ssl::context> create_ssl_context()
     {
-        unsigned long ssl_options = ssl::context::default_workarounds | ssl::context::no_sslv2
-                                    | ssl::context::single_dh_use;
+        try {
+            unsigned long ssl_options = ssl::context::default_workarounds | ssl::context::no_sslv2
+                                        | ssl::context::single_dh_use;
 
-        auto ssl_ctx = std::make_unique<ssl::context>(ssl::context::sslv23);
+            auto ssl_ctx = std::make_unique<ssl::context>(ssl::context::sslv23);
+            ssl_ctx->set_options(ssl_options);
 
-        boost::system::error_code ec;
-        ssl_ctx->set_options(ssl_options, ec);
-        if (ec)
+            if (!ssl_config_->passwd.empty()) {
+                ssl_ctx->set_password_callback([this](auto, auto) { return ssl_config_->passwd; });
+            }
+            ssl_ctx->use_certificate_chain_file(ssl_config_->cert_file.string());
+            ssl_ctx->use_private_key_file(ssl_config_->key_file.string(), ssl::context::pem);
+            return ssl_ctx;
+        } catch (const std::exception &e) {
+            logger_->error("create_ssl_context: {}", e.what());
             return nullptr;
-
-        if (!ssl_config_->passwd.empty()) {
-            ssl_ctx->set_password_callback([this](auto, auto) { return ssl_config_->passwd; }, ec);
-            if (ec)
-                return nullptr;
         }
-        ssl_ctx->use_certificate_chain_file(ssl_config_->cert_file.string(), ec);
-        if (ec)
-            return nullptr;
-        ssl_ctx->use_private_key_file(ssl_config_->key_file.string(), ssl::context::pem, ec);
-        if (ec)
-            return nullptr;
-
-        return ssl_ctx;
     }
     net::awaitable<void> do_session(tcp::socket sock)
     {
-        beast::flat_buffer buffer;
-        boost::system::error_code ec;
-        bool is_ssl = co_await beast::async_detect_ssl(sock, buffer, net_awaitable[ec]);
+        try {
+            beast::flat_buffer buffer;
+            boost::system::error_code ec;
+            bool is_ssl = co_await beast::async_detect_ssl(sock, buffer, net_awaitable[ec]);
 
-        if (ec)
-            co_return;
-
-        std::unique_ptr<http_connection_t> conn;
-        std::unique_ptr<ssl::context> ssl_ctx;
-        if (is_ssl) {
-            ssl_ctx = create_ssl_context();
-            ssl_http_stream stream(std::move(sock), *ssl_ctx);
-
-            auto bytes_used = co_await stream.async_handshake(ssl::stream_base::server,
-                                                              buffer.data(),
-                                                              net_awaitable[ec]);
-            if (ec) {
-                std::cout << ec.message() << std::endl;
+            if (ec)
                 co_return;
-            }
-            buffer.consume(bytes_used);
-            conn = std::make_unique<http_connection_t>(std::move(stream));
 
-        } else {
-            http_stream stream(std::move(sock));
-            conn = std::make_unique<http_connection_t>(std::move(stream));
-        }
-
-        header_parser_type parser;
-        while (!parser.is_header_done()) {
-            conn->expires_after(std::chrono::seconds(30));
-            co_await http::async_read_some(*conn, buffer, parser);
-        }
-        // websocket
-        if (websocket::is_upgrade(parser.get())) {
-            conn->expires_never();
-            co_await std::visit(
-                [&](auto &&t) -> net::awaitable<void> {
-                    auto conn = std::make_shared<websocket_conn>(std::move(t));
-                    co_await conn->run(parser.get());
+            std::unique_ptr<http_variant_stream_type> http_variant_stream;
+            std::unique_ptr<ssl::context> ssl_ctx;
+            if (is_ssl) {
+                ssl_ctx = create_ssl_context();
+                if (!ssl_ctx)
                     co_return;
-                },
-                *conn);
-            co_return;
+
+                ssl_http_stream stream(std::move(sock), *ssl_ctx);
+
+                auto bytes_used = co_await stream.async_handshake(ssl::stream_base::server,
+                                                                  buffer.data(),
+                                                                  net_awaitable[ec]);
+                if (ec) {
+                    logger_->error("ssl handshake failed: {}", ec.message());
+                    co_return;
+                }
+                buffer.consume(bytes_used);
+                http_variant_stream = std::make_unique<http_variant_stream_type>(std::move(stream));
+
+            } else {
+                http_stream stream(std::move(sock));
+                http_variant_stream = std::make_unique<http_variant_stream_type>(std::move(stream));
+            }
+
+            for (;;) {
+                header_parser_type header_parser;
+                while (!header_parser.is_header_done()) {
+                    http_variant_stream->expires_after(std::chrono::seconds(30));
+                    co_await http::async_read_some(*http_variant_stream, buffer, header_parser);
+                }
+                // websocket
+                if (websocket::is_upgrade(header_parser.get())) {
+                    http_variant_stream->expires_never();
+                    auto conn = std::make_shared<websocket_conn>(logger_,
+                                                                 std::move(*http_variant_stream));
+                    co_await conn->run(header_parser.get(), std::move(buffer));
+                    co_return;
+                }
+            }
+        } catch (const std::exception &e) {
+            spdlog::error("do_session: {}", e.what());
         }
         // try {
         //   for (;;) {
@@ -434,6 +570,7 @@ private:
     }
 
 private:
+    std::shared_ptr<spdlog::logger> logger_;
     net::thread_pool pool_;
     tcp::acceptor acceptor_;
     std::optional<ssl_config> ssl_config_;

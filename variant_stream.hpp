@@ -38,8 +38,29 @@ public:
     }
     lowest_layer_type &lowest_layer()
     {
-        return std::visit([&](auto &t) mutable -> lowest_layer_type & { return t.lowest_layer(); },
-                          *this);
+        return std::visit(
+            [&](auto &t) mutable -> lowest_layer_type & {
+                using stream_type = std::decay_t<decltype(beast::get_lowest_layer(t))>;
+                if constexpr (std::same_as<stream_type, beast::tcp_stream>) {
+                    return beast::get_lowest_layer(t).socket().lowest_layer();
+                } else {
+                    return t.lowest_layer();
+                }
+            },
+            *this);
+    }
+    const lowest_layer_type &lowest_layer() const
+    {
+        return std::visit(
+            [&](auto &t) mutable -> const lowest_layer_type & {
+                using stream_type = std::decay_t<decltype(beast::get_lowest_layer(t))>;
+                if constexpr (std::same_as<stream_type, beast::tcp_stream>) {
+                    return beast::get_lowest_layer(t).socket().lowest_layer();
+                } else {
+                    return t.lowest_layer();
+                }
+            },
+            *this);
     }
     template<typename MutableBufferSequence, typename ReadHandler>
     auto async_read_some(const MutableBufferSequence &buffers, ReadHandler &&handler)
@@ -60,26 +81,16 @@ public:
             *this);
     }
 
-    tcp::endpoint remote_endpoint()
-    {
-        return std::visit([&](auto &t) mutable { return t.lowest_layer().remote_endpoint(); },
-                          *this);
-    }
+    tcp::endpoint remote_endpoint() { return lowest_layer().remote_endpoint(); }
 
     void shutdown(net::socket_base::shutdown_type what, boost::system::error_code &ec)
     {
-        std::visit([&](auto &t) mutable { t.lowest_layer().shutdown(what, ec); }, *this);
+        lowest_layer().shutdown(what, ec);
     }
 
-    bool is_open() const
-    {
-        return std::visit([&](auto &t) { return t.lowest_layer().is_open(); }, *this);
-    }
+    bool is_open() const { return lowest_layer().is_open(); }
 
-    void close(boost::system::error_code &ec)
-    {
-        std::visit([&](auto &t) mutable { t.lowest_layer().close(ec); }, *this);
-    }
+    void close(boost::system::error_code &ec) { lowest_layer().close(ec); }
 };
 
 template<typename... T>
@@ -116,6 +127,49 @@ public:
                 return t.async_accept(req, std::forward<AcceptHandler>(handler));
             },
             *this);
+    }
+    template<class DynamicBuffer, class ReadHandler>
+    auto async_read(DynamicBuffer &buffer, ReadHandler &&handler)
+    {
+        return std::visit(
+            [&, handler = std::move(handler)](auto &t) mutable {
+                return t.async_read(buffer, std::forward<ReadHandler>(handler));
+            },
+            *this);
+    }
+    template<class ConstBufferSequence, class WriteHandler>
+    auto async_write(ConstBufferSequence const &bs, WriteHandler &&handler)
+    {
+        return std::visit(
+            [&, handler = std::move(handler)](auto &t) mutable {
+                return t.async_write(bs, std::forward<WriteHandler>(handler));
+            },
+            *this);
+    }
+    template<class CloseHandler>
+    auto async_close(beast::websocket::close_reason const &cr, CloseHandler &&handler)
+    {
+        return std::visit(
+            [&, handler = std::move(handler)](auto &t) mutable {
+                return t.async_close(cr, std::forward<CloseHandler>(handler));
+            },
+            *this);
+    }
+    bool got_binary() const noexcept
+    {
+        return std::visit([&](auto &t) mutable { return t.got_binary(); }, *this);
+    }
+    bool got_text() const
+    {
+        return std::visit([&](auto &t) mutable { return t.got_text(); }, *this);
+    }
+    void text(bool value)
+    {
+        std::visit([&](auto &t) mutable { return t.text(value); }, *this);
+    }
+    void binary(bool value)
+    {
+        std::visit([&](auto &t) mutable { return t.binary(value); }, *this);
     }
 };
 
