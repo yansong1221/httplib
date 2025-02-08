@@ -1,4 +1,5 @@
 #pragma once
+#include "proxy_conn.hpp"
 #include "use_awaitable.hpp"
 #include "variant_stream.hpp"
 #include "websocket_conn.hpp"
@@ -33,6 +34,20 @@ auto make_response(const beast::http::request<RequestBody> &request,
     response.keep_alive(request.keep_alive());
     return response;
 }
+template<class RequestBody>
+auto make_empty_response(const beast::http::request<RequestBody> &request,
+                         beast::http::status status = beast::http::status::ok,
+                         std::optional<std::string_view> reason = std::nullopt) {
+
+    beast::http::response<http::empty_body> response{status, request.version()};
+    if (reason)
+        response.reason(*reason);
+    response.set(beast::http::field::server, BOOST_BEAST_VERSION_STRING);
+    response.prepare_payload();
+    response.keep_alive(request.keep_alive());
+    return response;
+}
+
 template<class RequestBody>
 auto make_string_response(const beast::http::request<RequestBody> &request, beast::string_view body,
                           beast::string_view content_type,
@@ -126,15 +141,14 @@ private:
     }
     net::awaitable<void> do_session(tcp::socket sock) {
         try {
+            std::unique_ptr<util::http_variant_stream_type> http_variant_stream;
             beast::flat_buffer buffer;
             boost::system::error_code ec;
             bool is_ssl = co_await beast::async_detect_ssl(sock, buffer, net_awaitable[ec]);
-
-            if (ec)
+            if (ec) {
+                logger_->error("async_detect_ssl failed: {}", ec.message());
                 co_return;
-
-            std::unique_ptr<util::http_variant_stream_type> http_variant_stream;
-
+            }
             if (is_ssl) {
                 auto ssl_ctx = create_ssl_context();
                 if (!ssl_ctx)
@@ -161,23 +175,61 @@ private:
                 header_parser_type header_parser;
                 while (!header_parser.is_header_done()) {
                     http_variant_stream->expires_after(std::chrono::seconds(30));
-                    co_await http::async_read_some(*http_variant_stream, buffer, header_parser);
+                    co_await http::async_read_some(*http_variant_stream, buffer, header_parser,
+                                                   net_awaitable[ec]);
+                    if (ec) {
+                        logger_->debug("read http header failed: {}", ec.message());
+                        co_return;
+                    }
                 }
+                http_variant_stream->expires_never();
+
+                const auto &header = header_parser.get();
                 // websocket
-                if (websocket::is_upgrade(header_parser.get())) {
-                    http_variant_stream->expires_never();
+                if (websocket::is_upgrade(header)) {
+
                     auto conn = std::make_shared<httplib::websocket_conn>(
                         logger_, std::move(*http_variant_stream));
                     conn->set_open_handler(websocket_open_handler_);
                     conn->set_close_handler(websocket_close_handler_);
                     conn->set_message_handler(websocket_message_handler_);
-                    co_await conn->run(header_parser.get(), std::move(buffer));
+                    co_await conn->run(header, std::move(buffer));
                     co_return;
                 }
-                //CONNECT
-                else if (header_parser.get().method() == http::verb::connect)
-                {
-                    auto target = header_parser.get().target();
+                //http proxy
+                else if (header.method() == http::verb::connect) {
+                    auto target = header.target();
+                    auto pos = target.find(":");
+                    if (pos == std::string_view::npos)
+                        co_return;
+
+                    auto host = target.substr(0, pos);
+                    auto port = target.substr(pos + 1);
+
+                    tcp::resolver resolver(co_await net::this_coro::executor);
+                    auto results = co_await resolver.async_resolve(host, port, net_awaitable[ec]);
+                    if (ec)
+                        co_return;
+
+                    tcp::socket proxy_socket(co_await net::this_coro::executor);
+                    co_await net::async_connect(proxy_socket, results, net_awaitable[ec]);
+                    if (ec)
+                        co_return;
+
+                    co_await http::async_write(
+                        *http_variant_stream,
+                        make_empty_response(header, http::status::ok, "Connection Established"),
+                        net_awaitable[ec]);
+                    if (ec)
+                        co_return;
+
+                    auto conn = std::make_shared<httplib::proxy_conn>(
+                        std::move(*http_variant_stream), std::move(proxy_socket));
+
+                    co_await conn->run();
+                    //透明代理
+
+                    co_return;
                 }
             }
         } catch (const std::exception &e) {
@@ -241,6 +293,7 @@ private:
 
         //} catch (const std::exception &e) {}
     }
+
     template<class Body, class Allocator>
     http::message_generator
     handle_request(beast::string_view doc_root,

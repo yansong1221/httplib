@@ -146,6 +146,7 @@ public:
     net::awaitable<void> run(http::request<http::empty_body> const& req, beast::flat_buffer buffer)
     {
         boost::system::error_code ec;
+        auto remote_endp = ws_->remote_endpoint(ec);
         co_await ws_->async_accept(req, net_awaitable[ec]);
         if (ec) {
             logger_->error("websocket handshake failed: {}", ec.message());
@@ -155,7 +156,7 @@ public:
         if (open_handler_)
             co_await open_handler_(weak_from_this());
 
-        auto remote_endp = ws_->remote_endpoint();
+        
 
         logger_->debug("websocket new connection: [{}:{}]",
                        remote_endp.address().to_string(),

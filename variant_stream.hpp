@@ -16,6 +16,13 @@ namespace beast = boost::beast;
 namespace http = beast::http;
 namespace websocket = beast::websocket;
 
+using http_stream =
+    beast::basic_stream<net::ip::tcp, net::any_io_executor, beast::simple_rate_policy>;
+using ssl_http_stream = ssl_stream<http_stream>;
+
+using ws_stream = websocket::stream<http_stream>;
+using ssl_ws_stream = websocket::stream<ssl_http_stream>;
+
 template<typename... T>
 class variant_stream : public std::variant<T...> {
 public:
@@ -39,7 +46,7 @@ public:
         return std::visit(
             [&](auto &t) mutable -> lowest_layer_type & {
                 using stream_type = std::decay_t<decltype(beast::get_lowest_layer(t))>;
-                if constexpr (std::same_as<stream_type, beast::tcp_stream>) {
+                if constexpr (std::same_as<stream_type, util::http_stream>) {
                     return beast::get_lowest_layer(t).socket().lowest_layer();
                 } else {
                     return t.lowest_layer();
@@ -51,7 +58,7 @@ public:
         return std::visit(
             [&](auto &t) mutable -> const lowest_layer_type & {
                 using stream_type = std::decay_t<decltype(beast::get_lowest_layer(t))>;
-                if constexpr (std::same_as<stream_type, beast::tcp_stream>) {
+                if constexpr (std::same_as<stream_type, util::http_stream>) {
                     return beast::get_lowest_layer(t).socket().lowest_layer();
                 } else {
                     return t.lowest_layer();
@@ -78,6 +85,9 @@ public:
 
     tcp::endpoint remote_endpoint() {
         return lowest_layer().remote_endpoint();
+    }
+    tcp::endpoint remote_endpoint(boost::system::error_code &ec) {
+        return lowest_layer().remote_endpoint(ec);
     }
 
     void shutdown(net::socket_base::shutdown_type what, boost::system::error_code &ec) {
@@ -106,6 +116,14 @@ public:
     auto expires_never() {
         return std::visit(
             [&](auto &t) mutable { return beast::get_lowest_layer(t).expires_never(); }, *this);
+    }
+
+    auto rate_policy() noexcept {
+        return std::visit([&](auto &t) mutable { return beast::get_lowest_layer(t).rate_policy(); },
+                          *this);
+    }
+    auto rate_policy() const noexcept {
+        return std::visit([&](auto &t) { return beast::get_lowest_layer(t).rate_policy(); }, *this);
     }
 };
 
@@ -161,12 +179,7 @@ public:
     }
 };
 
-using http_stream = beast::tcp_stream;
-using ssl_http_stream = ssl_stream<beast::tcp_stream>;
 using http_variant_stream_type = http_variant_stream<http_stream, ssl_http_stream>;
-
-using ws_stream = websocket::stream<http_stream>;
-using ssl_ws_stream = websocket::stream<ssl_http_stream>;
 using ws_variant_stream_type = websocket_variant_stream<ws_stream, ssl_ws_stream>;
 
 } // namespace util
