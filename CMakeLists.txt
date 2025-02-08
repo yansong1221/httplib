@@ -48,6 +48,7 @@ server.hpp
 use_awaitable.hpp
 variant_stream.hpp
 websocket_conn.hpp
+ssl_stream.hpp
 )
 target_link_libraries(${PROJECT_NAME} 
 PRIVATE Boost::beast

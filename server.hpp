@@ -13,20 +13,18 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
-namespace beast     = boost::beast;          // from <boost/beast.hpp>
-namespace http      = beast::http;           // from <boost/beast/http.hpp>
-namespace net       = boost::asio;           // from <boost/asio.hpp>
-namespace ssl       = boost::asio::ssl;      // from <boost/asio/ssl.hpp>
-using tcp           = boost::asio::ip::tcp;  // from <boost/asio/ip/tcp.hpp>
+namespace beast = boost::beast;   // from <boost/beast.hpp>
+namespace http = beast::http;     // from <boost/beast/http.hpp>
+namespace net = boost::asio;      // from <boost/asio.hpp>
+namespace ssl = boost::asio::ssl; // from <boost/asio/ssl.hpp>
+using tcp = boost::asio::ip::tcp; // from <boost/asio/ip/tcp.hpp>
 namespace websocket = beast::websocket;
 
 // Returns a success response (200)
-template <class ResponseBody, class RequestBody>
-auto make_response(const beast::http::request<RequestBody>& request,
-                   typename ResponseBody::value_type        body,
-                   beast::string_view                       content_type,
-                   beast::http::status                      status = beast::http::status::ok)
-{
+template<class ResponseBody, class RequestBody>
+auto make_response(const beast::http::request<RequestBody> &request,
+                   typename ResponseBody::value_type body, beast::string_view content_type,
+                   beast::http::status status = beast::http::status::ok) {
     beast::http::response<ResponseBody> response{status, request.version()};
     response.set(beast::http::field::server, BOOST_BEAST_VERSION_STRING);
     response.set(beast::http::field::content_type, content_type);
@@ -35,12 +33,10 @@ auto make_response(const beast::http::request<RequestBody>& request,
     response.keep_alive(request.keep_alive());
     return response;
 }
-template <class RequestBody>
-auto make_string_response(const beast::http::request<RequestBody>& request,
-                          beast::string_view                       body,
-                          beast::string_view                       content_type,
-                          beast::http::status                      status = beast::http::status::ok)
-{
+template<class RequestBody>
+auto make_string_response(const beast::http::request<RequestBody> &request, beast::string_view body,
+                          beast::string_view content_type,
+                          beast::http::status status = beast::http::status::ok) {
     return make_response<http::string_body>(request, body, content_type, status);
 }
 
@@ -49,34 +45,30 @@ private:
     using header_parser_type = http::request_parser<http::empty_body>;
 
 public:
-    struct ssl_config
-    {
+    struct ssl_config {
         std::filesystem::path cert_file;
         std::filesystem::path key_file;
-        std::string           passwd;
+        std::string passwd;
     };
 
     explicit server(uint32_t num_threads = std::thread::hardware_concurrency())
-        : pool_(num_threads), acceptor_(pool_)
-    {
+        : pool_(num_threads), acceptor_(pool_) {
         logger_ = spdlog::stdout_color_mt("server");
         logger_->set_level(spdlog::level::debug);
-        ssl_config_ = ssl_config{R"(D:\code\http\server.crt)", R"(D:\code\http\server.key)", "test"};
+        ssl_config_ =
+            ssl_config{R"(D:\code\http\server.crt)", R"(D:\code\http\server.key)", "test"};
         // ssl_config_ = ssl_config{};
     }
 
 public:
-    auto get_executor() noexcept
-    {
+    auto get_executor() noexcept {
         return pool_.get_executor();
     }
 
-    server& listen(std::string_view host,
-                   uint16_t         port,
-                   int              backlog = net::socket_base::max_listen_connections)
-    {
+    server &listen(std::string_view host, uint16_t port,
+                   int backlog = net::socket_base::max_listen_connections) {
         tcp::resolver resolver(pool_);
-        auto          results = resolver.resolve(host, std::to_string(port));
+        auto results = resolver.resolve(host, std::to_string(port));
 
         tcp::endpoint endp(*results.begin());
         acceptor_.open(endp.protocol());
@@ -85,23 +77,20 @@ public:
         logger_->info("Server Listen on: [{}:{}]", endp.address().to_string(), endp.port());
         return *this;
     }
-    void run()
-    {
+    void run() {
         async_run();
         pool_.wait();
     }
 
-    void async_run()
-    {
+    void async_run() {
         net::co_spawn(pool_, do_listen(), net::detached);
     }
 
 public:
-    net::awaitable<void> do_listen()
-    {
+    net::awaitable<void> do_listen() {
         boost::system::error_code ec;
 
-        const auto& executor = co_await net::this_coro::executor;
+        const auto &executor = co_await net::this_coro::executor;
         for (;;) {
             tcp::socket sock(executor);
             co_await acceptor_.async_accept(sock, net_awaitable[ec]);
@@ -116,12 +105,12 @@ public:
     }
 
 private:
-    std::unique_ptr<ssl::context> create_ssl_context()
-    {
+    std::shared_ptr<ssl::context> create_ssl_context() {
         try {
-            unsigned long ssl_options = ssl::context::default_workarounds | ssl::context::no_sslv2 | ssl::context::single_dh_use;
+            unsigned long ssl_options = ssl::context::default_workarounds | ssl::context::no_sslv2 |
+                                        ssl::context::single_dh_use;
 
-            auto ssl_ctx = std::make_unique<ssl::context>(ssl::context::sslv23);
+            auto ssl_ctx = std::make_shared<ssl::context>(ssl::context::sslv23);
             ssl_ctx->set_options(ssl_options);
 
             if (!ssl_config_->passwd.empty()) {
@@ -130,46 +119,42 @@ private:
             ssl_ctx->use_certificate_chain_file(ssl_config_->cert_file.string());
             ssl_ctx->use_private_key_file(ssl_config_->key_file.string(), ssl::context::pem);
             return ssl_ctx;
-        }
-        catch (const std::exception& e) {
+        } catch (const std::exception &e) {
             logger_->error("create_ssl_context: {}", e.what());
             return nullptr;
         }
     }
-    net::awaitable<void> do_session(tcp::socket sock)
-    {
+    net::awaitable<void> do_session(tcp::socket sock) {
         try {
-            beast::flat_buffer        buffer;
+            beast::flat_buffer buffer;
             boost::system::error_code ec;
-            bool                      is_ssl = co_await beast::async_detect_ssl(sock, buffer, net_awaitable[ec]);
+            bool is_ssl = co_await beast::async_detect_ssl(sock, buffer, net_awaitable[ec]);
 
             if (ec)
                 co_return;
 
             std::unique_ptr<util::http_variant_stream_type> http_variant_stream;
-            std::unique_ptr<ssl::context>                   ssl_ctx;
+
             if (is_ssl) {
-                ssl_ctx = create_ssl_context();
+                auto ssl_ctx = create_ssl_context();
                 if (!ssl_ctx)
                     co_return;
 
-                util::ssl_http_stream stream(std::move(sock), *ssl_ctx);
+                util::ssl_http_stream stream(std::move(sock), ssl_ctx);
 
                 auto bytes_used = co_await stream.async_handshake(ssl::stream_base::server,
-                                                                  buffer.data(),
-                                                                  net_awaitable[ec]);
+                                                                  buffer.data(), net_awaitable[ec]);
                 if (ec) {
                     logger_->error("ssl handshake failed: {}", ec.message());
                     co_return;
                 }
                 buffer.consume(bytes_used);
-                http_variant_stream = std::make_unique<util::http_variant_stream_type>(
-                    std::move(stream));
-            }
-            else {
+                http_variant_stream =
+                    std::make_unique<util::http_variant_stream_type>(std::move(stream));
+            } else {
                 util::http_stream stream(std::move(sock));
-                http_variant_stream = std::make_unique<util::http_variant_stream_type>(
-                    std::move(stream));
+                http_variant_stream =
+                    std::make_unique<util::http_variant_stream_type>(std::move(stream));
             }
 
             for (;;) {
@@ -181,18 +166,21 @@ private:
                 // websocket
                 if (websocket::is_upgrade(header_parser.get())) {
                     http_variant_stream->expires_never();
-                    auto conn = std::make_shared<httplib::websocket_conn>(logger_,
-                                                                          std::move(
-                                                                              *http_variant_stream));
+                    auto conn = std::make_shared<httplib::websocket_conn>(
+                        logger_, std::move(*http_variant_stream));
                     conn->set_open_handler(websocket_open_handler_);
                     conn->set_close_handler(websocket_close_handler_);
                     conn->set_message_handler(websocket_message_handler_);
                     co_await conn->run(header_parser.get(), std::move(buffer));
                     co_return;
                 }
+                //CONNECT
+                else if (header_parser.get().method() == http::verb::connect)
+                {
+                    auto target = header_parser.get().target();
+                }
             }
-        }
-        catch (const std::exception& e) {
+        } catch (const std::exception &e) {
             spdlog::error("do_session: {}", e.what());
         }
         // try {
@@ -253,10 +241,10 @@ private:
 
         //} catch (const std::exception &e) {}
     }
-    template <class Body, class Allocator>
-    http::message_generator handle_request(beast::string_view                                   doc_root,
-                                           http::request<Body, http::basic_fields<Allocator>>&& req)
-    {
+    template<class Body, class Allocator>
+    http::message_generator
+    handle_request(beast::string_view doc_root,
+                   http::request<Body, http::basic_fields<Allocator>> &&req) {
         // Returns a bad request response
         auto const bad_request = [&req](beast::string_view why) {
             http::response<http::string_body> res{http::status::bad_request, req.version()};
@@ -296,7 +284,8 @@ private:
             return bad_request("Unknown HTTP-method");
 
         // Request path must be absolute and not contain "..".
-        if (req.target().empty() || req.target()[0] != '/' || req.target().find("..") != beast::string_view::npos)
+        if (req.target().empty() || req.target()[0] != '/' ||
+            req.target().find("..") != beast::string_view::npos)
             return bad_request("Illegal request-target");
 
         // Build the path to the requested file
@@ -305,7 +294,7 @@ private:
             path.append("index.html");
 
         // Attempt to open the file
-        beast::error_code           ec;
+        beast::error_code ec;
         http::file_body::value_type body;
         body.open(path.c_str(), beast::file_mode::scan, ec);
 
@@ -340,8 +329,7 @@ private:
         res.keep_alive(req.keep_alive());
         return res;
     }
-    std::string path_cat(beast::string_view base, beast::string_view path)
-    {
+    std::string path_cat(beast::string_view base, beast::string_view path) {
         if (base.empty())
             return std::string(path);
         std::string result(base);
@@ -350,7 +338,7 @@ private:
         if (result.back() == path_separator)
             result.resize(result.size() - 1);
         result.append(path.data(), path.size());
-        for (auto& c : result)
+        for (auto &c : result)
             if (c == '/')
                 c = path_separator;
 #else
@@ -361,8 +349,7 @@ private:
 #endif
         return result;
     }
-    beast::string_view mime_type(beast::string_view path)
-    {
+    beast::string_view mime_type(beast::string_view path) {
         using beast::iequals;
         auto const ext = [&path] {
             auto const pos = path.rfind(".");
@@ -418,26 +405,23 @@ private:
     }
 
 public:
-    void set_websocket_message_handler(httplib::websocket_conn::message_handler_type&& handler)
-    {
+    void set_websocket_message_handler(httplib::websocket_conn::message_handler_type &&handler) {
         websocket_message_handler_ = handler;
     }
-    void set_websocket_open_handler(httplib::websocket_conn::open_handler_type&& handler)
-    {
+    void set_websocket_open_handler(httplib::websocket_conn::open_handler_type &&handler) {
         websocket_open_handler_ = handler;
     }
-    void set_websocket_close_handler(httplib::websocket_conn::close_handler_type&& handler)
-    {
+    void set_websocket_close_handler(httplib::websocket_conn::close_handler_type &&handler) {
         websocket_close_handler_ = handler;
     }
 
 private:
     std::shared_ptr<spdlog::logger> logger_;
-    net::thread_pool                pool_;
-    tcp::acceptor                   acceptor_;
-    std::optional<ssl_config>       ssl_config_;
+    net::thread_pool pool_;
+    tcp::acceptor acceptor_;
+    std::optional<ssl_config> ssl_config_;
 
     httplib::websocket_conn::message_handler_type websocket_message_handler_;
-    httplib::websocket_conn::open_handler_type    websocket_open_handler_;
-    httplib::websocket_conn::close_handler_type   websocket_close_handler_;
+    httplib::websocket_conn::open_handler_type websocket_open_handler_;
+    httplib::websocket_conn::close_handler_type websocket_close_handler_;
 };
