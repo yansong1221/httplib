@@ -143,7 +143,7 @@ public:
                 co_return;
         }
     }
-    net::awaitable<void> run(http::request<http::empty_body> const& req, beast::flat_buffer buffer)
+    net::awaitable<void> run(http::request<http::empty_body> const &req)
     {
         boost::system::error_code ec;
         auto remote_endp = ws_->remote_endpoint(ec);
@@ -162,6 +162,7 @@ public:
                        remote_endp.address().to_string(),
                        remote_endp.port());
 
+        beast::flat_buffer buffer;
         for (;;) {
             auto bytes = co_await ws_->async_read(buffer, net_awaitable[ec]);
             if (ec) {
@@ -183,10 +184,6 @@ public:
             }
             buffer.consume(bytes);
         }
-        // ws_stream w;
-        // w.async_write
-        //     w.set_option(websocket::stream_base::timeout::suggested(beast::role_type::server));
-        // w.async_read
     }
 
 private:

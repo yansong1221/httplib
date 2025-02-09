@@ -1,5 +1,6 @@
 #pragma once
 #include "proxy_conn.hpp"
+#include "request.hpp"
 #include "use_awaitable.hpp"
 #include "variant_stream.hpp"
 #include "websocket_conn.hpp"
@@ -178,58 +179,56 @@ private:
                     co_await http::async_read_some(*http_variant_stream, buffer, header_parser,
                                                    net_awaitable[ec]);
                     if (ec) {
-                        logger_->debug("read http header failed: {}", ec.message());
+                        logger_->trace("read http header failed: {}", ec.message());
                         co_return;
                     }
                 }
                 http_variant_stream->expires_never();
 
                 const auto &header = header_parser.get();
+
+                httplib::request ew(header_parser.release());
+                ew.value<http::empty_body>();
                 // websocket
                 if (websocket::is_upgrade(header)) {
-
-                    auto conn = std::make_shared<httplib::websocket_conn>(
-                        logger_, std::move(*http_variant_stream));
-                    conn->set_open_handler(websocket_open_handler_);
-                    conn->set_close_handler(websocket_close_handler_);
-                    conn->set_message_handler(websocket_message_handler_);
-                    co_await conn->run(header, std::move(buffer));
+                    co_await handle_websocket(std::move(*http_variant_stream),
+                                              header_parser.release());
                     co_return;
                 }
                 //http proxy
                 else if (header.method() == http::verb::connect) {
-                    auto target = header.target();
-                    auto pos = target.find(":");
-                    if (pos == std::string_view::npos)
-                        co_return;
-
-                    auto host = target.substr(0, pos);
-                    auto port = target.substr(pos + 1);
-
-                    tcp::resolver resolver(co_await net::this_coro::executor);
-                    auto results = co_await resolver.async_resolve(host, port, net_awaitable[ec]);
-                    if (ec)
-                        co_return;
-
-                    tcp::socket proxy_socket(co_await net::this_coro::executor);
-                    co_await net::async_connect(proxy_socket, results, net_awaitable[ec]);
-                    if (ec)
-                        co_return;
+                    co_await handle_connect(std::move(*http_variant_stream),
+                                            header_parser.release());
+                    co_return;
+                }
+                switch (header.method()) {
+                case http::verb::get: {
+                    httplib::request ew(header_parser.release());
 
                     co_await http::async_write(
                         *http_variant_stream,
-                        make_empty_response(header, http::status::ok, "Connection Established"),
+                        make_string_response(ew.value<http::empty_body>(), "hello", "text/plain"), 
                         net_awaitable[ec]);
+
                     if (ec)
                         co_return;
 
-                    auto conn = std::make_shared<httplib::proxy_conn>(
-                        std::move(*http_variant_stream), std::move(proxy_socket));
+                } break;
+                default: {
+                    http::request_parser<http::string_body> body_parser(header_parser.release());
+                    httplib::response www; 
 
-                    co_await conn->run();
-                    //透明代理
-
-                    co_return;
+                    while (!body_parser.is_done()) {
+                        http_variant_stream->expires_after(std::chrono::seconds(30));
+                        co_await http::async_read_some(*http_variant_stream, buffer, body_parser,
+                                                       net_awaitable[ec]);
+                        if (ec) {
+                            logger_->trace("read http body failed: {}", ec.message());
+                            co_return;
+                        }
+                    }
+                    httplib::request ew(body_parser.release());
+                } break;
                 }
             }
         } catch (const std::exception &e) {
@@ -292,6 +291,50 @@ private:
         //  // dropped the connection already.
 
         //} catch (const std::exception &e) {}
+    }
+    net::awaitable<void> handle_connect(util::http_variant_stream_type http_variant_stream,
+                                        http::request<http::empty_body> req) {
+        auto target = req.target();
+        auto pos = target.find(":");
+        if (pos == std::string_view::npos)
+            co_return;
+
+        auto host = target.substr(0, pos);
+        auto port = target.substr(pos + 1);
+
+        boost::system::error_code ec;
+        tcp::resolver resolver(co_await net::this_coro::executor);
+        auto results = co_await resolver.async_resolve(host, port, net_awaitable[ec]);
+        if (ec)
+            co_return;
+
+        tcp::socket proxy_socket(co_await net::this_coro::executor);
+        co_await net::async_connect(proxy_socket, results, net_awaitable[ec]);
+        if (ec)
+            co_return;
+
+        co_await http::async_write(
+            http_variant_stream,
+            make_empty_response(req, http::status::ok, "Connection Established"),
+            net_awaitable[ec]);
+        if (ec)
+            co_return;
+
+        auto conn = std::make_shared<httplib::proxy_conn>(std::move(http_variant_stream),
+                                                          std::move(proxy_socket));
+
+        co_await conn->run();
+        co_return;
+    }
+    net::awaitable<void> handle_websocket(util::http_variant_stream_type http_variant_stream,
+                                          http::request<http::empty_body> req) {
+        auto conn =
+            std::make_shared<httplib::websocket_conn>(logger_, std::move(http_variant_stream));
+        conn->set_open_handler(websocket_open_handler_);
+        conn->set_close_handler(websocket_close_handler_);
+        conn->set_message_handler(websocket_message_handler_);
+        co_await conn->run(req);
+        co_return;
     }
 
     template<class Body, class Allocator>
