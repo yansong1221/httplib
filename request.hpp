@@ -10,15 +10,6 @@ namespace ssl = boost::asio::ssl; // from <boost/asio/ssl.hpp>
 using tcp = boost::asio::ip::tcp; // from <boost/asio/ip/tcp.hpp>
 namespace websocket = beast::websocket;
 
-enum class BodyType {
-    empty_body,
-    string_body,
-    file_body,
-    dynamic_body
-};
-
-namespace detail {
-
 template<bool isRequest, typename... Bodies>
 struct http_message_variant : std::variant<http::message<isRequest, Bodies>...> {
     using std::variant<http::message<isRequest, Bodies>...>::variant;
@@ -34,6 +25,13 @@ class message_variant : public http_message_variant_type<isRequest> {
     using http_message_variant_type<isRequest>::http_message_variant;
 
 public:
+    enum class BodyType {
+        empty_body,
+        string_body,
+        file_body,
+        dynamic_body
+    };
+
     BodyType body_type() const {
         return std::visit(
             [](auto &t) {
@@ -61,16 +59,23 @@ public:
     const http::message<isRequest, Body> &value() const {
         return std::get<http::message<isRequest, Body>>(*this);
     }
+
+    template<class Body>
+    auto body() {
+        return value<Body>().body();
+    }
+    template<class Body>
+    auto body() const {
+        return value<Body>().body();
+    }
 };
 
-} // namespace detail
-
-struct request : public detail::message_variant<true> {
-    using detail::message_variant<true>::message_variant;
+struct request : public message_variant<true> {
+    using message_variant<true>::message_variant;
 };
 
-struct response : public detail::message_variant<false> {
-    using detail::message_variant<false>::message_variant;
+struct response : public message_variant<false> {
+    using message_variant<false>::message_variant;
 };
 
 } // namespace httplib

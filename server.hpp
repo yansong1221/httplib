@@ -204,7 +204,7 @@ private:
                 switch (header.method()) {
                 case http::verb::get: {
                     httplib::request ew(header_parser.release());
-
+                    ew.body<http::empty_body>();
                     co_await http::async_write(
                         *http_variant_stream,
                         make_string_response(ew.value<http::empty_body>(), "hello", "text/plain"), 
@@ -216,7 +216,6 @@ private:
                 } break;
                 default: {
                     http::request_parser<http::string_body> body_parser(header_parser.release());
-                    httplib::response www; 
 
                     while (!body_parser.is_done()) {
                         http_variant_stream->expires_after(std::chrono::seconds(30));
