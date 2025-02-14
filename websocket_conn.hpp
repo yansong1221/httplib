@@ -143,7 +143,7 @@ public:
                 co_return;
         }
     }
-    net::awaitable<void> run(http::request<http::empty_body> const &req)
+    net::awaitable<void> run(const http::request<http::empty_body> &req)
     {
         boost::system::error_code ec;
         auto remote_endp = ws_->remote_endpoint(ec);

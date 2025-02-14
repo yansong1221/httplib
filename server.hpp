@@ -1,12 +1,14 @@
 #pragma once
 #include "proxy_conn.hpp"
 #include "request.hpp"
+#include "router.hpp"
 #include "use_awaitable.hpp"
 #include "variant_stream.hpp"
 #include "websocket_conn.hpp"
 #include <boost/asio.hpp>
 #include <boost/beast.hpp>
 #include <boost/beast/ssl.hpp>
+#include <boost/url.hpp>
 #include <filesystem>
 #include <functional>
 #include <iostream>
@@ -14,7 +16,7 @@
 #include <span>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
-
+namespace httplib {
 namespace beast = boost::beast;   // from <boost/beast.hpp>
 namespace http = beast::http;     // from <boost/beast/http.hpp>
 namespace net = boost::asio;      // from <boost/asio.hpp>
@@ -22,43 +24,25 @@ namespace ssl = boost::asio::ssl; // from <boost/asio/ssl.hpp>
 using tcp = boost::asio::ip::tcp; // from <boost/asio/ip/tcp.hpp>
 namespace websocket = beast::websocket;
 
-// Returns a success response (200)
-template<class ResponseBody, class RequestBody>
-auto make_response(const beast::http::request<RequestBody> &request,
-                   typename ResponseBody::value_type body, beast::string_view content_type,
-                   beast::http::status status = beast::http::status::ok) {
-    beast::http::response<ResponseBody> response{status, request.version()};
-    response.set(beast::http::field::server, BOOST_BEAST_VERSION_STRING);
-    response.set(beast::http::field::content_type, content_type);
-    response.body() = body;
-    response.prepare_payload();
-    response.keep_alive(request.keep_alive());
-    return response;
-}
-template<class RequestBody>
-auto make_empty_response(const beast::http::request<RequestBody> &request,
-                         beast::http::status status = beast::http::status::ok,
-                         std::optional<std::string_view> reason = std::nullopt) {
+// 格式化当前时间为 HTTP Date 格式
+std::string format_http_date() {
 
-    beast::http::response<http::empty_body> response{status, request.version()};
-    if (reason)
-        response.reason(*reason);
-    response.set(beast::http::field::server, BOOST_BEAST_VERSION_STRING);
-    response.prepare_payload();
-    response.keep_alive(request.keep_alive());
-    return response;
-}
+    using namespace std::chrono;
 
-template<class RequestBody>
-auto make_string_response(const beast::http::request<RequestBody> &request, beast::string_view body,
-                          beast::string_view content_type,
-                          beast::http::status status = beast::http::status::ok) {
-    return make_response<http::string_body>(request, body, content_type, status);
+    auto now = utc_clock::now();
+    std::time_t tt = system_clock::to_time_t(utc_clock::to_sys(now));
+    std::tm tm{};
+#ifdef _WIN32
+    gmtime_s(&tm, &tt);
+#else
+    gmtime_r(&tt, &tm);
+#endif
+    std::ostringstream oss;
+    oss << std::put_time(&tm, "%a, %d %b %Y %H:%M:%S GMT");
+    return oss.str();
 }
 
 class server {
-private:
-    using header_parser_type = http::request_parser<http::empty_body>;
 
 public:
     struct ssl_config {
@@ -68,9 +52,12 @@ public:
     };
 
     explicit server(uint32_t num_threads = std::thread::hardware_concurrency())
-        : pool_(num_threads), acceptor_(pool_) {
-        logger_ = spdlog::stdout_color_mt("server");
-        logger_->set_level(spdlog::level::debug);
+        : pool_(num_threads),
+          acceptor_(pool_),
+          logger_(spdlog::stdout_color_mt("server")),
+          router_(logger_) {
+
+        logger_->set_level(spdlog::level::trace);
         ssl_config_ =
             ssl_config{R"(D:\code\http\server.crt)", R"(D:\code\http\server.key)", "test"};
         // ssl_config_ = ssl_config{};
@@ -112,7 +99,7 @@ public:
             co_await acceptor_.async_accept(sock, net_awaitable[ec]);
             if (ec)
                 co_return;
-            logger_->debug("accept new connection [{}:{}]",
+            logger_->trace("accept new connection [{}:{}]",
                            sock.remote_endpoint().address().to_string(),
                            sock.remote_endpoint().port());
 
@@ -173,7 +160,7 @@ private:
             }
 
             for (;;) {
-                header_parser_type header_parser;
+                http::request_parser<http::empty_body> header_parser;
                 while (!header_parser.is_header_done()) {
                     http_variant_stream->expires_after(std::chrono::seconds(30));
                     co_await http::async_read_some(*http_variant_stream, buffer, header_parser,
@@ -187,8 +174,6 @@ private:
 
                 const auto &header = header_parser.get();
 
-                httplib::request ew(header_parser.release());
-                ew.value<http::empty_body>();
                 // websocket
                 if (websocket::is_upgrade(header)) {
                     co_await handle_websocket(std::move(*http_variant_stream),
@@ -201,21 +186,17 @@ private:
                                             header_parser.release());
                     co_return;
                 }
-                switch (header.method()) {
-                case http::verb::get: {
-                    httplib::request ew(header_parser.release());
-                    ew.body<http::empty_body>();
-                    co_await http::async_write(
-                        *http_variant_stream,
-                        make_string_response(ew.value<http::empty_body>(), "hello", "text/plain"), 
-                        net_awaitable[ec]);
 
-                    if (ec)
-                        co_return;
-
-                } break;
+                httplib::request req;
+                switch (header.base().method()) {
+                case http::verb::get:
+                case http::verb::head:
+                case http::verb::trace:
+                case http::verb::connect:
+                    req = header_parser.release();
+                    break;
                 default: {
-                    http::request_parser<http::string_body> body_parser(header_parser.release());
+                    http::request_parser<http::string_body> body_parser(std::move(header_parser));
 
                     while (!body_parser.is_done()) {
                         http_variant_stream->expires_after(std::chrono::seconds(30));
@@ -226,70 +207,49 @@ private:
                             co_return;
                         }
                     }
-                    httplib::request ew(body_parser.release());
+                    req = body_parser.release();
                 } break;
+                }
+                httplib::response resp;
+                resp.base().result(http::status::not_implemented);
+                resp.base().version(req.base().version());
+                resp.base().set(http::field::server, BOOST_BEAST_VERSION_STRING);
+                resp.base().set(http::field::date, format_http_date());
+                resp.keep_alive(req.keep_alive());
+
+                try {
+                    co_await handle_http(req, resp);
+                } catch (const std::exception &e) {
+                    resp.base().result(http::status::internal_server_error);
+                    resp.base().set(http::field::content_type, "text/html");
+                    resp.set_body<http::string_body>(e.what());
+                } catch (...) {
+                    resp.base().result(http::status::internal_server_error);
+                    resp.base().set(http::field::content_type, "text/html");
+                    resp.set_body<http::string_body>("unknown exception");
+                }
+                resp.base().set(http::field::connection,
+                                resp.keep_alive() ? "keep-alive" : "close");
+                resp.prepare_payload();
+                auto msg = resp.to_message_generator();
+
+                // Determine if we should close the connection
+                bool keep_alive = msg.keep_alive();
+
+                co_await beast::async_write(*http_variant_stream, std::move(msg),
+                                            net_awaitable[ec]);
+
+                if (!keep_alive) {
+                    // This means we should close the connection, usually because
+                    // the response indicated the "Connection: close" semantic.
+                    boost::system::error_code ec;
+                    http_variant_stream->shutdown(net::socket_base::shutdown_receive, ec);
+                    co_return;
                 }
             }
         } catch (const std::exception &e) {
             spdlog::error("do_session: {}", e.what());
         }
-        // try {
-        //   for (;;) {
-        //     header_parser_type header_parser;
-        //     while (!header_parser.is_header_done()) {
-        //       stream.expires_after(std::chrono::seconds(30));
-        //       co_await http::async_read_some(stream, buffer, header_parser);
-        //     }
-        //     // websocket
-        //     if (websocket::is_upgrade(header_parser.get())) {
-        //       ws_stream _stream(stream.release_socket());
-        //       // wss_stream _wss_stream(stream.release_socket());
-        //     }
-        //     const auto &header = header_parser.get();
-        //     switch (header.method()) {
-        //     case http::verb::get: break;
-        //     case http::verb::post: {
-        //       auto content_type = header[http::field::content_type];
-        //       if (content_type.starts_with("application/json")) {}
-
-        //    }
-
-        //    break;
-        //    default: break;
-        //    }
-        //    /*  auto reader = create_body_reader(header.target());
-        //      if (!reader) {
-        //        reader = std::make_unique<impl_body_reader<http::empty_body>>(
-        //            [](const auto &req) -> net::awaitable<http::message_generator>
-        //            {
-        //              co_return make_string_response(req, "404", "text/plain",
-        //                                             http::status::not_found);
-        //            });
-        //      }*/
-        //    http::message_generator msg = make_string_response(
-        //        header, "404", "text/plain", http::status::not_found);
-
-        //    // Determine if we should close the connection
-        //    bool keep_alive = msg.keep_alive();
-
-        //    // Send the response
-        //    co_await beast::async_write(stream, std::move(msg));
-
-        //    if (!keep_alive) {
-        //      // This means we should close the connection, usually because
-        //      // the response indicated the "Connection: close" semantic.
-        //      break;
-        //    }
-        //  }
-
-        //  // Send a TCP shutdown
-        //  stream.socket().shutdown(net::ip::tcp::socket::shutdown_send);
-
-        //  // At this point the connection is closed gracefully
-        //  // we ignore the error because the client might have
-        //  // dropped the connection already.
-
-        //} catch (const std::exception &e) {}
     }
     net::awaitable<void> handle_connect(util::http_variant_stream_type http_variant_stream,
                                         http::request<http::empty_body> req) {
@@ -312,10 +272,11 @@ private:
         if (ec)
             co_return;
 
-        co_await http::async_write(
-            http_variant_stream,
-            make_empty_response(req, http::status::ok, "Connection Established"),
-            net_awaitable[ec]);
+        http::response<http::empty_body> resp(http::status::ok, req.version());
+        resp.base().reason("Connection Established");
+        resp.base().set(http::field::server, BOOST_BEAST_VERSION_STRING);
+        resp.base().set(http::field::date, format_http_date());
+        co_await http::async_write(http_variant_stream, resp, net_awaitable[ec]);
         if (ec)
             co_return;
 
@@ -335,168 +296,99 @@ private:
         co_await conn->run(req);
         co_return;
     }
+    net::awaitable<void> handle_http(httplib::request &req, httplib::response &resp) {
+        
+        auto key = std::format("{} {}", req.base().method_string(), req.base().target());
+        auto decoded_result = boost::urls::parse_origin_form(key);
+        if (!decoded_result.has_value()) {
+            logger_->warn("Failed to decode URL: {}", key);
+            co_return;
+        }
+        key = decoded_result->data();
 
-    template<class Body, class Allocator>
-    http::message_generator
-    handle_request(beast::string_view doc_root,
-                   http::request<Body, http::basic_fields<Allocator>> &&req) {
-        // Returns a bad request response
-        auto const bad_request = [&req](beast::string_view why) {
-            http::response<http::string_body> res{http::status::bad_request, req.version()};
-            res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-            res.set(http::field::content_type, "text/html");
-            res.keep_alive(req.keep_alive());
-            res.body() = std::string(why);
-            res.prepare_payload();
-            return res;
-        };
+        if (auto handler = router_.get_handler(key); handler) {
+            router_.route(handler, req, resp, key);
+        } else {
+            if (auto coro_handler = router_.get_coro_handler(key); coro_handler) {
+                co_await router_.route_coro(coro_handler, req, resp, key);
+            } else {
+                if (default_handler_) {
+                    co_await default_handler_(req, resp);
+                } else {
+                    bool is_exist = false;
 
-        // Returns a not found response
-        auto const not_found = [&req](beast::string_view target) {
-            http::response<http::string_body> res{http::status::not_found, req.version()};
-            res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-            res.set(http::field::content_type, "text/html");
-            res.keep_alive(req.keep_alive());
-            res.body() = "The resource '" + std::string(target) + "' was not found.";
-            res.prepare_payload();
-            return res;
-        };
+                    std::function<void(request & req, response & resp)> handler;
+                    std::string method_str{req.base().method_string()};
+                    std::string url_path = method_str;
+                    url_path.append(" ").append(req.base().target());
+                    std::tie(is_exist, handler, req.params) =
+                        router_.get_router_tree()->get(url_path, method_str);
+                    if (is_exist) {
+                        if (handler) {
+                            (handler)(req, resp);
+                        } else {
+                            resp.base().result(http::status::not_found);
+                        }
+                    } else {
+                        bool is_coro_exist = false;
+                        std::function<net::awaitable<void>(request & req, response & resp)>
+                            coro_handler;
 
-        // Returns a server error response
-        auto const server_error = [&req](beast::string_view what) {
-            http::response<http::string_body> res{http::status::internal_server_error,
-                                                  req.version()};
-            res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-            res.set(http::field::content_type, "text/html");
-            res.keep_alive(req.keep_alive());
-            res.body() = "An error occurred: '" + std::string(what) + "'";
-            res.prepare_payload();
-            return res;
-        };
+                        std::tie(is_coro_exist, coro_handler, req.params) =
+                            router_.get_coro_router_tree()->get_coro(url_path, method_str);
 
-        // Make sure we can handle the method
-        if (req.method() != http::verb::get && req.method() != http::verb::head)
-            return bad_request("Unknown HTTP-method");
+                        if (is_coro_exist) {
+                            if (coro_handler) {
+                                co_await coro_handler(req, resp);
+                            } else {
+                                resp.base().result(http::status::not_found);
+                            }
+                        } else {
+                            bool is_matched_regex_router = false;
+                            // coro regex router
+                            auto coro_regex_handlers = router_.get_coro_regex_handlers();
+                            if (coro_regex_handlers.size() != 0) {
+                                for (auto &pair : coro_regex_handlers) {
+                                    std::string coro_regex_key{key};
 
-        // Request path must be absolute and not contain "..".
-        if (req.target().empty() || req.target()[0] != '/' ||
-            req.target().find("..") != beast::string_view::npos)
-            return bad_request("Illegal request-target");
-
-        // Build the path to the requested file
-        std::string path = path_cat(doc_root, req.target());
-        if (req.target().back() == '/')
-            path.append("index.html");
-
-        // Attempt to open the file
-        beast::error_code ec;
-        http::file_body::value_type body;
-        body.open(path.c_str(), beast::file_mode::scan, ec);
-
-        // Handle the case where the file doesn't exist
-        if (ec == beast::errc::no_such_file_or_directory)
-            return not_found(req.target());
-
-        // Handle an unknown error
-        if (ec)
-            return server_error(ec.message());
-
-        // Cache the size since we need it after the move
-        auto const size = body.size();
-
-        // Respond to HEAD request
-        if (req.method() == http::verb::head) {
-            http::response<http::empty_body> res{http::status::ok, req.version()};
-            res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-            res.set(http::field::content_type, mime_type(path));
-            res.content_length(size);
-            res.keep_alive(req.keep_alive());
-            return res;
+                                    if (std::regex_match(coro_regex_key, req.matches,
+                                                         std::get<0>(pair))) {
+                                        auto coro_handler = std::get<1>(pair);
+                                        if (coro_handler) {
+                                            co_await coro_handler(req, resp);
+                                            is_matched_regex_router = true;
+                                        }
+                                    }
+                                }
+                            }
+                            // regex router
+                            if (!is_matched_regex_router) {
+                                auto regex_handlers = router_.get_regex_handlers();
+                                if (regex_handlers.size() != 0) {
+                                    for (auto &pair : regex_handlers) {
+                                        std::string regex_key{key};
+                                        if (std::regex_match(regex_key, req.matches,
+                                                             std::get<0>(pair))) {
+                                            auto handler = std::get<1>(pair);
+                                            if (handler) {
+                                                (handler)(req, resp);
+                                                is_matched_regex_router = true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // not found
+                            if (!is_matched_regex_router) {
+                                resp.base().result(http::status::not_found);
+                            }
+                        }
+                    }
+                }
+            }
         }
 
-        // Respond to GET request
-        http::response<http::file_body> res{std::piecewise_construct,
-                                            std::make_tuple(std::move(body)),
-                                            std::make_tuple(http::status::ok, req.version())};
-        res.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-        res.set(http::field::content_type, mime_type(path));
-        res.content_length(size);
-        res.keep_alive(req.keep_alive());
-        return res;
-    }
-    std::string path_cat(beast::string_view base, beast::string_view path) {
-        if (base.empty())
-            return std::string(path);
-        std::string result(base);
-#ifdef BOOST_MSVC
-        char constexpr path_separator = '\\';
-        if (result.back() == path_separator)
-            result.resize(result.size() - 1);
-        result.append(path.data(), path.size());
-        for (auto &c : result)
-            if (c == '/')
-                c = path_separator;
-#else
-        char constexpr path_separator = '/';
-        if (result.back() == path_separator)
-            result.resize(result.size() - 1);
-        result.append(path.data(), path.size());
-#endif
-        return result;
-    }
-    beast::string_view mime_type(beast::string_view path) {
-        using beast::iequals;
-        auto const ext = [&path] {
-            auto const pos = path.rfind(".");
-            if (pos == beast::string_view::npos)
-                return beast::string_view{};
-            return path.substr(pos);
-        }();
-        if (iequals(ext, ".htm"))
-            return "text/html";
-        if (iequals(ext, ".html"))
-            return "text/html";
-        if (iequals(ext, ".php"))
-            return "text/html";
-        if (iequals(ext, ".css"))
-            return "text/css";
-        if (iequals(ext, ".txt"))
-            return "text/plain";
-        if (iequals(ext, ".hpp"))
-            return "text/plain";
-        if (iequals(ext, ".js"))
-            return "application/javascript";
-        if (iequals(ext, ".json"))
-            return "application/json";
-        if (iequals(ext, ".xml"))
-            return "application/xml";
-        if (iequals(ext, ".swf"))
-            return "application/x-shockwave-flash";
-        if (iequals(ext, ".flv"))
-            return "video/x-flv";
-        if (iequals(ext, ".png"))
-            return "image/png";
-        if (iequals(ext, ".jpe"))
-            return "image/jpeg";
-        if (iequals(ext, ".jpeg"))
-            return "image/jpeg";
-        if (iequals(ext, ".jpg"))
-            return "image/jpeg";
-        if (iequals(ext, ".gif"))
-            return "image/gif";
-        if (iequals(ext, ".bmp"))
-            return "image/bmp";
-        if (iequals(ext, ".ico"))
-            return "image/vnd.microsoft.icon";
-        if (iequals(ext, ".tiff"))
-            return "image/tiff";
-        if (iequals(ext, ".tif"))
-            return "image/tiff";
-        if (iequals(ext, ".svg"))
-            return "image/svg+xml";
-        if (iequals(ext, ".svgz"))
-            return "image/svg+xml";
-        return "application/text";
+        co_return;
     }
 
 public:
@@ -510,8 +402,39 @@ public:
         websocket_close_handler_ = handler;
     }
 
+    template<http::verb... method, typename Func, typename... Aspects>
+    void set_http_handler(std::string key, Func handler, Aspects &&...asps) {
+        static_assert(sizeof...(method) >= 1, "must set http_method");
+        if constexpr (sizeof...(method) == 1) {
+            (router_.set_http_handler<method>(std::move(key), std::move(handler),
+                                              std::forward<Aspects>(asps)...),
+             ...);
+        } else {
+            (router_.set_http_handler<method>(key, handler, std::forward<Aspects>(asps)...), ...);
+        }
+    }
+
+    template<http::verb... method, typename Func, typename... Aspects>
+    void set_http_handler(std::string key, Func handler, util::class_type_t<Func> &owner,
+                          Aspects &&...asps) {
+        static_assert(std::is_member_function_pointer_v<Func>, "must be member function");
+        using return_type = typename util::function_traits<Func>::return_type;
+        if constexpr (is_awaitable_v<return_type>) {
+            std::function<net::awaitable<void>(httplib::request & req, httplib::response & resp)>
+                f = std::bind(handler, &owner, std::placeholders::_1, std::placeholders::_2);
+            set_http_handler<method...>(std::move(key), std::move(f),
+                                        std::forward<Aspects>(asps)...);
+        } else {
+            std::function<void(httplib::request & req, httplib::response & resp)> f =
+                std::bind(handler, &owner, std::placeholders::_1, std::placeholders::_2);
+            set_http_handler<method...>(std::move(key), std::move(f),
+                                        std::forward<Aspects>(asps)...);
+        }
+    }
+
 private:
     std::shared_ptr<spdlog::logger> logger_;
+    httplib::router router_;
     net::thread_pool pool_;
     tcp::acceptor acceptor_;
     std::optional<ssl_config> ssl_config_;
@@ -519,4 +442,7 @@ private:
     httplib::websocket_conn::message_handler_type websocket_message_handler_;
     httplib::websocket_conn::open_handler_type websocket_open_handler_;
     httplib::websocket_conn::close_handler_type websocket_close_handler_;
+
+    std::function<net::awaitable<void>(request &, response &)> default_handler_;
 };
+} // namespace httplib
