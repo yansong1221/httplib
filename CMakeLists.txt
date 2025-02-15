@@ -38,25 +38,5 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Boost REQUIRED COMPONENTS beast url)
-find_package(OpenSSL REQUIRED)
-find_package(spdlog CONFIG REQUIRED)
-
-add_executable(${PROJECT_NAME} 
-main.cxx
-server.hpp
-use_awaitable.hpp
-variant_stream.hpp
-websocket_conn.hpp
-ssl_stream.hpp
-proxy_conn.hpp
-request.hpp
-router.hpp
-type_traits.h
-radix_tree.hpp
-)
-target_link_libraries(${PROJECT_NAME} 
-PRIVATE Boost::beast Boost::url
-PRIVATE OpenSSL::SSL OpenSSL::Crypto
-PRIVATE spdlog::spdlog
-)
+add_subdirectory(lib)
+add_subdirectory(examples)
