@@ -103,13 +103,14 @@ public:
     }
 
     template<class Body>
-    void change_body() {
+    typename Body::value_type &change_body() & {
         std::visit(
             [this](auto &&t) mutable {
                 http::message<isRequest, Body> message(std::move(t));
                 *this = std::move(message);
             },
             *this);
+        return body<Body>();
     }
 
     template<class Body>

@@ -358,6 +358,15 @@ public:
         }
     }
 
+    bool set_mount_point(const std::string &mount_point, const std::filesystem::path &dir,
+                         const http::fields &headers = {}) {
+
+        return router_.set_mount_point(mount_point, dir, headers);
+    }
+    bool remove_mount_point(const std::string &mount_point) {
+        return router_.remove_mount_point(mount_point);
+    }
+
 private:
     std::shared_ptr<spdlog::logger> logger_;
     httplib::router router_;

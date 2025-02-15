@@ -44,5 +44,6 @@ int main() { // HTTP
             co_return;
         },
         log_t{});
+    svr.set_mount_point("/", R"(D:\code\cinatra\build)");
     svr.run();
 }

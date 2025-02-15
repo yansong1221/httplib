@@ -41,6 +41,12 @@ constexpr inline bool is_awaitable_v =
 
 class router {
 public:
+    struct mount_point_entry {
+        std::string mount_point;
+        std::filesystem::path base_dir;
+        http::fields headers;
+    };
+
     router(std::shared_ptr<spdlog::logger> logger) : logger_(logger) {}
 
 public:
@@ -139,6 +145,26 @@ public:
             }
         }
     }
+    bool set_mount_point(const std::string &mount_point, const std::filesystem::path &dir,
+                         const http::fields &headers = {}) {
+        if (std::filesystem::is_directory(dir)) {
+            std::string mnt = !mount_point.empty() ? mount_point : "/";
+            if (!mnt.empty() && mnt[0] == '/') {
+                static_file_entry_.push_back({mnt, dir, std::move(headers)});
+                return true;
+            }
+        }
+        return false;
+    }
+    bool remove_mount_point(const std::string &mount_point) {
+        for (auto it = static_file_entry_.begin(); it != static_file_entry_.end(); ++it) {
+            if (it->mount_point == mount_point) {
+                static_file_entry_.erase(it);
+                return true;
+            }
+        }
+        return false;
+    }
 
     template<typename T>
     void do_before(T &aspect, request &req, response &resp, bool &ok) {
@@ -198,6 +224,9 @@ public:
         return regex_handles_;
     }
     net::awaitable<void> routing(request &req, response &resp) {
+
+        if (co_await handle_file_request(req, resp))
+            co_return;
         auto key = router::make_whole_str(req);
 
         if (auto handler = get_handler(key); handler) {
@@ -281,6 +310,97 @@ public:
     }
 
 private:
+    inline net::awaitable<bool> handle_file_request(request &req, response &res) {
+
+        if (req.base().method() != http::verb::head && req.base().method() != http::verb::get)
+            co_return false;
+
+        for (const auto &entry : static_file_entry_) {
+            // Prefix match
+            if (!req.decoded_target().compare(0, entry.mount_point.size(), entry.mount_point)) {
+                std::string sub_path = req.decoded_target().substr(entry.mount_point.size());
+                if (is_valid_path(sub_path)) {
+                    auto path = entry.base_dir / sub_path;
+                    if (path.string().ends_with('/')) {
+                        path += "index.html";
+                    }
+
+                    //detail::FileStat stat(path);
+
+                    /*if (std::filesystem::is_directory(path)) {
+                        res.set_redirect(sub_path + "/", StatusCode::MovedPermanently_301);
+                        co_return true;
+                    }*/
+
+                    if (std::filesystem::is_regular_file(path)) {
+                        for (const auto &kv : entry.headers) {
+                            res.base().set(kv.name(), kv.value());
+                        }
+
+                        res.change_body<http::file_body>();
+                        beast::error_code ec;
+                        res.base().result(http::status::ok);
+                        res.body<http::file_body>().open(path.string().c_str(),
+                                                         beast::file_mode::read, ec);
+                        if (ec)
+                            co_return false;
+
+                        if (req.base().method() != http::verb::head && file_request_handler_) {
+                            co_await file_request_handler_(req, res);
+                        }
+
+                        co_return true;
+                    }
+                }
+            }
+        }
+        co_return false;
+    }
+    inline static bool is_valid_path(const std::string &path) {
+        size_t level = 0;
+        size_t i = 0;
+
+        // Skip slash
+        while (i < path.size() && path[i] == '/') {
+            i++;
+        }
+
+        while (i < path.size()) {
+            // Read component
+            auto beg = i;
+            while (i < path.size() && path[i] != '/') {
+                if (path[i] == '\0') {
+                    return false;
+                } else if (path[i] == '\\') {
+                    return false;
+                }
+                i++;
+            }
+
+            auto len = i - beg;
+            assert(len > 0);
+
+            if (!path.compare(beg, len, ".")) {
+                ;
+            } else if (!path.compare(beg, len, "..")) {
+                if (level == 0) {
+                    return false;
+                }
+                level--;
+            } else {
+                level++;
+            }
+
+            // Skip slash
+            while (i < path.size() && path[i] == '/') {
+                i++;
+            }
+        }
+
+        return true;
+    }
+
+private:
     std::shared_ptr<spdlog::logger> logger_;
     std::set<std::string> keys_;
     std::unordered_map<std::string_view, http_handler_type> map_handles_;
@@ -297,5 +417,8 @@ private:
     std::vector<std::tuple<std::regex, coro_http_handler_type>> coro_regex_handles_;
 
     coro_http_handler_type default_handler_;
+    coro_http_handler_type file_request_handler_;
+
+    std::vector<mount_point_entry> static_file_entry_;
 };
 } // namespace httplib
