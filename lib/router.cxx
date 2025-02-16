@@ -1,6 +1,8 @@
 #include "httplib/router.h"
 #include "httplib/html.h"
 
+#include <boost/beast/version.hpp>
+
 namespace httplib {
 
 namespace detail {

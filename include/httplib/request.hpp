@@ -3,7 +3,12 @@
 #include "mime_types.hpp"
 #include "use_awaitable.hpp"
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/http/message.hpp>
+#include <boost/beast/http/file_body.hpp>
+#include <boost/beast/http/dynamic_body.hpp>
+#include <boost/beast/http/string_body.hpp>
+#include <boost/beast/http/empty_body.hpp>
 #include <boost/url.hpp>
 #include <filesystem>
 #include <regex>
@@ -121,14 +126,6 @@ public:
         body<Body>() = data;
     }
 
-    http::message_generator to_message_generator() {
-        return std::visit(
-            [](auto &&t) mutable -> http::message_generator {
-                http::message_generator msg(std::move(t));
-                return msg;
-            },
-            *this);
-    }
     template<typename AsyncWriteStream>
     net::awaitable<void> async_write(AsyncWriteStream &stream, boost::system::error_code &ec,
                                      bool only_head = false) {

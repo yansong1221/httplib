@@ -2,7 +2,10 @@
 #include "httplib/html.h"
 #include "httplib/use_awaitable.hpp"
 #include <boost/asio/detached.hpp>
+#include <boost/beast/core/detect_ssl.hpp>
 #include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/spdlog.h>
+
 namespace httplib {
 
 server::server(uint32_t num_threads /*= std::thread::hardware_concurrency()*/)
@@ -13,7 +16,7 @@ server::server(uint32_t num_threads /*= std::thread::hardware_concurrency()*/)
 
     logger_->set_level(spdlog::level::trace);
     ssl_config_ =
-        ssl_config{R"(D:\code\http\lib\server.crt)", R"(D:\code\http\lib\server.key)", "test"}; 
+        ssl_config{R"(D:\code\http\lib\server.crt)", R"(D:\code\http\lib\server.key)", "test"};
     // ssl_config_ = ssl_config{};
 }
 
