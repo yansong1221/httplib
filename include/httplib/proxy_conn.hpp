@@ -1,6 +1,6 @@
 #pragma once
 #include "use_awaitable.hpp"
-#include "stream/variant_stream.hpp"
+#include "stream/http_stream.hpp"
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <memory>
 
@@ -11,7 +11,7 @@ namespace beast = boost::beast;
 
 class proxy_conn : public std::enable_shared_from_this<proxy_conn> {
 public:
-    explicit proxy_conn(stream::http_variant_stream_type &&stream,
+    explicit proxy_conn(stream::http_stream_variant_type &&stream,
                         net::ip::tcp::socket &&proxy_socket)
         : stream_(std::move(stream)), proxy_socket_(std::move(proxy_socket)) {}
 
@@ -59,7 +59,7 @@ private:
     }
 
 private:
-    stream::http_variant_stream_type stream_;
+    stream::http_stream_variant_type stream_;
     net::ip::tcp::socket proxy_socket_;
 };
 } // namespace httplib

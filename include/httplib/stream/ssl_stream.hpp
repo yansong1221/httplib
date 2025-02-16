@@ -1,5 +1,7 @@
 #pragma once
+#include "httplib/config.hpp"
 #include <boost/beast/core/detail/config.hpp>
+#include <memory>
 
 // This include is necessary to work with `ssl::stream` and `boost::beast::websocket::stream`
 #include <boost/beast/websocket/ssl.hpp>
@@ -9,11 +11,9 @@
 #include <boost/asio/ssl/error.hpp>
 
 #include <boost/asio/ssl/stream.hpp>
-#include <memory>
 
 namespace httplib::stream {
-namespace net = boost::asio;
-namespace beast = boost::beast;
+
 template<class NextLayer>
 struct ssl_stream : public net::ssl::stream<NextLayer> {
     using net::ssl::stream<NextLayer>::stream;

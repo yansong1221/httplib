@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
-project(http)
+project(httplib)
 
 get_directory_property(_HAS_PARENT PARENT_DIRECTORY)
 if(_HAS_PARENT)
@@ -30,13 +30,12 @@ if(IS_ROOT_PROJECT)
 
 endif(IS_ROOT_PROJECT)
 
-if (MSVC)
-    add_compile_options(/bigobj)
-endif()
-
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+set(HTTPLIB_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
+set(HTTPLIB_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lib)
 
 add_subdirectory(lib)
 add_subdirectory(examples)

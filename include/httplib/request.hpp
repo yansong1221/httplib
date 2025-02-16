@@ -1,19 +1,14 @@
 #pragma once
-#include "body/form_data_body.hpp"
+#include "httplib/body/form_data_body.hpp"
+#include "mime_types.hpp"
+#include "use_awaitable.hpp"
 #include <boost/asio/awaitable.hpp>
-#include <boost/beast.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/url.hpp>
+#include <filesystem>
 #include <regex>
 
 namespace httplib {
-
-namespace beast = boost::beast;   // from <boost/beast.hpp>
-namespace http = beast::http;     // from <boost/beast/http.hpp>
-namespace net = boost::asio;      // from <boost/asio.hpp>
-namespace ssl = boost::asio::ssl; // from <boost/asio/ssl.hpp>
-using tcp = boost::asio::ip::tcp; // from <boost/asio/ip/tcp.hpp>
-namespace websocket = beast::websocket;
 
 template<bool isRequest, typename Fields, typename... Bodies>
 struct http_message_variant : std::variant<http::message<isRequest, Bodies, Fields>...> {
@@ -130,9 +125,31 @@ public:
         return std::visit(
             [](auto &&t) mutable -> http::message_generator {
                 http::message_generator msg(std::move(t));
-                return std::move(msg);
+                return msg;
             },
             *this);
+    }
+    template<typename AsyncWriteStream>
+    net::awaitable<void> async_write(AsyncWriteStream &stream, boost::system::error_code &ec,
+                                     bool only_head = false) {
+        co_await std::visit(
+            [&](auto &&t) mutable -> net::awaitable<void> {
+                using body_type = std::decay_t<decltype(t)>::body_type;
+                using header_type = std::decay_t<decltype(t)>::header_type;
+
+                http::serializer<isRequest, body_type, Fields> serializer(t);
+                co_await http::async_write_header(stream, serializer, net_awaitable[ec]);
+                if (ec)
+                    co_return;
+
+                if (only_head)
+                    co_return;
+
+                co_await http::async_write(stream, serializer, net_awaitable[ec]);
+                co_return;
+            },
+            *this);
+        co_return;
     }
 };
 
@@ -146,6 +163,14 @@ using http_response_variant =
 
 struct request : public http_request_variant {
     using http_request_variant::http_request_variant;
+
+public:
+    http::verb method() const {
+        return std::visit([](auto &t) { return t.method(); }, *this);
+    }
+    std::string_view target() const {
+        return std::visit([](auto &t) { return t.target(); }, *this);
+    }
 
 public:
     std::string decoded_target() const {
@@ -168,9 +193,18 @@ struct response : public http_response_variant {
     using http_response_variant::http_response_variant;
 
 public:
-    void set_string_body(std::string_view data, std::string_view content_type) {
+    void set_string_content(std::string_view data, std::string_view content_type,
+                            http::status status = http::status::ok) {
         base().set(http::field::content_type, content_type);
-        set_body<http::string_body>(std::string(data));
+        change_body<http::string_body>() = data;
+        base().result(status);
+    }
+    void set_file_content(const std::filesystem::path &path, beast::error_code &ec) {
+        change_body<http::file_body>().open(path.string().c_str(), beast::file_mode::read, ec);
+        if (ec)
+            return;
+        base().set(http::field::content_type, mime::get_mime_type(path.extension().string()));
+        base().result(http::status::ok);
     }
 };
 using coro_http_handler_type = std::function<net::awaitable<void>(request &req, response &resp)>;

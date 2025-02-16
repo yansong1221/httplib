@@ -1,5 +1,5 @@
 
-#include "server.hpp"
+#include "httplib/server.hpp"
 #include <filesystem>
 #include <format>
 #include <iostream>
@@ -12,7 +12,7 @@ struct log_t {
 
     bool after(httplib::request &req, httplib::response &res) {
         auto span = std::chrono::steady_clock::now() - start_;
-        std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(span) << std::endl;
+        std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(span) << std::endl; 
         return true;
     }
 

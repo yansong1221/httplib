@@ -1,15 +1,7 @@
-#pragma once
-#include "strutil.hpp"
-#include <boost/algorithm/string/replace.hpp>
-#include <boost/asio/io_context.hpp>
-#include <boost/system/error_code.hpp>
-#include <boost/url/parse.hpp>
-#include <filesystem>
-#include <format>
+#include "httplib/html.h"
 
-namespace httplib {
-namespace html {
-namespace fs = std::filesystem;
+namespace httplib::html {
+namespace detail {
 
 inline constexpr auto head_fmt =
     LR"(<html><head><meta charset="UTF-8"><title>Index of {}</title></head><body bgcolor="white"><h1>Index of {}</h1><hr><pre>)";
@@ -29,7 +21,6 @@ inline std::string make_unc_path(const Path &path) {
 
     return ret;
 }
-
 inline std::tuple<std::string, fs::path> file_last_wirte_time(const fs::path &file) {
     static auto loc_time = [](auto t) -> struct tm * {
         using time_type = std::decay_t<decltype(t)>;
@@ -71,7 +62,6 @@ inline std::tuple<std::string, fs::path> file_last_wirte_time(const fs::path &fi
 
     return {time_string, unc_path};
 }
-
 inline std::vector<std::wstring> format_path_list(const fs::path &path,
                                                   boost::system::error_code &ec) {
     fs::directory_iterator end;
@@ -136,7 +126,6 @@ inline std::vector<std::wstring> format_path_list(const fs::path &path,
 
     return path_list;
 }
-
 inline std::wstring make_target_path(std::string_view target) {
     std::string url = "http://example.com";
     if (target.starts_with("/"))
@@ -152,27 +141,27 @@ inline std::wstring make_target_path(std::string_view target) {
 
     return strutil::string_to_wstring(result->path());
 }
+} // namespace detail
 
-inline static std::string format_dir_to_html(std::string_view target, const fs::path &path,
-                                             boost::system::error_code ec) {
-    auto path_list = format_path_list(target, ec);
+std::string format_dir_to_html(std::string_view target, const fs::path &path,
+                               boost::system::error_code ec) {
+    auto path_list = detail::format_path_list(path, ec);
     if (ec)
         return {};
 
-    auto target_path = make_target_path(target);
-    std::wstring head = std::format(head_fmt, target_path, target_path);
+    auto target_path = detail::make_target_path(target);
+    std::wstring head = std::format(detail::head_fmt, target_path, target_path);
 
-    std::wstring body = std::format(body_fmt, L"../", L"../", L"", L"", L"");
+    std::wstring body = std::format(detail::body_fmt, L"../", L"../", L"", L"", L"");
 
     for (auto &s : path_list)
         body += s;
-    body = head + body + tail_fmt;
+    body = head + body + detail::tail_fmt;
 
     return strutil::wstring_to_string(body);
 }
 
-inline static std::string fromat_error_content(int status, std::string_view reason,
-                                               std::string_view server) {
+std::string fromat_error_content(int status, std::string_view reason, std::string_view server) {
     return std::format(
         R"x*x*x(<html>
 <head><title>{0} {1}</title></head>
@@ -184,9 +173,7 @@ inline static std::string fromat_error_content(int status, std::string_view reas
         status, reason, server);
 }
 
-// 格式化当前时间为 HTTP Date 格式
-inline static std::string format_http_date() {
-
+std::string format_http_date() {
     using namespace std::chrono;
 
     auto now = utc_clock::now();
@@ -202,21 +189,11 @@ inline static std::string format_http_date() {
     return oss.str();
 }
 
-// http_ranges 用于保存 http range 请求头的解析结果.
-// 例如: bytes=0-100,200-300,400-500
-// 解析后的结果为: { {0, 100}, {200, 300}, {400, 500} }
-// 例如: bytes=0-100,200-300,400-500,600
-// 解析后的结果为: { {0, 100}, {200, 300}, {400, 500}, {600, -1} }
-// 如果解析失败, 则返回空数组.
-using http_ranges = std::vector<std::pair<int64_t, int64_t>>;
-
-// parser_http_ranges 用于解析 http range 请求头.
-inline static http_ranges parser_http_ranges(std::string_view range) noexcept {
-    // 去掉前后空白.
+http_ranges parser_http_ranges(std::string_view range) noexcept { // 去掉前后空白.
     range = boost::trim_copy(range);
 
     // range 必须以 bytes= 开头, 否则返回空数组.
-    if (!range.starts_with("bytes="))
+    if (!range.starts_with("bytes=")) 
         return {};
 
     // 去掉开头的 bytes= 字符串.
@@ -225,9 +202,9 @@ inline static http_ranges parser_http_ranges(std::string_view range) noexcept {
     http_ranges results;
 
     // 获取其中所有 range 字符串.
-    auto ranges = utils::split(range, ",");
+    auto ranges = strutil::split(range, ",");
     for (const auto &str : ranges) {
-        auto r = utils::split(std::string(str), "-");
+        auto r = strutil::split(std::string(str), "-");
 
         // range 只有一个数值.
         if (r.size() == 1) {
@@ -263,5 +240,4 @@ inline static http_ranges parser_http_ranges(std::string_view range) noexcept {
     return results;
 }
 
-} // namespace html
-} // namespace httplib
+} // namespace httplib::html
