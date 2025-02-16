@@ -1,9 +1,10 @@
 #pragma once
+#include "html.hpp"
 #include "proxy_conn.hpp"
 #include "request.hpp"
 #include "router.hpp"
+#include "stream/variant_stream.hpp"
 #include "use_awaitable.hpp"
-#include "variant_stream.hpp"
 #include "websocket_conn.hpp"
 #include <boost/asio.hpp>
 #include <boost/beast.hpp>
@@ -23,24 +24,6 @@ namespace net = boost::asio;      // from <boost/asio.hpp>
 namespace ssl = boost::asio::ssl; // from <boost/asio/ssl.hpp>
 using tcp = boost::asio::ip::tcp; // from <boost/asio/ip/tcp.hpp>
 namespace websocket = beast::websocket;
-
-// 格式化当前时间为 HTTP Date 格式
-std::string format_http_date() {
-
-    using namespace std::chrono;
-
-    auto now = utc_clock::now();
-    std::time_t tt = system_clock::to_time_t(utc_clock::to_sys(now));
-    std::tm tm{};
-#ifdef _WIN32
-    gmtime_s(&tm, &tt);
-#else
-    gmtime_r(&tt, &tm);
-#endif
-    std::ostringstream oss;
-    oss << std::put_time(&tm, "%a, %d %b %Y %H:%M:%S GMT");
-    return oss.str();
-}
 
 class server {
 
@@ -99,11 +82,18 @@ public:
             co_await acceptor_.async_accept(sock, net_awaitable[ec]);
             if (ec)
                 co_return;
-            logger_->trace("accept new connection [{}:{}]",
-                           sock.remote_endpoint().address().to_string(),
-                           sock.remote_endpoint().port());
 
-            net::co_spawn(executor, do_session(std::move(sock)), net::detached);
+            net::co_spawn(
+                executor,
+                [this, sock = std::move(sock)]() mutable -> net::awaitable<void> {
+                    auto remote_endp = sock.remote_endpoint();
+                    logger_->trace("accept new connection [{}:{}]",
+                                   remote_endp.address().to_string(), remote_endp.port());
+                    co_await do_session(std::move(sock));
+                    logger_->trace("close connection [{}:{}]", remote_endp.address().to_string(),
+                                   remote_endp.port());
+                },
+                net::detached);
         }
     }
 
@@ -127,9 +117,34 @@ private:
             return nullptr;
         }
     }
+
+    template<class Body>
+    net::awaitable<void>
+    async_read_http_body(http::request_parser<http::empty_body> &&header_parser,
+                         stream::http_variant_stream_type &stream, beast::flat_buffer &buffer,
+                         httplib::request &req, boost::system::error_code &ec) {
+
+        http::request_parser<Body> body_parser(std::move(header_parser));
+
+        while (!body_parser.is_done()) {
+            stream.expires_after(std::chrono::seconds(30));
+            co_await http::async_read_some(stream, buffer, body_parser, net_awaitable[ec]);
+            stream.expires_never();
+            if (ec) {
+                logger_->trace("read http body failed: {}", ec.message());
+                co_return;
+            }
+        }
+        req = std::move(body_parser.release());
+        co_return;
+    }
+
     net::awaitable<void> do_session(tcp::socket sock) {
         try {
-            std::unique_ptr<util::http_variant_stream_type> http_variant_stream;
+            net::ip::tcp::endpoint remote_endpoint = sock.remote_endpoint();
+            net::ip::tcp::endpoint local_endpoint = sock.local_endpoint();
+
+            std::unique_ptr<stream::http_variant_stream_type> http_variant_stream;
             beast::flat_buffer buffer;
             boost::system::error_code ec;
             bool is_ssl = co_await beast::async_detect_ssl(sock, buffer, net_awaitable[ec]);
@@ -142,8 +157,7 @@ private:
                 if (!ssl_ctx)
                     co_return;
 
-                util::ssl_http_stream stream(std::move(sock), ssl_ctx);
-
+                stream::ssl_http_stream stream(std::move(sock), ssl_ctx);
                 auto bytes_used = co_await stream.async_handshake(ssl::stream_base::server,
                                                                   buffer.data(), net_awaitable[ec]);
                 if (ec) {
@@ -152,11 +166,11 @@ private:
                 }
                 buffer.consume(bytes_used);
                 http_variant_stream =
-                    std::make_unique<util::http_variant_stream_type>(std::move(stream));
+                    std::make_unique<stream::http_variant_stream_type>(std::move(stream));
             } else {
-                util::http_stream stream(std::move(sock));
+                stream::http_stream stream(std::move(sock));
                 http_variant_stream =
-                    std::make_unique<util::http_variant_stream_type>(std::move(stream));
+                    std::make_unique<stream::http_variant_stream_type>(std::move(stream));
             }
 
             for (;;) {
@@ -165,12 +179,12 @@ private:
                     http_variant_stream->expires_after(std::chrono::seconds(30));
                     co_await http::async_read_some(*http_variant_stream, buffer, header_parser,
                                                    net_awaitable[ec]);
+                    http_variant_stream->expires_never();
                     if (ec) {
                         logger_->trace("read http header failed: {}", ec.message());
                         co_return;
                     }
                 }
-                http_variant_stream->expires_never();
 
                 const auto &header = header_parser.get();
 
@@ -196,61 +210,23 @@ private:
                     req = header_parser.release();
                     break;
                 default: {
+
                     auto content_type = header[http::field::content_type];
                     if (content_type.starts_with("multipart/form-data")) {
-                        http::request_parser<form_data_body> body_parser(std::move(header_parser));
 
-                        while (!body_parser.is_done()) {
-                            http_variant_stream->expires_after(std::chrono::seconds(30));
-                            co_await http::async_read_some(*http_variant_stream, buffer,
-                                                           body_parser, net_awaitable[ec]);
-                            if (ec) {
-                                logger_->trace("read http body failed: {}", ec.message());
-                                co_return;
-                            }
-                        }
-                        req = body_parser.release();
-                        break;
+                        co_await async_read_http_body<form_data_body>(
+                            std::move(header_parser), *http_variant_stream, buffer, req, ec);
+                    } else {
+                        co_await async_read_http_body<http::string_body>(
+                            std::move(header_parser), *http_variant_stream, buffer, req, ec);
                     }
-
-                    http::request_parser<http::string_body> body_parser(std::move(header_parser));
-
-                    while (!body_parser.is_done()) {
-                        http_variant_stream->expires_after(std::chrono::seconds(30));
-                        co_await http::async_read_some(*http_variant_stream, buffer, body_parser,
-                                                       net_awaitable[ec]);
-                        if (ec) {
-                            logger_->trace("read http body failed: {}", ec.message());
-                            co_return;
-                        }
-                    }
-                    req = body_parser.release();
-                    logger_->info(req.body<http::string_body>());
+                    if (ec)
+                        co_return;
                 } break;
                 }
                 httplib::response resp;
-                resp.base().result(http::status::not_implemented);
-                resp.base().version(req.base().version());
-                resp.base().set(http::field::server, BOOST_BEAST_VERSION_STRING);
-                resp.base().set(http::field::date, format_http_date());
-                resp.keep_alive(req.keep_alive());
+                co_await router_.routing(req, resp);
 
-                try {
-                    co_await router_.routing(req, resp);
-                } catch (const std::exception &e) {
-                    logger_->warn("exception in business function, reason: {}", e.what());
-                    resp.base().result(http::status::internal_server_error);
-                    resp.base().set(http::field::content_type, "text/html");
-                    resp.set_body<http::string_body>(e.what());
-                } catch (...) {
-                    logger_->warn("unknown exception in business function");
-                    resp.base().result(http::status::internal_server_error);
-                    resp.base().set(http::field::content_type, "text/html");
-                    resp.set_body<http::string_body>("unknown exception");
-                }
-                resp.base().set(http::field::connection,
-                                resp.keep_alive() ? "keep-alive" : "close");
-                resp.prepare_payload();
                 auto msg = resp.to_message_generator();
 
                 // Determine if we should close the connection
@@ -271,7 +247,7 @@ private:
             spdlog::error("do_session: {}", e.what());
         }
     }
-    net::awaitable<void> handle_connect(util::http_variant_stream_type http_variant_stream,
+    net::awaitable<void> handle_connect(stream::http_variant_stream_type http_variant_stream,
                                         http::request<http::empty_body> req) {
         auto target = req.target();
         auto pos = target.find(":");
@@ -295,7 +271,7 @@ private:
         http::response<http::empty_body> resp(http::status::ok, req.version());
         resp.base().reason("Connection Established");
         resp.base().set(http::field::server, BOOST_BEAST_VERSION_STRING);
-        resp.base().set(http::field::date, format_http_date());
+        resp.base().set(http::field::date, html::format_http_date());
         co_await http::async_write(http_variant_stream, resp, net_awaitable[ec]);
         if (ec)
             co_return;
@@ -306,7 +282,7 @@ private:
         co_await conn->run();
         co_return;
     }
-    net::awaitable<void> handle_websocket(util::http_variant_stream_type http_variant_stream,
+    net::awaitable<void> handle_websocket(stream::http_variant_stream_type http_variant_stream,
                                           http::request<http::empty_body> req) {
         auto conn =
             std::make_shared<httplib::websocket_conn>(logger_, std::move(http_variant_stream));

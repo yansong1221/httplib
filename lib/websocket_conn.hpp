@@ -1,6 +1,6 @@
 #pragma once
 #include "use_awaitable.hpp"
-#include "variant_stream.hpp"
+#include "stream/variant_stream.hpp"
 #include <memory>
 #include <queue>
 #include <span>
@@ -51,19 +51,19 @@ public:
     using message_handler_type = std::function<net::awaitable<void>(websocket_conn::weak_ptr, message)>;
 
 public:
-    websocket_conn(std::shared_ptr<spdlog::logger> logger, util::http_variant_stream_type&& stream)
+    websocket_conn(std::shared_ptr<spdlog::logger> logger,
+                   stream::http_variant_stream_type &&stream)
         : logger_(logger), strand_(stream.get_executor())
     {
         std::visit(
             [this](auto&& t) {
                 using value_type = std::decay_t<decltype(t)>;
-                if constexpr (std::same_as<util::http_stream, value_type>) {
-                    ws_ = std::make_unique<util::ws_variant_stream_type>(
-                        util::ws_stream(std::move(t)));
-                }
-                else if constexpr (std::same_as<util::ssl_http_stream, value_type>) {
-                    ws_ = std::make_unique<util::ws_variant_stream_type>(
-                        util::ssl_ws_stream(std::move(t)));
+                if constexpr (std::same_as<stream::http_stream, value_type>) {
+                    ws_ = std::make_unique<stream::ws_variant_stream_type>(
+                        stream::ws_stream(std::move(t)));
+                } else if constexpr (std::same_as<stream::ssl_http_stream, value_type>) {
+                    ws_ = std::make_unique<stream::ws_variant_stream_type>(
+                        stream::ssl_ws_stream(std::move(t)));
                 }
                 else {
                     static_assert(false, "unknown http_variant_stream_type");
@@ -189,7 +189,7 @@ public:
 private:
     net::strand<net::any_io_executor>             strand_;
     std::shared_ptr<spdlog::logger>               logger_;
-    std::unique_ptr<util::ws_variant_stream_type> ws_;
+    std::unique_ptr<stream::ws_variant_stream_type> ws_;
 
     std::queue<message> send_que_;
 

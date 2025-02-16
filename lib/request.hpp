@@ -160,6 +160,8 @@ public:
 public:
     std::unordered_map<std::string, std::string> params;
     std::smatch matches;
+    net::ip::tcp::endpoint local_endpoint;
+    net::ip::tcp::endpoint remote_endpoint;
 };
 
 struct response : public http_response_variant {

@@ -7,7 +7,7 @@
 #include <boost/beast.hpp>
 #include <boost/beast/ssl.hpp>
 
-namespace util {
+namespace httplib::stream {
 
 namespace net = boost::asio;
 namespace ssl = boost::asio::ssl;
@@ -26,14 +26,7 @@ using ssl_ws_stream = websocket::stream<ssl_http_stream>;
 template<typename... T>
 class variant_stream : public std::variant<T...> {
 public:
-    variant_stream() = default;
-    variant_stream &operator=(variant_stream &&) = default;
-    variant_stream(variant_stream &&) = default;
-
-    template<typename S>
-    explicit variant_stream(S device) : std::variant<T...>(std::move(device)) {
-        static_assert(std::is_move_constructible<S>::value, "must be move constructible");
-    }
+    using std::variant<T...>::variant;
 
 public:
     using executor_type = net::any_io_executor;
@@ -46,7 +39,7 @@ public:
         return std::visit(
             [&](auto &t) mutable -> lowest_layer_type & {
                 using stream_type = std::decay_t<decltype(beast::get_lowest_layer(t))>;
-                if constexpr (std::same_as<stream_type, util::http_stream>) {
+                if constexpr (std::same_as<stream_type, stream::http_stream>) {
                     return beast::get_lowest_layer(t).socket().lowest_layer();
                 } else {
                     return t.lowest_layer();
@@ -58,7 +51,7 @@ public:
         return std::visit(
             [&](auto &t) mutable -> const lowest_layer_type & {
                 using stream_type = std::decay_t<decltype(beast::get_lowest_layer(t))>;
-                if constexpr (std::same_as<stream_type, util::http_stream>) {
+                if constexpr (std::same_as<stream_type, stream::http_stream>) {
                     return beast::get_lowest_layer(t).socket().lowest_layer();
                 } else {
                     return t.lowest_layer();
@@ -105,6 +98,7 @@ public:
 
 template<typename... T>
 class http_variant_stream : public variant_stream<T...> {
+public:
     using variant_stream<T...>::variant_stream;
 
 public:
@@ -182,4 +176,4 @@ public:
 using http_variant_stream_type = http_variant_stream<http_stream, ssl_http_stream>;
 using ws_variant_stream_type = websocket_variant_stream<ws_stream, ssl_ws_stream>;
 
-} // namespace util
+} // namespace httplib::stream

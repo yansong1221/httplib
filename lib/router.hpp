@@ -45,6 +45,16 @@ public:
         std::string mount_point;
         std::filesystem::path base_dir;
         http::fields headers;
+
+        bool operator<(const mount_point_entry &other) const {
+            return mount_point.size() < mount_point.size();
+        }
+        bool operator=(const mount_point_entry &other) const {
+            return mount_point.size() == mount_point.size();
+        }
+        bool operator>(const mount_point_entry &other) const {
+            return mount_point.size() > mount_point.size();
+        }
     };
 
     router(std::shared_ptr<spdlog::logger> logger) : logger_(logger) {}
@@ -151,6 +161,8 @@ public:
             std::string mnt = !mount_point.empty() ? mount_point : "/";
             if (!mnt.empty() && mnt[0] == '/') {
                 static_file_entry_.push_back({mnt, dir, std::move(headers)});
+                std::sort(static_file_entry_.begin(), static_file_entry_.end(),
+                          std::greater<mount_point_entry>());
                 return true;
             }
         }
@@ -223,8 +235,43 @@ public:
     const auto &get_regex_handlers() {
         return regex_handles_;
     }
+
     net::awaitable<void> routing(request &req, response &resp) {
 
+        resp.base().result(http::status::not_found);
+        resp.base().version(req.base().version());
+        resp.base().set(http::field::server, BOOST_BEAST_VERSION_STRING);
+        resp.base().set(http::field::date, html::format_http_date());
+        resp.keep_alive(req.keep_alive());
+
+        try {
+            co_await proc_routing_befor(req, resp);
+            co_await proc_routing(req, resp);
+            co_await proc_routing_after(req, resp);
+        } catch (const std::exception &e) {
+            logger_->warn("exception in business function, reason: {}", e.what());
+            resp.base().result(http::status::internal_server_error);
+            resp.base().set(http::field::content_type, "text/html");
+            resp.set_body<http::string_body>(e.what());
+        } catch (...) {
+            logger_->warn("unknown exception in business function");
+            resp.base().result(http::status::internal_server_error);
+            resp.base().set(http::field::content_type, "text/html");
+            resp.set_body<http::string_body>("unknown exception");
+        }
+
+        resp.base().set(http::field::connection, resp.keep_alive() ? "keep-alive" : "close");
+        if (resp.base().result_int() >= 400 && resp.is_body_type<http::empty_body>()) {
+            resp.set_body<http::string_body>(html::fromat_error_content(
+                resp.base().result_int(), resp.base().reason(), BOOST_BEAST_VERSION_STRING));
+        }
+        resp.prepare_payload();
+    }
+private:
+    net::awaitable<void> proc_routing_befor(request &req, response &resp) {
+        co_return;
+    }
+    net::awaitable<void> proc_routing(request &req, response &resp) {
         if (co_await handle_file_request(req, resp))
             co_return;
         auto key = router::make_whole_str(req);
@@ -308,8 +355,71 @@ public:
         }
         co_return;
     }
+    net::awaitable<void> proc_routing_after(request &req, response &resp) {
+        co_return;
+    }
 
 private:
+    // http_ranges 用于保存 http range 请求头的解析结果.
+    // 例如: bytes=0-100,200-300,400-500
+    // 解析后的结果为: { {0, 100}, {200, 300}, {400, 500} }
+    // 例如: bytes=0-100,200-300,400-500,600
+    // 解析后的结果为: { {0, 100}, {200, 300}, {400, 500}, {600, -1} }
+    // 如果解析失败, 则返回空数组.
+    using http_ranges = std::vector<std::pair<int64_t, int64_t>>;
+
+    // parser_http_ranges 用于解析 http range 请求头.
+    inline static http_ranges parser_http_ranges(std::string_view range) noexcept {
+        // 去掉前后空白.
+        range = boost::trim_copy(range);
+
+        // range 必须以 bytes= 开头, 否则返回空数组.
+        if (!range.starts_with("bytes="))
+            return {};
+
+        // 去掉开头的 bytes= 字符串.
+        range.remove_prefix(6);
+
+        http_ranges results;
+
+        // 获取其中所有 range 字符串.
+        auto ranges = utils::split(range, ",");
+        for (const auto &str : ranges) {
+            auto r = utils::split(std::string(str), "-");
+
+            // range 只有一个数值.
+            if (r.size() == 1) {
+                if (str.front() == '-') {
+                    auto pos = std::atoll(r.front().data());
+                    results.emplace_back(-1, pos);
+                } else {
+                    auto pos = std::atoll(r.front().data());
+                    results.emplace_back(pos, -1);
+                }
+            } else if (r.size() == 2) {
+                // range 有 start 和 end 的情况, 解析成整数到容器.
+                auto &start_str = r[0];
+                auto &end_str = r[1];
+
+                if (start_str.empty() && !end_str.empty()) {
+                    auto end = std::atoll(end_str.data());
+                    results.emplace_back(-1, end);
+                } else {
+                    auto start = std::atoll(start_str.data());
+                    auto end = std::atoll(end_str.data());
+                    if (end_str.empty())
+                        end = -1;
+
+                    results.emplace_back(start, end);
+                }
+            } else {
+                // 在一个 range 项中不应该存在3个'-', 否则则是无效项.
+                return {};
+            }
+        }
+
+        return results;
+    }
     inline net::awaitable<bool> handle_file_request(request &req, response &res) {
 
         if (req.base().method() != http::verb::head && req.base().method() != http::verb::get)
