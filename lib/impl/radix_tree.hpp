@@ -1,14 +1,14 @@
 #pragma once
 
-#include "http_handler.hpp"
-#include "type_traits.h"
+#include "httplib/http_handler.hpp"
+#include "httplib/type_traits.h"
 #include <functional>
 #include <string>
 #include <string_view>
 #include <tuple>
 #include <vector>
 
-namespace httplib {
+namespace httplib::impl {
 constexpr char type_asterisk = '*';
 constexpr char type_colon = ':';
 constexpr char type_slash = '/';
@@ -214,4 +214,4 @@ private:
 
     std::shared_ptr<radix_tree_node> root;
 };
-} // namespace httplib
+} // namespace httplib::impl

@@ -1,16 +1,11 @@
 #pragma once
-#include "radix_tree.hpp"
+#include "http_handler.hpp"
 #include "type_traits.h"
 #include <algorithm>
-#include <boost/algorithm/string.hpp>
-
-#include <functional>
-#include <regex>
-#include <set>
+#include <filesystem>
 #include <spdlog/spdlog.h>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 
 namespace httplib {
 template<class, class = void>
@@ -39,6 +34,10 @@ template<typename T>
 constexpr inline bool is_awaitable_v =
     util::is_specialization_v<std::remove_cvref_t<T>, net::awaitable>;
 
+namespace impl {
+class router;
+}
+
 class router {
 public:
     struct mount_point_entry {
@@ -47,7 +46,8 @@ public:
         http::fields headers;
     };
 
-    router(std::shared_ptr<spdlog::logger> logger) : logger_(logger) {}
+    explicit router(std::shared_ptr<spdlog::logger> logger);
+    virtual ~router();
 
 public:
     // eg: "GET hello/" as a key
@@ -90,35 +90,7 @@ public:
 
     bool remove_mount_point(const std::string &mount_point);
 
-    //coro_http_handler_type get_coro_handler(const std::string &key) {
-    //    if (auto it = coro_handles_.find(key); it != coro_handles_.end()) {
-    //        return it->second;
-    //    }
-    //    return nullptr;
-    //}
-
-    const auto &get_coro_handlers() const {
-        return coro_handles_;
-    }
-
-    std::shared_ptr<radix_tree> get_coro_router_tree() {
-        return coro_router_tree_;
-    }
-
-    const auto &get_coro_regex_handlers() {
-        return coro_regex_handles_;
-    }
-
     net::awaitable<void> routing(request &req, response &resp);
-
-private:
-    net::awaitable<void> proc_routing_befor(request &req, response &resp) {
-        co_return;
-    }
-    net::awaitable<void> proc_routing(request &req, response &resp);
-    net::awaitable<void> proc_routing_after(request &req, response &resp) {
-        co_return;
-    }
 
 private:
     template<typename T>
@@ -153,20 +125,7 @@ private:
     void set_http_handler(http::verb method, std::string_view key,
                           coro_http_handler_type &&handler);
 
-    inline net::awaitable<bool> handle_file_request(request &req, response &res);
-
 private:
-    std::shared_ptr<spdlog::logger> logger_;
-
-    using verb_handler_map = std::unordered_map<http::verb, coro_http_handler_type>;
-    std::unordered_map<std::string, verb_handler_map> coro_handles_;
-
-    std::shared_ptr<radix_tree> coro_router_tree_ = std::make_shared<radix_tree>(radix_tree());
-    std::vector<std::tuple<std::regex, coro_http_handler_type>> coro_regex_handles_;
-
-    http_handler_variant default_handler_;
-    http_handler_variant file_request_handler_;
-
-    std::vector<mount_point_entry> static_file_entry_;
+    impl::router *impl_;
 };
 } // namespace httplib
