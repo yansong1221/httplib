@@ -13,7 +13,7 @@
 #include <filesystem>
 #include <regex>
 
-namespace httplib::impl {
+namespace httplib {
 
 template<bool isRequest, typename Fields, typename... Bodies>
 struct message_variant : std::variant<http::message<isRequest, Bodies, Fields>...> {
@@ -152,7 +152,7 @@ public:
 
 template<bool isRequest, typename Fields = http::fields>
 using http_message_variant = message_variant<isRequest, Fields, http::empty_body, http::string_body,
-                                             http::file_body, http::dynamic_body, form_data_body>;
+                                             http::file_body, form_data_body>;
 
 using http_request_variant = http_message_variant<true>;
 using http_response_variant = http_message_variant<false>;
@@ -194,4 +194,4 @@ public:
     }
 };
 
-} // namespace httplib::impl
+} // namespace httplib

@@ -2,7 +2,6 @@
 
 #include "httplib/router.h"
 #include "proxy_conn.hpp"
-#include "request.hpp"
 #include "stream/variant_stream.hpp"
 #include "websocket_conn.hpp"
 #include <boost/asio/thread_pool.hpp>

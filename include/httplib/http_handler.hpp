@@ -1,5 +1,5 @@
 #pragma once
-#include "request.hpp"
+#include "message_variant.hpp"
 namespace httplib {
 
 using coro_http_handler_type = std::function<net::awaitable<void>(request &req, response &resp)>;
