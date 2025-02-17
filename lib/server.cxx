@@ -8,6 +8,29 @@
 
 namespace httplib {
 
+namespace detail {
+
+template<class Body>
+net::awaitable<void> async_read_http_body(http::request_parser<http::empty_body> &&header_parser,
+                                          stream::http_stream_variant_type &stream,
+                                          beast::flat_buffer &buffer, httplib::request &req,
+                                          boost::system::error_code &ec) {
+
+    http::request_parser<Body> body_parser(std::move(header_parser));
+
+    while (!body_parser.is_done()) {
+        stream.expires_after(std::chrono::seconds(30));
+        co_await http::async_read_some(stream, buffer, body_parser, net_awaitable[ec]);
+        stream.expires_never();
+        if (ec) {
+            co_return;
+        }
+    }
+    req = std::move(body_parser.release());
+    co_return;
+}
+} // namespace detail
+
 server::server(uint32_t num_threads /*= std::thread::hardware_concurrency()*/)
     : pool_(num_threads),
       acceptor_(pool_),
@@ -31,6 +54,11 @@ httplib::server &server::listen(std::string_view host, uint16_t port,
     acceptor_.listen(backlog);
     logger_->info("Server Listen on: [{}:{}]", endp.address().to_string(), endp.port());
     return *this;
+}
+
+void server::run() {
+    async_run();
+    pool_.wait();
 }
 
 void server::async_run() {
@@ -154,14 +182,16 @@ net::awaitable<void> server::do_session(tcp::socket sock) {
                 auto content_type = header[http::field::content_type];
                 if (content_type.starts_with("multipart/form-data")) {
 
-                    co_await async_read_http_body<form_data_body>(
+                    co_await detail::async_read_http_body<form_data_body>(
                         std::move(header_parser), *http_variant_stream, buffer, req, ec);
                 } else {
-                    co_await async_read_http_body<http::string_body>(
+                    co_await detail::async_read_http_body<http::string_body>(
                         std::move(header_parser), *http_variant_stream, buffer, req, ec);
                 }
-                if (ec)
+                if (ec) {
+                    logger_->trace("read http body failed: {}", ec.message());
                     co_return;
+                }
             } break;
             }
 

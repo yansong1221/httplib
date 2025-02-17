@@ -35,11 +35,7 @@ public:
     server &listen(std::string_view host, uint16_t port,
                    int backlog = net::socket_base::max_listen_connections);
 
-    void run() {
-        async_run();
-        pool_.wait();
-    }
-
+    void run();
     void async_run();
 
 public:
@@ -47,27 +43,6 @@ public:
 
 private:
     std::shared_ptr<ssl::context> create_ssl_context();
-
-    template<class Body>
-    net::awaitable<void>
-    async_read_http_body(http::request_parser<http::empty_body> &&header_parser,
-                         stream::http_stream_variant_type &stream, beast::flat_buffer &buffer,
-                         httplib::request &req, boost::system::error_code &ec) {
-
-        http::request_parser<Body> body_parser(std::move(header_parser));
-
-        while (!body_parser.is_done()) {
-            stream.expires_after(std::chrono::seconds(30));
-            co_await http::async_read_some(stream, buffer, body_parser, net_awaitable[ec]);
-            stream.expires_never();
-            if (ec) {
-                logger_->trace("read http body failed: {}", ec.message());
-                co_return;
-            }
-        }
-        req = std::move(body_parser.release());
-        co_return;
-    }
 
     net::awaitable<void> do_session(tcp::socket sock);
     net::awaitable<void> handle_connect(stream::http_stream_variant_type http_variant_stream,
@@ -87,7 +62,7 @@ public:
     }
 
     template<http::verb... method, typename Func, typename... Aspects>
-    void set_http_handler(std::string key, Func handler, Aspects &&...asps) {
+    void set_http_handler(std::string key, Func&& handler, Aspects &&...asps) {
         static_assert(sizeof...(method) >= 1, "must set http_method");
         if constexpr (sizeof...(method) == 1) {
             (router_.set_http_handler<method>(std::move(key), std::move(handler),
@@ -99,7 +74,7 @@ public:
     }
 
     template<http::verb... method, typename Func, typename... Aspects>
-    void set_http_handler(std::string key, Func handler, util::class_type_t<Func> &owner,
+    void set_http_handler(std::string key, Func&& handler, util::class_type_t<Func> &owner,
                           Aspects &&...asps) {
         static_assert(std::is_member_function_pointer_v<Func>, "must be member function");
         using return_type = typename util::function_traits<Func>::return_type;

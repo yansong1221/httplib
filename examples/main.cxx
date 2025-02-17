@@ -5,9 +5,9 @@
 #include <iostream>
 //日志切面
 struct log_t {
-    bool before(httplib::request &req, httplib::response &res) {
-        start_ = std::chrono::steady_clock::now();
-        return true;
+    httplib::net::awaitable<bool> before(httplib::request &req, httplib::response &res) {
+        start_ = std::chrono::steady_clock::now(); 
+        co_return true;
     }
 
     bool after(httplib::request &req, httplib::response &res) {
@@ -34,9 +34,9 @@ int main() { // HTTP
             conn->send_message(msg);
             co_return;
         });
-    svr.set_http_handler<httplib::http::verb::post>(
-        "/",
-        [](httplib::request &req, httplib::response &resp) -> boost::asio::awaitable<void> {
+    svr.set_http_handler<httplib::http::verb::post, httplib::http::verb::get>(
+        "/中文",
+        [](httplib::request &req, httplib::response &resp) -> httplib::net::awaitable<void> {
             req.is_body_type<httplib::form_data_body>();
 
             resp.base().result(httplib::http::status::ok);
@@ -44,6 +44,26 @@ int main() { // HTTP
             co_return;
         },
         log_t{});
-    svr.set_mount_point("/", R"(D:\code\cinatra\build)");
+    svr.set_http_handler<httplib::http::verb::post, httplib::http::verb::get>(
+        "/hello/:w",
+        [](httplib::request &req, httplib::response &resp) {
+            req.is_body_type<httplib::form_data_body>();
+
+            resp.base().result(httplib::http::status::ok);
+            resp.set_string_content("1000", "text/html");
+            return;
+        },
+        log_t{});
+    //svr.set_http_handler<httplib::http::verb::post>(
+    //    "/",
+    //    [](httplib::request &req, httplib::response &resp) -> boost::asio::awaitable<void> {
+    //        req.is_body_type<httplib::form_data_body>();
+
+    //        resp.base().result(httplib::http::status::ok);
+    //        resp.set_body<httplib::form_data_body>(req.body<httplib::form_data_body>());
+    //        co_return;
+    //    },
+    //    log_t{});
+    //svr.set_mount_point("/", R"(D:\WORK)");
     svr.run();
 }

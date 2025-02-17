@@ -82,6 +82,12 @@ static inline void url_decode(std::string &str) {
     }
     str.resize(w);
 }
+static inline std::string url_decode(std::string_view str) {
+
+    std::string decode_str(str);
+    url_decode(decode_str);
+    return decode_str;
+}
 static std::string_view buffer_to_string_view(const boost::asio::const_buffer &buffer) {
     return std::string_view(boost::asio::buffer_cast<const char *>(buffer),
                             boost::asio::buffer_size(buffer));

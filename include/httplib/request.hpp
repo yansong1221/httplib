@@ -2,14 +2,14 @@
 #include "httplib/body/form_data_body.hpp"
 #include "mime_types.hpp"
 #include "use_awaitable.hpp"
+#include "utils.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/ip/tcp.hpp>
-#include <boost/beast/http/message.hpp>
-#include <boost/beast/http/file_body.hpp>
 #include <boost/beast/http/dynamic_body.hpp>
-#include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/empty_body.hpp>
-#include <boost/url.hpp>
+#include <boost/beast/http/file_body.hpp>
+#include <boost/beast/http/message.hpp>
+#include <boost/beast/http/string_body.hpp>
 #include <filesystem>
 #include <regex>
 
@@ -104,24 +104,24 @@ public:
 
     template<class Body>
     typename Body::value_type &change_body() & {
-        std::visit(
-            [this](auto &&t) mutable {
-                http::message<isRequest, Body> message(std::move(t));
-                *this = std::move(message);
-            },
-            *this);
+        if (!is_body_type<Body>()) {
+            std::visit(
+                [this](auto &&t) mutable {
+                    http::message<isRequest, Body> message(std::move(t));
+                    *this = std::move(message);
+                },
+                *this);
+        }
         return body<Body>();
     }
 
     template<class Body>
     void set_body(typename Body::value_type &&data) {
-
         change_body<Body>();
         body<Body>() = std::move(data);
     }
     template<class Body>
     void set_body(const typename Body::value_type &data) {
-
         change_body<Body>();
         body<Body>() = data;
     }
@@ -165,18 +165,8 @@ public:
     http::verb method() const {
         return std::visit([](auto &t) { return t.method(); }, *this);
     }
-    std::string_view target() const {
+    auto target() const {
         return std::visit([](auto &t) { return t.target(); }, *this);
-    }
-
-public:
-    std::string decoded_target() const {
-        auto target = base().target();
-        if (target.find("%") != decltype(target)::npos) {
-            boost::urls::pct_string_view pct_str(target);
-            return pct_str.decode();
-        }
-        return target;
     }
 
 public:
@@ -204,7 +194,5 @@ public:
         base().result(http::status::ok);
     }
 };
-using coro_http_handler_type = std::function<net::awaitable<void>(request &req, response &resp)>;
-using http_handler_type = std::function<void(request &req, response &resp)>;
 
 } // namespace httplib
