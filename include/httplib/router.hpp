@@ -1,8 +1,8 @@
 #pragma once
 #include "httplib/http_handler.hpp"
-#include "httplib/message_variant.hpp"
+#include "httplib/variant_message.hpp"
 #include "radix_tree.hpp"
-#include "type_traits.h"
+#include "httplib/util/type_traits.h"
 #include <algorithm>
 #include <filesystem>
 #include <list>

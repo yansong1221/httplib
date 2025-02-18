@@ -2,7 +2,6 @@
 #include "httplib/body/form_data_body.hpp"
 #include "httplib/mime_types.hpp"
 #include "httplib/use_awaitable.hpp"
-#include "httplib/utils.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/http/dynamic_body.hpp>
@@ -16,7 +15,7 @@
 namespace httplib {
 
 template<bool isRequest, typename Fields, typename... Bodies>
-struct message_variant : std::variant<http::message<isRequest, Bodies, Fields>...> {
+struct variant_message : std::variant<http::message<isRequest, Bodies, Fields>...> {
     using std::variant<http::message<isRequest, Bodies, Fields>...>::variant;
 
 public:
@@ -128,47 +127,10 @@ public:
 };
 
 template<bool isRequest, typename Fields = http::fields>
-using http_message_variant = message_variant<isRequest, Fields, http::empty_body, http::string_body,
+using http_message_variant = variant_message<isRequest, Fields, http::empty_body, http::string_body,
                                              http::file_body, form_data_body>;
 
 using http_request_variant = http_message_variant<true>;
 using http_response_variant = http_message_variant<false>;
-
-struct request : public http_request_variant {
-    using http_request_variant::http_request_variant;
-
-public:
-    http::verb method() const {
-        return std::visit([](auto &t) { return t.method(); }, *this);
-    }
-    auto target() const {
-        return std::visit([](auto &t) { return t.target(); }, *this);
-    }
-
-public:
-    std::unordered_map<std::string, std::string> params;
-    std::smatch matches;
-    net::ip::tcp::endpoint local_endpoint;
-    net::ip::tcp::endpoint remote_endpoint;
-};
-
-struct response : public http_response_variant {
-    using http_response_variant::http_response_variant;
-
-public:
-    void set_string_content(std::string_view data, std::string_view content_type,
-                            http::status status = http::status::ok) {
-        base().set(http::field::content_type, content_type);
-        change_body<http::string_body>() = data;
-        base().result(status);
-    }
-    void set_file_content(const std::filesystem::path &path, beast::error_code &ec) {
-        change_body<http::file_body>().open(path.string().c_str(), beast::file_mode::read, ec);
-        if (ec)
-            return;
-        base().set(http::field::content_type, mime::get_mime_type(path.extension().string()));
-        base().result(http::status::ok);
-    }
-};
 
 } // namespace httplib

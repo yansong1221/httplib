@@ -87,14 +87,14 @@ inline std::vector<std::wstring> format_path_list(const fs::path &path,
         const auto &item = it->path();
 
         auto [ftime, unc_path] = file_last_wirte_time(item);
-        std::wstring time_string = strutil::string_to_wstring(ftime);
+        std::wstring time_string = util::string_to_wstring(ftime);
 
         std::wstring rpath;
 
         if (fs::is_directory(unc_path.empty() ? item : unc_path, ec)) {
-            auto leaf = strutil::wstring_to_string(item.filename().wstring());
+            auto leaf = util::wstring_to_string(item.filename().wstring());
             leaf = leaf + "/";
-            rpath = strutil::string_to_wstring(leaf);
+            rpath = util::string_to_wstring(leaf);
             int width = 50 - static_cast<int>(rpath.size());
             width = width < 0 ? 0 : width;
             std::wstring space(width, L' ');
@@ -107,8 +107,8 @@ inline std::vector<std::wstring> format_path_list(const fs::path &path,
 
             path_list.push_back(str);
         } else {
-            auto leaf = strutil::wstring_to_string(item.filename().wstring());
-            rpath = strutil::string_to_wstring(leaf);
+            auto leaf = util::wstring_to_string(item.filename().wstring());
+            rpath = util::string_to_wstring(leaf);
             int width = 50 - (int)rpath.size();
             width = width < 0 ? 0 : width;
             std::wstring space(width, L' ');
@@ -118,7 +118,7 @@ inline std::vector<std::wstring> format_path_list(const fs::path &path,
             auto sz = static_cast<float>(fs::file_size(unc_path, ec));
             if (ec)
                 sz = 0;
-            filesize = strutil::string_to_wstring(strutil::add_suffix(sz));
+            filesize = util::string_to_wstring(util::add_suffix(sz));
             auto show_path = rpath;
             if (show_path.size() > 50) {
                 show_path = show_path.substr(0, 47);
@@ -147,9 +147,9 @@ inline std::wstring make_target_path(std::string_view target) {
 
     auto result = boost::urls::parse_uri(url);
     if (result.has_error())
-        return strutil::string_to_wstring(target);
+        return util::string_to_wstring(target);
 
-    return strutil::string_to_wstring(result->path());
+    return util::string_to_wstring(result->path());
 }
 } // namespace detail
 
@@ -168,7 +168,7 @@ static std::string format_dir_to_html(std::string_view target, const fs::path &p
         body += s;
     body = head + body + detail::tail_fmt;
 
-    return strutil::wstring_to_string(body);
+    return util::wstring_to_string(body);
 }
 
 static std::string fromat_error_content(int status, std::string_view reason,
@@ -213,9 +213,9 @@ static http_ranges parser_http_ranges(std::string_view range) noexcept { // 去�
     http_ranges results;
 
     // 获取其中所有 range 字符串.
-    auto ranges = strutil::split(range, ",");
+    auto ranges = util::split(range, ",");
     for (const auto &str : ranges) {
-        auto r = strutil::split(std::string(str), "-");
+        auto r = util::split(std::string(str), "-");
 
         // range 只有一个数值.
         if (r.size() == 1) {

@@ -1,6 +1,6 @@
 #pragma once
 #include "httplib/config.hpp"
-#include "httplib/type_traits.h"
+#include "httplib/util/type_traits.h"
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core/basic_stream.hpp>
 #include <type_traits>
@@ -85,4 +85,4 @@ public:
     }
 };
 
-} // namespace httplib::stream
+} // namespace httplib

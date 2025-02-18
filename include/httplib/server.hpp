@@ -1,8 +1,8 @@
 #pragma once
 
 #include "httplib/router.hpp"
+#include "httplib/stream/http_stream.hpp"
 #include "proxy_conn.hpp"
-#include "stream/variant_stream.hpp"
 #include "websocket_conn.hpp"
 #include <boost/asio/thread_pool.hpp>
 #include <boost/beast/core/detect_ssl.hpp>
@@ -20,7 +20,7 @@ namespace detail {
 
 template<class Body>
 net::awaitable<void> async_read_http_body(http::request_parser<http::empty_body> &&header_parser,
-                                          http_stream_variant_type &stream,
+                                          http_variant_stream_type &stream,
                                           beast::flat_buffer &buffer, httplib::request &req,
                                           boost::system::error_code &ec) {
 
@@ -162,7 +162,7 @@ private:
             net::ip::tcp::endpoint remote_endpoint = sock.remote_endpoint();
             net::ip::tcp::endpoint local_endpoint = sock.local_endpoint();
 
-            std::unique_ptr<http_stream_variant_type> http_variant_stream;
+            std::unique_ptr<http_variant_stream_type> http_variant_stream;
             beast::flat_buffer buffer;
             boost::system::error_code ec;
             bool is_ssl = co_await beast::async_detect_ssl(sock, buffer, net_awaitable[ec]);
@@ -176,7 +176,7 @@ private:
                 if (!ssl_ctx)
                     co_return;
 
-                stream::ssl_http_stream stream(std::move(sock), ssl_ctx);
+                ssl_http_stream stream(std::move(sock), ssl_ctx);
                 auto bytes_used = co_await stream.async_handshake(ssl::stream_base::server,
                                                                   buffer.data(), net_awaitable[ec]);
                 if (ec) {
@@ -184,14 +184,13 @@ private:
                     co_return;
                 }
                 buffer.consume(bytes_used);
-                http_variant_stream =
-                    std::make_unique<stream::http_stream_variant_type>(std::move(stream));
+                http_variant_stream = std::make_unique<http_variant_stream_type>(std::move(stream));
 #else
                 co_return;
 #endif
             } else {
                 http_stream stream(std::move(sock));
-                http_variant_stream = std::make_unique<http_stream_variant_type>(std::move(stream));
+                http_variant_stream = std::make_unique<http_variant_stream_type>(std::move(stream));
             }
 
             for (;;) {
@@ -276,7 +275,7 @@ private:
             spdlog::error("do_session: {}", e.what());
         }
     }
-    net::awaitable<void> handle_connect(http_stream_variant_type http_variant_stream,
+    net::awaitable<void> handle_connect(http_variant_stream_type http_variant_stream,
                                         http::request<http::empty_body> req) {
         auto target = req.target();
         auto pos = target.find(":");
@@ -311,7 +310,7 @@ private:
         co_await conn->run();
         co_return;
     }
-    net::awaitable<void> handle_websocket(http_stream_variant_type http_variant_stream,
+    net::awaitable<void> handle_websocket(http_variant_stream_type http_variant_stream,
                                           http::request<http::empty_body> req) {
         auto conn =
             std::make_shared<httplib::websocket_conn>(logger_, std::move(http_variant_stream));

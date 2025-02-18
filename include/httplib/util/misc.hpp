@@ -7,7 +7,7 @@
 #include <filesystem>
 #include <fstream>
 
-namespace httplib::utils {
+namespace util {
 using boost::asio::buffer;
 using boost::beast::bind_front_handler;
 using boost::beast::buffers_to_string;
@@ -93,4 +93,4 @@ static std::string_view buffer_to_string_view(const boost::asio::const_buffer &b
                             boost::asio::buffer_size(buffer));
 }
 
-} // namespace httplib::utils
+} // namespace util

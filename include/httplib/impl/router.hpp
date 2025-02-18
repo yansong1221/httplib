@@ -1,6 +1,8 @@
 #pragma once
 #include "httplib/html.hpp"
 #include "httplib/http_handler.hpp"
+#include "httplib/request.hpp"
+#include "httplib/response.hpp"
 #include <boost/algorithm/string.hpp>
 #include <boost/beast/version.hpp>
 #include <functional>
@@ -60,7 +62,7 @@ static std::string make_whole_str(http::verb method, std::string_view target) {
     return std::format("{} {}", std::string_view(http::to_string(method)), target);
 }
 static std::string make_whole_str(const request &req) {
-    return make_whole_str(req.base().method(), utils::url_decode(req.target()));
+    return make_whole_str(req.base().method(), util::url_decode(req.target()));
 }
 
 } // namespace detail
@@ -90,7 +92,7 @@ net::awaitable<void> router::routing(request &req, response &resp) {
     resp.prepare_payload();
 }
 net::awaitable<bool> router::handle_file_request(request &req, response &res) {
-    std::string decoded_target = utils::url_decode(req.target());
+    std::string decoded_target = util::url_decode(req.target());
     std::string_view target(decoded_target);
     beast::error_code ec;
 
@@ -158,7 +160,7 @@ net::awaitable<void> router::proc_routing(request &req, response &resp) {
 
     auto key = detail::make_whole_str(req);
     {
-        auto iter = coro_handles_.find(utils::url_decode(req.target()));
+        auto iter = coro_handles_.find(util::url_decode(req.target()));
         if (iter != coro_handles_.end()) {
             const auto &map = iter->second;
             auto iter = map.find(req.method());

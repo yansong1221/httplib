@@ -1,8 +1,8 @@
 #pragma once
 #include "form_data.hpp"
 #include "httplib/config.hpp"
-#include "httplib/strutil.hpp"
-#include "httplib/utils.hpp"
+#include "httplib/util/string.hpp"
+#include "httplib/util/misc.hpp"
 #include <boost/algorithm/string/trim.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/message.hpp>
@@ -133,7 +133,7 @@ public:
             boost::ignore_unused(content_length);
             ec = {};
 
-            auto content_type_parts = strutil::split(content_type_, ";"sv);
+            auto content_type_parts = util::split(content_type_, ";"sv);
 
             // Look for boundary
             for (const auto &part : content_type_parts) {
@@ -143,7 +143,7 @@ public:
                     continue;
 
                 // Extract boundary
-                const auto &boundary_pair = strutil::split(trimed_part, "="sv);
+                const auto &boundary_pair = util::split(trimed_part, "="sv);
                 if (boundary_pair.size() != 2)
                     continue;
 
@@ -166,7 +166,7 @@ public:
                     ec = http::error::need_more;
                     return 0;
                 }
-                auto data = utils::buffer_to_string_view(buffers);
+                auto data = util::buffer_to_string_view(buffers);
 
                 if (data.starts_with(boundary_line)) {
                     step_ = step::boundary_header;
@@ -181,7 +181,7 @@ public:
             } break;
             case step::boundary_header: {
 
-                auto data = utils::buffer_to_string_view(buffers);
+                auto data = util::buffer_to_string_view(buffers);
                 auto pos = data.find("\r\n\r\n");
                 if (pos == std::string_view::npos) {
                     ec = http::error::need_more;
@@ -228,7 +228,7 @@ public:
             } break;
             case step::boundary_content: {
 
-                auto data = utils::buffer_to_string_view(buffers);
+                auto data = util::buffer_to_string_view(buffers);
                 if (data.starts_with("\r")) {
 
                     const std::string eof_boundary_line = "\r\n--" + boundary_;
@@ -259,7 +259,7 @@ public:
                     ec = http::error::need_more;
                     return 0;
                 }
-                auto data = utils::buffer_to_string_view(buffers);
+                auto data = util::buffer_to_string_view(buffers);
                 if (!data.starts_with("\r\n")) {
                     ec = http::error::unexpected_body;
                     return 0;
@@ -335,7 +335,7 @@ public:
         static auto split_header_field_value(std::string_view header,
                                              boost::system::error_code &ec) {
             std::vector<std::pair<std::string_view, std::string_view>> results;
-            auto lines = strutil::split(header, "\r\n"sv);
+            auto lines = util::split(header, "\r\n"sv);
 
             for (const auto &line : lines) {
                 if (line.empty())

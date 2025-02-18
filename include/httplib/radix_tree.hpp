@@ -1,12 +1,13 @@
 #pragma once
 
 #include "httplib/http_handler.hpp"
-#include "httplib/type_traits.h"
+#include "httplib/util/type_traits.h"
 #include <functional>
 #include <string>
 #include <string_view>
 #include <tuple>
 #include <vector>
+#include <boost/beast/http/verb.hpp>
 
 namespace httplib {
 constexpr char type_asterisk = '*';

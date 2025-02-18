@@ -3,68 +3,37 @@
 #include "ssl_stream.hpp"
 #endif
 #include "http_stream.hpp"
-#include <boost/beast/websocket/stream.hpp>
+#include "websocket_variant_stream.hpp"
 
 namespace httplib {
 
-template<typename... T>
-class websocket_stream_variant : public http_stream_variant<T...> {
-public:
-    using http_stream_variant<T...>::http_stream_variant;
-
-public:
-    template<class Header, class AcceptHandler>
-    auto async_accept(Header const &req, AcceptHandler &&handler) {
-        return std::visit(
-            [&, handler = std::move(handler)](auto &t) mutable {
-                return t.async_accept(req, std::forward<AcceptHandler>(handler));
-            },
-            *this);
-    }
-    template<class DynamicBuffer, class ReadHandler>
-    auto async_read(DynamicBuffer &buffer, ReadHandler &&handler) {
-        return std::visit(
-            [&, handler = std::move(handler)](auto &t) mutable {
-                return t.async_read(buffer, std::forward<ReadHandler>(handler));
-            },
-            *this);
-    }
-    template<class ConstBufferSequence, class WriteHandler>
-    auto async_write(ConstBufferSequence const &bs, WriteHandler &&handler) {
-        return std::visit(
-            [&, handler = std::move(handler)](auto &t) mutable {
-                return t.async_write(bs, std::forward<WriteHandler>(handler));
-            },
-            *this);
-    }
-    template<class CloseHandler>
-    auto async_close(beast::websocket::close_reason const &cr, CloseHandler &&handler) {
-        return std::visit(
-            [&, handler = std::move(handler)](auto &t) mutable {
-                return t.async_close(cr, std::forward<CloseHandler>(handler));
-            },
-            *this);
-    }
-    bool got_binary() const noexcept {
-        return std::visit([&](auto &t) mutable { return t.got_binary(); }, *this);
-    }
-    bool got_text() const {
-        return std::visit([&](auto &t) mutable { return t.got_text(); }, *this);
-    }
-    void text(bool value) {
-        std::visit([&](auto &t) mutable { return t.text(value); }, *this);
-    }
-    void binary(bool value) {
-        std::visit([&](auto &t) mutable { return t.binary(value); }, *this);
-    }
-};
-
-using ws_stream = websocket::stream<http_stream>;
+using websocket_stream = websocket::stream<http_stream>;
 #ifdef HTTLIP_ENABLED_SSL
-using ssl_ws_stream = websocket::stream<ssl_http_stream>;
-using ws_stream_variant_type = websocket_stream_variant<ws_stream, ssl_ws_stream>;
+using ssl_websocket_stream = websocket::stream<ssl_http_stream>;
+using websocket_variant_stream_type =
+    websocket_variant_stream<websocket_stream, ssl_websocket_stream>;
 #else
-using ws_stream_variant_type = websocket_stream_variant<ws_stream>;
+using websocket_variant_stream_type = websocket_variant_stream<websocket_stream>;
 #endif
 
-} // namespace httplib::stream
+inline static websocket_variant_stream_type
+create_websocket_variant_stream(http_variant_stream_type &&stream) {
+    return std::visit(
+        [](auto &&t) -> websocket_variant_stream_type {
+            using value_type = std::decay_t<decltype(t)>;
+            if constexpr (std::same_as<http_stream, value_type>) {
+                return websocket_stream(std::move(t));
+            }
+#ifdef HTTLIP_ENABLED_SSL
+            else if constexpr (std::same_as<ssl_http_stream, value_type>) {
+                return ssl_websocket_stream(std::move(t));
+            }
+#endif
+            else {
+                static_assert(false, "unknown http_variant_stream_type");
+            }
+        },
+        stream);
+}
+
+} // namespace httplib

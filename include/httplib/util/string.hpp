@@ -5,8 +5,7 @@
 #include <string_view>
 #include <vector>
 
-namespace httplib {
-namespace strutil {
+namespace util {
 
 static std::wstring string_to_wstring(std::string_view str) {
     return boost::nowide::widen(str);
@@ -81,5 +80,4 @@ static std::vector<std::string_view> split(std::string_view str,
     return parts;
 }
 
-} // namespace strutil
-} // namespace httplib
+} // namespace util
