@@ -62,7 +62,7 @@ async_write_http_message(AsyncWriteStream &stream, http_message_variant<isReques
 }
 } // namespace detail
 
-class server {
+class server : public std::enable_shared_from_this<server> {
 
 public:
     struct ssl_config {
@@ -122,7 +122,8 @@ public:
 
             net::co_spawn(
                 executor,
-                [this, sock = std::move(sock)]() mutable -> net::awaitable<void> {
+                [this, self = shared_from_this(),
+                 sock = std::move(sock)]() mutable -> net::awaitable<void> {
                     auto remote_endp = sock.remote_endpoint();
                     logger_->trace("accept new connection [{}:{}]",
                                    remote_endp.address().to_string(), remote_endp.port());
@@ -156,44 +157,48 @@ private:
         }
     }
 #endif
+    net::awaitable<std::optional<http_variant_stream_type>>
+    async_create_http_variant_stream(tcp::socket &&sock, beast::flat_buffer &buffer) {
+        boost::system::error_code ec;
+        bool is_ssl = co_await beast::async_detect_ssl(sock, buffer, net_awaitable[ec]);
+        if (ec) {
+            logger_->error("async_detect_ssl failed: {}", ec.message());
+            co_return std::nullopt;
+        }
+        if (is_ssl) {
+#ifdef HTTLIP_ENABLED_SSL
+            auto ssl_ctx = create_ssl_context();
+            if (!ssl_ctx)
+                co_return std::nullopt;
+
+            ssl_http_stream stream(std::move(sock), ssl_ctx);
+            auto bytes_used = co_await stream.async_handshake(ssl::stream_base::server,
+                                                              buffer.data(), net_awaitable[ec]);
+            if (ec) {
+                logger_->error("ssl handshake failed: {}", ec.message());
+                co_return std::nullopt;
+            }
+            buffer.consume(bytes_used);
+            co_return std::move(stream);
+#endif
+        }
+        co_return http_stream(std::move(sock));
+    }
 
     net::awaitable<void> do_session(tcp::socket sock) {
         try {
             net::ip::tcp::endpoint remote_endpoint = sock.remote_endpoint();
             net::ip::tcp::endpoint local_endpoint = sock.local_endpoint();
 
-            std::unique_ptr<http_variant_stream_type> http_variant_stream;
             beast::flat_buffer buffer;
-            boost::system::error_code ec;
-            bool is_ssl = co_await beast::async_detect_ssl(sock, buffer, net_awaitable[ec]);
-            if (ec) {
-                logger_->error("async_detect_ssl failed: {}", ec.message());
-                co_return;
-            }
-            if (is_ssl) {
-#ifdef HTTLIP_ENABLED_SSL
-                auto ssl_ctx = create_ssl_context();
-                if (!ssl_ctx)
-                    co_return;
 
-                ssl_http_stream stream(std::move(sock), ssl_ctx);
-                auto bytes_used = co_await stream.async_handshake(ssl::stream_base::server,
-                                                                  buffer.data(), net_awaitable[ec]);
-                if (ec) {
-                    logger_->error("ssl handshake failed: {}", ec.message());
-                    co_return;
-                }
-                buffer.consume(bytes_used);
-                http_variant_stream = std::make_unique<http_variant_stream_type>(std::move(stream));
-#else
+            auto http_variant_stream =
+                co_await async_create_http_variant_stream(std::move(sock), buffer);
+            if (!http_variant_stream)
                 co_return;
-#endif
-            } else {
-                http_stream stream(std::move(sock));
-                http_variant_stream = std::make_unique<http_variant_stream_type>(std::move(stream));
-            }
 
             for (;;) {
+                boost::system::error_code ec;
                 http::request_parser<http::empty_body> header_parser;
                 while (!header_parser.is_header_done()) {
                     http_variant_stream->expires_after(std::chrono::seconds(30));
