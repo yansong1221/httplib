@@ -7,13 +7,13 @@
 struct log_t {
     httplib::net::awaitable<bool> before(httplib::request &req, httplib::response &res) {
         start_ = std::chrono::steady_clock::now(); 
-        co_return true;
+        co_return true; 
     }
 
-    bool after(httplib::request &req, httplib::response &res) {
+    bool after(httplib::request &req, httplib::response &res) { 
         auto span = std::chrono::steady_clock::now() - start_;
         std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(span) << std::endl;  
-        return true;  
+        return true;   
     }
 
 private:

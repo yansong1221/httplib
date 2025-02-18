@@ -1,12 +1,12 @@
 #pragma once
+#include "httplib/config.hpp"
 #include "httplib/type_traits.h"
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core/basic_stream.hpp>
-#include <boost/beast/websocket/stream.hpp>
 #include <type_traits>
 #include <variant>
 
-namespace httplib::stream {
+namespace httplib {
 
 template<typename T>
 constexpr inline bool is_basic_stream_v =

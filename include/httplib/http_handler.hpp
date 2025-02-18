@@ -1,6 +1,14 @@
 #pragma once
-#include "message_variant.hpp"
+#include "httplib/config.hpp"
+
+#include <boost/asio/awaitable.hpp>
+#include <functional>
+#include <variant>
+
 namespace httplib {
+
+class request;
+class response;
 
 using coro_http_handler_type = std::function<net::awaitable<void>(request &req, response &resp)>;
 using http_handler_type = std::function<void(request &req, response &resp)>;

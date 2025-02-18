@@ -1,7 +1,11 @@
 #pragma once
+#ifdef HTTLIP_ENABLED_SSL
+#include "ssl_stream.hpp"
+#endif
 #include "http_stream.hpp"
+#include <boost/beast/websocket/stream.hpp>
 
-namespace httplib::stream {
+namespace httplib {
 
 template<typename... T>
 class websocket_stream_variant : public http_stream_variant<T...> {
@@ -56,8 +60,11 @@ public:
 };
 
 using ws_stream = websocket::stream<http_stream>;
+#ifdef HTTLIP_ENABLED_SSL
 using ssl_ws_stream = websocket::stream<ssl_http_stream>;
-
 using ws_stream_variant_type = websocket_stream_variant<ws_stream, ssl_ws_stream>;
+#else
+using ws_stream_variant_type = websocket_stream_variant<ws_stream>;
+#endif
 
 } // namespace httplib::stream

@@ -1,8 +1,11 @@
 #pragma once
-#include "http_handler.hpp"
+#include "httplib/http_handler.hpp"
+#include "httplib/message_variant.hpp"
+#include "radix_tree.hpp"
 #include "type_traits.h"
 #include <algorithm>
 #include <filesystem>
+#include <list>
 #include <spdlog/spdlog.h>
 #include <string>
 #include <string_view>
@@ -34,10 +37,6 @@ template<typename T>
 constexpr inline bool is_awaitable_v =
     util::is_specialization_v<std::remove_cvref_t<T>, net::awaitable>;
 
-namespace impl {
-class router;
-}
-
 class router {
 public:
     struct mount_point_entry {
@@ -46,8 +45,7 @@ public:
         http::fields headers;
     };
 
-    explicit router(std::shared_ptr<spdlog::logger> logger);
-    virtual ~router();
+    router(std::shared_ptr<spdlog::logger> logger) : logger_(logger) {}
 
 public:
     // eg: "GET hello/" as a key
@@ -85,12 +83,12 @@ public:
         }
         set_http_handler(method, key, std::move(http_handler));
     }
-    bool set_mount_point(const std::string &mount_point, const std::filesystem::path &dir,
-                         const http::fields &headers = {});
+    inline bool set_mount_point(const std::string &mount_point, const std::filesystem::path &dir,
+                                const http::fields &headers = {});
 
-    bool remove_mount_point(const std::string &mount_point);
+    inline bool remove_mount_point(const std::string &mount_point);
 
-    net::awaitable<void> routing(request &req, response &resp);
+    inline net::awaitable<void> routing(request &req, response &resp);
 
 private:
     template<typename T>
@@ -122,10 +120,28 @@ private:
         }
         co_return;
     }
-    void set_http_handler(http::verb method, std::string_view key,
-                          coro_http_handler_type &&handler);
+    inline void set_http_handler(http::verb method, std::string_view key,
+                                 coro_http_handler_type &&handler);
+
+    inline net::awaitable<bool> handle_file_request(request &req, response &res);
+    inline net::awaitable<void> proc_routing_befor(request &req, response &resp);
+    inline net::awaitable<void> proc_routing(request &req, response &resp);
+    inline net::awaitable<void> proc_routing_after(request &req, response &resp);
 
 private:
-    impl::router *impl_;
+    std::shared_ptr<spdlog::logger> logger_;
+
+    using verb_handler_map = std::unordered_map<http::verb, coro_http_handler_type>;
+    std::unordered_map<std::string, verb_handler_map> coro_handles_;
+
+    std::shared_ptr<radix_tree> coro_router_tree_ = std::make_shared<radix_tree>(radix_tree());
+    std::vector<std::tuple<std::regex, coro_http_handler_type>> coro_regex_handles_;
+
+    http_handler_variant default_handler_;
+    http_handler_variant file_request_handler_;
+
+    std::vector<mount_point_entry> static_file_entry_;
 };
 } // namespace httplib
+
+#include "httplib/impl/router.hpp"

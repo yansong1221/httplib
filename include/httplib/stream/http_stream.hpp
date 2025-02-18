@@ -1,8 +1,10 @@
 #pragma once
+#ifdef HTTLIP_ENABLED_SSL
 #include "ssl_stream.hpp"
+#endif
 #include "variant_stream.hpp"
 
-namespace httplib::stream {
+namespace httplib {
 
 template<typename... T>
 class http_stream_variant : public variant_stream<T...> {
@@ -31,8 +33,12 @@ public:
 
 using http_stream =
     beast::basic_stream<net::ip::tcp, net::any_io_executor, beast::simple_rate_policy>;
-using ssl_http_stream = ssl_stream<http_stream>;
 
+#ifdef HTTLIP_ENABLED_SSL
+using ssl_http_stream = ssl_stream<http_stream>;
 using http_stream_variant_type = http_stream_variant<http_stream, ssl_http_stream>;
+#else
+using http_stream_variant_type = http_stream_variant<http_stream>;
+#endif
 
 } // namespace httplib::stream

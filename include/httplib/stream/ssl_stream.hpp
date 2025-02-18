@@ -12,7 +12,7 @@
 
 #include <boost/asio/ssl/stream.hpp>
 
-namespace httplib::stream {
+namespace httplib {
 
 template<class NextLayer>
 struct ssl_stream : public net::ssl::stream<NextLayer> {

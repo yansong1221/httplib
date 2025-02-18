@@ -1,6 +1,16 @@
-#include "httplib/html.h"
+#pragma once
+#include <boost/algorithm/string/replace.hpp>
+#include <boost/algorithm/string/trim.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/system/error_code.hpp>
+#include <boost/url/parse.hpp>
+#include <filesystem>
+#include <format>
 
 namespace httplib::html {
+
+namespace fs = std::filesystem;
+
 namespace detail {
 
 inline constexpr auto head_fmt =
@@ -143,8 +153,8 @@ inline std::wstring make_target_path(std::string_view target) {
 }
 } // namespace detail
 
-std::string format_dir_to_html(std::string_view target, const fs::path &path,
-                               boost::system::error_code ec) {
+static std::string format_dir_to_html(std::string_view target, const fs::path &path,
+                                      boost::system::error_code ec) {
     auto path_list = detail::format_path_list(path, ec);
     if (ec)
         return {};
@@ -161,7 +171,8 @@ std::string format_dir_to_html(std::string_view target, const fs::path &path,
     return strutil::wstring_to_string(body);
 }
 
-std::string fromat_error_content(int status, std::string_view reason, std::string_view server) {
+static std::string fromat_error_content(int status, std::string_view reason,
+                                        std::string_view server) {
     return std::format(
         R"x*x*x(<html>
 <head><title>{0} {1}</title></head>
@@ -173,7 +184,7 @@ std::string fromat_error_content(int status, std::string_view reason, std::strin
         status, reason, server);
 }
 
-std::string format_http_date() {
+static std::string format_http_date() {
     using namespace std::chrono;
 
     auto now = utc_clock::now();
@@ -189,11 +200,11 @@ std::string format_http_date() {
     return oss.str();
 }
 
-http_ranges parser_http_ranges(std::string_view range) noexcept { // 去掉前后空白.
+static http_ranges parser_http_ranges(std::string_view range) noexcept { // 去掉前后空白.
     range = boost::trim_copy(range);
 
     // range 必须以 bytes= 开头, 否则返回空数组.
-    if (!range.starts_with("bytes=")) 
+    if (!range.starts_with("bytes="))
         return {};
 
     // 去掉开头的 bytes= 字符串.

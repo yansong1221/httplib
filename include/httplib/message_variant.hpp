@@ -125,29 +125,6 @@ public:
         change_body<Body>();
         body<Body>() = data;
     }
-
-    template<typename AsyncWriteStream>
-    net::awaitable<void> async_write(AsyncWriteStream &stream, boost::system::error_code &ec,
-                                     bool only_head = false) {
-        co_await std::visit(
-            [&](auto &&t) mutable -> net::awaitable<void> {
-                using body_type = std::decay_t<decltype(t)>::body_type;
-                using header_type = std::decay_t<decltype(t)>::header_type;
-
-                http::serializer<isRequest, body_type, Fields> serializer(t);
-                co_await http::async_write_header(stream, serializer, net_awaitable[ec]);
-                if (ec)
-                    co_return;
-
-                if (only_head)
-                    co_return;
-
-                co_await http::async_write(stream, serializer, net_awaitable[ec]);
-                co_return;
-            },
-            *this);
-        co_return;
-    }
 };
 
 template<bool isRequest, typename Fields = http::fields>

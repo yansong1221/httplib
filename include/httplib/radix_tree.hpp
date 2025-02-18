@@ -8,7 +8,7 @@
 #include <tuple>
 #include <vector>
 
-namespace httplib::impl {
+namespace httplib {
 constexpr char type_asterisk = '*';
 constexpr char type_colon = ':';
 constexpr char type_slash = '/';
