@@ -1,11 +1,15 @@
 #pragma once
 #include "httplib/config.hpp"
-
+#include "httplib/util/type_traits.h"
 #include <boost/asio/awaitable.hpp>
 #include <functional>
 #include <variant>
 
 namespace httplib {
+
+template<typename T>
+constexpr inline bool is_awaitable_v =
+    util::is_specialization_v<std::remove_cvref_t<T>, net::awaitable>;
 
 class request;
 class response;
@@ -21,14 +25,14 @@ public:
         co_await std::visit(
             [&](auto &handler) -> net::awaitable<void> {
                 using handler_type = std::decay_t<decltype(handler)>;
-                if constexpr (std::same_as<handler_type, coro_http_handler_type>) {
+                using return_type = typename util::function_traits<handler_type>::return_type;
+
+                if constexpr (is_awaitable_v<return_type>) {
                     if (handler)
                         co_await handler(req, resp);
-                } else if constexpr (std::same_as<handler_type, http_handler_type>) {
+                } else {
                     if (handler)
                         handler(req, resp);
-                } else {
-                    static_assert(false, "unknown handler type");
                 }
                 co_return;
             },

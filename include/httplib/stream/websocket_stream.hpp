@@ -21,6 +21,7 @@ create_websocket_variant_stream(http_variant_stream_type &&stream) {
     return std::visit(
         [](auto &&t) -> websocket_variant_stream_type {
             using value_type = std::decay_t<decltype(t)>;
+            
             if constexpr (std::same_as<http_stream, value_type>) {
                 return websocket_stream(std::move(t));
             }
@@ -29,9 +30,6 @@ create_websocket_variant_stream(http_variant_stream_type &&stream) {
                 return ssl_websocket_stream(std::move(t));
             }
 #endif
-            else {
-                static_assert(false, "unknown http_variant_stream_type");
-            }
         },
         stream);
 }

@@ -5,6 +5,7 @@
 #include <boost/system/error_code.hpp>
 #include <boost/url/parse.hpp>
 #include <filesystem>
+#include <fmt/format.h>
 #include <format>
 
 namespace httplib::html {
@@ -103,7 +104,7 @@ inline std::vector<std::wstring> format_path_list(const fs::path &path,
                 show_path = show_path.substr(0, 47);
                 show_path += L"..&gt;";
             }
-            auto str = std::format(body_fmt, rpath, show_path, space, time_string, L"-");
+            auto str = fmt::format(body_fmt, rpath, show_path, space, time_string, L"-");
 
             path_list.push_back(str);
         } else {
@@ -124,7 +125,7 @@ inline std::vector<std::wstring> format_path_list(const fs::path &path,
                 show_path = show_path.substr(0, 47);
                 show_path += L"..&gt;";
             }
-            auto str = std::format(body_fmt, rpath, show_path, space, time_string, filesize);
+            auto str = fmt::format(body_fmt, rpath, show_path, space, time_string, filesize);
 
             file_list.push_back(str);
         }
@@ -160,9 +161,9 @@ static std::string format_dir_to_html(std::string_view target, const fs::path &p
         return {};
 
     auto target_path = detail::make_target_path(target);
-    std::wstring head = std::format(detail::head_fmt, target_path, target_path);
+    std::wstring head = fmt::format(detail::head_fmt, target_path, target_path);
 
-    std::wstring body = std::format(detail::body_fmt, L"../", L"../", L"", L"", L"");
+    std::wstring body = fmt::format(detail::body_fmt, L"../", L"../", L"", L"", L"");
 
     for (auto &s : path_list)
         body += s;
@@ -173,7 +174,7 @@ static std::string format_dir_to_html(std::string_view target, const fs::path &p
 
 static std::string fromat_error_content(int status, std::string_view reason,
                                         std::string_view server) {
-    return std::format(
+    return fmt::format(
         R"x*x*x(<html>
 <head><title>{0} {1}</title></head>
 <body bgcolor="white">
@@ -187,16 +188,22 @@ static std::string fromat_error_content(int status, std::string_view reason,
 static std::string format_http_date() {
     using namespace std::chrono;
 
-    auto now = utc_clock::now();
-    std::time_t tt = system_clock::to_time_t(utc_clock::to_sys(now));
+    // Get the current time from system clock
+    auto now = system_clock::now();
+    std::time_t tt = system_clock::to_time_t(now);
+
+    // Convert the time to UTC using gmtime_s (Windows) or gmtime_r (Unix-like systems)
     std::tm tm{};
 #ifdef _WIN32
-    gmtime_s(&tm, &tt);
+    gmtime_s(&tm, &tt); // Thread-safe for Windows
 #else
-    gmtime_r(&tt, &tm);
+    gmtime_r(&tt, &tm); // Thread-safe for Unix-like systems
 #endif
+
+    // Format the date in HTTP format
     std::ostringstream oss;
     oss << std::put_time(&tm, "%a, %d %b %Y %H:%M:%S GMT");
+
     return oss.str();
 }
 

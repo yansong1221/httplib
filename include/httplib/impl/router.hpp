@@ -157,7 +157,7 @@ inline static bool is_valid_path(std::string_view path) {
 }
 
 static std::string make_whole_str(http::verb method, std::string_view target) {
-    return std::format("{} {}", std::string_view(http::to_string(method)), target);
+    return fmt::format("{} {}", std::string_view(http::to_string(method)), target);
 }
 static std::string make_whole_str(const request &req) {
     return make_whole_str(req.base().method(), util::url_decode(req.target()));

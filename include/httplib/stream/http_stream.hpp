@@ -10,7 +10,6 @@ namespace httplib {
 
 using http_stream =
     beast::basic_stream<net::ip::tcp, net::any_io_executor, beast::simple_rate_policy>;
-
 #ifdef HTTLIP_ENABLED_SSL
 using ssl_http_stream = ssl_stream<http_stream>;
 

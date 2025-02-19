@@ -1,7 +1,7 @@
 #pragma once
 #include "httplib/util/misc.hpp"
 #include "httplib/util/string.hpp"
-#include <format>
+#include <fmt/format.h>
 #include <random>
 #include <string_view>
 
@@ -100,7 +100,7 @@ static auto split_header_field_value(std::string_view header, boost::system::err
 template<bool isRequest, class Fields>
 form_data_body::writer::writer(http::header<isRequest, Fields> &h, value_type &b)
     : body_(b), boundary_(detail::generate_boundary()) {
-    h.set(http::field::content_type, std::format("multipart/form-data; boundary={}", boundary_));
+    h.set(http::field::content_type, fmt::format("multipart/form-data; boundary={}", boundary_));
 }
 
 boost::optional<std::pair<form_data_body::writer::const_buffers_type, bool>>
@@ -113,15 +113,15 @@ form_data_body::writer::get(boost::system::error_code &ec) {
     auto &field_data = body_.fields[field_data_index_];
     switch (step_) {
     case step::header: {
-        std::string header = std::format("--{}\r\n", boundary_);
+        std::string header = fmt::format("--{}\r\n", boundary_);
 
-        header += std::format(R"(Content-Disposition: form-data; name="{}")", field_data.name);
+        header += fmt::format(R"(Content-Disposition: form-data; name="{}")", field_data.name);
         if (!field_data.filename.empty()) {
-            header += std::format(R"(; filename="{}")", field_data.filename);
+            header += fmt::format(R"(; filename="{}")", field_data.filename);
         }
         header += "\r\n";
         if (!field_data.content_type.empty()) {
-            header += std::format("Content-Type: {}\r\n", field_data.content_type);
+            header += fmt::format("Content-Type: {}\r\n", field_data.content_type);
         }
         header += "\r\n";
         net::buffer_copy(buffer_.prepare(header.size()), net::buffer(header));
@@ -140,7 +140,7 @@ form_data_body::writer::get(boost::system::error_code &ec) {
         bool is_eof = field_data_index_ == body_.fields.size() - 1;
         std::string end("\r\n");
         if (is_eof) {
-            end += std::format("--{}--\r\n", boundary_);
+            end += fmt::format("--{}--\r\n", boundary_);
             step_ = step::eof;
         } else {
             step_ = step::header;
