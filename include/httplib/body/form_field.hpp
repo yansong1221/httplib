@@ -2,7 +2,7 @@
 
 #include <string>
 
-namespace httplib {
+namespace httplib::body {
 /**
      * Type to represent the data held by a single field of an HTML form.
      */

@@ -1,5 +1,5 @@
 #pragma once
-
+#include "httplib/body/body.hpp"
 #include "httplib/router.hpp"
 #include "httplib/stream/http_stream.hpp"
 #include "proxy_conn.hpp"
@@ -25,7 +25,6 @@ net::awaitable<void> async_read_http_body(http::request_parser<http::empty_body>
                                           boost::system::error_code &ec) {
 
     http::request_parser<Body> body_parser(std::move(header_parser));
-
     while (!body_parser.is_done()) {
         stream.expires_after(std::chrono::seconds(30));
         co_await http::async_read_some(stream, buffer, body_parser, net_awaitable[ec]);
@@ -122,8 +121,7 @@ public:
 
             net::co_spawn(
                 executor,
-                [this, self = shared_from_this(),
-                 sock = std::move(sock)]() mutable -> net::awaitable<void> {
+                [this, sock = std::move(sock)]() mutable -> net::awaitable<void> {
                     auto remote_endp = sock.remote_endpoint();
                     logger_->trace("accept new connection [{}:{}]",
                                    remote_endp.address().to_string(), remote_endp.port());
@@ -200,6 +198,7 @@ private:
             for (;;) {
                 boost::system::error_code ec;
                 http::request_parser<http::empty_body> header_parser;
+                header_parser.body_limit(std::numeric_limits<unsigned long long>::max());
                 while (!header_parser.is_header_done()) {
                     http_variant_stream->expires_after(std::chrono::seconds(30));
                     co_await http::async_read_some(*http_variant_stream, buffer, header_parser,
@@ -239,10 +238,13 @@ private:
                     auto content_type = header[http::field::content_type];
                     if (content_type.starts_with("multipart/form-data")) {
 
-                        co_await detail::async_read_http_body<form_data_body>(
+                        co_await detail::async_read_http_body<body::form_data_body>(
+                            std::move(header_parser), *http_variant_stream, buffer, req, ec);
+                    } else if (content_type.starts_with("application/json")) {
+                        co_await detail::async_read_http_body<body::json_body>(
                             std::move(header_parser), *http_variant_stream, buffer, req, ec);
                     } else {
-                        co_await detail::async_read_http_body<http::string_body>(
+                        co_await detail::async_read_http_body<body::string_body>(
                             std::move(header_parser), *http_variant_stream, buffer, req, ec);
                     }
                     if (ec) {
@@ -336,44 +338,8 @@ public:
     void set_websocket_close_handler(httplib::websocket_conn::close_handler_type &&handler) {
         websocket_close_handler_ = handler;
     }
-
-    template<http::verb... method, typename Func, typename... Aspects>
-    void set_http_handler(std::string key, Func &&handler, Aspects &&...asps) {
-        static_assert(sizeof...(method) >= 1, "must set http_method");
-        if constexpr (sizeof...(method) == 1) {
-            (router_.set_http_handler<method>(std::move(key), std::move(handler),
-                                              std::forward<Aspects>(asps)...),
-             ...);
-        } else {
-            (router_.set_http_handler<method>(key, handler, std::forward<Aspects>(asps)...), ...);
-        }
-    }
-
-    template<http::verb... method, typename Func, typename... Aspects>
-    void set_http_handler(std::string key, Func &&handler, util::class_type_t<Func> &owner,
-                          Aspects &&...asps) {
-        static_assert(std::is_member_function_pointer_v<Func>, "must be member function");
-        using return_type = typename util::function_traits<Func>::return_type;
-        if constexpr (is_awaitable_v<return_type>) {
-            std::function<net::awaitable<void>(httplib::request & req, httplib::response & resp)>
-                f = std::bind(handler, &owner, std::placeholders::_1, std::placeholders::_2);
-            set_http_handler<method...>(std::move(key), std::move(f),
-                                        std::forward<Aspects>(asps)...);
-        } else {
-            std::function<void(httplib::request & req, httplib::response & resp)> f =
-                std::bind(handler, &owner, std::placeholders::_1, std::placeholders::_2);
-            set_http_handler<method...>(std::move(key), std::move(f),
-                                        std::forward<Aspects>(asps)...);
-        }
-    }
-
-    bool set_mount_point(const std::string &mount_point, const std::filesystem::path &dir,
-                         const http::fields &headers = {}) {
-
-        return router_.set_mount_point(mount_point, dir, headers);
-    }
-    bool remove_mount_point(const std::string &mount_point) {
-        return router_.remove_mount_point(mount_point);
+    router &get_router() {
+        return router_;
     }
 
 private:

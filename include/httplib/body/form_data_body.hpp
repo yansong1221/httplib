@@ -5,11 +5,11 @@
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/message.hpp>
 
-namespace httplib {
+namespace httplib::body {
 
 class form_data_body {
 public:
-    using value_type = httplib::form_data;
+    using value_type = form_data;
 
     class writer {
     public:
@@ -77,6 +77,6 @@ public:
         form_field_data field_data_;
     };
 };
-} // namespace httplib
+} // namespace httplib::body
 
 #include "httplib/body/impl/form_data_body.hpp"

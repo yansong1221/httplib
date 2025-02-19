@@ -1,14 +1,11 @@
 #pragma once
-#include "httplib/body/form_data_body.hpp"
+#include "httplib/body/body.hpp"
+
 #include "httplib/mime_types.hpp"
 #include "httplib/use_awaitable.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/ip/tcp.hpp>
-#include <boost/beast/http/dynamic_body.hpp>
-#include <boost/beast/http/empty_body.hpp>
-#include <boost/beast/http/file_body.hpp>
 #include <boost/beast/http/message.hpp>
-#include <boost/beast/http/string_body.hpp>
 #include <filesystem>
 #include <regex>
 
@@ -127,8 +124,9 @@ public:
 };
 
 template<bool isRequest, typename Fields = http::fields>
-using http_message_variant = variant_message<isRequest, Fields, http::empty_body, http::string_body,
-                                             http::file_body, form_data_body>;
+using http_message_variant =
+    variant_message<isRequest, Fields, body::empty_body, body::string_body, body::file_body,
+                    body::form_data_body, body::json_body>;
 
 using http_request_variant = http_message_variant<true>;
 using http_response_variant = http_message_variant<false>;

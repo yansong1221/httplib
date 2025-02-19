@@ -1,6 +1,7 @@
 #pragma once
 #include "httplib/html.hpp"
 #include "httplib/http_handler.hpp"
+#include "httplib/impl/radix_tree.hpp"
 #include "httplib/request.hpp"
 #include "httplib/response.hpp"
 #include <boost/algorithm/string.hpp>
@@ -14,6 +15,102 @@
 namespace httplib {
 
 namespace detail {
+
+template<class, class = void>
+struct has_before : std::false_type {};
+
+template<class T>
+struct has_before<T, std::void_t<decltype(std::declval<T>().before(std::declval<request &>(),
+                                                                   std::declval<response &>()))>>
+    : std::true_type {};
+
+template<class, class = void>
+struct has_after : std::false_type {};
+
+template<class T>
+struct has_after<T, std::void_t<decltype(std::declval<T>().after(std::declval<request &>(),
+                                                                 std::declval<response &>()))>>
+    : std::true_type {};
+
+template<class T>
+constexpr bool has_before_v = has_before<T>::value;
+
+template<class T>
+constexpr bool has_after_v = has_after<T>::value;
+
+template<typename T>
+constexpr inline bool is_awaitable_v =
+    util::is_specialization_v<std::remove_cvref_t<T>, net::awaitable>;
+
+
+template<typename T>
+net::awaitable<void> do_before(T &aspect, request &req, response &resp, bool &ok) {
+    if constexpr (has_before_v<T>) {
+        if (!ok) {
+            co_return;
+        }
+        using return_type = std::decay_t<decltype(aspect.before(req, resp))>;
+        if constexpr (is_awaitable_v<return_type>)
+            ok = co_await aspect.before(req, resp);
+        else
+            ok = aspect.before(req, resp);
+    }
+    co_return;
+}
+
+template<typename T>
+net::awaitable<void> do_after(T &aspect, request &req, response &resp, bool &ok) {
+    if constexpr (has_after_v<T>) {
+        if (!ok) {
+            co_return;
+        }
+        using return_type = std::decay_t<decltype(aspect.after(req, resp))>;
+        if constexpr (is_awaitable_v<return_type>)
+            ok = co_await aspect.after(req, resp);
+        else
+            ok = aspect.after(req, resp);
+    }
+    co_return;
+}
+template<typename Func>
+http_handler_variant create_http_handler_variant(Func &&handler) {
+    http_handler_variant handler_variant;
+    using return_type =
+        typename util::function_traits<std::decay_t<decltype(handler)>>::return_type;
+    if constexpr (is_awaitable_v<return_type>) {
+        handler_variant = coro_http_handler_type(std::move(handler));
+    } else {
+        handler_variant = http_handler_type(std::move(handler));
+    }
+    return std::move(handler_variant);
+}
+template<typename Func, typename... Aspects>
+coro_http_handler_type create_router_coro_http_handler(Func &&handler, Aspects &&...asps) {
+
+    auto handler_variant = create_http_handler_variant(handler);
+    // hold keys to make sure map_handles_ key is
+    // std::string_view, avoid memcpy when route
+    coro_http_handler_type http_handler;
+    if constexpr (sizeof...(Aspects) > 0) {
+        http_handler = [handler_variant = std::move(handler_variant),
+                        ... asps = std::forward<Aspects>(asps)](
+                           request &req, response &resp) mutable -> net::awaitable<void> {
+            bool ok = true;
+            co_await (detail::do_before(asps, req, resp, ok), ...);
+            if (ok) {
+                co_await handler_variant(req, resp);
+            }
+            ok = true;
+            co_await (detail::do_after(asps, req, resp, ok), ...);
+        };
+    } else {
+        http_handler = [handler_variant = std::move(handler_variant)](
+                           request &req, response &resp) mutable -> net::awaitable<void> {
+            co_await handler_variant(req, resp);
+        };
+    }
+    return std::move(http_handler);
+}
 
 inline static bool is_valid_path(std::string_view path) {
     size_t level = 0;
@@ -58,6 +155,7 @@ inline static bool is_valid_path(std::string_view path) {
 
     return true;
 }
+
 static std::string make_whole_str(http::verb method, std::string_view target) {
     return std::format("{} {}", std::string_view(http::to_string(method)), target);
 }
@@ -66,6 +164,9 @@ static std::string make_whole_str(const request &req) {
 }
 
 } // namespace detail
+
+router::router(std::shared_ptr<spdlog::logger> logger)
+    : logger_(logger), coro_router_tree_(std::make_shared<radix_tree>(radix_tree())) {}
 
 net::awaitable<void> router::routing(request &req, response &resp) {
     try {
@@ -158,7 +259,6 @@ net::awaitable<void> router::proc_routing(request &req, response &resp) {
             co_return;
     }
 
-    auto key = detail::make_whole_str(req);
     {
         auto iter = coro_handles_.find(util::url_decode(req.target()));
         if (iter != coro_handles_.end()) {
@@ -177,6 +277,7 @@ net::awaitable<void> router::proc_routing(request &req, response &resp) {
         co_await default_handler_(req, resp);
         co_return;
     }
+    auto key = detail::make_whole_str(req);
     std::string url_path = detail::make_whole_str(req.method(), req.target());
 
     bool is_coro_exist = false;
@@ -237,12 +338,18 @@ bool router::remove_mount_point(const std::string &mount_point) {
     }
     return false;
 }
-void router::set_http_handler(http::verb method, std::string_view key,
-                              coro_http_handler_type &&handler) {
+
+template<typename Func, typename... Aspects>
+void router::set_http_handler(http::verb method, std::string_view key, Func &&handler,
+                              Aspects &&...asps) {
+
+    coro_http_handler_type http_handler =
+        detail::create_router_coro_http_handler(std::move(handler), asps...);
+
     auto whole_str = detail::make_whole_str(method, key);
 
     if (whole_str.find(":") != std::string::npos) {
-        coro_router_tree_->coro_insert(whole_str, std::move(handler), method);
+        coro_router_tree_->coro_insert(whole_str, std::move(http_handler), method);
         return;
     }
 
@@ -253,7 +360,7 @@ void router::set_http_handler(http::verb method, std::string_view key,
             boost::replace_all(pattern, "{}", "([^/]+)");
         }
 
-        coro_regex_handles_.emplace_back(std::regex(pattern), std::move(handler));
+        coro_regex_handles_.emplace_back(std::regex(pattern), std::move(http_handler));
         return;
     }
     auto &map = coro_handles_[std::string(key)];
@@ -262,6 +369,35 @@ void router::set_http_handler(http::verb method, std::string_view key,
                       key);
         return;
     }
-    map[method] = std::move(handler);
+    map[method] = std::move(http_handler);
 }
+
+template<http::verb... method, typename Func, typename... Aspects>
+void router::set_http_handler(std::string_view key, Func &&handler, util::class_type_t<Func> &owner,
+                              Aspects &&...asps) {
+    static_assert(std::is_member_function_pointer_v<Func>, "must be member function");
+    using return_type = typename util::function_traits<Func>::return_type;
+    if constexpr (detail::is_awaitable_v<return_type>) {
+        coro_http_handler_type f =
+            std::bind(handler, &owner, std::placeholders::_1, std::placeholders::_2);
+        set_http_handler<method...>(key, std::move(f), std::forward<Aspects>(asps)...);
+    } else {
+        http_handler_type f =
+            std::bind(handler, &owner, std::placeholders::_1, std::placeholders::_2);
+        set_http_handler<method...>(key, std::move(f), std::forward<Aspects>(asps)...);
+    }
+}
+
+template<typename Func, typename... Aspects>
+void router::set_default_handler(Func &&handler, Aspects &&...asps) {
+    default_handler_ =
+        detail::create_router_coro_http_handler(std::move(handler), std::forward<Aspects>(asps)...);
+}
+
+template<typename Func, typename... Aspects>
+void router::set_file_request_handler(Func &&handler, Aspects &&...asps) {
+    file_request_handler_ =
+        detail::create_router_coro_http_handler(std::move(handler), std::forward<Aspects>(asps)...);
+}
+
 } // namespace httplib

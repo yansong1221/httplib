@@ -5,7 +5,7 @@
 #include <random>
 #include <string_view>
 
-namespace httplib {
+namespace httplib::body {
 
 using namespace std::string_view_literals;
 
@@ -308,4 +308,4 @@ std::size_t form_data_body::reader::put(const_buffers_type const &buffers,
     ec = http::error::unexpected_body;
     return 0;
 }
-} // namespace httplib
+} // namespace httplib::body

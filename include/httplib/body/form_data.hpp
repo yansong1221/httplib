@@ -7,7 +7,7 @@
 #include <string_view>
 #include <vector>
 
-namespace httplib {
+namespace httplib::body {
 
 /**
      * Type to represent the data held by an HTML form.
