@@ -26,6 +26,12 @@ public:
     header_type &base() {
         return std::visit([](auto &t) mutable -> header_type & { return t.base(); }, *this);
     }
+    header_type &operator->() {
+        return base();
+    }
+    const header_type &operator->() const {
+        return base();
+    }
 
     bool chunked() const {
         return std::visit([](auto &t) { return t.chunked(); }, *this);

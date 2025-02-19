@@ -229,6 +229,7 @@ net::awaitable<bool> router::handle_file_request(request &req, response &res) {
         }
 
         if (std::filesystem::is_regular_file(path, ec)) {
+
             for (const auto &kv : entry.headers) {
                 res.base().set(kv.name(), kv.value());
             }

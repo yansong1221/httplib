@@ -13,7 +13,7 @@ public:
         base().set(http::field::content_type, content_type);
         base().result(status);
     }
-    void set_string_content(const std::string &&data, std::string_view content_type,
+    void set_string_content(std::string &&data, std::string_view content_type,
                             http::status status = http::status::ok) {      
         change_body<body::string_body>() = std::move(data);
         base().set(http::field::content_type, content_type);

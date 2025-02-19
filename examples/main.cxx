@@ -50,12 +50,12 @@ int main() { // HTTP
         [](httplib::request &req, httplib::response &resp) -> httplib::net::awaitable<void> {
             auto &doc = req.body<httplib::body::json_body>();
 
-            const auto &obj = doc.get_object();
+ /*           const auto &obj = doc.get_object();
             for (const auto &item : obj.at("statuses").as_array()) {
                 std::string_view created_at = item.at("created_at").as_string();
                 resp.set_string_content(std::string(created_at), "text/html");
                 co_return;
-            }
+            }*/
             resp.set_json_content(doc);
             co_return;
         },
