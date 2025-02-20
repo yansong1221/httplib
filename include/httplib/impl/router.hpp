@@ -42,7 +42,6 @@ template<typename T>
 constexpr inline bool is_awaitable_v =
     util::is_specialization_v<std::remove_cvref_t<T>, net::awaitable>;
 
-
 template<typename T>
 net::awaitable<void> do_before(T &aspect, request &req, response &resp, bool &ok) {
     if constexpr (has_before_v<T>) {
@@ -235,8 +234,10 @@ net::awaitable<bool> router::handle_file_request(request &req, response &res) {
             }
             beast::error_code ec;
             res.set_file_content(path, ec);
-            if (ec)
+            if (ec) {
+                logger_->warn("set_file_content： {}", ec.message());
                 co_return false;
+            }
 
             if (req.method() != http::verb::head && file_request_handler_) {
                 co_await file_request_handler_(req, res);
@@ -328,6 +329,7 @@ bool router::set_mount_point(const std::string &mount_point, const std::filesyst
             return true;
         }
     }
+    logger_->warn("set_mount_point path: {} is not directory", dir.string());
     return false;
 }
 bool router::remove_mount_point(const std::string &mount_point) {

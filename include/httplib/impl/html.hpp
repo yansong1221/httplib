@@ -15,9 +15,9 @@ namespace fs = std::filesystem;
 namespace detail {
 
 inline constexpr auto head_fmt =
-    LR"(<html><head><meta charset="UTF-8"><title>Index of {}</title></head><body bgcolor="white"><h1>Index of {}</h1><hr><pre>)";
-inline constexpr auto tail_fmt = L"</pre><hr></body></html>";
-inline constexpr auto body_fmt = L"<a href=\"{}\">{}</a>{} {}       {}\r\n";
+    R"(<html><head><meta charset="UTF-8"><title>Index of {}</title></head><body bgcolor="white"><h1>Index of {}</h1><hr><pre>)";
+inline constexpr auto tail_fmt = "</pre><hr></body></html>";
+inline constexpr auto body_fmt = "<a href=\"{}\">{}</a>{} {}       {}\r\n";
 
 template<typename Path>
 inline std::string make_unc_path(const Path &path) {
@@ -73,7 +73,7 @@ inline std::tuple<std::string, fs::path> file_last_wirte_time(const fs::path &fi
 
     return {time_string, unc_path};
 }
-inline std::vector<std::wstring> format_path_list(const fs::path &path,
+inline std::vector<std::string> format_path_list(const fs::path &path,
                                                   boost::system::error_code &ec) {
     fs::directory_iterator end;
     fs::directory_iterator it(path, ec);
@@ -81,49 +81,48 @@ inline std::vector<std::wstring> format_path_list(const fs::path &path,
         return {};
     }
 
-    std::vector<std::wstring> path_list;
-    std::vector<std::wstring> file_list;
+    std::vector<std::string> path_list;
+    std::vector<std::string> file_list;
 
     for (; it != end; it++) {
         const auto &item = it->path();
 
-        auto [ftime, unc_path] = file_last_wirte_time(item);
-        std::wstring time_string = util::string_to_wstring(ftime);
-
-        std::wstring rpath;
+        auto [time_string, unc_path] = file_last_wirte_time(item);
+ 
+        std::string rpath;
 
         if (fs::is_directory(unc_path.empty() ? item : unc_path, ec)) {
-            auto leaf = util::wstring_to_string(item.filename().wstring());
-            leaf = leaf + "/";
-            rpath = util::string_to_wstring(leaf);
+            auto rpath = util::wstring_to_string(item.filename().wstring());
+            rpath += "/";
+
             int width = 50 - static_cast<int>(rpath.size());
             width = width < 0 ? 0 : width;
-            std::wstring space(width, L' ');
+            std::string space(width, ' ');
             auto show_path = rpath;
             if (show_path.size() > 50) {
                 show_path = show_path.substr(0, 47);
-                show_path += L"..&gt;";
+                show_path += "..&gt;";
             }
-            auto str = fmt::format(body_fmt, rpath, show_path, space, time_string, L"-");
+            auto str = fmt::format(body_fmt, rpath, show_path, space, time_string, "-");
 
             path_list.push_back(str);
         } else {
-            auto leaf = util::wstring_to_string(item.filename().wstring());
-            rpath = util::string_to_wstring(leaf);
+            auto rpath = util::wstring_to_string(item.filename().wstring());
+
             int width = 50 - (int)rpath.size();
             width = width < 0 ? 0 : width;
-            std::wstring space(width, L' ');
-            std::wstring filesize;
+            std::string space(width, ' ');
+            std::string filesize;
             if (unc_path.empty())
                 unc_path = item;
             auto sz = static_cast<float>(fs::file_size(unc_path, ec));
             if (ec)
                 sz = 0;
-            filesize = util::string_to_wstring(util::add_suffix(sz));
+            filesize = util::add_suffix(sz);
             auto show_path = rpath;
             if (show_path.size() > 50) {
                 show_path = show_path.substr(0, 47);
-                show_path += L"..&gt;";
+                show_path += "..&gt;";
             }
             auto str = fmt::format(body_fmt, rpath, show_path, space, time_string, filesize);
 
@@ -137,7 +136,7 @@ inline std::vector<std::wstring> format_path_list(const fs::path &path,
 
     return path_list;
 }
-inline std::wstring make_target_path(std::string_view target) {
+inline std::string make_target_path(std::string_view target) {
     std::string url = "http://example.com";
     if (target.starts_with("/"))
         url += target;
@@ -148,9 +147,9 @@ inline std::wstring make_target_path(std::string_view target) {
 
     auto result = boost::urls::parse_uri(url);
     if (result.has_error())
-        return util::string_to_wstring(target);
+        return std::string(target);
 
-    return util::string_to_wstring(result->path());
+    return result->path();
 }
 } // namespace detail
 
@@ -161,15 +160,15 @@ static std::string format_dir_to_html(std::string_view target, const fs::path &p
         return {};
 
     auto target_path = detail::make_target_path(target);
-    std::wstring head = fmt::format(detail::head_fmt, target_path, target_path);
+    std::string head = fmt::format(detail::head_fmt, target_path, target_path);
 
-    std::wstring body = fmt::format(detail::body_fmt, L"../", L"../", L"", L"", L"");
+    std::string body = fmt::format(detail::body_fmt, "../", "../", "", "", "");
 
     for (auto &s : path_list)
         body += s;
     body = head + body + detail::tail_fmt;
 
-    return util::wstring_to_string(body);
+    return body;
 }
 
 static std::string fromat_error_content(int status, std::string_view reason,

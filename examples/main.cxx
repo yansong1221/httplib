@@ -83,6 +83,8 @@ int main() { // HTTP
     //        co_return;
     //    },
     //    log_t{});
-    //svr.set_mount_point("/", R"(D:\WORK)");
+    router.set_mount_point("/", R"(D:\)");
+
+    
     svr.run();
 }
