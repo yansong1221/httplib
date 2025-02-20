@@ -34,7 +34,10 @@ int main() { // HTTP
             conn->send_message(msg);
             co_return;
         });
-    /*   svr.set_http_handler<httplib::http::verb::post, httplib::http::verb::get>(
+
+    auto &router = svr.get_router();
+
+    router.set_http_handler<httplib::http::verb::post, httplib::http::verb::get>(
         "/中文",
         [](httplib::request &req, httplib::response &resp) -> httplib::net::awaitable<void> {
             req.is_body_type<httplib::body::form_data_body>();
@@ -43,14 +46,13 @@ int main() { // HTTP
             resp.set_body<httplib::body::form_data_body>(req.body<httplib::body::form_data_body>());
             co_return;
         },
-        log_t{});*/
-    auto &router = svr.get_router();
+        log_t{});
     router.set_http_handler<httplib::http::verb::post>(
         "/json",
         [](httplib::request &req, httplib::response &resp) -> httplib::net::awaitable<void> {
             auto &doc = req.body<httplib::body::json_body>();
 
- /*           const auto &obj = doc.get_object();
+            /*           const auto &obj = doc.get_object();
             for (const auto &item : obj.at("statuses").as_array()) {
                 std::string_view created_at = item.at("created_at").as_string();
                 resp.set_string_content(std::string(created_at), "text/html");
@@ -85,6 +87,5 @@ int main() { // HTTP
     //    log_t{});
     router.set_mount_point("/", R"(D:\)");
 
-    
     svr.run();
 }

@@ -14,8 +14,7 @@ constexpr inline bool is_awaitable_v =
 
 template<typename... T>
 class variant_handler : public std::variant<T...> {
-public:
-    std::variant<T...>::variant;
+    using std::variant<T...>::variant;
 
 public:
     template<typename... Args>
