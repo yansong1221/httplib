@@ -37,9 +37,9 @@ net::awaitable<void> async_read_http_body(http::request_parser<http::empty_body>
     co_return;
 }
 template<typename AsyncWriteStream, bool isRequest, typename Fields = http::fields>
-net::awaitable<void>
-async_write_http_message(AsyncWriteStream &stream, http_message_variant<isRequest, Fields> &message,
-                         boost::system::error_code &ec, bool only_head = false) {
+net::awaitable<void> async_write_http_message(AsyncWriteStream &stream,
+                                              http_message_variant<isRequest, Fields> &message,
+                                              boost::system::error_code &ec) {
     co_await std::visit(
         [&](auto &&t) mutable -> net::awaitable<void> {
             using body_type = std::decay_t<decltype(t)>::body_type;
@@ -48,9 +48,6 @@ async_write_http_message(AsyncWriteStream &stream, http_message_variant<isReques
             http::serializer<isRequest, body_type, Fields> serializer(t);
             co_await http::async_write_header(stream, serializer, net_awaitable[ec]);
             if (ec)
-                co_return;
-
-            if (only_head)
                 co_return;
 
             co_await http::async_write(stream, serializer, net_awaitable[ec]);
@@ -224,49 +221,52 @@ private:
                                             header_parser.release());
                     co_return;
                 }
-
-                httplib::request req;
-                switch (header.base().method()) {
-                case http::verb::get:
-                case http::verb::head:
-                case http::verb::trace:
-                case http::verb::connect:
-                    req = header_parser.release();
-                    break;
-                default: {
-
-                    auto content_type = header[http::field::content_type];
-                    if (content_type.starts_with("multipart/form-data")) {
-
-                        co_await detail::async_read_http_body<body::form_data_body>(
-                            std::move(header_parser), *http_variant_stream, buffer, req, ec);
-                    } else if (content_type.starts_with("application/json")) {
-                        co_await detail::async_read_http_body<body::json_body>(
-                            std::move(header_parser), *http_variant_stream, buffer, req, ec);
-                    } else {
-                        co_await detail::async_read_http_body<body::string_body>(
-                            std::move(header_parser), *http_variant_stream, buffer, req, ec);
-                    }
-                    if (ec) {
-                        logger_->trace("read http body failed: {}", ec.message());
-                        co_return;
-                    }
-                } break;
-                }
-
-                req.local_endpoint = local_endpoint;
-                req.remote_endpoint = remote_endpoint;
-
                 httplib::response resp;
                 resp.base().result(http::status::not_found);
-                resp.base().version(req.base().version());
+                resp.base().version(header_parser.get().version());
                 resp.base().set(http::field::server, BOOST_BEAST_VERSION_STRING);
                 resp.base().set(http::field::date, html::format_http_date());
-                resp.keep_alive(req.keep_alive());
+                resp.keep_alive(header_parser.get().keep_alive());
 
-                co_await router_.routing(req, resp);
-                co_await detail::async_write_http_message(*http_variant_stream, resp, ec,
-                                                          req.base().method() == http::verb::head);
+                if (router_.has_handler(header.method(), header.target())) {
+
+                    httplib::request req;
+                    switch (header.base().method()) {
+                    case http::verb::get:
+                    case http::verb::head:
+                    case http::verb::trace:
+                    case http::verb::connect:
+                        req = header_parser.release();
+                        break;
+                    default: {
+                        auto content_type = header[http::field::content_type];
+                        if (content_type.starts_with("multipart/form-data")) {
+
+                            co_await detail::async_read_http_body<body::form_data_body>(
+                                std::move(header_parser), *http_variant_stream, buffer, req, ec);
+                        } else if (content_type.starts_with("application/json")) {
+                            co_await detail::async_read_http_body<body::json_body>(
+                                std::move(header_parser), *http_variant_stream, buffer, req, ec);
+                        } else {
+                            co_await detail::async_read_http_body<body::string_body>(
+                                std::move(header_parser), *http_variant_stream, buffer, req, ec);
+                        }
+                        if (ec) {
+                            logger_->trace("read http body failed: {}", ec.message());
+                            co_return;
+                        }
+
+                    } break;
+                    }
+
+                    req.local_endpoint = local_endpoint;
+                    req.remote_endpoint = remote_endpoint;
+                    co_await router_.routing(req, resp);
+                }
+                if (!resp.has_content_length())
+                    resp.prepare_payload();
+
+                co_await detail::async_write_http_message(*http_variant_stream, resp, ec);
                 if (ec)
                     co_return;
 

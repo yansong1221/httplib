@@ -50,6 +50,8 @@ public:
 
     inline bool remove_mount_point(const std::string &mount_point);
 
+    inline bool has_handler(http::verb method, std::string_view target) const;
+
     inline net::awaitable<void> routing(request &req, response &resp);
 
 private:
@@ -72,6 +74,10 @@ private:
 
     std::vector<mount_point_entry> static_file_entry_;
 };
+
+bool router::has_handler(http::verb method, std::string_view target) const {
+    return true;
+}
 
 } // namespace httplib
 
