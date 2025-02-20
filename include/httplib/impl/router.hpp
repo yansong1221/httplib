@@ -237,8 +237,7 @@ net::awaitable<bool> router::handle_file_request(request &req, response &res) {
             if (ec) {
                 logger_->warn("set_file_content： {}", ec.message());
                 co_return false;
-            }
-
+            }          
             if (req.method() != http::verb::head && file_request_handler_) {
                 co_await file_request_handler_(req, res);
             }

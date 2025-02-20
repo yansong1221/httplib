@@ -1,4 +1,5 @@
 
+#include "httplib/client.hpp"
 #include "httplib/server.hpp"
 #include <filesystem>
 #include <format>
@@ -62,9 +63,11 @@ int main() { // HTTP
             co_return;
         },
         log_t{});
-    router.set_default_handler([](httplib::request &req, httplib::response &resp) {
-        resp.set_string_content("1000"sv, "text/html");
-    });
+    router.set_default_handler(
+        [](httplib::request &req, httplib::response &resp) -> httplib::net::awaitable<void> {
+            httplib::client cli("www.baidu.com", 80, co_await httplib::net::this_coro::executor);
+            resp = co_await cli.async_get("/");
+        });
     //svr.set_http_handler<httplib::http::verb::post, httplib::http::verb::get>(
     //    "/hello/:w",
     //    [](httplib::request &req, httplib::response &resp) {
