@@ -1,5 +1,6 @@
 #pragma once
 #include "httplib/config.hpp"
+#include "httplib/stream/http_stream.hpp"
 #include "use_awaitable.hpp"
 #include <boost/asio.hpp>
 #include <boost/asio/co_spawn.hpp>
@@ -8,6 +9,7 @@
 #include <boost/url.hpp>
 #include <filesystem>
 #include <limits>
+
 namespace httplib {
 
 class client {
@@ -19,11 +21,11 @@ public:
     };
 
 public:
-    client(std::string_view host, uint16_t port, net::io_service &ex)
-        : client(host, port, ex.get_executor()) {}
+    client(net::io_context &ex, std::string_view host, uint16_t port)
+        : client(ex.get_executor(), host, port) {}
 
-    client(std::string_view host, uint16_t port, const net::any_io_executor &ex)
-        : executor_(ex), resolver_(ex), stream_(ex), host_(host), port_(port) {}
+    client(const net::any_io_executor &ex, std::string_view host, uint16_t port)
+        : executor_(ex), resolver_(ex), host_(host), port_(port) {}
 
     void set_timeout_policy(const timeout_policy &policy) {
         timeout_policy_ = policy;
@@ -31,6 +33,9 @@ public:
 
     void set_timeout(const std::chrono::steady_clock::duration &duration) {
         timeout_ = duration;
+    }
+    void set_use_ssl(bool ssl) {
+        use_ssl_ = ssl;
     }
 
     template<typename ResponseBody = http::string_body>
@@ -63,18 +68,15 @@ public:
 
     void close() {
         resolver_.cancel();
-        stream_.expires_never();
-        stream_.cancel();
-        stream_.close();
+        if (variant_stream_) {
+            variant_stream_->expires_never();
+            boost::system::error_code ec;
+            variant_stream_->close(ec);
+        }
     }
 
     bool is_connected() {
-        if (!stream_.socket().is_open())
-            return false;
-
-        boost::system::error_code ec;
-        stream_.socket().receive(boost::asio::mutable_buffer(), 0, ec);
-        return !ec;
+        return variant_stream_ && variant_stream_->is_connected();
     }
 
 private:
@@ -92,33 +94,58 @@ private:
     net::awaitable<http::response<ResponseBody>>
     async_send_request(http::request<RequestBody> request) {
         try {
-            bool frist_set_timer = true;
+            bool first_set_timer = true;
             auto reset_step_timer = [&]() {
                 if (timeout_policy_ == timeout_policy::step)
-                    stream_.expires_after(timeout_);
+                    variant_stream_->expires_after(timeout_);
                 else if (timeout_policy_ == timeout_policy::never)
-                    stream_.expires_never();
+                    variant_stream_->expires_never();
                 else if (timeout_policy_ == timeout_policy::overall) {
-                    if (!frist_set_timer)
+                    if (!first_set_timer)
                         return;
-                    frist_set_timer = false;
-                    stream_.expires_after(timeout_);
+                    variant_stream_->expires_after(timeout_);
                 }
+                first_set_timer = false;
             };
+            
             // Set up an HTTP GET request message
             if (!is_connected()) {
-                boost::system::error_code ec;
-                stream_.socket().close(ec);
+                if (variant_stream_) {
+                    boost::system::error_code ec;
+                    variant_stream_->close(ec);
+                }
 
                 auto endpoints = co_await resolver_.async_resolve(host_, std::to_string(port_),
                                                                   net::use_awaitable);
                 reset_step_timer();
-                co_await stream_.async_connect(endpoints);
+                if (use_ssl_) {
+#ifdef HTTLIP_ENABLED_SSL
+                    unsigned long ssl_options = ssl::context::default_workarounds |
+                                                ssl::context::no_sslv2 |
+                                                ssl::context::single_dh_use;
+
+                    auto ssl_ctx = std::make_shared<ssl::context>(ssl::context::sslv23);
+                    ssl_ctx->set_options(ssl_options);
+
+                    ssl_http_stream stream(co_await net::this_coro::executor, ssl_ctx);
+                    co_await beast::get_lowest_layer(stream).async_connect(endpoints,
+                                                                           net::use_awaitable);
+                    co_await stream.async_handshake(ssl::stream_base::client, net::use_awaitable);
+
+                    variant_stream_ = std::make_unique<http_variant_stream_type>(
+                        ssl_http_stream(std::move(stream)));
+#endif
+                } else {
+                    http_stream stream(co_await net::this_coro::executor);
+                    co_await stream.async_connect(endpoints, net::use_awaitable);
+                    variant_stream_ =
+                        std::make_unique<http_variant_stream_type>(http_stream(std::move(stream)));
+                }
             }
             http::request_serializer<RequestBody> serializer(request);
             while (!serializer.is_done()) {
                 reset_step_timer();
-                co_await http::async_write_some(stream_, serializer);
+                co_await http::async_write_some(*variant_stream_, serializer);
             }
 
             http::response_parser<ResponseBody> parser;
@@ -126,10 +153,10 @@ private:
             while ((request.method() == http::verb::head && !parser.is_header_done()) ||
                    (request.method() != http::verb::head && !parser.is_done())) {
                 reset_step_timer();
-                co_await http::async_read_some(stream_, buffer, parser);
+                co_await http::async_read_some(*variant_stream_, buffer, parser);
             }
 
-            stream_.expires_never();
+            variant_stream_->expires_never();
             co_return parser.release();
         } catch (...) {
             close();
@@ -139,12 +166,13 @@ private:
 
 private:
     net::any_io_executor executor_;
-    beast::tcp_stream stream_;
     tcp::resolver resolver_;
     timeout_policy timeout_policy_ = timeout_policy::overall;
     std::chrono::steady_clock::duration timeout_ = std::chrono::seconds(30);
     std::string host_;
     uint16_t port_ = 0;
+    std::unique_ptr<http_variant_stream_type> variant_stream_;
+    bool use_ssl_ = false;
 };
 
 namespace detail {
@@ -167,8 +195,8 @@ public:
         if (!result) {
             boost::throw_exception(boost::system::system_error(result.error()));
         }
-        client cli(result->host(), detail::get_url_port(*result),
-                   co_await net::this_coro::executor);
+        client cli(co_await net::this_coro::executor, result->host(),
+                   detail::get_url_port(*result));
 
         auto response = co_await cli.async_head(detail::get_url_path(*result));
         if (response.base().result_int() == 200 && response.has_content_length()) {
