@@ -38,6 +38,18 @@ public:
         use_ssl_ = ssl;
     }
 
+private:
+    template<typename RequestBody>
+    auto make_http_request(http::verb method, std::string_view path, const http::fields &headers) {
+        http::request<RequestBody> req(method, path, 11);
+        req.set(http::field::host, host_);
+        req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
+        for (const auto &field : headers)
+            req.set(field.name_string(), field.value());
+        return std::move(req);
+    }
+
+public:
     template<typename ResponseBody = http::string_body>
     auto async_get(std::string_view path, const http::fields headers = http::fields()) {
         auto request = make_http_request<http::empty_body>(http::verb::get, path, headers);
@@ -79,17 +91,6 @@ public:
         return variant_stream_ && variant_stream_->is_connected();
     }
 
-private:
-    template<typename RequestBody>
-    auto make_http_request(http::verb method, std::string_view path, const http::fields &headers) {
-        http::request<RequestBody> req(method, path, 11);
-        req.set(http::field::host, host_);
-        req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
-        for (const auto &field : headers)
-            req.set(field.name_string(), field.value());
-        return std::move(req);
-    }
-
     template<typename ResponseBody, typename RequestBody>
     net::awaitable<http::response<ResponseBody>>
     async_send_request(http::request<RequestBody> request) {
@@ -107,7 +108,7 @@ private:
                 }
                 first_set_timer = false;
             };
-            
+
             // Set up an HTTP GET request message
             if (!is_connected()) {
                 if (variant_stream_) {
