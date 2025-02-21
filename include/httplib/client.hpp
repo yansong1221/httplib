@@ -95,30 +95,24 @@ public:
     net::awaitable<http::response<ResponseBody>>
     async_send_request(http::request<RequestBody> request) {
         try {
-            bool first_set_timer = true;
-            auto reset_step_timer = [&]() {
+            auto expires_after = [this](auto &stream, bool first = false) {
                 if (timeout_policy_ == timeout_policy::step)
-                    variant_stream_->expires_after(timeout_);
+                    beast::get_lowest_layer(stream).expires_after(timeout_);
                 else if (timeout_policy_ == timeout_policy::never)
-                    variant_stream_->expires_never();
+                    beast::get_lowest_layer(stream).expires_never();
                 else if (timeout_policy_ == timeout_policy::overall) {
-                    if (!first_set_timer)
+                    if (!first)
                         return;
-                    variant_stream_->expires_after(timeout_);
+                    beast::get_lowest_layer(stream).expires_after(timeout_);
                 }
-                first_set_timer = false;
             };
 
             // Set up an HTTP GET request message
             if (!is_connected()) {
-                if (variant_stream_) {
-                    boost::system::error_code ec;
-                    variant_stream_->close(ec);
-                }
-
+                close();
                 auto endpoints = co_await resolver_.async_resolve(host_, std::to_string(port_),
                                                                   net::use_awaitable);
-                reset_step_timer();
+
                 if (use_ssl_) {
 #ifdef HTTLIP_ENABLED_SSL
                     unsigned long ssl_options = ssl::context::default_workarounds |
@@ -127,25 +121,37 @@ public:
 
                     auto ssl_ctx = std::make_shared<ssl::context>(ssl::context::sslv23);
                     ssl_ctx->set_options(ssl_options);
+                    ssl_ctx->set_default_verify_paths();
+                    ssl_ctx->set_verify_mode(ssl::verify_none);
 
                     ssl_http_stream stream(co_await net::this_coro::executor, ssl_ctx);
-                    co_await beast::get_lowest_layer(stream).async_connect(endpoints,
-                                                                           net::use_awaitable);
+                    if (!SSL_set_tlsext_host_name(stream.native_handle(), host_.c_str())) {
+                        beast::error_code ec{static_cast<int>(::ERR_get_error()),
+                                             net::error::get_ssl_category()};
+                        throw boost::system::system_error(ec);
+                    }
+                    expires_after(stream, true);
+                    co_await stream.next_layer().async_connect(endpoints, net::use_awaitable); 
                     co_await stream.async_handshake(ssl::stream_base::client, net::use_awaitable);
 
                     variant_stream_ = std::make_unique<http_variant_stream_type>(
                         ssl_http_stream(std::move(stream)));
+#else
+                    throw boost::system::system_error(boost::system::errc::make_error_code(
+                        boost::system::errc::protocol_not_supported));
 #endif
                 } else {
                     http_stream stream(co_await net::this_coro::executor);
+                    expires_after(stream, true);
                     co_await stream.async_connect(endpoints, net::use_awaitable);
                     variant_stream_ =
                         std::make_unique<http_variant_stream_type>(http_stream(std::move(stream)));
                 }
             }
+
             http::request_serializer<RequestBody> serializer(request);
             while (!serializer.is_done()) {
-                reset_step_timer();
+                expires_after(*variant_stream_);
                 co_await http::async_write_some(*variant_stream_, serializer);
             }
 
@@ -153,7 +159,7 @@ public:
             beast::flat_buffer buffer;
             while ((request.method() == http::verb::head && !parser.is_header_done()) ||
                    (request.method() != http::verb::head && !parser.is_done())) {
-                reset_step_timer();
+                expires_after(*variant_stream_);
                 co_await http::async_read_some(*variant_stream_, buffer, parser);
             }
 

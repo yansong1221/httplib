@@ -65,9 +65,12 @@ int main() { // HTTP
         log_t{});
     router.set_default_handler(
         [](httplib::request &req, httplib::response &resp) -> httplib::net::awaitable<void> {
-            httplib::client cli(co_await httplib::net::this_coro::executor, "www.baidu.com", 443);
-            cli.set_use_ssl(true);
+            httplib::client cli(co_await httplib::net::this_coro::executor, "www.jsonin.com", 80);
+            cli.set_use_ssl(false);
             resp = co_await cli.async_get("/"); 
+
+            //resp.set_string_content(cli_resp.body(), "text/html", cli_resp.result());
+            co_return;
         });
     //svr.set_http_handler<httplib::http::verb::post, httplib::http::verb::get>(
     //    "/hello/:w",

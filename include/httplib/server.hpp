@@ -70,7 +70,7 @@ public:
     explicit server(uint32_t num_threads = std::thread::hardware_concurrency())
         : pool_(num_threads),
           acceptor_(pool_),
-          logger_(spdlog::stdout_color_mt("server")),
+          logger_(spdlog::stdout_color_mt("httplib.server")),
           router_(logger_) {
 
         logger_->set_level(spdlog::level::trace);
