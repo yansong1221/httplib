@@ -22,32 +22,37 @@
 #include <boost/json/monotonic_resource.hpp>
 #include <boost/json/stream_parser.hpp>
 
-namespace httplib::body {
+namespace httplib::body
+{
 
 namespace json = boost::json;
 
-struct json_body {
+struct json_body
+{
     using value_type = json::value;
 
-    struct writer {
+    struct writer
+    {
         using const_buffers_type = boost::asio::const_buffer;
         template<bool isRequest, class Fields>
-        writer(boost::beast::http::header<isRequest, Fields> const &, value_type const &body) {
+        writer(boost::beast::http::header<isRequest, Fields> const&, value_type const& body)
+        {
             // The serializer holds a pointer to the value, so all we need to do is to reset it.
             serializer.reset(&body);
         }
 
-        void init(boost::system::error_code &ec) {
+        void init(boost::system::error_code& ec)
+        {
             // The serializer always works, so no error can occur here.
             ec = {};
         }
 
-        boost::optional<std::pair<const_buffers_type, bool>> get(boost::system::error_code &ec) {
+        boost::optional<std::pair<const_buffers_type, bool>> get(boost::system::error_code& ec)
+        {
             ec = {};
             // We serialize as much as we can with the buffer. Often that'll suffice
             const auto len = serializer.read(buffer, sizeof(buffer));
-            return std::make_pair(boost::asio::const_buffer(len.data(), len.size()),
-                                  !serializer.done());
+            return std::make_pair(boost::asio::const_buffer(len.data(), len.size()), !serializer.done());
         }
 
     private:
@@ -56,29 +61,32 @@ struct json_body {
         char buffer[32768];
     };
 
-    struct reader {
+    struct reader
+    {
         template<bool isRequest, class Fields>
-        reader(boost::beast::http::header<isRequest, Fields> &, value_type &body) : body(body) {}
-        void init(boost::optional<std::uint64_t> const &content_length,
-                  boost::system::error_code &ec) {
-
+        reader(boost::beast::http::header<isRequest, Fields>&, value_type& body) : body(body)
+        {
+        }
+        void init(boost::optional<std::uint64_t> const& content_length, boost::system::error_code& ec)
+        {
             // If we know the content-length, we can allocate a monotonic resource to increase the parsing speed.
             // We're using it rather then a static_resource, so a consumer can modify the resulting value.
             // It is also only assumption that the parsed json will be smaller than the serialize one,
             // it might not always be the case.
-            if (content_length)
-                parser.reset(json::make_shared_resource<json::monotonic_resource>(*content_length));
+            if (content_length) parser.reset(json::make_shared_resource<json::monotonic_resource>(*content_length));
             ec = {};
         }
 
         template<class ConstBufferSequence>
-        std::size_t put(ConstBufferSequence const &buffers, boost::system::error_code &ec) {
+        std::size_t put(ConstBufferSequence const& buffers, boost::system::error_code& ec)
+        {
             ec = {};
             // The parser just uses the `ec` to indicate errors, so we don't need to do anything.
-            return parser.write_some(static_cast<const char *>(buffers.data()), buffers.size(), ec);
+            return parser.write_some(static_cast<const char*>(buffers.data()), buffers.size(), ec);
         }
 
-        void finish(boost::system::error_code &ec) {
+        void finish(boost::system::error_code& ec)
+        {
             ec = {};
             // We check manually if the json is complete.
             if (parser.done())
@@ -89,9 +97,9 @@ struct json_body {
 
     private:
         json::stream_parser parser;
-        value_type &body;
+        value_type& body;
     };
 };
-} // namespace httplib
+} // namespace httplib::body
 
 #endif

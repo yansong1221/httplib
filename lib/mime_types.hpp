@@ -2,7 +2,8 @@
 #include <map>
 #include <string_view>
 
-namespace httplib::mime {
+namespace httplib::mime
+{
 static const std::map<std::string_view, std::string_view> mime_map = {
     {".323", "text/h323"},
     {".3gp", "video/3gpp"},
@@ -276,8 +277,9 @@ static const std::map<std::string_view, std::string_view> mime_map = {
     {".ppm", "image/x-portable-pixmap"},
     {".pps", "application/vnd.ms-powerpoint"},
     {".ppt", "application/vnd.ms-powerpoint"},
-    {".pptx", "application/"
-              "vnd.openxmlformats-officedocument.presentationml.presentation"},
+    {".pptx",
+     "application/"
+     "vnd.openxmlformats-officedocument.presentationml.presentation"},
     {".pqf", "application/x-cprplayer"},
     {".pqi", "application/cprplayer"},
     {".prc", "application/x-prc"},
@@ -492,9 +494,11 @@ static const std::map<std::string_view, std::string_view> mime_map = {
     {".7z", "application/x-7z-compressed"},
 };
 
-inline std::string_view get_mime_type(std::string_view extension) {
+inline std::string_view get_mime_type(std::string_view extension)
+{
     auto it = mime_map.find(std::string(extension.data(), extension.size()));
-    if (it == mime_map.end()) {
+    if (it == mime_map.end())
+    {
         return "application/octet-stream";
     }
 
