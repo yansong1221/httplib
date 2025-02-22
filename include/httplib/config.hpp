@@ -1,24 +1,36 @@
 #pragma once
-namespace boost {
-namespace asio {
-namespace ip {
+namespace boost
+{
+namespace asio
+{
+namespace ip
+{
 class tcp;
 }
-namespace ssl {}
+namespace ssl
+{
+}
 } // namespace asio
 
-namespace beast {
-namespace http {}
-namespace websocket {}
+namespace beast
+{
+namespace http
+{
+}
+namespace websocket
+{
+}
 } // namespace beast
 
 } // namespace boost
 
-namespace spdlog {
+namespace spdlog
+{
 class logger;
 }
 
-namespace httplib {
+namespace httplib
+{
 namespace net = boost::asio;
 namespace ssl = boost::asio::ssl;
 using tcp = net::ip::tcp;

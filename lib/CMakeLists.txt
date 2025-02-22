@@ -1,6 +1,6 @@
 set(MOUDLE httplib)
 
-file(GLOB_RECURSE HTTPLIB_HEADER_FILES "${HTTPLIB_INCLUDE_DIR}/*.h" "${HTTPLIB_INCLUDE_DIR}/*.hpp")
+file(GLOB_RECURSE HTTPLIB_HEADER_FILES "${HTTPLIB_INCLUDE_DIR}/*.h" "${HTTPLIB_INCLUDE_DIR}/*.hpp" "${HTTPLIB_INCLUDE_DIR}/*.inl")
 source_group(TREE ${HTTPLIB_INCLUDE_DIR} PREFIX "include" FILES ${HTTPLIB_HEADER_FILES})
 
 file(GLOB_RECURSE HTTPLIB_SOURCE_FILES  ${HTTPLIB_LIB_DIR}/*.c ${HTTPLIB_LIB_DIR}/*.cxx ${HTTPLIB_LIB_DIR}/*.cpp ${HTTPLIB_LIB_DIR}/*.hpp)
@@ -24,3 +24,5 @@ target_include_directories(${MOUDLE} PUBLIC ${HTTPLIB_INCLUDE_DIR})
 if (MSVC)
     target_compile_options(${MOUDLE} PRIVATE /bigobj)
 endif()
+
+#target_compile_definitions(${MOUDLE} PUBLIC HTTLIP_ENABLED_SSL)

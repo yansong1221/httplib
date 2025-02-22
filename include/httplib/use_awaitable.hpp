@@ -17,18 +17,14 @@
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/type_traits.hpp>
 
-namespace asio_util {
-template <typename Executor = boost::asio::any_io_executor>
+namespace asio_util
+{
+template<typename Executor = boost::asio::any_io_executor>
 struct asio_use_awaitable_t : public boost::asio::use_awaitable_t<Executor>
 {
-    constexpr asio_use_awaitable_t()
-        : boost::asio::use_awaitable_t<Executor>()
-    {
-    }
+    constexpr asio_use_awaitable_t() : boost::asio::use_awaitable_t<Executor>() { }
 
-    constexpr asio_use_awaitable_t(const char* file_name,
-                                   int         line,
-                                   const char* function_name)
+    constexpr asio_use_awaitable_t(const char* file_name, int line, const char* function_name)
         : boost::asio::use_awaitable_t<Executor>(file_name, line, function_name)
     {
     }
@@ -40,7 +36,7 @@ struct asio_use_awaitable_t : public boost::asio::use_awaitable_t<Executor>
         return boost::asio::redirect_error(boost::asio::use_awaitable_t<Executor>(), ec);
     }
 };
-}  // namespace asio_util
+} // namespace asio_util
 
 //
 // net_awaitable usage:
@@ -55,8 +51,6 @@ struct asio_use_awaitable_t : public boost::asio::use_awaitable_t<Executor>
 [[maybe_unused]] inline constexpr asio_util::asio_use_awaitable_t<> net_awaitable;
 
 // Executor is boost::asio::io_context::executor_type
-[[maybe_unused]] inline constexpr asio_util::asio_use_awaitable_t<
-    boost::asio::io_context::executor_type>
-    ioc_awaitable;
+[[maybe_unused]] inline constexpr asio_util::asio_use_awaitable_t<boost::asio::io_context::executor_type> ioc_awaitable;
 
-#endif  // INCLUDE__2023_10_18__USE_AWAITABLE_HPP
+#endif // INCLUDE__2023_10_18__USE_AWAITABLE_HPP

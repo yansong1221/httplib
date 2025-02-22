@@ -5,9 +5,11 @@
 #include <utility>
 #include <vector>
 
-namespace httplib::body {
+namespace httplib::body
+{
 
-class range_data {
+class range_data
+{
     using range_type = std::pair<int64_t, int64_t>;
 
     std::vector<range_type> ranges;

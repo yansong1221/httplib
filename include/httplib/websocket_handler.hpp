@@ -5,7 +5,8 @@
 #include <memory>
 #include <variant>
 
-namespace httplib {
+namespace httplib
+{
 
 class websocket_conn;
 class websocket_message;
