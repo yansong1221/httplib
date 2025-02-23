@@ -4,19 +4,11 @@
 namespace httplib
 {
 
-struct request : public http_request_variant
+struct request : public http::request<body::any_body>
 {
-    using http_request_variant::http_request_variant;
+    http::request<body::any_body>::message;
 
-public:
-    http::verb method() const
-    {
-        return std::visit([](auto& t) { return t.method(); }, *this);
-    }
-    auto target() const
-    {
-        return std::visit([](auto& t) { return t.target(); }, *this);
-    }
+    request(http::request<body::any_body>&& other) { http::request<body::any_body>::operator=(std::move(other)); }
 
 public:
     std::unordered_map<std::string, std::string> params;

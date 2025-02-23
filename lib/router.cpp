@@ -266,24 +266,21 @@ net::awaitable<void> router::routing(request& req, response& resp)
     catch (const std::exception& e)
     {
         impl_->logger_->warn("exception in business function, reason: {}", e.what());
-        resp.base().result(http::status::internal_server_error);
-        resp.base().set(http::field::content_type, "text/html");
-        resp.set_body<http::string_body>(e.what());
+        resp.set_string_content(std::string_view(e.what()), "text/html", http::status::internal_server_error);
     }
     catch (...)
     {
+        using namespace std::string_view_literals;
         impl_->logger_->warn("unknown exception in business function");
-        resp.base().result(http::status::internal_server_error);
-        resp.base().set(http::field::content_type, "text/html");
-        resp.set_body<http::string_body>("unknown exception");
+        resp.set_string_content("unknown exception"sv, "text/html", http::status::internal_server_error);
     }
 
-    resp.base().set(http::field::connection, resp.keep_alive() ? "keep-alive" : "close");
-    if (resp.base().result_int() >= 400 && resp.is_body_type<http::empty_body>())
-    {
-        resp.set_body<http::string_body>(
-            html::fromat_error_content(resp.base().result_int(), resp.base().reason(), BOOST_BEAST_VERSION_STRING));
-    }
+    resp.set(http::field::connection, resp.keep_alive() ? "keep-alive" : "close");
+    //if (resp.base().result_int() >= 400 && resp.is_body_type<http::empty_body>())
+    //{
+    //    resp.set_body<http::string_body>(
+    //        html::fromat_error_content(resp.base().result_int(), resp.base().reason(), BOOST_BEAST_VERSION_STRING));
+    //}
     resp.prepare_payload();
 }
 bool router::set_mount_point(const std::string& mount_point,

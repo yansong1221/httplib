@@ -197,7 +197,7 @@ public:
             for (;;)
             {
                 boost::system::error_code ec;
-                http::request_parser<http::empty_body> header_parser;
+                http::request_parser<body::any_body> header_parser; 
                 header_parser.body_limit(std::numeric_limits<unsigned long long>::max());
                 while (!header_parser.is_header_done())
                 {
@@ -226,10 +226,10 @@ public:
                     co_return;
                 }
                 httplib::response resp;
-                resp.base().result(http::status::not_found);
-                resp.base().version(header_parser.get().version());
-                resp.base().set(http::field::server, BOOST_BEAST_VERSION_STRING);
-                resp.base().set(http::field::date, html::format_http_date());
+                resp.result(http::status::not_found);
+                resp.version(header_parser.get().version());
+                resp.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+                resp.set(http::field::date, html::format_http_date());
                 resp.keep_alive(header_parser.get().keep_alive());
 
                 if (router_.has_handler(header.method(), header.target()))
@@ -243,26 +243,17 @@ public:
                         case http::verb::connect: req = header_parser.release(); break;
                         default:
                         {
-                            auto content_type = header[http::field::content_type];
-                            if (content_type.starts_with("multipart/form-data"))
+                            while (!header_parser.is_done())
                             {
-                                co_await detail::async_read_http_body<body::form_data_body>(
-                                    std::move(header_parser), *http_variant_stream, buffer, req, ec);
-                            }
-                            else if (content_type.starts_with("application/json"))
-                            {
-                                co_await detail::async_read_http_body<body::json_body>(
-                                    std::move(header_parser), *http_variant_stream, buffer, req, ec);
-                            }
-                            else
-                            {
-                                co_await detail::async_read_http_body<body::string_body>(
-                                    std::move(header_parser), *http_variant_stream, buffer, req, ec);
-                            }
-                            if (ec)
-                            {
-                                logger_->trace("read http body failed: {}", ec.message());
-                                co_return;
+                                http_variant_stream->expires_after(std::chrono::seconds(30));
+                                co_await http::async_read_some(
+                                    *http_variant_stream, buffer, header_parser, net_awaitable[ec]);
+                                http_variant_stream->expires_never();
+                                if (ec)
+                                {
+                                    logger_->trace("read http body failed: {}", ec.message());
+                                    co_return;
+                                }
                             }
                         }
                         break;
@@ -274,7 +265,7 @@ public:
                 }
                 if (!resp.has_content_length()) resp.prepare_payload();
 
-                co_await detail::async_write_http_message(*http_variant_stream, resp, ec);
+                co_await http::async_write(*http_variant_stream, resp, net_awaitable[ec]);
                 if (ec) co_return;
 
                 if (!resp.keep_alive())
@@ -292,8 +283,7 @@ public:
             spdlog::error("do_session: {}", e.what());
         }
     }
-    net::awaitable<void> handle_connect(http_variant_stream_type http_variant_stream,
-                                        http::request<http::empty_body> req)
+    net::awaitable<void> handle_connect(http_variant_stream_type http_variant_stream, http::request<body::any_body> req)
     {
         auto target = req.target();
         auto pos = target.find(":");
@@ -325,7 +315,7 @@ public:
     }
 
     net::awaitable<void> handle_websocket(http_variant_stream_type http_variant_stream,
-                                          http::request<http::empty_body> req)
+                                          http::request<body::any_body> req)
     {
         auto conn = std::make_shared<httplib::websocket_conn>(logger_, std::move(http_variant_stream));
         conn->set_open_handler(websocket_open_handler_);

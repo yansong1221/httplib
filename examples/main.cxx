@@ -49,10 +49,10 @@ int main()
         "/中文",
         [](httplib::request& req, httplib::response& resp) -> httplib::net::awaitable<void>
         {
-            req.is_body_type<httplib::body::form_data_body>();
+            //req.is_body_type<httplib::body::form_data_body>();
 
             resp.base().result(httplib::http::status::ok);
-            resp.set_body<httplib::body::form_data_body>(req.body<httplib::body::form_data_body>());
+            //resp.set_body<httplib::body::form_data_body>(req.body<httplib::body::form_data_body>());
             co_return;
         },
         log_t {});
@@ -60,7 +60,7 @@ int main()
         "/json",
         [](httplib::request& req, httplib::response& resp) -> httplib::net::awaitable<void>
         {
-            auto& doc = req.body<httplib::body::json_body>();
+            auto& doc = std::get<httplib::body::json_body::value_type>(req.body());
 
             /*           const auto &obj = doc.get_object();
             for (const auto &item : obj.at("statuses").as_array()) {
@@ -68,16 +68,16 @@ int main()
                 resp.set_string_content(std::string(created_at), "text/html");
                 co_return;
             }*/
-            resp.set_json_content(doc); 
-            co_return;
+            resp.set_json_content(doc);  
+            co_return; 
         },
         log_t {});
     router.set_default_handler(
         [](httplib::request& req, httplib::response& resp) -> httplib::net::awaitable<void>
         {
-            httplib::client cli(co_await httplib::net::this_coro::executor, "www.jsonin.com", 80);
-            cli.set_use_ssl(false);
-            resp = co_await cli.async_get("/");
+           // httplib::client cli(co_await httplib::net::this_coro::executor, "www.jsonin.com", 80);
+           // cli.set_use_ssl(false);
+           // resp = co_await cli.async_get("/");
 
             // resp.set_string_content(cli_resp.body(), "text/html", cli_resp.result());
             co_return;

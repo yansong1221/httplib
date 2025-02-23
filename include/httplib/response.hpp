@@ -4,9 +4,9 @@
 namespace httplib
 {
 
-struct response : public http_response_variant
+struct response : public http::response<body::any_body>
 {
-    using http_response_variant::http_response_variant;
+    http::response<body::any_body>::message;
 
 public:
     void set_string_content(std::string_view data,

@@ -10,6 +10,8 @@
 #include <queue>
 #include <span>
 #include <spdlog/spdlog.h>
+#include "request.hpp"
+#include "response.hpp"
 
 namespace httplib
 {
@@ -114,7 +116,7 @@ public:
             if (ec) co_return;
         }
     }
-    net::awaitable<void> run(const http::request<http::empty_body>& req)
+    net::awaitable<void> run(const http::request<body::any_body>& req)
     {
         boost::system::error_code ec;
         auto remote_endp = ws_.remote_endpoint(ec);

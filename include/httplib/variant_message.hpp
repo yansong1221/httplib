@@ -157,7 +157,7 @@ using http_message_variant = variant_message<isRequest,
                                              body::form_data_body,
                                              body::json_body>;
 
-using http_request_variant = http_message_variant<true>;
-using http_response_variant = http_message_variant<false>;
+//using http_request_variant = http_message_variant<true>;
+//using http_response_variant = http_message_variant<false>;
 
 } // namespace httplib

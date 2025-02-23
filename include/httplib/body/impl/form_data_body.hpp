@@ -7,112 +7,11 @@
 
 namespace httplib::body
 {
-
 using namespace std::string_view_literals;
-
-namespace detail
-{
-
-constexpr static std::string_view key_content_disposition = "Content-Disposition"sv;
-constexpr static std::string_view key_content_type = "Content-Type"sv;
-
-static std::string generate_boundary()
-{
-    auto now = std::chrono::system_clock::now().time_since_epoch();
-    auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
-
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<int> dist(100000, 999999);
-
-    return "----------------" + std::to_string(millis) + std::to_string(dist(gen));
-}
-static auto parse_content_disposition(std::string_view header)
-{
-    std::vector<std::pair<std::string_view, std::string_view>> results;
-
-    size_t pos = 0;
-    while (pos < header.size())
-    {
-        size_t eq = header.find('=', pos);
-        if (eq == std::string_view::npos) break;
-
-        std::string_view key = header.substr(pos, eq - pos);
-        key = boost::trim_copy(key); // 去掉 key 的前后空格
-        pos = eq + 1;
-
-        std::string_view value;
-        if (pos < header.size() && header[pos] == '"')
-        { // 处理双引号值
-            pos++;
-            size_t end = pos;
-            bool escape = false;
-            while (end < header.size())
-            {
-                if (header[end] == '\\' && !escape)
-                {
-                    escape = true;
-                }
-                else if (header[end] == '"' && !escape)
-                {
-                    break;
-                }
-                else
-                {
-                    escape = false;
-                }
-                end++;
-            }
-            value = header.substr(pos, end - pos);
-            pos = (end < header.size()) ? end + 1 : end; // 跳过 `"`
-        }
-        else
-        { // 处理非双引号值
-            size_t end = header.find(';', pos);
-            if (end == std::string_view::npos) end = header.size();
-            value = header.substr(pos, end - pos);
-            value = boost::trim_copy(value); // 去掉 value 的前后空格
-            pos = end;
-        }
-
-        results.emplace_back(key, value);
-
-        // 处理 `; ` 分隔符
-        if (pos < header.size() && header[pos] == ';') pos++;
-        while (pos < header.size() && std::isspace(header[pos])) // 跳过空格
-            pos++;
-    }
-    return results;
-}
-static auto split_header_field_value(std::string_view header, boost::system::error_code& ec)
-{
-    std::vector<std::pair<std::string_view, std::string_view>> results;
-    auto lines = util::split(header, "\r\n"sv);
-
-    for (const auto& line : lines)
-    {
-        if (line.empty()) continue;
-
-        auto pos = line.find(":");
-        if (pos == std::string_view::npos)
-        {
-            ec = http::error::unexpected_body;
-            return decltype(results) {};
-        }
-
-        auto key = boost::trim_copy(line.substr(0, pos));
-        auto value = boost::trim_copy(line.substr(pos + 1));
-        results.emplace_back(key, value);
-    }
-
-    return results;
-}
-
-} // namespace detail
 
 template<bool isRequest, class Fields>
 form_data_body::writer::writer(http::header<isRequest, Fields>& h, value_type& b)
-    : body_(b), boundary_(detail::generate_boundary())
+    : body_(b), boundary_(util::generate_boundary())
 {
     h.set(http::field::content_type, fmt::format("multipart/form-data; boundary={}", boundary_));
 }
@@ -253,13 +152,13 @@ std::size_t form_data_body::reader::put(const_buffers_type const& buffers, boost
                 return 0;
             }
             auto header = data.substr(0, pos + 4);
-            auto results = detail::split_header_field_value(header, ec);
+            auto results = util::split_header_field_value(header, ec);
             if (ec) return 0;
 
             form_field_data field_data;
             for (const auto& item : results)
             {
-                if (item.first == detail::key_content_disposition)
+                if (item.first == "Content-Disposition"sv)
                 {
                     auto value = item.second;
 
@@ -276,7 +175,7 @@ std::size_t form_data_body::reader::put(const_buffers_type const& buffers, boost
                     }
                     value.remove_prefix(pos + 1);
 
-                    auto result = detail::parse_content_disposition(value);
+                    auto result = util::parse_content_disposition(value);
                     for (const auto& pair : result)
                     {
                         if (pair.first == "name")
@@ -289,7 +188,7 @@ std::size_t form_data_body::reader::put(const_buffers_type const& buffers, boost
                         }
                     }
                 }
-                else if (item.first == detail::key_content_type)
+                else if (item.first == "Content-Type"sv)
                 {
                     field_data.content_type = item.second;
                 }
