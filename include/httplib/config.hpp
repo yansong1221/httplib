@@ -1,4 +1,7 @@
 #pragma once
+#include <utility>
+#include <vector>
+
 namespace boost
 {
 namespace asio
@@ -28,6 +31,10 @@ namespace spdlog
 {
 class logger;
 }
+namespace std::filesystem
+{
+
+}
 
 namespace httplib
 {
@@ -37,4 +44,9 @@ using tcp = net::ip::tcp;
 namespace beast = boost::beast;
 namespace http = beast::http;
 namespace websocket = beast::websocket;
+namespace fs = std::filesystem;
+
+using range_type = std::pair<int64_t, int64_t>;
+using http_ranges = std::vector<range_type>;
+
 } // namespace httplib

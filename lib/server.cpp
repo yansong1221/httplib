@@ -10,6 +10,7 @@
 #include "proxy_conn.hpp"
 #include <boost/asio/thread_pool.hpp>
 #include <boost/beast/core/detect_ssl.hpp>
+#include <boost/beast/http/serializer.hpp>
 #include <functional>
 #include <iostream>
 #include <map>
@@ -197,7 +198,7 @@ public:
             for (;;)
             {
                 boost::system::error_code ec;
-                http::request_parser<body::any_body> header_parser; 
+                http::request_parser<body::any_body> header_parser;
                 header_parser.body_limit(std::numeric_limits<unsigned long long>::max());
                 while (!header_parser.is_header_done())
                 {
@@ -263,10 +264,20 @@ public:
                     req.remote_endpoint = remote_endpoint;
                     co_await router_.routing(req, resp);
                 }
-                if (!resp.has_content_length()) resp.prepare_payload();
+
+                if (!resp.has_content_length())
+                    resp.prepare_payload();
 
                 co_await http::async_write(*http_variant_stream, resp, net_awaitable[ec]);
-                if (ec) co_return;
+                if (ec)
+                {
+                    logger_->trace("write http body failed: {}", ec.message());
+                    co_return;
+                }
+
+
+                // co_await http::async_write(*http_variant_stream, serializer, net_awaitable[ec]);
+                // if (ec) co_return;
 
                 if (!resp.keep_alive())
                 {

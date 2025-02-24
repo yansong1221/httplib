@@ -5,17 +5,42 @@
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/message.hpp>
 #include <fmt/format.h>
+#include <fstream>
 
 namespace httplib::body
 {
 struct file_body
 {
-    struct value_type : public beast::file
+    struct value_type
     {
-        using range_type = std::pair<int64_t, int64_t>;
-
-        std::vector<range_type> ranges;
+        http_ranges ranges;
         std::string content_type;
+        std::string boundary;
+
+        std::size_t file_size() const { return file_size_; }
+
+        void seekg(std::ios::off_type _Off, std::ios_base::seekdir _Way = std::ios::cur) { file_.seekg(_Off, _Way); }
+        std::size_t read(void* buffer, std::size_t n)
+        {
+            file_.read((char*)buffer, n);
+            return file_.gcount();
+        }
+        void open(const fs::path& path, std::ios_base::openmode mode = std::ios_base::in | std::ios_base::out)
+        {
+            file_size_ = 0;
+            file_.open(path, mode);
+            if (file_)
+            {
+                file_.seekg(0, std::ios::end);
+                file_size_ = file_.tellg();
+                file_.seekg(0, std::ios::beg);
+            }
+        }
+        bool is_open() const { return file_.is_open(); }
+
+    private:
+        std::fstream file_;
+        std::size_t file_size_ = 0;
     };
 
     class writer
@@ -26,25 +51,6 @@ struct file_body
         template<bool isRequest, class Fields>
         writer(http::header<isRequest, Fields>& h, value_type& b) : body_(b)
         {
-            if constexpr (!isRequest)
-            {
-                h.result(body_.ranges.empty() ? http::status::ok : http::status::partial_content);
-                if (body_.ranges.size() == 1)
-                {
-                    boost::system::error_code ec;
-                    const auto& range = body_.ranges.front();
-                    h.set(http::field::content_range,
-                          fmt::format("bytes {}-{}/{}", range.first, range.second, body_.size(ec)));
-                    h.set(http::field::content_type, body_.content_type);
-                }
-                else if (!body_.ranges.empty())
-                {
-                    boundary_ = util::generate_boundary();
-                    h.set(http::field::content_type, fmt::format("multipart/byteranges; boundary={}", boundary_));
-                }
-
-                h.set(http::field::accept_ranges, "bytes");
-            }
         }
 
         void init(boost::system::error_code& ec) { ec.clear(); }
@@ -52,17 +58,16 @@ struct file_body
         {
             if (body_.ranges.size() == 1 || body_.ranges.empty())
             {
-                value_type::range_type range;
+                range_type range;
                 if (body_.ranges.empty())
-                    range = {0, body_.size(ec)};
+                    range = {0, body_.file_size()};
                 else
                     range = body_.ranges.front();
 
                 if (!pos_)
                 {
                     pos_ = range.first;
-                    body_.seek(*pos_, ec);
-                    if (ec) return boost::none;
+                    body_.seekg(*pos_);
                 }
                 std::size_t const n = (std::min)(sizeof(buf_), beast::detail::clamp(range.second - *pos_));
                 if (n == 0)
@@ -70,8 +75,7 @@ struct file_body
                     ec = {};
                     return boost::none;
                 }
-                auto const nread = body_.read(buf_, n, ec);
-                if (ec) return boost::none;
+                auto const nread = body_.read(buf_, n);
                 if (nread == 0)
                 {
                     ec = http::error::short_read;
@@ -101,10 +105,9 @@ struct file_body
             {
                 case step::header:
                 {
-                    std::string header = fmt::format("--{}\r\n", boundary_);
+                    std::string header = fmt::format("--{}\r\n", body_.boundary);
                     header += fmt::format("Content-Type: {}\r\n", body_.content_type);
-                    header +=
-                        fmt::format("Content-Range: bytes {}-{}/{}\r\n", range.first, range.second, body_.size(ec));
+                    header += fmt::format("Content-Range: bytes {}-{}/{}\r\n", range.first, range.second, file_size_);
                     header += "\r\n";
                     strcpy(buf_, header.c_str());
                     step_ = step::content;
@@ -117,8 +120,7 @@ struct file_body
                     if (!pos_)
                     {
                         pos_ = range.first;
-                        body_.seek(*pos_, ec);
-                        if (ec) return boost::none;
+                        body_.seekg(*pos_);
                     }
                     std::size_t const n = (std::min)(sizeof(buf_), beast::detail::clamp(range.second - *pos_));
                     if (n == 0)
@@ -126,8 +128,7 @@ struct file_body
                         step_ = step::content_end;
                         return get(ec);
                     }
-                    auto const nread = body_.read(buf_, n, ec);
-                    if (ec) return boost::none;
+                    auto const nread = body_.read(buf_, n);
                     if (nread == 0)
                     {
                         ec = http::error::short_read;
@@ -146,7 +147,7 @@ struct file_body
                     std::string end("\r\n");
                     if (is_eof)
                     {
-                        end += fmt::format("--{}--\r\n", boundary_);
+                        end += fmt::format("--{}--\r\n", body_.boundary);
                         step_ = step::eof;
                     }
                     else
@@ -167,7 +168,6 @@ struct file_body
 
     private:
         value_type& body_;
-        std::string boundary_;
 
         std::optional<int> range_index_;
         std::optional<std::uint64_t> pos_;
@@ -180,6 +180,7 @@ struct file_body
         };
         step step_ = step::header;
         char buf_[BOOST_BEAST_FILE_BUFFER_SIZE];
+        std::size_t file_size_;
     };
     //--------------------------------------------------------------------------
 

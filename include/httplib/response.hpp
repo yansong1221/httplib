@@ -15,7 +15,8 @@ public:
     void set_string_content(std::string&& data, std::string_view content_type, http::status status = http::status::ok);
     void set_json_content(const body::json_body::value_type& data, http::status status = http::status::ok);
     void set_json_content(body::json_body::value_type&& data, http::status status = http::status::ok);
-    void set_file_content(const std::filesystem::path& path, beast::error_code& ec);
+    void set_file_content(const std::filesystem::path& path);
+    void set_file_content(const std::filesystem::path& path, const http_ranges& ranges);
 };
 
 } // namespace httplib

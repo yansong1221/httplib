@@ -131,17 +131,14 @@ public:
 
             if (std::filesystem::is_regular_file(path, ec))
             {
+                auto range = req[http::field::range];
+                auto ranges = html::parser_http_ranges(range);
+
                 for (const auto& kv : entry.headers)
                 {
                     res.base().set(kv.name(), kv.value());
                 }
-                beast::error_code ec;
-                res.set_file_content(path, ec);
-                if (ec)
-                {
-                    logger_->warn("set_file_content： {}", ec.message());
-                    co_return false;
-                }
+                res.set_file_content(path, ranges);
                 if (req.method() != http::verb::head && file_request_handler_)
                 {
                     co_await file_request_handler_(req, res);
@@ -275,13 +272,13 @@ net::awaitable<void> router::routing(request& req, response& resp)
         resp.set_string_content("unknown exception"sv, "text/html", http::status::internal_server_error);
     }
 
-    resp.set(http::field::connection, resp.keep_alive() ? "keep-alive" : "close");
-    //if (resp.base().result_int() >= 400 && resp.is_body_type<http::empty_body>())
-    //{
-    //    resp.set_body<http::string_body>(
-    //        html::fromat_error_content(resp.base().result_int(), resp.base().reason(), BOOST_BEAST_VERSION_STRING));
-    //}
-    resp.prepare_payload();
+    //resp.set(http::field::connection, resp.keep_alive() ? "keep-alive" : "close");
+    ////if (resp.base().result_int() >= 400 && resp.is_body_type<http::empty_body>())
+    ////{
+    ////    resp.set_body<http::string_body>(
+    ////        html::fromat_error_content(resp.base().result_int(), resp.base().reason(), BOOST_BEAST_VERSION_STRING));
+    ////}
+    //resp.prepare_payload();
 }
 bool router::set_mount_point(const std::string& mount_point,
                              const std::filesystem::path& dir,
