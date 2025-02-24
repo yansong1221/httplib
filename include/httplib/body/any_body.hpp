@@ -46,7 +46,7 @@ struct any_body
         friend class any_body::reader;
     };
 
-    using value_type = variant_value<http::empty_body, string_body, json_body, form_data_body, file_body>;
+    using value_type = variant_value<empty_body, string_body, json_body, form_data_body, file_body>;
 
     class writer
     {

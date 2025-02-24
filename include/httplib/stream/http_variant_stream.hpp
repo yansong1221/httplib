@@ -21,13 +21,13 @@ public:
         return std::visit([&](auto& t) mutable { return beast::get_lowest_layer(t).expires_never(); }, *this);
     }
 
-    auto rate_policy() noexcept
+    auto& rate_policy() & noexcept
     {
-        return std::visit([&](auto& t) mutable { return beast::get_lowest_layer(t).rate_policy(); }, *this);
+        return std::visit([&](auto& t) mutable -> auto& { return beast::get_lowest_layer(t).rate_policy(); }, *this);
     }
-    auto rate_policy() const noexcept
+    auto& rate_policy() const& noexcept
     {
-        return std::visit([&](auto& t) { return beast::get_lowest_layer(t).rate_policy(); }, *this);
+        return std::visit([&](auto& t) -> auto& { return beast::get_lowest_layer(t).rate_policy(); }, *this);
     }
 };
 

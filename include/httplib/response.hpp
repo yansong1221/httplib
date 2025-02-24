@@ -9,6 +9,7 @@ struct response : public http::response<body::any_body>
     using http::response<body::any_body>::message;
 
 public:
+    void set_empty_content(http::status status);
     void set_string_content(std::string_view data,
                             std::string_view content_type,
                             http::status status = http::status::ok);

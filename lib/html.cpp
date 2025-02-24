@@ -230,66 +230,89 @@ std::string format_http_date()
     return oss.str();
 }
 
-http_ranges parser_http_ranges(std::string_view range) noexcept
-{ // 去掉前后空白.
-    range = boost::trim_copy(range);
+http_ranges parser_http_ranges(std::string_view range_str, size_t file_size, bool& is_valid) noexcept
+{
+    range_str = boost::trim_copy(range_str);
+    if (!range_str.starts_with("bytes=")) return {};
+     range_str.remove_prefix(6);
 
-    // range 必须以 bytes= 开头, 否则返回空数组.
-    if (!range.starts_with("bytes=")) return {};
-
-    // 去掉开头的 bytes= 字符串.
-    range.remove_prefix(6);
-
-    http_ranges results;
-
-    // 获取其中所有 range 字符串.
-    auto ranges = util::split(range, ",");
-    for (const auto& str : ranges)
+    if (range_str.find("--") != std::string_view::npos)
     {
-        auto r = util::split(std::string(str), "-");
+        is_valid = false;
+        return {};
+    }
 
-        // range 只有一个数值.
-        if (r.size() == 1)
+    if (range_str == "-")
+    {
+        return {{0, file_size - 1}};
+    }
+
+    http_ranges vec;
+    auto ranges = util::split(range_str, ",");
+    for (auto range : ranges)
+    {
+        auto sub_range = util::split(range, "-");
+        auto fist_range = boost::trim_copy(sub_range[0]);
+
+        int start = 0;
+        if (fist_range.empty())
         {
-            if (str.front() == '-')
-            {
-                auto pos = std::atoll(r.front().data());
-                results.emplace_back(-1, pos);
-            }
-            else
-            {
-                auto pos = std::atoll(r.front().data());
-                results.emplace_back(pos, -1);
-            }
-        }
-        else if (r.size() == 2)
-        {
-            // range 有 start 和 end 的情况, 解析成整数到容器.
-            auto& start_str = r[0];
-            auto& end_str = r[1];
-
-            if (start_str.empty() && !end_str.empty())
-            {
-                auto end = std::atoll(end_str.data());
-                results.emplace_back(-1, end);
-            }
-            else
-            {
-                auto start = std::atoll(start_str.data());
-                auto end = std::atoll(end_str.data());
-                if (end_str.empty()) end = -1;
-
-                results.emplace_back(start, end);
-            }
+            start = -1;
         }
         else
         {
-            // 在一个 range 项中不应该存在3个'-', 否则则是无效项.
+            auto [ptr, ec] = std::from_chars(fist_range.data(), fist_range.data() + fist_range.size(), start);
+            if (ec != std::errc {})
+            {
+                is_valid = false;
+                return {};
+            }
+        }
+
+        int end = 0;
+        if (sub_range.size() == 1)
+        {
+            end = file_size - 1;
+        }
+        else
+        {
+            auto second_range = boost::trim_copy(sub_range[1]);
+            if (second_range.empty())
+            {
+                end = file_size - 1;
+            }
+            else
+            {
+                auto [ptr, ec] = std::from_chars(second_range.data(), second_range.data() + second_range.size(), end);
+                if (ec != std::errc {})
+                {
+                    is_valid = false;
+                    return {};
+                }
+            }
+        }
+
+        if (start > 0 && (start >= file_size || start == end))
+        {
+            // out of range
+            is_valid = false;
             return {};
         }
-    }
 
-    return results;
+        if (end > 0 && end >= file_size)
+        {
+            end = file_size - 1;
+        }
+
+        if (start == -1)
+        {
+            start = file_size - end;
+            end = file_size - 1;
+        }
+
+        vec.push_back({start, end});
+    }
+    return vec;
 }
 
 } // namespace httplib::html

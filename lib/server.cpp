@@ -195,6 +195,9 @@ public:
             auto http_variant_stream = co_await async_create_http_variant_stream(std::move(sock), buffer);
             if (!http_variant_stream) co_return;
 
+            http_variant_stream->rate_policy().read_limit(10240);
+            http_variant_stream->rate_policy().write_limit(10240);
+
             for (;;)
             {
                 boost::system::error_code ec;
@@ -267,7 +270,7 @@ public:
 
                 if (!resp.has_content_length())
                     resp.prepare_payload();
-
+                
                 co_await http::async_write(*http_variant_stream, resp, net_awaitable[ec]);
                 if (ec)
                 {

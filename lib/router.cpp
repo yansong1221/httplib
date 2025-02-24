@@ -131,8 +131,18 @@ public:
 
             if (std::filesystem::is_regular_file(path, ec))
             {
+                auto file_size = std::filesystem::file_size(path, ec);
+                if (ec) co_return false;
+
                 auto range = req[http::field::range];
-                auto ranges = html::parser_http_ranges(range);
+                bool is_valid = true;
+                auto ranges = html::parser_http_ranges(range, file_size, is_valid);
+                if (!is_valid)
+                {
+                    res.set(http::field::content_range, fmt::format("bytes */{}", file_size));
+                    res.set_empty_content(http::status::range_not_satisfiable);
+                    co_return true;
+                }
 
                 for (const auto& kv : entry.headers)
                 {
@@ -272,13 +282,13 @@ net::awaitable<void> router::routing(request& req, response& resp)
         resp.set_string_content("unknown exception"sv, "text/html", http::status::internal_server_error);
     }
 
-    //resp.set(http::field::connection, resp.keep_alive() ? "keep-alive" : "close");
+    // resp.set(http::field::connection, resp.keep_alive() ? "keep-alive" : "close");
     ////if (resp.base().result_int() >= 400 && resp.is_body_type<http::empty_body>())
     ////{
     ////    resp.set_body<http::string_body>(
     ////        html::fromat_error_content(resp.base().result_int(), resp.base().reason(), BOOST_BEAST_VERSION_STRING));
     ////}
-    //resp.prepare_payload();
+    // resp.prepare_payload();
 }
 bool router::set_mount_point(const std::string& mount_point,
                              const std::filesystem::path& dir,

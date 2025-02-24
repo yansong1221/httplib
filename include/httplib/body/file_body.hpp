@@ -62,7 +62,10 @@ struct file_body
                 if (body_.ranges.empty())
                     range = {0, body_.file_size()};
                 else
+                {
                     range = body_.ranges.front();
+                    range.second = range.second + 1;
+                }
 
                 if (!pos_)
                 {
