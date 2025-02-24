@@ -9,6 +9,7 @@
 #include <boost/url/parse.hpp>
 #include <filesystem>
 #include <fmt/format.h>
+#include <sstream>
 
 namespace httplib::html
 {

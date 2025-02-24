@@ -1,6 +1,7 @@
 #pragma once
 #include <utility>
 #include <vector>
+#include <filesystem>
 
 namespace boost
 {
@@ -30,10 +31,6 @@ namespace websocket
 namespace spdlog
 {
 class logger;
-}
-namespace std::filesystem
-{
-
 }
 
 namespace httplib

@@ -1,12 +1,12 @@
 #pragma once
 #include "variant_message.hpp"
-
+#include <filesystem>
 namespace httplib
 {
 
 struct response : public http::response<body::any_body>
 {
-    http::response<body::any_body>::message;
+    using http::response<body::any_body>::message;
 
 public:
     void set_string_content(std::string_view data,

@@ -10,18 +10,17 @@ void response::set_string_content(std::string&& data,
                                   std::string_view content_type,
                                   http::status status /*= http::status::ok*/)
 {
-    body() = std::move(data);
+    content_length(data.size());
     set(http::field::content_type, content_type);
     result(status);
+    body() = std::move(data);
 }
 
 void response::set_string_content(std::string_view data,
                                   std::string_view content_type,
                                   http::status status /*= http::status::ok*/)
 {
-    body() = std::string(data);
-    set(http::field::content_type, content_type);
-    result(status);
+    set_string_content(std::string(data), content_type, status);
 }
 
 void response::set_json_content(body::json_body::value_type&& data, http::status status /*= http::status::ok*/)
@@ -36,10 +35,7 @@ void response::set_json_content(const body::json_body::value_type& data, http::s
     result(status);
 }
 
-void response::set_file_content(const std::filesystem::path& path)
-{
-    set_file_content(path, {});
-}
+void response::set_file_content(const std::filesystem::path& path) { set_file_content(path, {}); }
 
 void response::set_file_content(const std::filesystem::path& path, const http_ranges& ranges)
 {
@@ -56,8 +52,8 @@ void response::set_file_content(const std::filesystem::path& path, const http_ra
     {
         set(http::field::accept_ranges, "bytes");
         set(http::field::content_type, file.content_type);
-        set(http::field::content_length, std::to_string(file_size));
         result(http::status::ok);
+        content_length(file_size);
     }
     else if (ranges.size() == 1)
     {
@@ -65,6 +61,7 @@ void response::set_file_content(const std::filesystem::path& path, const http_ra
         set(http::field::content_range, fmt::format("bytes {}-{}/{}", range.first, range.second, file_size));
         set(http::field::content_type, file.content_type);
         result(http::status::partial_content);
+        content_length(range.second - range.first);
     }
     else
     {

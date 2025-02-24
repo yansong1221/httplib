@@ -6,7 +6,7 @@ namespace httplib
 
 struct request : public http::request<body::any_body>
 {
-    http::request<body::any_body>::message;
+    using http::request<body::any_body>::message;
 
     request(http::request<body::any_body>&& other) { http::request<body::any_body>::operator=(std::move(other)); }
 
