@@ -86,4 +86,4 @@ struct any_body
 
 } // namespace httplib::body
 
-#include "httplib/body/any_body.inl"
+#include "httplib/body/impl/any_body.hpp"

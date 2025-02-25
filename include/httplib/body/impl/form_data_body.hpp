@@ -1,4 +1,5 @@
 #pragma once
+#include "httplib/html.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/string.hpp"
 #include <fmt/format.h>
@@ -11,7 +12,7 @@ using namespace std::string_view_literals;
 
 template<bool isRequest, class Fields>
 form_data_body::writer::writer(http::header<isRequest, Fields>& h, value_type& b)
-    : body_(b), boundary_(util::generate_boundary())
+    : body_(b), boundary_(html::generate_boundary())
 {
     h.set(http::field::content_type, fmt::format("multipart/form-data; boundary={}", boundary_));
 }
@@ -155,7 +156,7 @@ std::size_t form_data_body::reader::put(const_buffers_type const& buffers, boost
             auto results = util::split_header_field_value(header, ec);
             if (ec) return 0;
 
-            form_field_data field_data;
+            form_data::field field_data;
             for (const auto& item : results)
             {
                 if (item.first == "Content-Disposition"sv)

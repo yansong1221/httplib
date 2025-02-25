@@ -1,6 +1,7 @@
 #pragma once
 #include "httplib/config.hpp"
 #include "httplib/util/misc.hpp"
+#include "httplib/html.hpp"
 #include <boost/beast/core/file.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/message.hpp>
@@ -13,7 +14,7 @@ struct file_body
 {
     struct value_type
     {
-        http_ranges ranges;
+        html::http_ranges ranges;
         std::string content_type;
         std::string boundary;
 
@@ -58,7 +59,7 @@ struct file_body
         {
             if (body_.ranges.size() == 1 || body_.ranges.empty())
             {
-                range_type range;
+               html::range_type range;
                 if (body_.ranges.empty())
                     range = {0, body_.file_size()};
                 else

@@ -40,10 +40,7 @@ void response::set_json_content(const body::json_body::value_type& data, http::s
     body() = data;
     result(status);
 }
-
-void response::set_file_content(const std::filesystem::path& path) { set_file_content(path, {}); }
-
-void response::set_file_content(const std::filesystem::path& path, const http_ranges& ranges)
+void response::set_file_content(const std::filesystem::path& path, const html::http_ranges& ranges)
 {
     body::file_body::value_type file;
     file.open(path.string().c_str(), std::ios::in | std::ios::binary);
@@ -73,7 +70,7 @@ void response::set_file_content(const std::filesystem::path& path, const http_ra
     }
     else
     {
-        file.boundary = util::generate_boundary();
+        file.boundary = html::generate_boundary();
         set(http::field::content_type, fmt::format("multipart/byteranges; boundary={}", file.boundary));
         result(http::status::partial_content);
     }

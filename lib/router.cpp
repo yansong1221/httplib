@@ -1,6 +1,6 @@
 #include "httplib/router.hpp"
 
-#include "html.hpp"
+#include "httplib/html.hpp"
 #include "httplib/http_handler.hpp"
 #include "httplib/util/type_traits.h"
 #include "httplib/variant_message.hpp"
@@ -105,22 +105,22 @@ public:
             target.remove_prefix(entry.mount_point.size());
             if (!detail::is_valid_path(target)) continue;
 
-            auto path = entry.base_dir / std::filesystem::u8path(target);
-            if (!std::filesystem::exists(path, ec)) continue;
+            auto path = entry.base_dir / fs::u8path(target);
+            if (!fs::exists(path, ec)) continue;
 
-            if (std::filesystem::is_directory(path, ec))
+            if (fs::is_directory(path, ec))
             {
-                if (auto html_path = path / "index.html"; std::filesystem::is_regular_file(html_path, ec))
+                if (auto html_path = path / "index.html"; fs::is_regular_file(html_path, ec))
                 {
                     path = html_path;
                 }
-                else if (auto htm_path = path / "index.htm"; std::filesystem::is_regular_file(htm_path, ec))
+                else if (auto htm_path = path / "index.htm"; fs::is_regular_file(htm_path, ec))
                 {
                     path = htm_path;
                 }
             }
 
-            if (std::filesystem::is_directory(path, ec))
+            if (fs::is_directory(path, ec))
             {
                 beast::error_code ec;
                 auto body = html::format_dir_to_html(req.target(), path, ec);
@@ -129,9 +129,9 @@ public:
                 co_return true;
             }
 
-            if (std::filesystem::is_regular_file(path, ec))
+            if (fs::is_regular_file(path, ec))
             {
-                auto file_size = std::filesystem::file_size(path, ec);
+                auto file_size = fs::file_size(path, ec);
                 if (ec) co_return false;
 
                 auto range = req[http::field::range];
@@ -251,7 +251,7 @@ public:
     struct mount_point_entry
     {
         std::string mount_point;
-        std::filesystem::path base_dir;
+        fs::path base_dir;
         http::fields headers;
     };
     std::vector<mount_point_entry> static_file_entry_;
@@ -290,11 +290,9 @@ net::awaitable<void> router::routing(request& req, response& resp)
     ////}
     // resp.prepare_payload();
 }
-bool router::set_mount_point(const std::string& mount_point,
-                             const std::filesystem::path& dir,
-                             const http::fields& headers /*= {}*/)
+bool router::set_mount_point(const std::string& mount_point, const fs::path& dir, const http::fields& headers /*= {}*/)
 {
-    if (std::filesystem::is_directory(dir))
+    if (fs::is_directory(dir))
     {
         std::string mnt = !mount_point.empty() ? mount_point : "/";
         if (!mnt.empty() && mnt[0] == '/')

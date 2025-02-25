@@ -1,6 +1,4 @@
 #pragma once
-#include <utility>
-#include <vector>
 #include <filesystem>
 
 namespace boost
@@ -43,7 +41,5 @@ namespace http = beast::http;
 namespace websocket = beast::websocket;
 namespace fs = std::filesystem;
 
-using range_type = std::pair<int64_t, int64_t>;
-using http_ranges = std::vector<range_type>;
 
 } // namespace httplib

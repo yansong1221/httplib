@@ -3,12 +3,14 @@
 #include <boost/system/detail/error_code.hpp>
 #include <filesystem>
 #include <format>
+#include <vector>
 
 namespace httplib
 {
 namespace html
 {
-namespace fs = std::filesystem;
+using range_type = std::pair<int64_t, int64_t>;
+using http_ranges = std::vector<range_type>;
 
 std::string format_dir_to_html(std::string_view target, const fs::path& path, boost::system::error_code ec);
 
@@ -19,6 +21,8 @@ std::string format_http_date();
 
 // parser_http_ranges 用于解析 http range 请求头.
 http_ranges parser_http_ranges(std::string_view range_str, size_t file_size, bool& is_valid) noexcept;
+
+std::string generate_boundary();
 
 } // namespace html
 } // namespace httplib

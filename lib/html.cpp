@@ -1,5 +1,5 @@
 #pragma once
-#include "html.hpp"
+#include "httplib/html.hpp"
 
 #include "httplib/util/string.hpp"
 #include <boost/algorithm/string/replace.hpp>
@@ -7,14 +7,14 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/system/error_code.hpp>
 #include <boost/url/parse.hpp>
+#include <chrono>
 #include <filesystem>
 #include <fmt/format.h>
+#include <random>
 #include <sstream>
 
 namespace httplib::html
 {
-
-namespace fs = std::filesystem;
 
 namespace detail
 {
@@ -24,8 +24,8 @@ inline constexpr auto head_fmt =
 inline constexpr auto tail_fmt = "</pre><hr></body></html>";
 inline constexpr auto body_fmt = "<a href=\"{}\">{}</a>{} {}       {}\r\n";
 
-template<typename Path>
-inline std::string make_unc_path(const Path& path)
+
+inline static std::string make_unc_path(const fs::path& path)
 {
     auto ret = path.string();
 
@@ -39,7 +39,7 @@ inline std::string make_unc_path(const Path& path)
 
     return ret;
 }
-inline std::tuple<std::string, fs::path> file_last_wirte_time(const fs::path& file)
+inline static std::tuple<std::string, fs::path> file_last_wirte_time(const fs::path& file)
 {
     static auto loc_time = [](auto t) -> struct tm*
     {
@@ -89,7 +89,7 @@ inline std::tuple<std::string, fs::path> file_last_wirte_time(const fs::path& fi
 
     return {time_string, unc_path};
 }
-inline std::vector<std::string> format_path_list(const fs::path& path, boost::system::error_code& ec)
+inline static std::vector<std::string> format_path_list(const fs::path& path, boost::system::error_code& ec)
 {
     fs::directory_iterator end;
     fs::directory_iterator it(path, ec);
@@ -157,7 +157,7 @@ inline std::vector<std::string> format_path_list(const fs::path& path, boost::sy
 
     return path_list;
 }
-inline std::string make_target_path(std::string_view target)
+inline static std::string make_target_path(std::string_view target)
 {
     std::string url = "http://example.com";
     if (target.starts_with("/"))
@@ -232,9 +232,15 @@ std::string format_http_date()
 
 http_ranges parser_http_ranges(std::string_view range_str, size_t file_size, bool& is_valid) noexcept
 {
+    is_valid = true;
     range_str = boost::trim_copy(range_str);
-    if (!range_str.starts_with("bytes=")) return {};
-     range_str.remove_prefix(6);
+    if (range_str.empty()) return {};
+    if (!range_str.starts_with("bytes="))
+    {
+        is_valid = false;
+        return {};
+    }
+    range_str.remove_prefix(6);
 
     if (range_str.find("--") != std::string_view::npos)
     {
@@ -249,7 +255,7 @@ http_ranges parser_http_ranges(std::string_view range_str, size_t file_size, boo
 
     http_ranges vec;
     auto ranges = util::split(range_str, ",");
-    for (auto range : ranges)
+    for (const auto& range : ranges)
     {
         auto sub_range = util::split(range, "-");
         auto fist_range = boost::trim_copy(sub_range[0]);
@@ -313,6 +319,18 @@ http_ranges parser_http_ranges(std::string_view range_str, size_t file_size, boo
         vec.push_back({start, end});
     }
     return vec;
+}
+
+std::string generate_boundary()
+{
+    auto now = std::chrono::system_clock::now().time_since_epoch();
+    auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<int> dist(100000, 999999);
+
+    return "----------------" + std::to_string(millis) + std::to_string(dist(gen));
 }
 
 } // namespace httplib::html

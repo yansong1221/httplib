@@ -95,17 +95,6 @@ static inline std::string url_decode(std::string_view str)
     return decode_str;
 }
 
-static std::string generate_boundary()
-{
-    auto now = std::chrono::system_clock::now().time_since_epoch();
-    auto millis = std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
-
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<int> dist(100000, 999999);
-
-    return "----------------" + std::to_string(millis) + std::to_string(dist(gen));
-}
 static auto parse_content_disposition(std::string_view header)
 {
     std::vector<std::pair<std::string_view, std::string_view>> results;

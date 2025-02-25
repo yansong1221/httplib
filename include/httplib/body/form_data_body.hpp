@@ -80,7 +80,7 @@ public:
             eof
         };
         step step_ = step::boundary_line;
-        form_field_data field_data_;
+        form_data::field field_data_;
     };
 };
 } // namespace httplib::body

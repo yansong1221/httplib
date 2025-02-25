@@ -1,7 +1,7 @@
 
 #include "httplib/server.hpp"
 
-#include "html.hpp"
+#include "httplib/html.hpp"
 #include "httplib/body/body.hpp"
 #include "httplib/request.hpp"
 #include "httplib/response.hpp"
@@ -21,53 +21,6 @@
 
 namespace httplib
 {
-
-namespace detail
-{
-
-template<class Body>
-net::awaitable<void> async_read_http_body(http::request_parser<http::empty_body>&& header_parser,
-                                          http_variant_stream_type& stream,
-                                          beast::flat_buffer& buffer,
-                                          httplib::request& req,
-                                          boost::system::error_code& ec)
-{
-    http::request_parser<Body> body_parser(std::move(header_parser));
-    while (!body_parser.is_done())
-    {
-        stream.expires_after(std::chrono::seconds(30));
-        co_await http::async_read_some(stream, buffer, body_parser, net_awaitable[ec]);
-        stream.expires_never();
-        if (ec)
-        {
-            co_return;
-        }
-    }
-    req = std::move(body_parser.release());
-    co_return;
-}
-template<typename AsyncWriteStream, bool isRequest, typename Fields = http::fields>
-net::awaitable<void> async_write_http_message(AsyncWriteStream& stream,
-                                              http_message_variant<isRequest, Fields>& message,
-                                              boost::system::error_code& ec)
-{
-    co_await std::visit(
-        [&](auto&& t) mutable -> net::awaitable<void>
-        {
-            using body_type = std::decay_t<decltype(t)>::body_type;
-            using header_type = std::decay_t<decltype(t)>::header_type;
-
-            http::serializer<isRequest, body_type, Fields> serializer(t);
-            co_await http::async_write_header(stream, serializer, net_awaitable[ec]);
-            if (ec) co_return;
-
-            co_await http::async_write(stream, serializer, net_awaitable[ec]);
-            co_return;
-        },
-        message);
-    co_return;
-}
-} // namespace detail
 
 class server::impl : public std::enable_shared_from_this<server::impl>
 {
