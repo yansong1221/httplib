@@ -11,10 +11,8 @@ namespace httplib::body
 using namespace std::string_view_literals;
 
 template<bool isRequest, class Fields>
-form_data_body::writer::writer(http::header<isRequest, Fields>& h, value_type& b)
-    : body_(b), boundary_(html::generate_boundary())
+form_data_body::writer::writer(http::header<isRequest, Fields>& h, value_type& b) : body_(b)
 {
-    h.set(http::field::content_type, fmt::format("multipart/form-data; boundary={}", boundary_));
 }
 
 boost::optional<std::pair<form_data_body::writer::const_buffers_type, bool>> form_data_body::writer::get(
@@ -31,7 +29,7 @@ boost::optional<std::pair<form_data_body::writer::const_buffers_type, bool>> for
     {
         case step::header:
         {
-            std::string header = fmt::format("--{}\r\n", boundary_);
+            std::string header = fmt::format("--{}\r\n", body_.boundary);
 
             header += fmt::format(R"(Content-Disposition: form-data; name="{}")", field_data.name);
             if (!field_data.filename.empty())
@@ -63,7 +61,7 @@ boost::optional<std::pair<form_data_body::writer::const_buffers_type, bool>> for
             std::string end("\r\n");
             if (is_eof)
             {
-                end += fmt::format("--{}--\r\n", boundary_);
+                end += fmt::format("--{}--\r\n", body_.boundary);
                 step_ = step::eof;
             }
             else

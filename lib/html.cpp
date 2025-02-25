@@ -191,29 +191,29 @@ std::string format_dir_to_html(std::string_view target, const fs::path& path, bo
 
     return body;
 }
-
-std::string fromat_error_content(int status, std::string_view reason, std::string_view server)
+std::chrono::system_clock::time_point file_last_write_time(const fs::path& path, std::error_code& ec)
 {
-    return fmt::format(
-        R"x*x*x(<html>
-<head><title>{0} {1}</title></head>
-<body bgcolor="white">
-<center><h1>{0} {1}</h1></center>
-<hr><center>{2}</center>
-</body>
-</html>)x*x*x",
-        status,
-        reason,
-        server);
+    auto ftime = fs::last_write_time(path, ec);
+    if (ec) return {};
+
+    auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+        ftime - std::filesystem::file_time_type::clock::now() + std::chrono::system_clock::now());
+    return sctp;
 }
 
-std::string format_http_date()
+std::string format_http_current_gmt_date()
 {
     using namespace std::chrono;
 
     // Get the current time from system clock
     auto now = system_clock::now();
-    std::time_t tt = system_clock::to_time_t(now);
+    return format_http_gmt_date(now);
+}
+
+std::string format_http_gmt_date(const std::chrono::system_clock::time_point& time)
+{
+    using namespace std::chrono;
+    std::time_t tt = system_clock::to_time_t(time);
 
     // Convert the time to UTC using gmtime_s (Windows) or gmtime_r (Unix-like systems)
     std::tm tm {};
@@ -228,6 +228,24 @@ std::string format_http_date()
     oss << std::put_time(&tm, "%a, %d %b %Y %H:%M:%S GMT");
 
     return oss.str();
+}
+std::chrono::system_clock::time_point parse_http_gmt_date(const std::string& http_date)
+{
+    std::tm tm = {};
+    std::istringstream iss(http_date);
+
+    // Parse the HTTP date string into a tm struct
+    iss >> std::get_time(&tm, "%a, %d %b %Y %H:%M:%S GMT");
+
+    if (iss.fail())
+    {
+        throw std::runtime_error("Failed to parse HTTP date string");
+    }
+    // Convert tm to time_t (seconds since epoch)
+    std::time_t tt = mktime(&tm); // timegm is not standard but widely available
+
+    // Convert time_t to system_clock::time_point
+    return std::chrono::system_clock::from_time_t(tt);
 }
 
 http_ranges parser_http_ranges(std::string_view range_str, size_t file_size, bool& is_valid) noexcept

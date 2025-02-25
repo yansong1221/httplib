@@ -131,24 +131,11 @@ public:
 
             if (fs::is_regular_file(path, ec))
             {
-                auto file_size = fs::file_size(path, ec);
-                if (ec) co_return false;
-
-                auto range = req[http::field::range];
-                bool is_valid = true;
-                auto ranges = html::parser_http_ranges(range, file_size, is_valid);
-                if (!is_valid)
-                {
-                    res.set(http::field::content_range, fmt::format("bytes */{}", file_size));
-                    res.set_empty_content(http::status::range_not_satisfiable);
-                    co_return true;
-                }
-
                 for (const auto& kv : entry.headers)
                 {
                     res.base().set(kv.name(), kv.value());
                 }
-                res.set_file_content(path, ranges);
+                res.set_file_content(path, req);
                 if (req.method() != http::verb::head && file_request_handler_)
                 {
                     co_await file_request_handler_(req, res);
@@ -182,7 +169,7 @@ public:
                 }
                 else
                 {
-                    resp.base().result(http::status::method_not_allowed);
+                    resp.set_error_content(http::status::method_not_allowed);
                     co_return;
                 }
             }
@@ -207,7 +194,7 @@ public:
             }
             else
             {
-                resp.base().result(http::status::not_found);
+                resp.set_error_content(http::status::not_found);
             }
             co_return;
         }
@@ -231,7 +218,7 @@ public:
         // not found
         if (!is_matched_regex_router)
         {
-            resp.base().result(http::status::not_found);
+            resp.set_error_content(http::status::not_found);
         }
         co_return;
     }

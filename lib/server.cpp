@@ -1,8 +1,8 @@
 
 #include "httplib/server.hpp"
 
-#include "httplib/html.hpp"
 #include "httplib/body/body.hpp"
+#include "httplib/html.hpp"
 #include "httplib/request.hpp"
 #include "httplib/response.hpp"
 #include "httplib/router.hpp"
@@ -21,6 +21,7 @@
 
 namespace httplib
 {
+using namespace std::chrono_literals;
 
 class server::impl : public std::enable_shared_from_this<server::impl>
 {
@@ -43,6 +44,9 @@ public:
     websocket_conn::message_handler_type websocket_message_handler_;
     websocket_conn::open_handler_type websocket_open_handler_;
     websocket_conn::close_handler_type websocket_close_handler_;
+
+    std::chrono::steady_clock::duration timeout_ = 30s;
+
 
 #ifdef HTTLIP_ENABLED_SSL
     std::shared_ptr<ssl::context> create_ssl_context()
@@ -73,8 +77,13 @@ public:
     net::awaitable<std::optional<http_variant_stream_type>> async_create_http_variant_stream(tcp::socket&& sock,
                                                                                              beast::flat_buffer& buffer)
     {
+        http_stream normal_stream(std::move(sock));
+#ifndef HTTLIP_ENABLED_SSL
+        return std::move(normal_stream);
+#else
         boost::system::error_code ec;
-        bool is_ssl = co_await beast::async_detect_ssl(sock, buffer, net_awaitable[ec]);
+        normal_stream.expires_after(timeout_);
+        bool is_ssl = co_await beast::async_detect_ssl(normal_stream, buffer, net_awaitable[ec]);
         if (ec)
         {
             logger_->error("async_detect_ssl failed: {}", ec.message());
@@ -82,23 +91,22 @@ public:
         }
         if (is_ssl)
         {
-#ifdef HTTLIP_ENABLED_SSL
             auto ssl_ctx = create_ssl_context();
             if (!ssl_ctx) co_return std::nullopt;
 
-            ssl_http_stream stream(std::move(sock), ssl_ctx);
+            ssl_http_stream ssl_stream(std::move(normal_stream), ssl_ctx);
             auto bytes_used =
-                co_await stream.async_handshake(ssl::stream_base::server, buffer.data(), net_awaitable[ec]);
+                co_await ssl_stream.async_handshake(ssl::stream_base::server, buffer.data(), net_awaitable[ec]);
             if (ec)
             {
                 logger_->error("ssl handshake failed: {}", ec.message());
                 co_return std::nullopt;
             }
             buffer.consume(bytes_used);
-            co_return std::move(stream);
-#endif
+            co_return std::move(ssl_stream);
         }
-        co_return http_stream(std::move(sock));
+        co_return std::move(normal_stream);
+#endif
     }
     void listen(std::string_view host, uint16_t port, int backlog)
     {
@@ -148,8 +156,8 @@ public:
             auto http_variant_stream = co_await async_create_http_variant_stream(std::move(sock), buffer);
             if (!http_variant_stream) co_return;
 
-            http_variant_stream->rate_policy().read_limit(10240);
-            http_variant_stream->rate_policy().write_limit(10240);
+            // http_variant_stream->rate_policy().read_limit(10240);
+            // http_variant_stream->rate_policy().write_limit(10240);
 
             for (;;)
             {
@@ -158,7 +166,7 @@ public:
                 header_parser.body_limit(std::numeric_limits<unsigned long long>::max());
                 while (!header_parser.is_header_done())
                 {
-                    http_variant_stream->expires_after(std::chrono::seconds(30));
+                    http_variant_stream->expires_after(timeout_);
                     co_await http::async_read_some(*http_variant_stream, buffer, header_parser, net_awaitable[ec]);
                     http_variant_stream->expires_never();
                     if (ec)
@@ -186,7 +194,7 @@ public:
                 resp.result(http::status::not_found);
                 resp.version(header_parser.get().version());
                 resp.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-                resp.set(http::field::date, html::format_http_date());
+                resp.set(http::field::date, html::format_http_current_gmt_date());
                 resp.keep_alive(header_parser.get().keep_alive());
 
                 if (router_.has_handler(header.method(), header.target()))
@@ -221,9 +229,8 @@ public:
                     co_await router_.routing(req, resp);
                 }
 
-                if (!resp.has_content_length())
-                    resp.prepare_payload();
-                
+                if (!resp.has_content_length()) resp.prepare_payload();
+
                 co_await http::async_write(*http_variant_stream, resp, net_awaitable[ec]);
                 if (ec)
                 {
@@ -269,9 +276,9 @@ public:
         if (ec) co_return;
 
         http::response<http::empty_body> resp(http::status::ok, req.version());
-        resp.base().reason("Connection Established");
-        resp.base().set(http::field::server, BOOST_BEAST_VERSION_STRING);
-        resp.base().set(http::field::date, html::format_http_date());
+        resp.reason("Connection Established");
+        resp.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+        resp.set(http::field::date, html::format_http_current_gmt_date());
         co_await http::async_write(http_variant_stream, resp, net_awaitable[ec]);
         if (ec) co_return;
 

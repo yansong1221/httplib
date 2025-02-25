@@ -37,7 +37,6 @@ struct json_body
         template<bool isRequest, class Fields>
         writer(boost::beast::http::header<isRequest, Fields> &h, value_type const& body)
         {
-            h.set(http::field::content_type, "application/json");
             // The serializer holds a pointer to the value, so all we need to do is to reset it.
             serializer.reset(&body);
         }

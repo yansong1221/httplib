@@ -30,7 +30,6 @@ public:
 
     private:
         value_type& body_;
-        std::string boundary_;
         int field_data_index_ = 0;
         beast::flat_buffer buffer_;
 

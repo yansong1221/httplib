@@ -12,6 +12,23 @@ void response::set_empty_content(http::status status)
     content_length(0);
 }
 
+void response::set_error_content(http::status status)
+{
+    auto content = fmt::format(
+        R"(<html>
+<head><title>{0} {1}</title></head>
+<body bgcolor="white">
+<center><h1>{0} {1}</h1></center>
+<hr><center>{2}</center>
+</body>
+</html>)",
+        (int)status,
+        http::obsolete_reason(status),
+        at(http::field::server));
+
+    set_string_content(std::move(content), "text/html", status);
+}
+
 void response::set_string_content(std::string&& data,
                                   std::string_view content_type,
                                   http::status status /*= http::status::ok*/)
@@ -31,25 +48,58 @@ void response::set_string_content(std::string_view data,
 
 void response::set_json_content(body::json_body::value_type&& data, http::status status /*= http::status::ok*/)
 {
-    body() = std::move(data);
     result(status);
+    set(http::field::content_type, "application/json");
+    set(http::field::cache_control, "no-store");
+    body() = std::move(data);
 }
 
 void response::set_json_content(const body::json_body::value_type& data, http::status status /*= http::status::ok*/)
 {
-    body() = data;
-    result(status);
+    set_json_content(body::json_body::value_type(data));
 }
-void response::set_file_content(const std::filesystem::path& path, const html::http_ranges& ranges)
+
+void response::set_file_content(const fs::path& path, const http::fields& req_header)
 {
+    std::error_code ec;
+    auto file_size = fs::file_size(path, ec);
+    if (ec) return;
+    auto file_write_time = html::file_last_write_time(path, ec);
+    if (ec) return;
+
+    bool is_valid = true;
+    auto ranges = html::parser_http_ranges(req_header[http::field::range], file_size, is_valid);
+    if (!is_valid)
+    {
+        set(http::field::content_range, fmt::format("bytes */{}", file_size));
+        set_empty_content(http::status::range_not_satisfiable);
+        return;
+    }
+    // etag
+    auto file_etag_str = fmt::format("tag-{}-{}", file_size, std::chrono::system_clock::to_time_t(file_write_time));
+    if (req_header[http::field::if_none_match] == file_etag_str)
+    {
+        set_empty_content(http::status::not_modified);
+        return;
+    }
+    // last modified
+    auto file_gmt_date_str = html::format_http_gmt_date(file_write_time);
+    if (req_header[http::field::if_modified_since] == file_gmt_date_str)
+    {
+        set_empty_content(http::status::not_modified);
+        return;
+    }
+
     body::file_body::value_type file;
     file.open(path.string().c_str(), std::ios::in | std::ios::binary);
     if (!file.is_open()) return;
 
-    auto file_size = file.file_size();
-
     file.content_type = mime::get_mime_type(path.extension().string());
     file.ranges = ranges;
+
+    set(http::field::etag, file_etag_str);
+    set(http::field::last_modified, file_gmt_date_str);
+
     if (file.ranges.empty())
     {
         set(http::field::accept_ranges, "bytes");
@@ -75,6 +125,17 @@ void response::set_file_content(const std::filesystem::path& path, const html::h
         result(http::status::partial_content);
     }
     body() = std::move(file);
+}
+
+void response::set_form_data_content(const std::vector<body::form_data::field>& data)
+{
+    body::form_data_body::value_type value;
+    value.boundary = html::generate_boundary();
+    value.fields = data;
+
+    result(http::status::ok);
+    set(http::field::content_type, fmt::format("multipart/form-data; boundary={}", value.boundary));
+    body() = std::move(value);
 }
 
 } // namespace httplib
