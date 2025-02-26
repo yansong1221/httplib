@@ -18,8 +18,8 @@ public:
     public:
         using const_buffers_type = net::const_buffer;
 
-        template<bool isRequest, class Fields>
-        writer(http::header<isRequest, Fields>& h, value_type& b);
+        
+        writer(http::fields const& h, value_type& b);
 
         void init(boost::system::error_code& ec)
         {
@@ -50,8 +50,7 @@ public:
     public:
         using const_buffers_type = net::const_buffer;
 
-        template<bool isRequest, class Fields>
-        reader(http::header<isRequest, Fields>& h, value_type& b);
+        reader(http::fields const& h, value_type& b);
 
         inline void init(boost::optional<std::uint64_t> const& content_length, boost::system::error_code& ec);
 

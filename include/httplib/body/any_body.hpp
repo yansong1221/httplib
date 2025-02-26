@@ -2,8 +2,10 @@
 #include "empty_body.hpp"
 #include "file_body.hpp"
 #include "form_data_body.hpp"
+#include "httplib/config.hpp"
 #include "json_body.hpp"
 #include "string_body.hpp"
+#include <boost/beast/http/message.hpp>
 
 namespace httplib::body
 {
@@ -38,10 +40,9 @@ struct any_body
         }
 
     private:
-        template<bool isRequest, class Fields>
-        std::unique_ptr<proxy_writer> create_proxy_writer(http::header<isRequest, Fields>& h);
-        template<class Body, bool isRequest, class Fields>
-        std::unique_ptr<proxy_reader> create_proxy_reader(http::header<isRequest, Fields>& h);
+        inline std::unique_ptr<proxy_writer> create_proxy_writer(http::fields& h);
+        template<class Body>
+        inline std::unique_ptr<proxy_reader> create_proxy_reader(http::fields& h);
         friend class any_body::writer;
         friend class any_body::reader;
     };
@@ -57,8 +58,8 @@ struct any_body
         template<bool isRequest, class Fields>
         writer(http::header<isRequest, Fields>& h, value_type& b);
 
-        inline void init(boost::system::error_code& ec);
-        inline boost::optional<std::pair<const_buffers_type, bool>> get(boost::system::error_code& ec);
+        void init(boost::system::error_code& ec);
+        boost::optional<std::pair<const_buffers_type, bool>> get(boost::system::error_code& ec);
 
     private:
         std::unique_ptr<proxy_writer> proxy_;
@@ -75,9 +76,9 @@ struct any_body
         template<bool isRequest, class Fields>
         reader(http::header<isRequest, Fields>& h, value_type& b);
 
-        inline void init(boost::optional<std::uint64_t> const& content_length, boost::system::error_code& ec);
-        inline std::size_t put(const_buffers_type const& buffers, boost::system::error_code& ec);
-        inline void finish(boost::system::error_code& ec);
+        void init(boost::optional<std::uint64_t> const& content_length, boost::system::error_code& ec);
+        std::size_t put(const_buffers_type const& buffers, boost::system::error_code& ec);
+        void finish(boost::system::error_code& ec);
 
     private:
         std::unique_ptr<proxy_reader> proxy_;

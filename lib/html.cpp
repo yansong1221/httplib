@@ -12,6 +12,7 @@
 #include <fmt/format.h>
 #include <random>
 #include <sstream>
+#include <charconv>
 
 namespace httplib::html
 {
