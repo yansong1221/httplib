@@ -26,7 +26,7 @@ void response::set_error_content(http::status status)
         http::obsolete_reason(status),
         at(http::field::server));
 
-    set_string_content(std::move(content), "text/html", status);
+    set_string_content(std::move(content), "text/html; charset=utf-8", status);
 }
 
 void response::set_string_content(std::string&& data,
@@ -76,7 +76,7 @@ void response::set_file_content(const fs::path& path, const http::fields& req_he
         return;
     }
     // etag
-    auto file_etag_str = fmt::format("tag-{}-{}", file_size, std::chrono::system_clock::to_time_t(file_write_time));
+    auto file_etag_str = fmt::format("W/{}-{}", file_size, file_write_time);
     if (req_header[http::field::if_none_match] == file_etag_str)
     {
         set_empty_content(http::status::not_modified);
@@ -127,7 +127,7 @@ void response::set_file_content(const fs::path& path, const http::fields& req_he
     body() = std::move(file);
 }
 
-void response::set_form_data_content(const std::vector<body::form_data::field>& data)
+void response::set_form_data_content(const std::vector<form_data::field>& data)
 {
     body::form_data_body::value_type value;
     value.boundary = html::generate_boundary();

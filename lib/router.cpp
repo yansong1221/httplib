@@ -125,7 +125,7 @@ public:
                 beast::error_code ec;
                 auto body = html::format_dir_to_html(req.target(), path, ec);
                 if (ec) co_return false;
-                res.set_string_content(body, "text/html");
+                res.set_string_content(body, "text/html; charset=utf-8");
                 co_return true;
             }
 

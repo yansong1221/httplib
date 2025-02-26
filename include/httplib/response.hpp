@@ -1,5 +1,6 @@
 #pragma once
 #include "httplib/html.hpp"
+#include "httplib/form_data.hpp"
 #include "variant_message.hpp"
 #include <filesystem>
 
@@ -23,7 +24,7 @@ public:
 
     void set_file_content(const fs::path& path, const http::fields& req_header = {});
 
-    void set_form_data_content(const std::vector<body::form_data::field>& data);
+    void set_form_data_content(const std::vector<form_data::field>& data);
 };
 
 } // namespace httplib

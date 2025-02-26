@@ -1,13 +1,13 @@
 #pragma once
+#include "empty_body.hpp"
 #include "file_body.hpp"
 #include "form_data_body.hpp"
 #include "json_body.hpp"
 #include "string_body.hpp"
-#include "empty_body.hpp"
 
 namespace httplib::body
 {
-
+class compressor;
 struct any_body
 {
     class writer;
@@ -62,6 +62,7 @@ struct any_body
 
     private:
         std::unique_ptr<proxy_writer> proxy_;
+        std::unique_ptr<compressor> compressor_;
     };
     //--------------------------------------------------------------------------
 

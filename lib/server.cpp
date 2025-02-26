@@ -197,10 +197,10 @@ public:
                 resp.set(http::field::date, html::format_http_current_gmt_date());
                 resp.keep_alive(header_parser.get().keep_alive());
 
+                httplib::request req;
                 if (router_.has_handler(header.method(), header.target()))
                 {
-                    httplib::request req;
-                    switch (header.base().method())
+                    switch (header.method())
                     {
                         case http::verb::get:
                         case http::verb::head:
@@ -210,7 +210,7 @@ public:
                         {
                             while (!header_parser.is_done())
                             {
-                                http_variant_stream->expires_after(std::chrono::seconds(30));
+                                http_variant_stream->expires_after(timeout_);
                                 co_await http::async_read_some(
                                     *http_variant_stream, buffer, header_parser, net_awaitable[ec]);
                                 http_variant_stream->expires_never();
@@ -227,6 +227,16 @@ public:
                     req.local_endpoint = local_endpoint;
                     req.remote_endpoint = remote_endpoint;
                     co_await router_.routing(req, resp);
+                }
+                auto accept_encoding = util::split(req[http::field::accept_encoding], ",");
+                for (const auto& encoding : accept_encoding)
+                {
+                    if (encoding == "gzip")
+                    {
+                        resp.set(http::field::content_encoding, "gzip");
+                        resp.chunked(true);
+                        break;
+                    }
                 }
 
                 if (!resp.has_content_length()) resp.prepare_payload();

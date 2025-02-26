@@ -24,6 +24,24 @@ inline constexpr auto head_fmt =
 inline constexpr auto tail_fmt = "</pre><hr></body></html>";
 inline constexpr auto body_fmt = "<a href=\"{}\">{}</a>{} {}       {}\r\n";
 
+inline static long get_gmt_timezone_offset()
+{
+    static long offset = []()
+    {
+        std::time_t now = std::time(nullptr);
+        std::tm local_tm;
+        std::tm gmt_tm;
+#ifdef _WIN32
+        localtime_s(&local_tm, &now);
+        gmtime_s(&gmt_tm, &now);
+#else
+        localtime_r(&now, &local_tm);
+        gmtime_r(&now, &gmt_tm);
+#endif
+        return std::mktime(&local_tm) - std::mktime(&gmt_tm);
+    }();
+    return offset;
+}
 
 inline static std::string make_unc_path(const fs::path& path)
 {
@@ -191,36 +209,31 @@ std::string format_dir_to_html(std::string_view target, const fs::path& path, bo
 
     return body;
 }
-std::chrono::system_clock::time_point file_last_write_time(const fs::path& path, std::error_code& ec)
+std::time_t file_last_write_time(const fs::path& path, std::error_code& ec)
 {
     auto ftime = fs::last_write_time(path, ec);
     if (ec) return {};
 
     auto sctp = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
         ftime - std::filesystem::file_time_type::clock::now() + std::chrono::system_clock::now());
-    return sctp;
+    return std::chrono::system_clock::to_time_t(sctp);
 }
 
 std::string format_http_current_gmt_date()
 {
-    using namespace std::chrono;
-
-    // Get the current time from system clock
-    auto now = system_clock::now();
-    return format_http_gmt_date(now);
+    return format_http_gmt_date(time(nullptr));
 }
 
-std::string format_http_gmt_date(const std::chrono::system_clock::time_point& time)
+std::string format_http_gmt_date(const std::time_t& time)
 {
     using namespace std::chrono;
-    std::time_t tt = system_clock::to_time_t(time);
 
     // Convert the time to UTC using gmtime_s (Windows) or gmtime_r (Unix-like systems)
     std::tm tm {};
 #ifdef _WIN32
-    gmtime_s(&tm, &tt); // Thread-safe for Windows
+    gmtime_s(&tm, &time); // Thread-safe for Windows
 #else
-    gmtime_r(&tt, &tm); // Thread-safe for Unix-like systems
+    gmtime_r(&time, &tm); // Thread-safe for Unix-like systems
 #endif
 
     // Format the date in HTTP format
@@ -229,7 +242,7 @@ std::string format_http_gmt_date(const std::chrono::system_clock::time_point& ti
 
     return oss.str();
 }
-std::chrono::system_clock::time_point parse_http_gmt_date(const std::string& http_date)
+std::time_t parse_http_gmt_date(const std::string& http_date)
 {
     std::tm tm = {};
     std::istringstream iss(http_date);
@@ -244,8 +257,10 @@ std::chrono::system_clock::time_point parse_http_gmt_date(const std::string& htt
     // Convert tm to time_t (seconds since epoch)
     std::time_t tt = mktime(&tm); // timegm is not standard but widely available
 
+    tt += detail::get_gmt_timezone_offset();
+
     // Convert time_t to system_clock::time_point
-    return std::chrono::system_clock::from_time_t(tt);
+    return tt;
 }
 
 http_ranges parser_http_ranges(std::string_view range_str, size_t file_size, bool& is_valid) noexcept

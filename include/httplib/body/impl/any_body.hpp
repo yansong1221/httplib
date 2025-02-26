@@ -1,4 +1,5 @@
 #pragma once
+#include "httplib/body/impl/compressor.hpp"
 
 namespace httplib::body
 {
@@ -140,12 +141,34 @@ template<bool isRequest, class Fields>
 any_body::writer::writer(http::header<isRequest, Fields>& h, value_type& b)
 {
     proxy_ = b.create_proxy_writer(h);
+    compressor_ = compressor::create(compressor::mode::encode, h[http::field::content_encoding]);
 }
 void any_body::writer::init(boost::system::error_code& ec) { proxy_->init(ec); }
 
-boost::optional<std::pair<httplib::body::any_body::writer::const_buffers_type, bool>> any_body::writer::get(
+boost::optional<std::pair<any_body::writer::const_buffers_type, bool>> any_body::writer::get(
     boost::system::error_code& ec)
 {
+    if (compressor_)
+    {
+        compressor_->consume();
+        bool more = false;
+        while (compressor_->buffer().size() == 0)
+        {
+            auto result = proxy_->get(ec);
+            if (!result)
+            {
+                break;
+            }
+            more = result->second;
+            compressor_->write(result->first, result->second);
+        }
+
+        auto decompressor = compressor::create(compressor::mode::decode, "gzip");
+        decompressor->write(compressor_->buffer(), false);
+
+        return {{compressor_->buffer(), more}};
+    }
+
     return proxy_->get(ec);
 }
 
@@ -163,7 +186,7 @@ any_body::reader::reader(http::header<isRequest, Fields>& h, value_type& b)
     }
     else
     {
-        proxy_ = b.create_proxy_reader<http::string_body>(h);
+        proxy_ = b.create_proxy_reader<string_body>(h);
     }
 }
 void any_body::reader::init(boost::optional<std::uint64_t> const& content_length, boost::system::error_code& ec)
