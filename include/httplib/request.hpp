@@ -1,5 +1,8 @@
 #pragma once
-#include "variant_message.hpp"
+#include "httplib/body/any_body.hpp"
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/beast/http/message.hpp>
+#include <regex>
 
 namespace httplib
 {
@@ -13,8 +16,8 @@ struct request : public http::request<body::any_body>
 public:
     std::unordered_map<std::string, std::string> params;
     std::smatch matches;
-    net::ip::tcp::endpoint local_endpoint;
-    net::ip::tcp::endpoint remote_endpoint;
+    tcp::endpoint local_endpoint;
+    tcp::endpoint remote_endpoint;
 };
 
 

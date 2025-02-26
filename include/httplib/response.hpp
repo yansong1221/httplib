@@ -1,7 +1,8 @@
 #pragma once
 #include "httplib/html.hpp"
 #include "httplib/form_data.hpp"
-#include "variant_message.hpp"
+#include "httplib/body/any_body.hpp"
+#include <boost/beast/http/message.hpp>
 #include <filesystem>
 
 namespace httplib

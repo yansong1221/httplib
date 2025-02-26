@@ -3,7 +3,6 @@
 #include "httplib/html.hpp"
 #include "httplib/http_handler.hpp"
 #include "httplib/util/type_traits.h"
-#include "httplib/variant_message.hpp"
 #include "radix_tree.hpp"
 #include <boost/algorithm/string.hpp>
 #include <boost/beast/version.hpp>

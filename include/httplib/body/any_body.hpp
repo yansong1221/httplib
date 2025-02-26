@@ -1,15 +1,16 @@
 #pragma once
-#include "empty_body.hpp"
-#include "file_body.hpp"
-#include "form_data_body.hpp"
+#include "httplib/body/empty_body.hpp"
+#include "httplib/body/compressor.hpp"
+#include "httplib/body/file_body.hpp"
+#include "httplib/body/form_data_body.hpp"
+#include "httplib/body/json_body.hpp"
+#include "httplib/body/string_body.hpp"
 #include "httplib/config.hpp"
-#include "json_body.hpp"
-#include "string_body.hpp"
 #include <boost/beast/http/message.hpp>
 
 namespace httplib::body
 {
-class compressor;
+
 struct any_body
 {
     class writer;
@@ -40,9 +41,9 @@ struct any_body
         }
 
     private:
-        inline std::unique_ptr<proxy_writer> create_proxy_writer(http::fields& h);
+        std::unique_ptr<proxy_writer> create_proxy_writer(http::fields& h);
         template<class Body>
-        inline std::unique_ptr<proxy_reader> create_proxy_reader(http::fields& h);
+        std::unique_ptr<proxy_reader> create_proxy_reader(http::fields& h);
         friend class any_body::writer;
         friend class any_body::reader;
     };
@@ -57,11 +58,13 @@ struct any_body
     public:
         template<bool isRequest, class Fields>
         writer(http::header<isRequest, Fields>& h, value_type& b);
+        ~writer();
 
         void init(boost::system::error_code& ec);
         boost::optional<std::pair<const_buffers_type, bool>> get(boost::system::error_code& ec);
 
     private:
+        std::string content_encoding_;
         std::unique_ptr<proxy_writer> proxy_;
         std::unique_ptr<compressor> compressor_;
     };
@@ -75,6 +78,7 @@ struct any_body
     public:
         template<bool isRequest, class Fields>
         reader(http::header<isRequest, Fields>& h, value_type& b);
+        ~reader();
 
         void init(boost::optional<std::uint64_t> const& content_length, boost::system::error_code& ec);
         std::size_t put(const_buffers_type const& buffers, boost::system::error_code& ec);
@@ -88,4 +92,4 @@ struct any_body
 
 } // namespace httplib::body
 
-#include "httplib/body/impl/any_body.hpp"
+#include "httplib/body/any_body.inl"

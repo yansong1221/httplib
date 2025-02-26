@@ -1,6 +1,4 @@
 #pragma once
-#include "httplib/body/impl/compressor.hpp"
-
 namespace httplib::body
 {
 
@@ -45,9 +43,7 @@ template<class Body>
 class impl_proxy_writer : public any_body::proxy_writer
 {
 public:
-    impl_proxy_writer(http::fields& h, typename Body::value_type& b) : writer_(h, b)
-    {
-    }
+    impl_proxy_writer(http::fields& h, typename Body::value_type& b) : writer_(h, b) { }
     void init(boost::system::error_code& ec) override { writer_.init(ec); };
     boost::optional<std::pair<any_body::writer::const_buffers_type, bool>> get(boost::system::error_code& ec) override
     {
@@ -63,9 +59,7 @@ template<class Body>
 class impl_proxy_reader : public any_body::proxy_reader
 {
 public:
-    impl_proxy_reader(http::fields& h, typename Body::value_type& b) : reader_(h, b)
-    {
-    }
+    impl_proxy_reader(http::fields& h, typename Body::value_type& b) : reader_(h, b) { }
     void init(boost::optional<std::uint64_t> const& content_length, boost::system::error_code& ec) override
     {
         reader_.init(content_length, ec);
@@ -97,8 +91,7 @@ bool any_body::variant_value<Bodies...>::is_body_type() const
 }
 
 template<typename... Bodies>
-std::unique_ptr<any_body::proxy_writer> any_body::variant_value<Bodies...>::create_proxy_writer(
-    http::fields& h)
+std::unique_ptr<any_body::proxy_writer> any_body::variant_value<Bodies...>::create_proxy_writer(http::fields& h)
 {
     return std::visit(
         [&](auto& t) -> std::unique_ptr<proxy_writer>
@@ -136,8 +129,9 @@ std::unique_ptr<any_body::proxy_reader> any_body::variant_value<Bodies...>::crea
 template<bool isRequest, class Fields>
 any_body::writer::writer(http::header<isRequest, Fields>& h, value_type& b)
 {
+    content_encoding_ = h[http::field::content_encoding];
     proxy_ = b.create_proxy_writer(h);
-    compressor_ = compressor::create(compressor::mode::encode, h[http::field::content_encoding]);
+    
 }
 
 template<bool isRequest, class Fields>

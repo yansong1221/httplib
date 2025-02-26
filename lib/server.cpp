@@ -162,12 +162,12 @@ public:
             for (;;)
             {
                 boost::system::error_code ec;
-                http::request_parser<body::any_body> header_parser;
-                header_parser.body_limit(std::numeric_limits<unsigned long long>::max());
-                while (!header_parser.is_header_done())
+                http::request_parser<body::any_body> req_parser;
+                req_parser.body_limit(std::numeric_limits<unsigned long long>::max());
+                while (!req_parser.is_header_done())
                 {
                     http_variant_stream->expires_after(timeout_);
-                    co_await http::async_read_some(*http_variant_stream, buffer, header_parser, net_awaitable[ec]);
+                    co_await http::async_read_some(*http_variant_stream, buffer, req_parser, net_awaitable[ec]);
                     http_variant_stream->expires_never();
                     if (ec)
                     {
@@ -176,26 +176,26 @@ public:
                     }
                 }
 
-                const auto& header = header_parser.get();
+                const auto& header = req_parser.get();
 
                 // websocket
                 if (websocket::is_upgrade(header))
                 {
-                    co_await handle_websocket(std::move(*http_variant_stream), header_parser.release());
+                    co_await handle_websocket(std::move(*http_variant_stream), req_parser.release());
                     co_return;
                 }
                 // http proxy
                 else if (header.method() == http::verb::connect)
                 {
-                    co_await handle_connect(std::move(*http_variant_stream), header_parser.release());
+                    co_await handle_connect(std::move(*http_variant_stream), req_parser.release());
                     co_return;
                 }
                 httplib::response resp;
                 resp.result(http::status::not_found);
-                resp.version(header_parser.get().version());
+                resp.version(header.version());
                 resp.set(http::field::server, BOOST_BEAST_VERSION_STRING);
                 resp.set(http::field::date, html::format_http_current_gmt_date());
-                resp.keep_alive(header_parser.get().keep_alive());
+                resp.keep_alive(header.keep_alive());
 
                 httplib::request req;
                 if (router_.has_handler(header.method(), header.target()))
@@ -205,14 +205,14 @@ public:
                         case http::verb::get:
                         case http::verb::head:
                         case http::verb::trace:
-                        case http::verb::connect: req = header_parser.release(); break;
+                        case http::verb::connect: req = req_parser.release(); break;
                         default:
                         {
-                            while (!header_parser.is_done())
+                            while (!req_parser.is_done())
                             {
                                 http_variant_stream->expires_after(timeout_);
                                 co_await http::async_read_some(
-                                    *http_variant_stream, buffer, header_parser, net_awaitable[ec]);
+                                    *http_variant_stream, buffer, req_parser, net_awaitable[ec]);
                                 http_variant_stream->expires_never();
                                 if (ec)
                                 {
