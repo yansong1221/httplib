@@ -3,7 +3,7 @@
 #include "httplib/form_data.hpp"
 #include <boost/algorithm/string/trim.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
-#include <boost/beast/http/message.hpp>
+#include <boost/beast/http/fields.hpp>
 
 namespace httplib::body
 {
@@ -18,15 +18,11 @@ public:
     public:
         using const_buffers_type = net::const_buffer;
 
-        
+
         writer(http::fields const& h, value_type& b);
 
-        void init(boost::system::error_code& ec)
-        {
-            ec.clear();
-            field_data_index_ = 0;
-        }
-        inline boost::optional<std::pair<const_buffers_type, bool>> get(boost::system::error_code& ec);
+        void init(boost::system::error_code& ec);
+        boost::optional<std::pair<const_buffers_type, bool>> get(boost::system::error_code& ec);
 
     private:
         value_type& body_;
@@ -52,22 +48,15 @@ public:
 
         reader(http::fields const& h, value_type& b);
 
-        inline void init(boost::optional<std::uint64_t> const& content_length, boost::system::error_code& ec);
+        void init(boost::optional<std::uint64_t> const& content_length, boost::system::error_code& ec);
 
-        inline std::size_t put(const_buffers_type const& buffers, boost::system::error_code& ec);
+        std::size_t put(const_buffers_type const& buffers, boost::system::error_code& ec);
 
-        void finish(boost::system::error_code& ec)
-        {
-            ec.clear();
-            if (step_ != step::eof)
-            {
-                ec = http::error::partial_message;
-            }
-        }
+        void finish(boost::system::error_code& ec);
 
     private:
         value_type& body_;
-        std::string_view content_type_;
+        std::string content_type_;
         std::string boundary_;
         enum class step
         {
@@ -82,5 +71,3 @@ public:
     };
 };
 } // namespace httplib::body
-
-#include "httplib/body/impl/form_data_body.hpp"

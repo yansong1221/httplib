@@ -1,4 +1,5 @@
-#pragma once
+#include "httplib/body/form_data_body.hpp"
+
 #include "httplib/html.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/string.hpp"
@@ -10,10 +11,7 @@ namespace httplib::body
 {
 using namespace std::string_view_literals;
 
-template<bool isRequest, class Fields>
-form_data_body::writer::writer(http::header<isRequest, Fields>& h, value_type& b) : body_(b)
-{
-}
+form_data_body::writer::writer(http::fields const&, value_type& b) : body_(b) { }
 
 boost::optional<std::pair<form_data_body::writer::const_buffers_type, bool>> form_data_body::writer::get(
     boost::system::error_code& ec)
@@ -79,8 +77,13 @@ boost::optional<std::pair<form_data_body::writer::const_buffers_type, bool>> for
     return boost::none;
 }
 
-template<bool isRequest, class Fields>
-form_data_body::reader::reader(http::header<isRequest, Fields>& h, value_type& b) : body_(b)
+void form_data_body::writer::init(boost::system::error_code& ec)
+{
+    ec.clear();
+    field_data_index_ = 0;
+}
+
+form_data_body::reader::reader(http::fields const& h, value_type& b) : body_(b)
 {
     content_type_ = h[http::field::content_type];
 }
@@ -252,4 +255,14 @@ std::size_t form_data_body::reader::put(const_buffers_type const& buffers, boost
     ec = http::error::unexpected_body;
     return 0;
 }
+
+void form_data_body::reader::finish(boost::system::error_code& ec)
+{
+    ec.clear();
+    if (step_ != step::eof)
+    {
+        ec = http::error::partial_message;
+    }
+}
+
 } // namespace httplib::body
