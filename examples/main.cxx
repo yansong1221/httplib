@@ -19,8 +19,8 @@ struct log_t
     bool after(httplib::request& req, httplib::response& res)
     {
         auto span = std::chrono::steady_clock::now() - start_;
-        std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(span).count() << std::endl;
-        return true;
+        std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(span).count() << std::endl; 
+        return true; 
     }
 
 private:
@@ -39,7 +39,7 @@ int main()
         [](httplib::websocket_conn::weak_ptr hdl, httplib::websocket_conn::message msg) -> boost::asio::awaitable<void>
         {
             auto conn = hdl.lock();
-            conn->send_message(msg);
+            conn->send_message(msg); 
             co_return;
         });
 
@@ -60,7 +60,7 @@ int main()
         "/json",
         [](httplib::request& req, httplib::response& resp) -> httplib::net::awaitable<void>
         {
-            auto& doc = std::get<httplib::body::json_body::value_type>(req.body());
+            auto& doc = std::get<httplib::body::json_body::value_type>(req.body()); 
 
             /*           const auto &obj = doc.get_object();
             for (const auto &item : obj.at("statuses").as_array()) {

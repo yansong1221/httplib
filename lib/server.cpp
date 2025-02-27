@@ -6,8 +6,9 @@
 #include "httplib/request.hpp"
 #include "httplib/response.hpp"
 #include "httplib/router.hpp"
-#include "httplib/stream/http_stream.hpp"
+#include "stream/http_stream.hpp"
 #include "proxy_conn.hpp"
+#include "websocket_conn_impl.hpp"
 #include <boost/asio/thread_pool.hpp>
 #include <boost/beast/core/detect_ssl.hpp>
 #include <boost/beast/http/serializer.hpp>
@@ -48,7 +49,7 @@ public:
     std::chrono::steady_clock::duration timeout_ = 30s;
 
 
-#ifdef HTTLIP_ENABLED_SSL
+#ifdef HTTLIB_ENABLED_SSL
     std::shared_ptr<ssl::context> create_ssl_context()
     {
         try
@@ -77,35 +78,34 @@ public:
     net::awaitable<std::optional<http_variant_stream_type>> async_create_http_variant_stream(tcp::socket&& sock,
                                                                                              beast::flat_buffer& buffer)
     {
-        http_stream normal_stream(std::move(sock));
-#ifndef HTTLIP_ENABLED_SSL
-        return std::move(normal_stream);
+        http_stream no_ssl_stream(std::move(sock));
+#ifndef HTTLIB_ENABLED_SSL
+        co_return std::move(no_ssl_stream);
 #else
         boost::system::error_code ec;
-        normal_stream.expires_after(timeout_);
-        bool is_ssl = co_await beast::async_detect_ssl(normal_stream, buffer, net_awaitable[ec]);
+        no_ssl_stream.expires_after(timeout_);
+        bool is_ssl = co_await beast::async_detect_ssl(no_ssl_stream, buffer, net_awaitable[ec]);
         if (ec)
         {
             logger_->error("async_detect_ssl failed: {}", ec.message());
             co_return std::nullopt;
         }
-        if (is_ssl)
-        {
-            auto ssl_ctx = create_ssl_context();
-            if (!ssl_ctx) co_return std::nullopt;
+        if (!is_ssl) co_return std::move(no_ssl_stream);
 
-            ssl_http_stream ssl_stream(std::move(normal_stream), ssl_ctx);
-            auto bytes_used =
-                co_await ssl_stream.async_handshake(ssl::stream_base::server, buffer.data(), net_awaitable[ec]);
-            if (ec)
-            {
-                logger_->error("ssl handshake failed: {}", ec.message());
-                co_return std::nullopt;
-            }
-            buffer.consume(bytes_used);
-            co_return std::move(ssl_stream);
+        auto ssl_ctx = create_ssl_context();
+        if (!ssl_ctx) co_return std::nullopt;
+
+        ssl_http_stream use_ssl_stream(std::move(no_ssl_stream), ssl_ctx);
+        auto bytes_used =
+            co_await use_ssl_stream.async_handshake(ssl::stream_base::server, buffer.data(), net_awaitable[ec]);
+        if (ec)
+        {
+            logger_->error("ssl handshake failed: {}", ec.message());
+            co_return std::nullopt;
         }
-        co_return std::move(normal_stream);
+        buffer.consume(bytes_used);
+        co_return std::move(use_ssl_stream);
+
 #endif
     }
     void listen(std::string_view host, uint16_t port, int backlog)
@@ -144,7 +144,7 @@ public:
         }
     }
 
-    net::awaitable<void> do_session(tcp::socket sock)
+    net::awaitable<void> do_session(tcp::socket&& sock)
     {
         try
         {
@@ -155,9 +155,6 @@ public:
 
             auto http_variant_stream = co_await async_create_http_variant_stream(std::move(sock), buffer);
             if (!http_variant_stream) co_return;
-
-            // http_variant_stream->rate_policy().read_limit(10240);
-            // http_variant_stream->rate_policy().write_limit(10240);
 
             for (;;)
             {
@@ -228,8 +225,7 @@ public:
                     req.remote_endpoint = remote_endpoint;
                     co_await router_.routing(req, resp);
                 }
-                auto accept_encoding = util::split(req[http::field::accept_encoding], ",");
-                for (const auto& encoding : accept_encoding)
+                /*for (const auto& encoding : util::split(req[http::field::accept_encoding], ","))
                 {
                     if (encoding == "gzip")
                     {
@@ -237,7 +233,7 @@ public:
                         resp.chunked(true);
                         break;
                     }
-                }
+                }*/
 
                 if (!resp.has_content_length()) resp.prepare_payload();
 
@@ -247,10 +243,6 @@ public:
                     logger_->trace("write http body failed: {}", ec.message());
                     co_return;
                 }
-
-
-                // co_await http::async_write(*http_variant_stream, serializer, net_awaitable[ec]);
-                // if (ec) co_return;
 
                 if (!resp.keep_alive())
                 {
@@ -299,9 +291,9 @@ public:
     }
 
     net::awaitable<void> handle_websocket(http_variant_stream_type http_variant_stream,
-                                          http::request<body::any_body> req)
+                                          request req)
     {
-        auto conn = std::make_shared<httplib::websocket_conn>(logger_, std::move(http_variant_stream));
+        auto conn = std::make_shared<httplib::websocket_conn_impl>(logger_, std::move(http_variant_stream));
         conn->set_open_handler(websocket_open_handler_);
         conn->set_close_handler(websocket_close_handler_);
         conn->set_message_handler(websocket_message_handler_);

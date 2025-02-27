@@ -25,4 +25,4 @@ if (MSVC)
     target_compile_options(${MOUDLE} PRIVATE /bigobj)
 endif()
 
-target_compile_definitions(${MOUDLE} PUBLIC HTTLIP_ENABLED_SSL)
+target_compile_definitions(${MOUDLE} PUBLIC HTTLIB_ENABLED_SSL)
