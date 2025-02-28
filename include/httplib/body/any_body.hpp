@@ -11,9 +11,28 @@ namespace httplib::body
 {
 struct any_body
 {
+
+     // 辅助模板：匹配 body_value_type 对应的 Body 类型
+    template<typename T, typename... Bodies>
+    struct match_body;
+
+    template<typename T, typename Body, typename... Bodies>
+    struct match_body<T, Body, Bodies...>
+    {
+        using type = std::
+            conditional_t<std::is_same_v<T, typename Body::value_type>, Body, typename match_body<T, Bodies...>::type>;
+    };
+
+    template<typename T>
+    struct match_body<T>
+    {
+        using type = void; // 无匹配时返回 void
+    };
+
     template<typename... Bodies>
     class variant_value : public std::variant<typename Bodies::value_type...>
     {
+    public:
         using std::variant<typename Bodies::value_type...>::variant;
 
     public:
@@ -35,12 +54,16 @@ struct any_body
         template<class Body>
         typename Body::value_type& as() &
         {
+            using body_type = typename match_body<typename Body::value_type, Bodies...>::type;
+            static_assert(!std::is_void_v<body_type>, "No matching Body type found");
             return std::get<typename Body::value_type>(*this);
         }
 
         template<class Body>
         const typename Body::value_type& as() const&
         {
+            using body_type = typename match_body<typename Body::value_type, Bodies...>::type;
+            static_assert(!std::is_void_v<body_type>, "No matching Body type found");
             return std::get<typename Body::value_type>(*this);
         }
     };

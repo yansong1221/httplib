@@ -6,22 +6,6 @@ namespace httplib::body
 {
 namespace detail
 {
-// 辅助模板：匹配 body_value_type 对应的 Body 类型
-template<typename T, typename... Bodies>
-struct match_body;
-
-template<typename T, typename Body, typename... Bodies>
-struct match_body<T, Body, Bodies...>
-{
-    using type =
-        std::conditional_t<std::is_same_v<T, typename Body::value_type>, Body, typename match_body<T, Bodies...>::type>;
-};
-
-template<typename T>
-struct match_body<T>
-{
-    using type = void; // 无匹配时返回 void
-};
 
 class proxy_writer
 {
@@ -121,7 +105,7 @@ private:
             {
                 using value_type = std::decay_t<decltype(t)>;
                 // 提取匹配的 Body 类型
-                using body_type = typename detail::match_body<value_type, Bodies...>::type;
+                using body_type = typename any_body::match_body<value_type, Bodies...>::type;
                 static_assert(!std::is_void_v<body_type>, "No matching Body type found");
 
                 return std::make_unique<detail::impl_proxy_writer<body_type>>(h, t);

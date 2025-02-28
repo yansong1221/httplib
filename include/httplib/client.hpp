@@ -18,6 +18,8 @@ public:
         step,
         never
     };
+    using response = http::response<body::any_body>;
+    using request = http::request<body::any_body>;
 
 public:
     explicit client(net::io_context& ex, std::string_view host, uint16_t port);
@@ -30,20 +32,18 @@ public:
     void set_use_ssl(bool ssl);
 
 public:
-    net::awaitable<http::response<body::any_body>> async_get(std::string_view path,
-                                                             const http::fields& headers = http::fields());
+    net::awaitable<response> async_get(std::string_view path, const http::fields& headers = http::fields());
 
-    net::awaitable<http::response<body::any_body>> async_send_request(http::request<body::any_body>& req);
+    net::awaitable<response> async_send_request(request& req);
 
-    net::awaitable<http::response<body::any_body>> async_head(std::string_view path,
-                                                              const http::fields& headers = http::fields());
+    net::awaitable<response> async_head(std::string_view path, const http::fields& headers = http::fields());
 
 
-    net::awaitable<http::response<body::any_body>> async_post(std::string_view path,
-                                                              std::string_view body,
-                                                              const http::fields& headers = http::fields());
+    net::awaitable<response> async_post(std::string_view path,
+                                        std::string_view body,
+                                        const http::fields& headers = http::fields());
 
-    http::response<body::any_body> get(std::string_view path, const http::fields& headers = http::fields());
+    response get(std::string_view path, const http::fields& headers = http::fields());
 
     void close();
     bool is_connected();

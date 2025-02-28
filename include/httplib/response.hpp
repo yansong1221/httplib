@@ -1,7 +1,7 @@
 #pragma once
-#include "httplib/html.hpp"
-#include "httplib/form_data.hpp"
 #include "httplib/body/any_body.hpp"
+#include "httplib/form_data.hpp"
+#include "httplib/html.hpp"
 #include <boost/beast/http/message.hpp>
 #include <filesystem>
 
@@ -11,6 +11,8 @@ namespace httplib
 struct response : public http::response<body::any_body>
 {
     using http::response<body::any_body>::message;
+
+    response(http::response<body::any_body>&& other) { http::response<body::any_body>::operator=(std::move(other)); }
 
 public:
     void set_empty_content(http::status status);

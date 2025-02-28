@@ -4,6 +4,7 @@
 #include "httplib/response.hpp"
 #include "httplib/router.hpp"
 #include "httplib/server.hpp"
+#include <boost/beast/http/empty_body.hpp>
 #include <filesystem>
 #include <format>
 #include <iostream>
@@ -75,16 +76,16 @@ int main()
             co_return;
         },
         log_t {});
-    // router.set_default_handler(
-    //     [](httplib::request& req, httplib::response& resp) -> httplib::net::awaitable<void>
-    //     {
-    //         // httplib::client cli(co_await httplib::net::this_coro::executor, "www.jsonin.com", 80);
-    //         // cli.set_use_ssl(false);
-    //         // resp = co_await cli.async_get("/");
+    router.set_default_handler(
+        [](httplib::request& req, httplib::response& resp) -> httplib::net::awaitable<void>
+        {
+            httplib::client cli(co_await httplib::net::this_coro::executor, "www.jsonin.com", 80);
+            cli.set_use_ssl(false);
+            resp = co_await cli.async_get("/");
 
-    //        resp.set_string_content("hello"sv, "text/html");
-    //        co_return;
-    //    });
+            // resp.set_string_content("hello"sv, "text/html");
+            co_return;
+        });
     // svr.set_http_handler<httplib::http::verb::post, httplib::http::verb::get>(
     //     "/hello/:w",
     //     [](httplib::request &req, httplib::response &resp) {
