@@ -6,8 +6,8 @@
 #include "httplib/request.hpp"
 #include "httplib/response.hpp"
 #include "httplib/router.hpp"
-#include "stream/http_stream.hpp"
 #include "proxy_conn.hpp"
+#include "stream/http_stream.hpp"
 #include "websocket_conn_impl.hpp"
 #include <boost/asio/thread_pool.hpp>
 #include <boost/beast/core/detect_ssl.hpp>
@@ -31,8 +31,6 @@ public:
         : pool_(num_threads), acceptor_(pool_), logger_(spdlog::stdout_color_mt("httplib.server")), router_(logger_)
     {
         logger_->set_level(spdlog::level::trace);
-        ssl_config_ = ssl_config {R"(D:\code\http\lib\server.crt)", R"(D:\code\http\lib\server.key)", "test"};
-        // ssl_config_ = ssl_config{};
     }
 
 public:
@@ -225,7 +223,7 @@ public:
                     req.remote_endpoint = remote_endpoint;
                     co_await router_.routing(req, resp);
                 }
-                /*for (const auto& encoding : util::split(req[http::field::accept_encoding], ","))
+                for (const auto& encoding : util::split(req[http::field::accept_encoding], ","))
                 {
                     if (encoding == "gzip")
                     {
@@ -233,7 +231,7 @@ public:
                         resp.chunked(true);
                         break;
                     }
-                }*/
+                }
 
                 if (!resp.has_content_length()) resp.prepare_payload();
 
@@ -290,8 +288,7 @@ public:
         co_return;
     }
 
-    net::awaitable<void> handle_websocket(http_variant_stream_type http_variant_stream,
-                                          request req)
+    net::awaitable<void> handle_websocket(http_variant_stream_type http_variant_stream, request req)
     {
         auto conn = std::make_shared<httplib::websocket_conn_impl>(logger_, std::move(http_variant_stream));
         conn->set_open_handler(websocket_open_handler_);
@@ -305,19 +302,17 @@ public:
 server::server(uint32_t num_threads /*= std::thread::hardware_concurrency()*/)
     : impl_(std::make_shared<impl>(num_threads))
 {
-    // ssl_config_ = ssl_config{};
 }
 
-server::~server()
-{
-    // delete impl_;
-}
+server::~server() { }
 
 net::any_io_executor server::get_executor() noexcept { return impl_->pool_.get_executor(); }
 
 std::shared_ptr<spdlog::logger> server::get_logger() noexcept { return impl_->logger_; }
 
 void server::set_logger(std::shared_ptr<spdlog::logger> logger) { impl_->logger_ = logger; }
+
+void server::set_ssl_config(const ssl_config& config) { impl_->ssl_config_ = config; }
 
 server& server::listen(std::string_view host, uint16_t port, int backlog /*= net::socket_base::max_listen_connections*/)
 {

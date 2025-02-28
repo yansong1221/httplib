@@ -1,6 +1,5 @@
 #pragma once
 #include "httplib/body/empty_body.hpp"
-#include "httplib/body/compressor.hpp"
 #include "httplib/body/file_body.hpp"
 #include "httplib/body/form_data_body.hpp"
 #include "httplib/body/json_body.hpp"
@@ -10,15 +9,8 @@
 
 namespace httplib::body
 {
-
 struct any_body
 {
-    class writer;
-    class reader;
-
-    class proxy_writer;
-    class proxy_reader;
-
     template<typename... Bodies>
     class variant_value : public std::variant<typename Bodies::value_type...>
     {
@@ -26,7 +18,19 @@ struct any_body
 
     public:
         template<typename Body>
-        bool is_body_type() const;
+        bool is_body_type() const
+        {
+            return std::visit(
+                [](auto& t)
+                {
+                    using value_type = std::decay_t<decltype(t)>;
+                    if constexpr (std::same_as<typename Body::value_type, value_type>)
+                        return true;
+                    else
+                        return false;
+                },
+                *this);
+        }
 
         template<class Body>
         typename Body::value_type& as() &
@@ -39,13 +43,6 @@ struct any_body
         {
             return std::get<typename Body::value_type>(*this);
         }
-
-    private:
-        std::unique_ptr<proxy_writer> create_proxy_writer(http::fields& h);
-        template<class Body>
-        std::unique_ptr<proxy_reader> create_proxy_reader(http::fields& h);
-        friend class any_body::writer;
-        friend class any_body::reader;
     };
 
     using value_type = variant_value<empty_body, string_body, json_body, form_data_body, file_body>;
@@ -57,16 +54,19 @@ struct any_body
 
     public:
         template<bool isRequest, class Fields>
-        writer(http::header<isRequest, Fields>& h, value_type& b);
-        ~writer();
+        explicit writer(http::header<isRequest, Fields>& h, value_type& b) : header_(h), body_(b)
+        {
+        }
+        virtual ~writer();
 
         void init(boost::system::error_code& ec);
         boost::optional<std::pair<const_buffers_type, bool>> get(boost::system::error_code& ec);
 
     private:
-        std::string content_encoding_;
-        std::unique_ptr<proxy_writer> proxy_;
-        std::unique_ptr<compressor> compressor_;
+        http::fields& header_;
+        value_type& body_;
+        class impl;
+        impl* impl_ = nullptr;
     };
     //--------------------------------------------------------------------------
 
@@ -77,19 +77,23 @@ struct any_body
 
     public:
         template<bool isRequest, class Fields>
-        reader(http::header<isRequest, Fields>& h, value_type& b);
-        ~reader();
+        explicit reader(http::header<isRequest, Fields>& h, value_type& b) : header_(h), body_(b)
+        {
+        }
+
+        virtual ~reader();
 
         void init(boost::optional<std::uint64_t> const& content_length, boost::system::error_code& ec);
         std::size_t put(const_buffers_type const& buffers, boost::system::error_code& ec);
         void finish(boost::system::error_code& ec);
 
     private:
-        std::unique_ptr<proxy_reader> proxy_;
+        http::fields& header_;
+        value_type& body_;
+        class impl;
+        impl* impl_ = nullptr;
     };
 };
 
 
 } // namespace httplib::body
-
-#include "httplib/body/any_body.inl"

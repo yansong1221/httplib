@@ -26,6 +26,8 @@ public:
     std::shared_ptr<spdlog::logger> get_logger() noexcept;
     void set_logger(std::shared_ptr<spdlog::logger> logger);
 
+    void set_ssl_config(const ssl_config& config);
+
     server& listen(std::string_view host, uint16_t port, int backlog = net::socket_base::max_listen_connections);
     void run();
     void async_run();
