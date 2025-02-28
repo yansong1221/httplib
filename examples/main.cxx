@@ -63,7 +63,7 @@ int main()
         "/json",
         [](httplib::request& req, httplib::response& resp) -> httplib::net::awaitable<void>
         {
-            auto& doc = std::get<httplib::body::json_body::value_type>(req.body());
+            auto& doc = req.body().as<httplib::body::json_body>();
 
             /*           const auto &obj = doc.get_object();
             for (const auto &item : obj.at("statuses").as_array()) {

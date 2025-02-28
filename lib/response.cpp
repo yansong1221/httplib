@@ -5,6 +5,7 @@
 
 namespace httplib
 {
+
 void response::set_empty_content(http::status status)
 {
     result(status);

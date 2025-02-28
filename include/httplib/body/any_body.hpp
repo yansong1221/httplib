@@ -54,17 +54,16 @@ struct any_body
 
     public:
         template<bool isRequest, class Fields>
-        explicit writer(http::header<isRequest, Fields>& h, value_type& b) : header_(h), body_(b)
+        explicit writer(http::header<isRequest, Fields>& h, value_type& b) : writer(static_cast<http::fields&>(h), b)
         {
         }
+        explicit writer(http::fields& h, value_type& b);
         virtual ~writer();
 
         void init(boost::system::error_code& ec);
         boost::optional<std::pair<const_buffers_type, bool>> get(boost::system::error_code& ec);
 
     private:
-        http::fields& header_;
-        value_type& body_;
         class impl;
         impl* impl_ = nullptr;
     };
@@ -77,9 +76,10 @@ struct any_body
 
     public:
         template<bool isRequest, class Fields>
-        explicit reader(http::header<isRequest, Fields>& h, value_type& b) : header_(h), body_(b)
+        explicit reader(http::header<isRequest, Fields>& h, value_type& b) : reader(static_cast<http::fields&>(h), b)
         {
         }
+        explicit reader(http::fields& h, value_type& b);
 
         virtual ~reader();
 
@@ -88,8 +88,6 @@ struct any_body
         void finish(boost::system::error_code& ec);
 
     private:
-        http::fields& header_;
-        value_type& body_;
         class impl;
         impl* impl_ = nullptr;
     };

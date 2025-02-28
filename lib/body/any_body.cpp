@@ -77,47 +77,59 @@ private:
 };
 
 
-template<class Body>
-std::unique_ptr<proxy_reader> create_proxy_reader(http::fields& h, any_body::value_type& body)
-{
-    return std::visit(
-        [&](auto& t) mutable -> std::unique_ptr<proxy_reader>
-        {
-            using value_type = std::decay_t<decltype(t)>;
-            if constexpr (!std::same_as<value_type, typename Body::value_type>)
-            {
-                body = typename Body::value_type {};
-                return create_proxy_reader<Body>(h, body);
-            }
-            else
-            {
-                return std::make_unique<impl_proxy_reader<Body>>(h, t);
-            }
-        },
-        body);
-}
-template<typename... Bodies>
-std::unique_ptr<proxy_writer> create_proxy_writer(http::fields& h, any_body::variant_value<Bodies...>& body)
-{
-    return std::visit(
-        [&](auto& t) -> std::unique_ptr<proxy_writer>
-        {
-            using value_type = std::decay_t<decltype(t)>;
-            // 提取匹配的 Body 类型
-            using body_type = typename match_body<value_type, Bodies...>::type;
-            static_assert(!std::is_void_v<body_type>, "No matching Body type found");
-
-            return std::make_unique<impl_proxy_writer<body_type>>(h, t);
-        },
-        body);
-}
-
 } // namespace detail
 
 
 class any_body::writer::impl
 {
 public:
+    explicit impl(http::fields& header, any_body::value_type& body)
+        : proxy_(create_proxy_writer(header, body))
+        , compressor_(compressor::create(compressor::mode::encode, header[http::field::content_encoding]))
+    {
+    }
+    void init(boost::system::error_code& ec) { proxy_->init(ec); }
+    boost::optional<std::pair<any_body::writer::const_buffers_type, bool>> get(boost::system::error_code& ec)
+    {
+        if (!compressor_) return proxy_->get(ec);
+
+        compressor_->consume();
+        for (;;)
+        {
+            auto result = proxy_->get(ec);
+            if (!result || ec) return result;
+
+            if (!result)
+            {
+                compressor_->finish();
+                auto buffer = compressor_->buffer();
+                return {{buffer, false}};
+            }
+
+            compressor_->write(net::buffer(result->first), result->second);
+            auto buffer = compressor_->buffer();
+            if (buffer.size() != 0) return {{buffer, result->second}};
+        }
+    }
+
+private:
+    template<typename... Bodies>
+    std::unique_ptr<detail::proxy_writer> create_proxy_writer(http::fields& h, any_body::variant_value<Bodies...>& body)
+    {
+        return std::visit(
+            [&](auto& t) -> std::unique_ptr<detail::proxy_writer>
+            {
+                using value_type = std::decay_t<decltype(t)>;
+                // 提取匹配的 Body 类型
+                using body_type = typename detail::match_body<value_type, Bodies...>::type;
+                static_assert(!std::is_void_v<body_type>, "No matching Body type found");
+
+                return std::make_unique<detail::impl_proxy_writer<body_type>>(h, t);
+            },
+            body);
+    }
+
+private:
     std::unique_ptr<detail::proxy_writer> proxy_;
     std::unique_ptr<compressor> compressor_;
 };
@@ -125,74 +137,91 @@ public:
 class any_body::reader::impl
 {
 public:
+    impl(http::fields& header, any_body::value_type& body)
+        : compressor_(compressor::create(compressor::mode::decode, header[http::field::content_encoding]))
+    {
+        auto content_type = header[http::field::content_type];
+        if (content_type.starts_with("multipart/form-data"))
+        {
+            proxy_ = create_proxy_reader<form_data_body>(header, body);
+        }
+        else if (content_type.starts_with("application/json"))
+        {
+            proxy_ = create_proxy_reader<json_body>(header, body);
+        }
+        else
+        {
+            proxy_ = create_proxy_reader<string_body>(header, body);
+        }
+    }
+    void init(boost::optional<std::uint64_t> const& content_length, boost::system::error_code& ec)
+    {
+        proxy_->init(content_length, ec);
+    }
+    std::size_t put(const_buffers_type const& buffers, boost::system::error_code& ec)
+    {
+        if (!compressor_) return proxy_->put(buffers, ec);
+
+        compressor_->write(buffers);
+
+        auto decoded_buffer = compressor_->buffer();
+        if (decoded_buffer.size() != 0)
+        {
+            auto bytes = proxy_->put(decoded_buffer, ec);
+            compressor_->consume(bytes);
+        }
+        return buffers.size();
+    }
+    void finish(boost::system::error_code& ec) { proxy_->finish(ec); }
+
+private:
+    template<class Body>
+    std::unique_ptr<detail::proxy_reader> create_proxy_reader(http::fields& h, any_body::value_type& body)
+    {
+        return std::visit(
+            [&](auto& t) mutable -> std::unique_ptr<detail::proxy_reader>
+            {
+                using value_type = std::decay_t<decltype(t)>;
+                if constexpr (!std::same_as<value_type, typename Body::value_type>)
+                {
+                    body = typename Body::value_type {};
+                    return create_proxy_reader<Body>(h, body);
+                }
+                else
+                {
+                    return std::make_unique<detail::impl_proxy_reader<Body>>(h, t);
+                }
+            },
+            body);
+    }
+
+private:
     std::unique_ptr<detail::proxy_reader> proxy_;
     std::unique_ptr<compressor> compressor_;
 };
 
-any_body::writer::~writer() { delete impl_; }
-void any_body::writer::init(boost::system::error_code& ec)
-{
-    auto proxy = detail::create_proxy_writer(header_, body_);
-    proxy->init(ec);
-    if (ec) return;
+any_body::writer::writer(http::fields& h, value_type& b) : impl_(new any_body::writer::impl(h, b)) { }
 
-    impl_ = new any_body::writer::impl();
-    impl_->proxy_ = std::move(proxy);
-    impl_->compressor_ = compressor::create(compressor::mode::encode, header_[http::field::content_encoding]);
-}
+any_body::writer::~writer() { delete impl_; }
+void any_body::writer::init(boost::system::error_code& ec) { impl_->init(ec); }
 
 boost::optional<std::pair<any_body::writer::const_buffers_type, bool>> any_body::writer::get(
     boost::system::error_code& ec)
 {
-    if (!impl_->compressor_) return impl_->proxy_->get(ec);
-
-    impl_->compressor_->consume();
-    for (;;)
-    {
-        auto result = impl_->proxy_->get(ec);
-        if (!result || ec) return result;
-
-        if (!result)
-        {
-            impl_->compressor_->finish();
-            auto buffer = impl_->compressor_->buffer();
-            return {{buffer, false}};
-        }
-
-        impl_->compressor_->write(net::buffer(result->first), result->second);
-        auto buffer = impl_->compressor_->buffer();
-        if (buffer.size() != 0) return {{buffer, result->second}};
-    }
+    return impl_->get(ec);
 }
 
+any_body::reader::reader(http::fields& h, value_type& b) : impl_(new any_body::reader::impl(h, b)) { }
 any_body::reader::~reader() { delete impl_; }
 void any_body::reader::init(boost::optional<std::uint64_t> const& content_length, boost::system::error_code& ec)
 {
-    impl_ = new any_body::reader::impl();
-    auto content_type = header_[http::field::content_type];
-    if (content_type.starts_with("multipart/form-data"))
-    {
-        impl_->proxy_ = detail::create_proxy_reader<form_data_body>(header_, body_);
-    }
-    else if (content_type.starts_with("application/json"))
-    {
-        impl_->proxy_ = detail::create_proxy_reader<json_body>(header_, body_);
-    }
-    else
-    {
-        impl_->proxy_ = detail::create_proxy_reader<string_body>(header_, body_);
-    }
-
-    return impl_->proxy_->init(content_length, ec);
+    impl_->init(content_length, ec);
 }
 std::size_t any_body::reader::put(const_buffers_type const& buffers, boost::system::error_code& ec)
 {
-    return impl_->proxy_->put(buffers, ec);
+    return impl_->put(buffers, ec);
 }
-void any_body::reader::finish(boost::system::error_code& ec)
-{
-    if (impl_) return impl_->proxy_->finish(ec);
-}
+void any_body::reader::finish(boost::system::error_code& ec) { impl_->finish(ec); }
 
 
 } // namespace httplib::body

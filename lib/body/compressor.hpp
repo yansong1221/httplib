@@ -1,9 +1,10 @@
 #pragma once
 #include "httplib/config.hpp"
 #include <boost/asio/streambuf.hpp>
-#include <boost/iostreams/filtering_stream.hpp>
-#include <boost/iostreams/filter/zlib.hpp>
 #include <boost/iostreams/filter/gzip.hpp>
+#include <boost/iostreams/filter/zlib.hpp>
+#include <boost/iostreams/filter/zstd.hpp>
+#include <boost/iostreams/filtering_stream.hpp>
 
 namespace httplib::body
 {
@@ -15,7 +16,8 @@ public:
     enum class type
     {
         deflate,
-        gzip
+        gzip,
+        zstd
     };
     enum class mode
     {
@@ -30,6 +32,7 @@ public:
             {
                 case type::gzip: stream_.push(io::gzip_compressor()); break;
                 case type::deflate: stream_.push(io::zlib_compressor()); break;
+                case type::zstd: stream_.push(io::zstd_compressor()); break;
             }
         }
         else if (m == mode::decode)
@@ -38,6 +41,7 @@ public:
             {
                 case type::gzip: stream_.push(io::gzip_decompressor()); break;
                 case type::deflate: stream_.push(io::zlib_decompressor()); break;
+                case type::zstd: stream_.push(io::zstd_decompressor()); break;
             }
         }
         stream_.push(buffer_);
@@ -54,6 +58,7 @@ public:
     }
     void finish() { io::close(stream_); }
     void consume() { buffer_.consume(buffer_.size()); }
+    void consume(std::size_t bytes) { buffer_.consume(bytes); }
 
 public:
     static std::unique_ptr<compressor> create(compressor::mode m, const std::string_view encoding)
@@ -65,6 +70,10 @@ public:
         else if (encoding == "deflate")
         {
             return std::make_unique<compressor>(m, compressor::type::deflate);
+        }
+        else if (encoding == "zstd")
+        {
+            return std::make_unique<compressor>(m, compressor::type::zstd);
         }
         return nullptr;
     }

@@ -157,12 +157,12 @@ public:
             for (;;)
             {
                 boost::system::error_code ec;
-                http::request_parser<body::any_body> req_parser;
-                req_parser.body_limit(std::numeric_limits<unsigned long long>::max());
-                while (!req_parser.is_header_done())
+                http::request_parser<http::empty_body> header_parser;
+                header_parser.body_limit(std::numeric_limits<unsigned long long>::max());
+                while (!header_parser.is_header_done())
                 {
                     http_variant_stream->expires_after(timeout_);
-                    co_await http::async_read_some(*http_variant_stream, buffer, req_parser, net_awaitable[ec]);
+                    co_await http::async_read_some(*http_variant_stream, buffer, header_parser, net_awaitable[ec]);
                     http_variant_stream->expires_never();
                     if (ec)
                     {
@@ -171,18 +171,20 @@ public:
                     }
                 }
 
-                const auto& header = req_parser.get();
+                const auto& header = header_parser.get();
 
                 // websocket
                 if (websocket::is_upgrade(header))
                 {
-                    co_await handle_websocket(std::move(*http_variant_stream), req_parser.release());
+                    request req(header_parser.release());
+                    co_await handle_websocket(std::move(*http_variant_stream), std::move(req));
                     co_return;
                 }
                 // http proxy
                 else if (header.method() == http::verb::connect)
                 {
-                    co_await handle_connect(std::move(*http_variant_stream), req_parser.release());
+                    request req(header_parser.release());
+                    co_await handle_connect(std::move(*http_variant_stream), std::move(req));
                     co_return;
                 }
                 httplib::response resp;
@@ -200,14 +202,15 @@ public:
                         case http::verb::get:
                         case http::verb::head:
                         case http::verb::trace:
-                        case http::verb::connect: req = req_parser.release(); break;
+                        case http::verb::connect: req = httplib::request(header_parser.release()); break;
                         default:
                         {
-                            while (!req_parser.is_done())
+                            http::request_parser<body::any_body> body_parser(std::move(header_parser));
+                            while (!body_parser.is_done())
                             {
                                 http_variant_stream->expires_after(timeout_);
                                 co_await http::async_read_some(
-                                    *http_variant_stream, buffer, req_parser, net_awaitable[ec]);
+                                    *http_variant_stream, buffer, body_parser, net_awaitable[ec]);
                                 http_variant_stream->expires_never();
                                 if (ec)
                                 {
@@ -215,6 +218,7 @@ public:
                                     co_return;
                                 }
                             }
+                            req = body_parser.release();
                         }
                         break;
                     }
@@ -225,9 +229,9 @@ public:
                 }
                 for (const auto& encoding : util::split(req[http::field::accept_encoding], ","))
                 {
-                    if (encoding == "gzip")
+                    if (encoding == "gzip" || encoding == "deflate" || encoding == "zstd")
                     {
-                        resp.set(http::field::content_encoding, "gzip");
+                        resp.set(http::field::content_encoding, encoding);
                         resp.chunked(true);
                         break;
                     }
@@ -257,7 +261,7 @@ public:
             spdlog::error("do_session: {}", e.what());
         }
     }
-    net::awaitable<void> handle_connect(http_variant_stream_type http_variant_stream, http::request<body::any_body> req)
+    net::awaitable<void> handle_connect(http_variant_stream_type&& http_variant_stream, request&& req)
     {
         auto target = req.target();
         auto pos = target.find(":");
@@ -288,7 +292,7 @@ public:
         co_return;
     }
 
-    net::awaitable<void> handle_websocket(http_variant_stream_type http_variant_stream, request req)
+    net::awaitable<void> handle_websocket(http_variant_stream_type&& http_variant_stream, request&& req)
     {
         auto conn = std::make_shared<httplib::websocket_conn_impl>(logger_, std::move(http_variant_stream));
         conn->set_open_handler(websocket_open_handler_);
