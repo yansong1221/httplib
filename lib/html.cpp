@@ -1,18 +1,20 @@
 #pragma once
 #include "httplib/html.hpp"
 
+#include "httplib/util/misc.hpp"
 #include "httplib/util/string.hpp"
+#include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/replace.hpp>
 #include <boost/algorithm/string/trim.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/system/error_code.hpp>
 #include <boost/url/parse.hpp>
+#include <charconv>
 #include <chrono>
 #include <filesystem>
 #include <fmt/format.h>
 #include <random>
 #include <sstream>
-#include <charconv>
 
 namespace httplib::html
 {
@@ -220,10 +222,7 @@ std::time_t file_last_write_time(const fs::path& path, std::error_code& ec)
     return std::chrono::system_clock::to_time_t(sctp);
 }
 
-std::string format_http_current_gmt_date()
-{
-    return format_http_gmt_date(time(nullptr));
-}
+std::string format_http_current_gmt_date() { return format_http_gmt_date(time(nullptr)); }
 
 std::string format_http_gmt_date(const std::time_t& time)
 {
@@ -365,6 +364,43 @@ std::string generate_boundary()
     std::uniform_int_distribution<int> dist(100000, 999999);
 
     return "----------------" + std::to_string(millis) + std::to_string(dist(gen));
+}
+
+query_params parse_http_query_params(std::string_view content, bool& is_valid)
+{
+    is_valid = true;
+    if (content.empty()) return {};
+
+    query_params result;
+    for (const auto& item : util::split(content, "&"))
+    {
+        auto key_val = util::split(item, "=");
+
+        if (key_val.size() != 2)
+        {
+            is_valid = false;
+            return {};
+        }
+        auto key = util::url_decode(key_val[0]);
+        auto val = util::url_decode(key_val[1]);
+
+        result.emplace(key, val);
+    }
+    return result;
+}
+
+std::string make_http_query_params(const query_params& params)
+{
+    std::vector<std::string> tokens;
+    for (const auto& item : params)
+    {
+        auto token = util::url_encode(item.first);
+        token += "=";
+        token += util::url_encode(item.second);
+
+        tokens.push_back(token);
+    }
+    return boost::join(tokens, "&");
 }
 
 } // namespace httplib::html

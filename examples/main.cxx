@@ -76,6 +76,23 @@ int main()
             co_return;
         },
         log_t {});
+
+    router.set_http_handler<httplib::http::verb::post>(
+        "/x-www-from-urlencoded",
+        [](httplib::request& req, httplib::response& resp) -> httplib::net::awaitable<void>
+        {
+            auto& doc = req.body().as<httplib::body::query_params_body>();
+
+            /*           const auto &obj = doc.get_object();
+            for (const auto &item : obj.at("statuses").as_array()) {
+                std::string_view created_at = item.at("created_at").as_string();
+                resp.set_string_content(std::string(created_at), "text/html");
+                co_return;
+            }*/
+            resp.set_error_content(httplib::http::status::internal_server_error);
+            co_return;
+        },
+        log_t {});
     router.set_default_handler(
         [](httplib::request& req, httplib::response& resp) -> httplib::net::awaitable<void>
         {

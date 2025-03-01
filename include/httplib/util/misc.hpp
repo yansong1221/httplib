@@ -16,38 +16,12 @@ using boost::beast::bind_front_handler;
 using boost::beast::buffers_to_string;
 
 /**
- * Returns an std::string which represents the raw bytes of the file.
- *
- * @param path The path to the file.
- * @return The content of the file as it resides on the disk - byte by byte.
- */
-[[nodiscard]] static inline std::string file_contents(const std::filesystem::path& path)
-{
-    // Sanity check
-    if (!std::filesystem::is_regular_file(path)) return {};
-
-    // Open the file
-    // Note that we have to use binary mode as we want to return a string
-    // representing matching the bytes of the file on the file system.
-    std::ifstream file(path, std::ios::in | std::ios::binary);
-    if (!file.is_open()) return {};
-
-    // Read contents
-    std::string content {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
-
-    // Close the file
-    file.close();
-
-    return content;
-}
-
-/**
  * Convert a hex value to a decimal value.
  *
  * @param c The hexadecimal input.
  * @return The decimal output.
  */
-[[nodiscard]] static inline std::uint8_t hex2dec(std::uint8_t c)
+static inline std::uint8_t hex2dec(std::uint8_t c)
 {
     if (c >= '0' && c <= '9')
         c -= '0';
@@ -94,6 +68,31 @@ static inline std::string url_decode(std::string_view str)
     url_decode(decode_str);
     return decode_str;
 }
+static inline std::string url_encode(std::string_view value)
+{
+    std::ostringstream escaped;
+    escaped.fill('0');
+    escaped << std::hex;
+
+    for (char c : value)
+    {
+        if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
+        {
+            escaped << c;
+        }
+        else if (c == ' ')
+        {
+            escaped << '+';
+        }
+        else
+        {
+            escaped << '%' << std::setw(2) << int(static_cast<unsigned char>(c));
+        }
+    }
+
+    return escaped.str();
+}
+
 
 static auto parse_content_disposition(std::string_view header)
 {
@@ -106,12 +105,12 @@ static auto parse_content_disposition(std::string_view header)
         if (eq == std::string_view::npos) break;
 
         std::string_view key = header.substr(pos, eq - pos);
-        key = boost::trim_copy(key); // 去掉 key 的前后空格
+        key = boost::trim_copy(key);
         pos = eq + 1;
 
         std::string_view value;
         if (pos < header.size() && header[pos] == '"')
-        { // 处理双引号值
+        {
             pos++;
             size_t end = pos;
             bool escape = false;
@@ -132,22 +131,21 @@ static auto parse_content_disposition(std::string_view header)
                 end++;
             }
             value = header.substr(pos, end - pos);
-            pos = (end < header.size()) ? end + 1 : end; // 跳过 `"`
+            pos = (end < header.size()) ? end + 1 : end;
         }
         else
-        { // 处理非双引号值
+        {
             size_t end = header.find(';', pos);
             if (end == std::string_view::npos) end = header.size();
             value = header.substr(pos, end - pos);
-            value = boost::trim_copy(value); // 去掉 value 的前后空格
+            value = boost::trim_copy(value);
             pos = end;
         }
 
         results.emplace_back(key, value);
 
-        // 处理 `; ` 分隔符
         if (pos < header.size() && header[pos] == ';') pos++;
-        while (pos < header.size() && std::isspace(header[pos])) // 跳过空格
+        while (pos < header.size() && std::isspace(header[pos]))
             pos++;
     }
     return results;

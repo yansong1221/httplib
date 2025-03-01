@@ -93,8 +93,7 @@ public:
 
     net::awaitable<bool> handle_file_request(request& req, response& res)
     {
-        std::string decoded_target = util::url_decode(req.target());
-        std::string_view target(decoded_target);
+        std::string_view target(req.decoded_target);
         beast::error_code ec;
 
         for (const auto& entry : static_file_entry_)
@@ -150,13 +149,31 @@ public:
     net::awaitable<void> proc_routing_after(request& req, response& resp) { co_return; }
     net::awaitable<void> proc_routing(request& req, response& resp)
     {
+        auto tokens = util::split(req.target(), "?");
+        if (tokens.empty() || tokens.size() > 2)
+        {
+            resp.set_empty_content(http::status::bad_request);
+            co_return;
+        }
+        req.decoded_target = util::url_decode(tokens[0]);
+        if (tokens.size() >= 2)
+        {
+            bool is_valid = true;
+            req.query_params = html::parse_http_query_params(tokens[1], is_valid);
+            if (!is_valid)
+            {
+                resp.set_empty_content(http::status::bad_request);
+                co_return;
+            }
+        }
+
         if (req.method() == http::verb::get || req.method() == http::verb::head)
         {
             if (co_await handle_file_request(req, resp)) co_return;
         }
 
         {
-            auto iter = coro_handles_.find(util::url_decode(req.target()));
+            auto iter = coro_handles_.find(req.decoded_target);
             if (iter != coro_handles_.end())
             {
                 const auto& map = iter->second;

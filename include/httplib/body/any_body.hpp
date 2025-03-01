@@ -3,16 +3,14 @@
 #include "httplib/body/file_body.hpp"
 #include "httplib/body/form_data_body.hpp"
 #include "httplib/body/json_body.hpp"
+#include "httplib/body/query_params_body.hpp"
 #include "httplib/body/string_body.hpp"
-#include "httplib/config.hpp"
-#include <boost/beast/http/message.hpp>
 
 namespace httplib::body
 {
 struct any_body
 {
-
-     // 辅助模板：匹配 body_value_type 对应的 Body 类型
+    // 辅助模板：匹配 body_value_type 对应的 Body 类型
     template<typename T, typename... Bodies>
     struct match_body;
 
@@ -68,7 +66,7 @@ struct any_body
         }
     };
 
-    using value_type = variant_value<empty_body, string_body, json_body, form_data_body, file_body>;
+    using value_type = variant_value<empty_body, string_body, json_body, form_data_body, file_body, query_params_body>;
 
     class writer
     {

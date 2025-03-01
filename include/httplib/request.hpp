@@ -14,6 +14,8 @@ struct request : public http::request<body::any_body>
     request(http::request<body::any_body>&& other) { http::request<body::any_body>::operator=(std::move(other)); }
 
 public:
+    std::string decoded_target;
+    html::query_params query_params;
     std::unordered_map<std::string, std::string> params;
     std::smatch matches;
     tcp::endpoint local_endpoint;

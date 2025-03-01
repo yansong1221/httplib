@@ -133,6 +133,10 @@ public:
         {
             proxy_ = create_proxy_reader<json_body>(header, body);
         }
+        else if (content_type.starts_with("application/x-www-form-urlencoded"))
+        {
+            proxy_ = create_proxy_reader<query_params_body>(header, body);
+        }
         else
         {
             proxy_ = create_proxy_reader<string_body>(header, body);
