@@ -93,7 +93,7 @@ public:
 
     net::awaitable<bool> handle_file_request(request& req, response& res)
     {
-        std::string_view target(req.decoded_target);
+        std::string_view target(req.path);
         beast::error_code ec;
 
         for (const auto& entry : static_file_entry_)
@@ -121,7 +121,7 @@ public:
             if (fs::is_directory(path, ec))
             {
                 beast::error_code ec;
-                auto body = html::format_dir_to_html(req.target(), path, ec);
+                auto body = html::format_dir_to_html(req.path, path, ec);
                 if (ec) co_return false;
                 res.set_string_content(body, "text/html; charset=utf-8");
                 co_return true;
@@ -153,7 +153,7 @@ public:
             resp.set_empty_content(http::status::bad_request);
             co_return;
         }
-        req.decoded_target = util::url_decode(tokens[0]);
+        req.path = util::url_decode(tokens[0]);
         if (tokens.size() >= 2)
         {
             bool is_valid = true;
@@ -171,7 +171,7 @@ public:
         }
 
         {
-            auto iter = coro_handles_.find(req.decoded_target);
+            auto iter = coro_handles_.find(req.path);
             if (iter != coro_handles_.end())
             {
                 const auto& map = iter->second;
@@ -198,7 +198,7 @@ public:
 
         bool is_coro_exist = false;
         coro_http_handler_type coro_handler;
-        std::tie(is_coro_exist, coro_handler, req.params) = coro_router_tree_->get_coro(url_path, req.method());
+        std::tie(is_coro_exist, coro_handler, req.path_params) = coro_router_tree_->get_coro(url_path, req.method());
 
         if (is_coro_exist)
         {

@@ -11,12 +11,12 @@ struct request : public http::request<body::any_body>
 {
     using http::request<body::any_body>::message;
 
-    request(http::request<body::any_body>&& other) { http::request<body::any_body>::operator=(std::move(other)); }
+    request(http::request<body::any_body>&& other);
 
 public:
-    std::string decoded_target;
+    std::string path;
     html::query_params query_params;
-    std::unordered_map<std::string, std::string> params;
+    std::unordered_map<std::string, std::string> path_params;
     std::smatch matches;
     tcp::endpoint local_endpoint;
     tcp::endpoint remote_endpoint;
