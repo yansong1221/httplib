@@ -1,5 +1,5 @@
 #pragma once
-#ifdef HTTLIB_ENABLED_SSL
+#ifdef HTTPLIB_ENABLED_SSL
 #include "ssl_stream.hpp"
 #endif
 #include "http_stream.hpp"
@@ -9,7 +9,7 @@ namespace httplib
 {
 
 using websocket_stream = websocket::stream<http_stream>;
-#ifdef HTTLIB_ENABLED_SSL
+#ifdef HTTPLIB_ENABLED_SSL
 using ssl_websocket_stream = websocket::stream<ssl_http_stream>;
 using websocket_variant_stream_type = websocket_variant_stream<websocket_stream, ssl_websocket_stream>;
 #else
@@ -27,7 +27,7 @@ inline static websocket_variant_stream_type create_websocket_variant_stream(http
             {
                 return websocket_stream(std::move(t));
             }
-#ifdef HTTLIB_ENABLED_SSL
+#ifdef HTTPLIB_ENABLED_SSL
             else if constexpr (std::same_as<ssl_http_stream, value_type>)
             {
                 return ssl_websocket_stream(std::move(t));

@@ -67,17 +67,20 @@ private:
 class any_body::writer::impl
 {
 public:
-    explicit impl(http::fields& header, any_body::value_type& body)
-        : proxy_(create_proxy_writer(header, body))
-        , compressor_(compressor::create(compressor::mode::encode, header[http::field::content_encoding]))
+    explicit impl(http::fields& header, any_body::value_type& body) : proxy_(create_proxy_writer(header, body))
     {
+        compressor_ = compressor_factory::instance().create(header[http::field::content_encoding]);
     }
-    void init(boost::system::error_code& ec) { proxy_->init(ec); }
+    void init(boost::system::error_code& ec)
+    {
+        if (compressor_) compressor_->init(compressor::mode::encode);
+        proxy_->init(ec);
+    }
     boost::optional<std::pair<any_body::writer::const_buffers_type, bool>> get(boost::system::error_code& ec)
     {
         if (!compressor_) return proxy_->get(ec);
 
-        compressor_->consume();
+        compressor_->consume_all();
         for (;;)
         {
             auto result = proxy_->get(ec);
@@ -122,7 +125,6 @@ class any_body::reader::impl
 {
 public:
     impl(http::fields& header, any_body::value_type& body)
-        : compressor_(compressor::create(compressor::mode::decode, header[http::field::content_encoding]))
     {
         auto content_type = header[http::field::content_type];
         if (content_type.starts_with("multipart/form-data"))
@@ -141,9 +143,11 @@ public:
         {
             proxy_ = create_proxy_reader<string_body>(header, body);
         }
+        compressor_ = compressor_factory::instance().create(header[http::field::content_encoding]);
     }
     void init(boost::optional<std::uint64_t> const& content_length, boost::system::error_code& ec)
     {
+        if (compressor_) compressor_->init(compressor::mode::decode);
         proxy_->init(content_length, ec);
     }
     std::size_t put(const_buffers_type const& buffers, boost::system::error_code& ec)
@@ -160,7 +164,18 @@ public:
         }
         return buffers.size();
     }
-    void finish(boost::system::error_code& ec) { proxy_->finish(ec); }
+    void finish(boost::system::error_code& ec)
+    {
+        if (!compressor_) return proxy_->finish(ec);
+
+        compressor_->finish();
+        auto decoded_buffer = compressor_->buffer();
+        if (decoded_buffer.size() != 0)
+        {
+            proxy_->put(decoded_buffer, ec);
+        }
+        return proxy_->finish(ec);
+    }
 
 private:
     template<class Body>

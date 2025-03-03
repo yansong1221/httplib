@@ -1,6 +1,7 @@
 
 #include "httplib/server.hpp"
 
+#include "body/compressor.hpp"
 #include "httplib/body/body.hpp"
 #include "httplib/html.hpp"
 #include "httplib/request.hpp"
@@ -47,7 +48,7 @@ public:
     std::chrono::steady_clock::duration timeout_ = 30s;
 
 
-#ifdef HTTLIB_ENABLED_SSL
+#ifdef HTTPLIB_ENABLED_SSL
     std::shared_ptr<ssl::context> create_ssl_context()
     {
         try
@@ -77,7 +78,7 @@ public:
                                                                                              beast::flat_buffer& buffer)
     {
         http_stream no_ssl_stream(std::move(sock));
-#ifndef HTTLIB_ENABLED_SSL
+#ifndef HTTPLIB_ENABLED_SSL
         co_return std::move(no_ssl_stream);
 #else
         boost::system::error_code ec;
@@ -227,15 +228,17 @@ public:
                     req.remote_endpoint = remote_endpoint;
                     co_await router_.routing(req, resp);
                 }
+
                 for (const auto& encoding : util::split(req[http::field::accept_encoding], ","))
                 {
-                    if (encoding == "gzip" || encoding == "deflate" || encoding == "zstd")
+                    if (body::compressor_factory::instance().is_supported_encoding(encoding))
                     {
                         resp.set(http::field::content_encoding, encoding);
                         resp.chunked(true);
                         break;
                     }
                 }
+
 
                 if (!resp.has_content_length()) resp.prepare_payload();
 

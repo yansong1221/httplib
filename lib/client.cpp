@@ -1,22 +1,25 @@
 #include "httplib/client.hpp"
 
+#include "body/compressor.hpp"
+#include "httplib/use_awaitable.hpp"
 #include "stream/http_stream.hpp"
+#include <boost/algorithm/string/join.hpp>
 #include <boost/asio/co_spawn.hpp>
-#include <boost/asio/use_future.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
-#include <boost/beast/version.hpp>
-#include <boost/beast/http/serializer.hpp>
+#include <boost/asio/use_future.hpp>
+#include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/parser.hpp>
-#include <boost/beast/http/write.hpp>
 #include <boost/beast/http/read.hpp>
+#include <boost/beast/http/serializer.hpp>
+#include <boost/beast/http/write.hpp>
+#include <boost/beast/version.hpp>
+
 
 namespace httplib
 {
 class client::impl
 {
 public:
-    impl(net::io_context& ex, std::string_view host, uint16_t port) : impl(ex.get_executor(), host, port) { }
-
     impl(const net::any_io_executor& ex, std::string_view host, uint16_t port)
         : executor_(ex), resolver_(ex), host_(host), port_(port)
     {
@@ -31,11 +34,20 @@ public:
                                                     std::string_view path,
                                                     const http::fields& headers)
     {
+        auto host = host_;
+        if ((use_ssl_ && port_ != 443) || (!use_ssl_ && port_ != 80)) host += fmt::format(":{}", port_);
+
         http::request<body::any_body> req(method, path, 11);
-        req.set(http::field::host, host_);
+        req.set(http::field::host, host);
         req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
+        req.set(http::field::accept, "*/*");
+
+        const auto& encoding = body::compressor_factory::instance().supported_encoding();
+        if (!encoding.empty()) req.set(http::field::accept_encoding, boost::join(encoding, ","));
+
         for (const auto& field : headers)
             req.set(field.name_string(), field.value());
+        req.keep_alive(true);
         return std::move(req);
     }
 
@@ -53,7 +65,16 @@ public:
 
     bool is_connected() { return variant_stream_ && variant_stream_->is_connected(); }
 
-    net::awaitable<http::response<body::any_body>> async_send_request(http::request<body::any_body>& req)
+    net::awaitable<client::response_result> async_send_request(http::request<body::any_body>& req)
+    {
+        client::response resp;
+        auto ec = co_await async_send_request(req, resp);
+        if (ec) co_return ec;
+        co_return resp;
+    }
+
+    net::awaitable<boost::system::error_code> async_send_request(http::request<body::any_body>& req,
+                                                                 client::response& resp)
     {
         try
         {
@@ -78,7 +99,7 @@ public:
 
                 if (use_ssl_)
                 {
-#ifdef HTTLIB_ENABLED_SSL
+#ifdef HTTPLIB_ENABLED_SSL
                     unsigned long ssl_options =
                         ssl::context::default_workarounds | ssl::context::no_sslv2 | ssl::context::single_dh_use;
 
@@ -119,22 +140,32 @@ public:
                 co_await http::async_write_some(*variant_stream_, serializer);
             }
 
-            http::response_parser<body::any_body> parser;
             beast::flat_buffer buffer;
-            while ((req.method() == http::verb::head && !parser.is_header_done()) ||
-                   (req.method() != http::verb::head && !parser.is_done()))
+
+            http::response_parser<http::empty_body> header_parser;
+            while (!header_parser.is_header_done())
             {
                 expires_after(*variant_stream_);
-                co_await http::async_read_some(*variant_stream_, buffer, parser);
+                co_await http::async_read_some(*variant_stream_, buffer, header_parser);
+            }
+            http::response_parser<body::any_body> body_parser(std::move(header_parser));
+            if (req.method() != http::verb::head)
+            {
+                while (!body_parser.is_done())
+                {
+                    expires_after(*variant_stream_);
+                    co_await http::async_read_some(*variant_stream_, buffer, body_parser);
+                }
             }
 
             variant_stream_->expires_never();
-            co_return parser.release();
+            resp = body_parser.release();
+            co_return boost::system::error_code {};
         }
-        catch (...)
+        catch (const boost::system::system_error& error)
         {
             close();
-            std::rethrow_exception(std::current_exception());
+            co_return error.code();
         }
     }
 
@@ -156,7 +187,7 @@ client::client(const net::any_io_executor& ex, std::string_view host, uint16_t p
 {
 }
 
- client::~client() { }
+client::~client() { }
 
 void client::set_timeout_policy(const timeout_policy& policy) { impl_->set_timeout_policy(policy); }
 
@@ -164,38 +195,55 @@ void client::set_timeout(const std::chrono::steady_clock::duration& duration) { 
 
 void client::set_use_ssl(bool ssl) { impl_->set_use_ssl(ssl); }
 
-net::awaitable<http::response<body::any_body>> client::async_get(std::string_view path,
-                                                                 const http::fields& headers /*= http::fields()*/)
+net::awaitable<client::response_result> client::async_get(std::string_view path,
+                                                          const html::query_params& params,
+                                                          const http::fields& headers /*= http::fields()*/)
 {
-    auto req = impl_->make_http_request(http::verb::get, path, headers);
-    co_return co_await async_send_request(req);
-}
-
-net::awaitable<http::response<body::any_body>> client::async_send_request(http::request<body::any_body>& req)
-{
+    auto query = html::make_http_query_params(params);
+    std::string target(path);
+    if (!query.empty())
+    {
+        target += "?";
+        target += query;
+    }
+    auto req = impl_->make_http_request(http::verb::get, target, headers);
     co_return co_await impl_->async_send_request(req);
 }
 
-httplib::net::awaitable<httplib::http::response<httplib::body::any_body>> client::async_head(
-    std::string_view path, const http::fields& headers /*= http::fields()*/)
+
+httplib::net::awaitable<client::response_result> client::async_head(std::string_view path,
+                                                                    const http::fields& headers /*= http::fields()*/)
 {
     auto req = impl_->make_http_request(http::verb::head, path, headers);
-    co_return co_await async_send_request(req);
+    co_return co_await impl_->async_send_request(req);
 }
 
-httplib::net::awaitable<httplib::http::response<httplib::body::any_body>> client::async_post(
-    std::string_view path, std::string_view body, const http::fields& headers /*= http::fields()*/)
+httplib::net::awaitable<client::response_result> client::async_post(std::string_view path,
+                                                                    std::string_view body,
+                                                                    const http::fields& headers /*= http::fields()*/)
 {
     auto request = impl_->make_http_request(http::verb::post, path, headers);
     request.content_length(body.size());
     request.body() = std::string(body);
-    co_return co_await async_send_request(request);
+    co_return co_await impl_->async_send_request(request);
 }
 
-httplib::http::response<httplib::body::any_body> client::get(std::string_view path,
-                                                             const http::fields& headers /*= http::fields()*/)
+httplib::net::awaitable<client::response_result> client::async_post(std::string_view path,
+                                                                    const boost::json::value& body,
+                                                                    const http::fields& headers /*= http::fields()*/)
 {
-    auto future = net::co_spawn(impl_->executor_, async_get(path, headers), net::use_future);
+    auto request = impl_->make_http_request(http::verb::post, path, headers);
+    request.set(http::field::content_type, "application/json");
+    request.body() = body;
+    request.prepare_payload();
+    co_return co_await impl_->async_send_request(request);
+}
+
+client::response_result client::get(std::string_view path,
+                                    const html::query_params& params,
+                                    const http::fields& headers /*= http::fields()*/)
+{
+    auto future = net::co_spawn(impl_->executor_, async_get(path, params, headers), net::use_future);
     return future.get();
 }
 

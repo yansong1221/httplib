@@ -1,85 +1,46 @@
 #pragma once
 #include "httplib/config.hpp"
-#include <boost/asio/streambuf.hpp>
-#include <boost/iostreams/filter/gzip.hpp>
-#include <boost/iostreams/filter/zlib.hpp>
-#include <boost/iostreams/filter/zstd.hpp>
-#include <boost/iostreams/filtering_stream.hpp>
+#include <boost/asio/buffer.hpp>
+#include <functional>
+#include <unordered_map>
 
 namespace httplib::body
 {
-namespace io = boost::iostreams;
-
 class compressor
 {
 public:
-    enum class type
-    {
-        deflate,
-        gzip,
-        zstd
-    };
     enum class mode
     {
         encode,
         decode,
     };
-    explicit compressor(mode m, type t)
-    {
-        if (m == mode::encode)
-        {
-            switch (t)
-            {
-                case type::gzip: stream_.push(io::gzip_compressor()); break;
-                case type::deflate: stream_.push(io::zlib_compressor()); break;
-                case type::zstd: stream_.push(io::zstd_compressor()); break;
-            }
-        }
-        else if (m == mode::decode)
-        {
-            switch (t)
-            {
-                case type::gzip: stream_.push(io::gzip_decompressor()); break;
-                case type::deflate: stream_.push(io::zlib_decompressor()); break;
-                case type::zstd: stream_.push(io::zstd_decompressor()); break;
-            }
-        }
-        stream_.push(buffer_);
-    }
+    virtual ~compressor() = default;
+    virtual void init(mode m) = 0;
 
-    net::const_buffer buffer() const { return buffer_.data(); }
-    void write(const net::const_buffer& buffer, bool more = true)
-    {
-        io::write(stream_, (const char*)buffer.data(), buffer.size());
-        if (!more)
-        {
-            io::close(stream_);
-        }
-    }
-    void finish() { io::close(stream_); }
-    void consume() { buffer_.consume(buffer_.size()); }
-    void consume(std::size_t bytes) { buffer_.consume(bytes); }
+    virtual net::const_buffer buffer() const = 0;
+    virtual void write(const net::const_buffer& buffer, bool more = true) = 0;
+    virtual void finish() = 0;
+    virtual void consume_all() = 0;
+    virtual void consume(std::size_t bytes) = 0;
+};
+
+class compressor_factory
+{
+public:
+    using create_function = std::function<std::unique_ptr<compressor>()>;
+
+    const std::vector<std::string>& supported_encoding() const;
+
+    std::unique_ptr<compressor> create(const std::string& encoding);
+
+    bool is_supported_encoding(std::string_view encoding) const;
 
 public:
-    static std::unique_ptr<compressor> create(compressor::mode m, const std::string_view encoding)
-    {
-        if (encoding == "gzip")
-        {
-            return std::make_unique<compressor>(m, compressor::type::gzip);
-        }
-        else if (encoding == "deflate")
-        {
-            return std::make_unique<compressor>(m, compressor::type::deflate);
-        }
-        else if (encoding == "zstd")
-        {
-            return std::make_unique<compressor>(m, compressor::type::zstd);
-        }
-        return nullptr;
-    }
+    static compressor_factory& instance();
 
 private:
-    net::streambuf buffer_;
-    io::filtering_ostreambuf stream_;
+    compressor_factory();
+    void register_compressor(const std::string& encoding, create_function&& func);
+    std::unordered_map<std::string, create_function> creators_;
 };
 } // namespace httplib::body

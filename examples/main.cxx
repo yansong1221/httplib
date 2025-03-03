@@ -96,10 +96,18 @@ int main()
     router.set_default_handler(
         [](httplib::request& req, httplib::response& resp) -> httplib::net::awaitable<void>
         {
-            httplib::client cli(co_await httplib::net::this_coro::executor, "www.jsonin.com", 80);
+            httplib::client cli(co_await httplib::net::this_coro::executor, "127.0.0.1", 8888);
             cli.set_use_ssl(false);
-            resp = co_await cli.async_get("/");
 
+            boost::json::object doc;
+            doc["hello"] = "world";
+            auto result = co_await cli.async_post("/json", doc);
+            if (!result)
+            {
+                resp.set_error_content(httplib::http::status::bad_gateway);
+                co_return;
+            }
+            resp = std::move(*result);
             // resp.set_string_content("hello"sv, "text/html");
             co_return;
         });
