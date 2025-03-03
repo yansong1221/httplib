@@ -25,6 +25,21 @@ namespace httplib
 {
 using namespace std::chrono_literals;
 
+namespace detail
+{
+template<class Body>
+httplib::response make_respone(const http::request<Body>& req)
+{
+    httplib::response resp;
+    resp.result(http::status::not_found);
+    resp.version(req.version());
+    resp.set(http::field::server, BOOST_BEAST_VERSION_STRING);
+    resp.set(http::field::date, html::format_http_current_gmt_date());
+    resp.keep_alive(req.keep_alive());
+    return resp;
+}
+} // namespace detail
+
 class server::impl : public std::enable_shared_from_this<server::impl>
 {
 public:
@@ -177,8 +192,10 @@ public:
                 // websocket
                 if (websocket::is_upgrade(header))
                 {
+#ifdef HTTPLIB_ENABLED_WEBSOCKET
                     request req(header_parser.release());
                     co_await handle_websocket(std::move(*http_variant_stream), std::move(req));
+#endif // HTTPLIB_ENABLED_WEBSOCKET
                     co_return;
                 }
                 // http proxy
@@ -188,13 +205,7 @@ public:
                     co_await handle_connect(std::move(*http_variant_stream), std::move(req));
                     co_return;
                 }
-                httplib::response resp;
-                resp.result(http::status::not_found);
-                resp.version(header.version());
-                resp.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-                resp.set(http::field::date, html::format_http_current_gmt_date());
-                resp.keep_alive(header.keep_alive());
-
+                httplib::response resp = detail::make_respone(header);
                 httplib::request req;
                 if (router_.has_handler(header.method(), header.target()))
                 {
@@ -226,6 +237,7 @@ public:
 
                     req.local_endpoint = local_endpoint;
                     req.remote_endpoint = remote_endpoint;
+
                     co_await router_.routing(req, resp);
                 }
 
@@ -294,7 +306,7 @@ public:
         co_await conn->run();
         co_return;
     }
-
+#ifdef HTTPLIB_ENABLED_WEBSOCKET
     net::awaitable<void> handle_websocket(http_variant_stream_type&& http_variant_stream, request&& req)
     {
         auto conn = std::make_shared<httplib::websocket_conn_impl>(logger_, std::move(http_variant_stream));
@@ -304,6 +316,7 @@ public:
         co_await conn->run(req);
         co_return;
     }
+#endif //  HTTPLIB_ENABLED_WEBSOCKET
 };
 
 server::server(uint32_t num_threads /*= std::thread::hardware_concurrency()*/)
