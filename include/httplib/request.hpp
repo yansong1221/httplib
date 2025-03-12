@@ -4,14 +4,16 @@
 #include <boost/beast/http/message.hpp>
 #include <regex>
 
-namespace httplib
-{
+namespace httplib {
 
-struct request : public http::request<body::any_body>
-{
+struct request : public http::request<body::any_body> {
     using http::request<body::any_body>::message;
 
     request(http::request<body::any_body>&& other);
+
+public:
+    net::ip::address
+    get_client_ip() const;
 
 public:
     std::string path;

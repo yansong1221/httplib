@@ -5,14 +5,11 @@
 #include <boost/asio/socket_base.hpp>
 #include <filesystem>
 
-namespace httplib
-{
+namespace httplib {
 class router;
-class server
-{
+class server {
 public:
-    struct ssl_config
-    {
+    struct ssl_config {
         std::filesystem::path cert_file;
         std::filesystem::path key_file;
         std::string passwd;
@@ -22,21 +19,34 @@ public:
     virtual ~server();
 
 public:
-    net::any_io_executor get_executor() noexcept;
-    std::shared_ptr<spdlog::logger> get_logger() noexcept;
-    void set_logger(std::shared_ptr<spdlog::logger> logger);
+    net::any_io_executor
+    get_executor() noexcept;
+    std::shared_ptr<spdlog::logger>
+    get_logger() noexcept;
+    void
+    set_logger(std::shared_ptr<spdlog::logger> logger);
 
-    void set_ssl_config(const ssl_config& config);
+    void
+    set_ssl_config(const ssl_config& config);
 
-    server& listen(std::string_view host, uint16_t port, int backlog = net::socket_base::max_listen_connections);
-    void run();
-    void async_run();
+    server&
+    listen(std::string_view host,
+           uint16_t port,
+           int backlog = net::socket_base::max_listen_connections);
+    void
+    run();
+    void
+    async_run();
 
 public:
-    void set_websocket_message_handler(websocket_conn::message_handler_type&& handler);
-    void set_websocket_open_handler(websocket_conn::open_handler_type&& handler);
-    void set_websocket_close_handler(websocket_conn::close_handler_type&& handler);
-    router& get_router();
+    void
+    set_websocket_message_handler(websocket_conn::message_handler_type&& handler);
+    void
+    set_websocket_open_handler(websocket_conn::open_handler_type&& handler);
+    void
+    set_websocket_close_handler(websocket_conn::close_handler_type&& handler);
+    router&
+    get_router();
 
 private:
     class impl;

@@ -9,7 +9,7 @@ AlignAfterOpenBracket: Align
 AlignOperands: true
 AlignTrailingComments: true
 AllowAllParametersOfDeclarationOnNextLine: true
-AllowShortBlocksOnASingleLine: false
+AllowShortBlocksOnASingleLine: true
 AllowShortCaseLabelsOnASingleLine: true
 AllowShortFunctionsOnASingleLine: All
 AllowShortIfStatementsOnASingleLine: true
@@ -18,9 +18,9 @@ AlwaysBreakTemplateDeclarations: true
 BinPackArguments: false
 BinPackParameters: false
 BreakBeforeBinaryOperators: None
-BreakBeforeBraces: Allman
+#BreakBeforeBraces: Allman
 BreakConstructorInitializersBeforeComma: true
-ColumnLimit: 120
+ColumnLimit: 90
 ConstructorInitializerAllOnOneLineOrOnePerLine: true
 Cpp11BracedListStyle: true
 FixNamespaceComments: true
@@ -42,5 +42,8 @@ NamespaceIndentation: None
 PenaltyReturnTypeOnItsOwnLine: 1000
 PointerAlignment: Left
 SpaceAfterTemplateKeyword: false
-Standard: Cpp11
+Standard: Auto
 UseTab: Never
+
+AlignConsecutiveAssignments: true
+AlwaysBreakAfterReturnType: All

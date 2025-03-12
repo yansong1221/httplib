@@ -2,8 +2,7 @@
 #include <map>
 #include <string_view>
 
-namespace httplib::mime
-{
+namespace httplib::mime {
 static const std::map<std::string_view, std::string_view> mime_map = {
     {".323", "text/h323"},
     {".3gp", "video/3gpp"},
@@ -494,13 +493,11 @@ static const std::map<std::string_view, std::string_view> mime_map = {
     {".7z", "application/x-7z-compressed"},
 };
 
-inline std::string_view get_mime_type(std::string_view extension)
+inline std::string_view
+get_mime_type(std::string_view extension)
 {
     auto it = mime_map.find(std::string(extension.data(), extension.size()));
-    if (it == mime_map.end())
-    {
-        return "application/octet-stream";
-    }
+    if (it == mime_map.end()) { return "application/octet-stream"; }
 
     return it->second;
 }

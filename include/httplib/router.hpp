@@ -8,50 +8,69 @@
 #include <string>
 #include <string_view>
 
-namespace httplib
-{
+namespace httplib {
 class router
 {
-public:
+  public:
     explicit router(std::shared_ptr<spdlog::logger> logger);
     virtual ~router();
 
-public:
+  public:
     // eg: "GET hello/" as a key
     template<typename Func, typename... Aspects>
-    void set_http_handler(http::verb method, std::string_view key, Func&& handler, Aspects&&... asps);
+    void
+    set_http_handler(http::verb method,
+                     std::string_view key,
+                     Func&& handler,
+                     Aspects&&... asps);
 
     template<http::verb... method, typename Func, typename... Aspects>
-    void set_http_handler(std::string_view key, Func&& handler, Aspects&&... asps)
+    void
+    set_http_handler(std::string_view key, Func&& handler, Aspects&&... asps)
     {
         static_assert(sizeof...(method) >= 1, "must set http_method");
         (set_http_handler(method, key, handler, std::forward<Aspects>(asps)...), ...);
     }
     template<http::verb... method, typename Func, typename... Aspects>
-    void set_http_handler(std::string_view key, Func&& handler, util::class_type_t<Func>& owner, Aspects&&... asps);
+    void
+    set_http_handler(std::string_view key,
+                     Func&& handler,
+                     util::class_type_t<Func>& owner,
+                     Aspects&&... asps);
 
     template<typename Func, typename... Aspects>
-    void set_default_handler(Func&& handler, Aspects&&... asps);
+    void
+    set_default_handler(Func&& handler, Aspects&&... asps);
 
     template<typename Func, typename... Aspects>
-    void set_file_request_handler(Func&& handler, Aspects&&... asps);
+    void
+    set_file_request_handler(Func&& handler, Aspects&&... asps);
 
-    bool set_mount_point(const std::string& mount_point,
-                         const std::filesystem::path& dir,
-                         const http::fields& headers = {});
+    bool
+    set_mount_point(const std::string& mount_point,
+                    const std::filesystem::path& dir,
+                    const http::fields& headers = {});
 
-    bool remove_mount_point(const std::string& mount_point);
+    bool
+    remove_mount_point(const std::string& mount_point);
 
-    bool has_handler(http::verb method, std::string_view target) const;
+    bool
+    has_handler(http::verb method, std::string_view target) const;
 
-    net::awaitable<void> routing(request& req, response& resp);
+    net::awaitable<void>
+    routing(request& req, response& resp);
 
-private:
-    void set_http_handler_impl(http::verb method, std::string_view key, coro_http_handler_type&& handler);
-    void set_default_handler_impl(coro_http_handler_type&& handler);
-    void set_file_request_handler_impl(coro_http_handler_type&& handler);
+  private:
+    void
+    set_http_handler_impl(http::verb method,
+                          std::string_view key,
+                          coro_http_handler_type&& handler);
+    void
+    set_default_handler_impl(coro_http_handler_type&& handler);
+    void
+    set_file_request_handler_impl(coro_http_handler_type&& handler);
 
-private:
+  private:
     class impl;
     std::unique_ptr<impl> impl_;
 };
