@@ -110,7 +110,7 @@ public:
             if (path.has_filename()) {
                 if (fs::is_regular_file(path, ec)) {
                     for (const auto& kv : entry.headers) {
-                        res.base().set(kv.name(), kv.value());
+                        res.base().set(kv.name_string(), kv.value());
                     }
                     res.set_file_content(path, req);
                     if (req.method() != http::verb::head && file_request_handler_) {

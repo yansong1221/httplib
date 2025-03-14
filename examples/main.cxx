@@ -140,7 +140,19 @@ main()
     //        co_return;
     //    },
     //    log_t{});
-    router.set_mount_point("/中文/eng/", R"(D:\)");
+    httplib::http::fields header;
+    header.set("Cross-Origin-Opener-Policy", "same-origin");
+    header.set("Cross-Origin-Embedder-Policy", "require-corp");
+    header.set("Access-Control-Allow-Origin", "*");
+    router.set_mount_point(
+        "/",
+        R"(F:/Qt/Examples/Qt-6.8.2/demos/mediaplayer/build/WebAssembly_Qt_6_8_2_multi_threaded-Debug)",
+        header);
+
+    router.set_mount_point(
+        "/files",
+        R"(D:/)",
+        header);
 
     svr.run();
 }

@@ -1,6 +1,7 @@
 #include "compressor.hpp"
 
 #ifdef HTTPLIB_ENABLED_COMPRESS
+#include "brotli.hpp"
 #include <boost/asio/streambuf.hpp>
 #include <boost/iostreams/filter/gzip.hpp>
 #include <boost/iostreams/filter/zlib.hpp>
@@ -59,7 +60,7 @@ private:
     io::filtering_ostreambuf stream_;
 };
 
-class gzip_compressor : public basic_compressor {
+class gzip_compressor_adapter : public basic_compressor {
 protected:
     void
     init_filtering_ostreambuf(mode m, io::filtering_ostreambuf& stream) override
@@ -71,7 +72,7 @@ protected:
         }
     }
 };
-class zlib_compressor : public basic_compressor {
+class zlib_compressor_adapter : public basic_compressor {
 protected:
     void
     init_filtering_ostreambuf(mode m, io::filtering_ostreambuf& stream) override
@@ -83,7 +84,7 @@ protected:
         }
     }
 };
-class zstd_compressor : public basic_compressor {
+class zstd_compressor_adapter : public basic_compressor {
 protected:
     void
     init_filtering_ostreambuf(mode m, io::filtering_ostreambuf& stream) override
@@ -95,14 +96,32 @@ protected:
         }
     }
 };
+class brotli_compressor_adapter : public basic_compressor {
+protected:
+    void
+    init_filtering_ostreambuf(mode m, io::filtering_ostreambuf& stream) override
+    {
+        switch (m) {
+            case mode::encode: stream.push(brotli_compressor()); break;
+            case mode::decode: stream.push(brotli_decompressor()); break;
+            default: break;
+        }
+    }
+};
+
 #endif
 
 compressor_factory::compressor_factory()
 {
 #ifdef HTTPLIB_ENABLED_COMPRESS
-    register_compressor("gzip", []() { return std::make_unique<gzip_compressor>(); });
-    register_compressor("deflate", []() { return std::make_unique<zlib_compressor>(); });
-    register_compressor("zstd", []() { return std::make_unique<zstd_compressor>(); });
+    register_compressor("gzip",
+                        []() { return std::make_unique<gzip_compressor_adapter>(); });
+    register_compressor("deflate",
+                        []() { return std::make_unique<zlib_compressor_adapter>(); });
+    register_compressor("zstd",
+                        []() { return std::make_unique<zstd_compressor_adapter>(); });
+    //register_compressor("br",
+    //                    []() { return std::make_unique<brotli_compressor_adapter>(); });
 #endif
 }
 compressor_factory&

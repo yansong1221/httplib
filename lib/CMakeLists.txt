@@ -35,8 +35,10 @@ if(HTTPLIB_ENABLED_SSL)
 endif()
 if(HTTPLIB_ENABLED_COMPRESS)
     find_package(Boost REQUIRED COMPONENTS iostreams)
+    find_package(unofficial-brotli CONFIG REQUIRED)
+
     target_compile_definitions(${MOUDLE} PUBLIC HTTPLIB_ENABLED_COMPRESS)
-    target_link_libraries(${MOUDLE} PRIVATE Boost::iostreams)
+    target_link_libraries(${MOUDLE} PRIVATE Boost::iostreams unofficial::brotli::brotlidec unofficial::brotli::brotlienc)
 endif()
 
 IF(HTTPLIB_ENABLED_WEBSOCKET)

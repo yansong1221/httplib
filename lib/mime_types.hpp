@@ -491,6 +491,7 @@ static const std::map<std::string_view, std::string_view> mime_map = {
     {".zip", "application/zip"},
     {".json", "application/json"},
     {".7z", "application/x-7z-compressed"},
+    {".wasm", "application/wasm"},
 };
 
 inline std::string_view
