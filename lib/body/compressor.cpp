@@ -120,8 +120,8 @@ compressor_factory::compressor_factory()
                         []() { return std::make_unique<zlib_compressor_adapter>(); });
     register_compressor("zstd",
                         []() { return std::make_unique<zstd_compressor_adapter>(); });
-    //register_compressor("br",
-    //                    []() { return std::make_unique<brotli_compressor_adapter>(); });
+    register_compressor("br",
+                        []() { return std::make_unique<brotli_compressor_adapter>(); });
 #endif
 }
 compressor_factory&

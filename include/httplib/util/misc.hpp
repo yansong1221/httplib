@@ -109,7 +109,7 @@ split(std::string_view str, std::string_view delimiter)
         }
 
         // Capture string
-        parts.emplace_back(str.substr(pos, pos_found - pos));
+        parts.emplace_back(boost::trim_copy(str.substr(pos, pos_found - pos)));
 
         // Drop trailing delimiters
         if (pos_found + delimiter.size() >= str.size()) break;
