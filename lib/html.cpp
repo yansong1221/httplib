@@ -1,4 +1,3 @@
-#pragma once
 #include "httplib/html.hpp"
 
 #include "httplib/util/misc.hpp"

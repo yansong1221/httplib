@@ -1,4 +1,3 @@
-#pragma once
 #include "httplib/body/empty_body.hpp"
 
 namespace httplib::body {

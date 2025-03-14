@@ -88,7 +88,9 @@ public:
             target.remove_prefix(entry.mount_point.size());
             if (!detail::is_valid_path(target)) continue;
 
-            auto path = entry.base_dir / fs::u8path(target);
+            auto path = entry.base_dir /
+                        fs::path(std::u8string_view((const char8_t*)target.data(),
+                                                    target.size()));
             if (!fs::exists(path, ec)) continue;
 
             if (target.empty() && !req.path.ends_with("/")) {
