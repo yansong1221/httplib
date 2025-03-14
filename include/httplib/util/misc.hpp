@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <fstream>
 #include <random>
+#include <sstream>
 
 namespace util {
 using boost::asio::buffer;
