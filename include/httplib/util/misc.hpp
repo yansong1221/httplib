@@ -199,8 +199,7 @@ split_header_field_value(std::string_view header, boost::system::error_code& ec)
 static std::string_view
 buffer_to_string_view(const boost::asio::const_buffer& buffer)
 {
-    return std::string_view(boost::asio::buffer_cast<const char*>(buffer),
-                            boost::asio::buffer_size(buffer));
+    return std::string_view(static_cast<const char*>(buffer.data()), buffer.size());
 }
 
 } // namespace util
