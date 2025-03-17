@@ -47,6 +47,8 @@ public:
         , logger_(spdlog::stdout_color_mt("httplib.server"))
         , router_(logger_)
     {
+        logger_ = spdlog::get("httplib.server");
+        if (!logger_) { logger_ = spdlog::stdout_color_mt("httplib.server"); }
         logger_->set_level(spdlog::level::info);
     }
 
@@ -403,6 +405,13 @@ server::async_run()
 {
     net::co_spawn(impl_->pool_, impl_->do_listen(), net::detached);
 }
+
+void
+server::stop()
+{
+    impl_->pool_.stop();
+}
+
 void
 server::set_websocket_message_handler(
     httplib::websocket_conn::message_handler_type&& handler)

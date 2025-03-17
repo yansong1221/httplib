@@ -37,6 +37,8 @@ public:
     run();
     void
     async_run();
+    void
+    stop();
 
 public:
     void

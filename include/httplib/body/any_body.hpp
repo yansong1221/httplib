@@ -44,7 +44,6 @@ struct any_body {
                 },
                 *this);
         }
-
         template<class Body>
         typename Body::value_type&
         as() &

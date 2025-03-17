@@ -11,6 +11,7 @@
 #include <boost/beast/http/parser.hpp>
 #include <boost/beast/http/read.hpp>
 #include <boost/beast/http/serializer.hpp>
+#include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/write.hpp>
 #include <boost/beast/version.hpp>
 
@@ -165,6 +166,7 @@ public:
                 expires_after(*variant_stream_);
                 co_await http::async_read_some(*variant_stream_, buffer, header_parser);
             }
+
             http::response_parser<body::any_body> body_parser(std::move(header_parser));
             if (req.method() != http::verb::head) {
                 while (!body_parser.is_done()) {
@@ -172,9 +174,8 @@ public:
                     co_await http::async_read_some(*variant_stream_, buffer, body_parser);
                 }
             }
-
-            variant_stream_->expires_never();
             resp = body_parser.release();
+            variant_stream_->expires_never();
             co_return boost::system::error_code {};
         } catch (const boost::system::system_error& error) {
             close();
