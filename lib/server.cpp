@@ -42,19 +42,18 @@ make_respone(const http::request<Body>& req)
 class server::impl : public std::enable_shared_from_this<server::impl> {
 public:
     impl(uint32_t num_threads /*= std::thread::hardware_concurrency()*/)
-        : pool_(num_threads)
-        , acceptor_(pool_)
-        , logger_(spdlog::stdout_color_mt("httplib.server"))
-        , router_(logger_)
+        : pool_(num_threads), acceptor_(pool_)
     {
-        logger_ = spdlog::get("httplib.server");
-        if (!logger_) { logger_ = spdlog::stdout_color_mt("httplib.server"); }
+        auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+        spdlog::sinks_init_list sink_list = {console_sink};
+        logger_ = std::make_shared<spdlog::logger>("httplib.server", sink_list);
         logger_->set_level(spdlog::level::info);
+        router_ = std::make_unique<router>(logger_);
     }
 
 public:
     std::shared_ptr<spdlog::logger> logger_;
-    router router_;
+    std::unique_ptr<router> router_;
     net::thread_pool pool_;
     tcp::acceptor acceptor_;
     std::optional<ssl_config> ssl_config_;
@@ -212,7 +211,7 @@ public:
                 }
                 httplib::response resp = detail::make_respone(header);
                 httplib::request req;
-                if (router_.has_handler(header.method(), header.target())) {
+                if (router_->has_handler(header.method(), header.target())) {
                     switch (header.method()) {
                         case http::verb::get:
                         case http::verb::head:
@@ -261,7 +260,7 @@ public:
 
                     auto start_time = std::chrono::steady_clock::now();
 
-                    co_await router_.routing(req, resp);
+                    co_await router_->routing(req, resp);
 
                     auto span_time = std::chrono::steady_clock::now() - start_time;
 
@@ -431,6 +430,6 @@ server::set_websocket_close_handler(httplib::websocket_conn::close_handler_type&
 router&
 server::get_router()
 {
-    return impl_->router_;
+    return *impl_->router_;
 }
 } // namespace httplib

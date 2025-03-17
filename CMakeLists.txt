@@ -36,7 +36,16 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 set(HTTPLIB_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(HTTPLIB_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lib)
-#add_compile_options(/d1reportTime)
+
+
+option(HTTPLIB_ENABLED_SSL "HTTLIB ENABLED SSL" OFF)
+option(HTTPLIB_ENABLED_COMPRESS "HTTLIB ENABLED COMPRESS" OFF)
+option(HTTPLIB_ENABLED_WEBSOCKET "HTTLIB ENABLED WEBSOCKET" OFF)
+option(HTTPLIB_ENABLED_EXAMPLES "HTTLIB Build Examples" OFF)
+
 
 add_subdirectory(lib)
-add_subdirectory(examples)
+
+if(HTTPLIB_ENABLED_EXAMPLES)
+    add_subdirectory(examples)
+endif()
