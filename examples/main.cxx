@@ -10,15 +10,13 @@
 #include <iostream>
 // 日志切面
 struct log_t {
-    httplib::net::awaitable<bool>
-    before(httplib::request& req, httplib::response& res)
+    httplib::net::awaitable<bool> before(httplib::request& req, httplib::response& res)
     {
         start_ = std::chrono::steady_clock::now();
         co_return true;
     }
 
-    bool
-    after(httplib::request& req, httplib::response& res)
+    bool after(httplib::request& req, httplib::response& res)
     {
         auto span = std::chrono::steady_clock::now() - start_;
         std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(span).count()
@@ -29,8 +27,7 @@ struct log_t {
 private:
     std::chrono::steady_clock::time_point start_;
 };
-int
-main()
+int main()
 { // HTTP
     using namespace std::string_view_literals;
     httplib::server svr;
@@ -149,10 +146,7 @@ main()
         R"(F:/Qt/Examples/Qt-6.8.2/demos/mediaplayer/build/WebAssembly_Qt_6_8_2_multi_threaded-Debug)",
         header);
 
-    router.set_mount_point(
-        "/files",
-        R"(D:/)",
-        header);
+    router.set_mount_point("/files", R"(D:/)", header);
 
     svr.run();
 }

@@ -45,5 +45,5 @@ SpaceAfterTemplateKeyword: false
 Standard: Auto
 UseTab: Never
 
-AlignConsecutiveAssignments: true
-AlwaysBreakAfterReturnType: All
+#AlignConsecutiveAssignments: true
+#AlwaysBreakAfterReturnType: All

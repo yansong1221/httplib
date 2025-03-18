@@ -26,8 +26,7 @@ using namespace std::chrono_literals;
 
 namespace detail {
 template<class Body>
-httplib::response
-make_respone(const http::request<Body>& req)
+httplib::response make_respone(const http::request<Body>& req)
 {
     httplib::response resp;
     resp.result(http::status::not_found);
@@ -67,8 +66,7 @@ public:
     std::chrono::steady_clock::duration timeout_ = 30s;
 
 #ifdef HTTPLIB_ENABLED_SSL
-    std::shared_ptr<ssl::context>
-    create_ssl_context()
+    std::shared_ptr<ssl::context> create_ssl_context()
     {
         try {
             unsigned long ssl_options = ssl::context::default_workarounds |
@@ -124,8 +122,7 @@ public:
 
 #endif
     }
-    void
-    listen(std::string_view host, uint16_t port, int backlog)
+    void listen(std::string_view host, uint16_t port, int backlog)
     {
         tcp::resolver resolver(pool_);
         auto results = resolver.resolve(host, std::to_string(port));
@@ -138,8 +135,7 @@ public:
             "Server Listen on: [{}:{}]", endp.address().to_string(), endp.port());
     }
 
-    net::awaitable<void>
-    do_listen()
+    net::awaitable<void> do_listen()
     {
         boost::system::error_code ec;
         const auto& executor = co_await net::this_coro::executor;
@@ -151,7 +147,7 @@ public:
             net::co_spawn(
                 executor,
                 [this, sock = std::move(sock)]() mutable -> net::awaitable<void> {
-                    auto self        = shared_from_this();
+                    auto self = shared_from_this();
                     auto remote_endp = sock.remote_endpoint();
                     logger_->trace("accept new connection [{}:{}]",
                                    remote_endp.address().to_string(),
@@ -165,12 +161,11 @@ public:
         }
     }
 
-    net::awaitable<void>
-    do_session(tcp::socket&& sock)
+    net::awaitable<void> do_session(tcp::socket&& sock)
     {
         try {
             net::ip::tcp::endpoint remote_endpoint = sock.remote_endpoint();
-            net::ip::tcp::endpoint local_endpoint  = sock.local_endpoint();
+            net::ip::tcp::endpoint local_endpoint = sock.local_endpoint();
 
             beast::flat_buffer buffer;
 
@@ -241,7 +236,7 @@ public:
                         } break;
                     }
                     // init request
-                    req.local_endpoint  = local_endpoint;
+                    req.local_endpoint = local_endpoint;
                     req.remote_endpoint = remote_endpoint;
 
                     auto tokens = util::split(req.target(), "?");
@@ -310,11 +305,11 @@ public:
             spdlog::error("do_session: {}", e.what());
         }
     }
-    net::awaitable<void>
-    handle_connect(http_variant_stream_type&& http_variant_stream, request&& req)
+    net::awaitable<void> handle_connect(http_variant_stream_type&& http_variant_stream,
+                                        request&& req)
     {
         auto target = req.target();
-        auto pos    = target.find(":");
+        auto pos = target.find(":");
         if (pos == std::string_view::npos) co_return;
 
         auto host = target.substr(0, pos);
@@ -342,8 +337,8 @@ public:
         co_return;
     }
 #ifdef HTTPLIB_ENABLED_WEBSOCKET
-    net::awaitable<void>
-    handle_websocket(http_variant_stream_type&& http_variant_stream, request&& req)
+    net::awaitable<void> handle_websocket(http_variant_stream_type&& http_variant_stream,
+                                          request&& req)
     {
         auto conn = std::make_shared<httplib::websocket_conn_impl>(
             logger_, std::move(http_variant_stream));
@@ -356,87 +351,66 @@ public:
 #endif //  HTTPLIB_ENABLED_WEBSOCKET
 };
 
-server::server(std::shared_ptr<spdlog::logger> logger,
-               uint32_t num_threads /*= std::thread::hardware_concurrency()*/)
+server::server(std::shared_ptr<spdlog::logger> logger, uint32_t num_threads)
     : impl_(std::make_shared<impl>(num_threads, logger))
 {
 }
 
-server::~server() { }
-
-net::any_io_executor
-server::get_executor() noexcept
+net::any_io_executor server::get_executor() noexcept
 {
     return impl_->pool_.get_executor();
 }
 
-std::shared_ptr<spdlog::logger>
-server::get_logger() noexcept
-{
-    return impl_->logger_;
-}
+std::shared_ptr<spdlog::logger> server::get_logger() noexcept { return impl_->logger_; }
 
-void
-server::set_logger(std::shared_ptr<spdlog::logger> logger)
+void server::set_logger(std::shared_ptr<spdlog::logger> logger)
 {
     impl_->logger_ = logger;
 }
 
-void
-server::set_ssl_config(const ssl_config& config)
-{
-    impl_->ssl_config_ = config;
-}
+void server::set_ssl_config(const ssl_config& config) { impl_->ssl_config_ = config; }
 
-server&
-server::listen(std::string_view host,
-               uint16_t port,
-               int backlog /*= net::socket_base::max_listen_connections*/)
+server& server::listen(std::string_view host,
+                       uint16_t port,
+                       int backlog /*= net::socket_base::max_listen_connections*/)
 {
     impl_->listen(host, port, backlog);
     return *this;
 }
 
-void
-server::run()
+void server::run()
 {
     async_run();
     impl_->pool_.wait();
 }
 
-void
-server::async_run()
+void server::async_run()
 {
     net::co_spawn(impl_->pool_, impl_->do_listen(), net::detached);
 }
 
-void
-server::stop()
+void server::stop()
 {
     boost::system::error_code ec;
     impl_->acceptor_.close(ec);
     impl_->pool_.stop();
 }
 
-void
-server::set_websocket_message_handler(
+void server::set_websocket_message_handler(
     httplib::websocket_conn::message_handler_type&& handler)
 {
     impl_->websocket_message_handler_ = handler;
 }
-void
-server::set_websocket_open_handler(httplib::websocket_conn::open_handler_type&& handler)
+void server::set_websocket_open_handler(
+    httplib::websocket_conn::open_handler_type&& handler)
 {
     impl_->websocket_open_handler_ = handler;
 }
-void
-server::set_websocket_close_handler(httplib::websocket_conn::close_handler_type&& handler)
+void server::set_websocket_close_handler(
+    httplib::websocket_conn::close_handler_type&& handler)
 {
     impl_->websocket_close_handler_ = handler;
 }
-router&
-server::get_router()
-{
-    return *impl_->router_;
-}
+router& server::get_router() { return *impl_->router_; }
+
 } // namespace httplib

@@ -7,6 +7,10 @@
 
 namespace httplib {
 class router;
+class session;
+} // namespace httplib
+
+namespace httplib {
 class server {
 public:
     struct ssl_config {
@@ -15,44 +19,34 @@ public:
         std::string passwd;
     };
 
+public:
     explicit server(std::shared_ptr<spdlog::logger> logger = nullptr,
                     uint32_t num_threads = std::thread::hardware_concurrency());
-    virtual ~server();
+
+    net::any_io_executor get_executor() noexcept;
+    std::shared_ptr<spdlog::logger> get_logger() noexcept;
+    void set_logger(std::shared_ptr<spdlog::logger> logger);
+
+    void set_ssl_config(const ssl_config& config);
+
+    server& listen(std::string_view host,
+                   uint16_t port,
+                   int backlog = net::socket_base::max_listen_connections);
+    void run();
+    void async_run();
+    void stop();
 
 public:
-    net::any_io_executor
-    get_executor() noexcept;
-    std::shared_ptr<spdlog::logger>
-    get_logger() noexcept;
-    void
-    set_logger(std::shared_ptr<spdlog::logger> logger);
-
-    void
-    set_ssl_config(const ssl_config& config);
-
-    server&
-    listen(std::string_view host,
-           uint16_t port,
-           int backlog = net::socket_base::max_listen_connections);
-    void
-    run();
-    void
-    async_run();
-    void
-    stop();
-
-public:
-    void
-    set_websocket_message_handler(websocket_conn::message_handler_type&& handler);
-    void
-    set_websocket_open_handler(websocket_conn::open_handler_type&& handler);
-    void
-    set_websocket_close_handler(websocket_conn::close_handler_type&& handler);
-    router&
-    get_router();
+    void set_websocket_message_handler(websocket_conn::message_handler_type&& handler);
+    void set_websocket_open_handler(websocket_conn::open_handler_type&& handler);
+    void set_websocket_close_handler(websocket_conn::close_handler_type&& handler);
+    router& get_router();
 
 private:
     class impl;
     std::shared_ptr<impl> impl_;
+
+    friend class session;
+    friend class router;
 };
 } // namespace httplib
