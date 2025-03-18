@@ -15,7 +15,8 @@ public:
         std::string passwd;
     };
 
-    explicit server(uint32_t num_threads = std::thread::hardware_concurrency());
+    explicit server(std::shared_ptr<spdlog::logger> logger = nullptr,
+                    uint32_t num_threads = std::thread::hardware_concurrency());
     virtual ~server();
 
 public:

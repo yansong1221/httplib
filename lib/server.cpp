@@ -41,13 +41,15 @@ make_respone(const http::request<Body>& req)
 
 class server::impl : public std::enable_shared_from_this<server::impl> {
 public:
-    impl(uint32_t num_threads /*= std::thread::hardware_concurrency()*/)
-        : pool_(num_threads), acceptor_(pool_)
+    impl(uint32_t num_threads, std::shared_ptr<spdlog::logger> logger)
+        : pool_(num_threads), acceptor_(pool_), logger_(logger)
     {
-        auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-        spdlog::sinks_init_list sink_list = {console_sink};
-        logger_ = std::make_shared<spdlog::logger>("httplib.server", sink_list);
-        logger_->set_level(spdlog::level::info);
+        if (!logger_) {
+            auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+            spdlog::sinks_init_list sink_list = {console_sink};
+            logger_ = std::make_shared<spdlog::logger>("httplib.server", sink_list);
+            logger_->set_level(spdlog::level::info);
+        }
         router_ = std::make_unique<router>(logger_);
     }
 
@@ -265,11 +267,13 @@ public:
                     auto span_time = std::chrono::steady_clock::now() - start_time;
 
                     logger_->info(
-                        "{} {} ({} -> {}) {} {}ms",
+                        "{} {} ({}:{} -> {}:{}) {} {}ms",
                         req.method_string(),
                         req.target(),
                         remote_endpoint.address().to_string(),
+                        remote_endpoint.port(),
                         local_endpoint.address().to_string(),
+                        local_endpoint.port(),
                         resp.result_int(),
                         std::chrono::duration_cast<std::chrono::milliseconds>(span_time)
                             .count());
@@ -352,8 +356,9 @@ public:
 #endif //  HTTPLIB_ENABLED_WEBSOCKET
 };
 
-server::server(uint32_t num_threads /*= std::thread::hardware_concurrency()*/)
-    : impl_(std::make_shared<impl>(num_threads))
+server::server(std::shared_ptr<spdlog::logger> logger,
+               uint32_t num_threads /*= std::thread::hardware_concurrency()*/)
+    : impl_(std::make_shared<impl>(num_threads, logger))
 {
 }
 
@@ -408,6 +413,8 @@ server::async_run()
 void
 server::stop()
 {
+    boost::system::error_code ec;
+    impl_->acceptor_.close(ec);
     impl_->pool_.stop();
 }
 
