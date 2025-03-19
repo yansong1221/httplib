@@ -55,7 +55,7 @@ response::set_json_content(body::json_body::value_type&& data,
                            http::status status /*= http::status::ok*/)
 {
     result(status);
-    set(http::field::content_type, "application/json");
+    set(http::field::content_type, "application/json; charset=utf-8");
     set(http::field::cache_control, "no-store");
     body() = std::move(data);
 }
