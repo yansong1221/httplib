@@ -18,16 +18,14 @@ public:
     using std::variant<T...>::variant;
 
 public:
-    using executor_type     = net::any_io_executor;
+    using executor_type = net::any_io_executor;
     using lowest_layer_type = tcp::socket::lowest_layer_type;
 
-    executor_type
-    get_executor()
+    executor_type get_executor()
     {
         return std::visit([&](auto& t) mutable { return t.get_executor(); }, *this);
     }
-    lowest_layer_type&
-    lowest_layer()
+    lowest_layer_type& lowest_layer()
     {
         return std::visit(
             [&](auto& t) mutable -> lowest_layer_type& {
@@ -40,8 +38,7 @@ public:
             },
             *this);
     }
-    const lowest_layer_type&
-    lowest_layer() const
+    const lowest_layer_type& lowest_layer() const
     {
         return std::visit(
             [&](auto& t) mutable -> const lowest_layer_type& {
@@ -55,8 +52,7 @@ public:
             *this);
     }
     template<typename MutableBufferSequence, typename ReadHandler>
-    auto
-    async_read_some(const MutableBufferSequence& buffers, ReadHandler&& handler)
+    auto async_read_some(const MutableBufferSequence& buffers, ReadHandler&& handler)
     {
         return std::visit(
             [&, handler = std::move(handler)](auto& t) mutable {
@@ -65,8 +61,7 @@ public:
             *this);
     }
     template<typename ConstBufferSequence, typename WriteHandler>
-    auto
-    async_write_some(const ConstBufferSequence& buffers, WriteHandler&& handler)
+    auto async_write_some(const ConstBufferSequence& buffers, WriteHandler&& handler)
     {
         return std::visit(
             [&, handler = std::move(handler)](auto& t) mutable {
@@ -75,36 +70,27 @@ public:
             *this);
     }
 
-    tcp::endpoint
-    remote_endpoint()
-    {
-        return lowest_layer().remote_endpoint();
-    }
-    tcp::endpoint
-    remote_endpoint(boost::system::error_code& ec)
+    tcp::endpoint remote_endpoint() { return lowest_layer().remote_endpoint(); }
+    tcp::endpoint remote_endpoint(boost::system::error_code& ec)
     {
         return lowest_layer().remote_endpoint(ec);
     }
 
-    void
-    shutdown(net::socket_base::shutdown_type what, boost::system::error_code& ec)
+    tcp::endpoint local_endpoint() { return lowest_layer().local_endpoint(); }
+    tcp::endpoint local_endpoint(boost::system::error_code& ec)
+    {
+        return lowest_layer().local_endpoint(ec);
+    }
+
+    void shutdown(net::socket_base::shutdown_type what, boost::system::error_code& ec)
     {
         lowest_layer().shutdown(what, ec);
     }
 
-    bool
-    is_open() const
-    {
-        return lowest_layer().is_open();
-    }
+    bool is_open() const { return lowest_layer().is_open(); }
 
-    void
-    close(boost::system::error_code& ec)
-    {
-        lowest_layer().close(ec);
-    }
-    bool
-    is_connected()
+    void close(boost::system::error_code& ec) { lowest_layer().close(ec); }
+    bool is_connected()
     {
         if (!lowest_layer().is_open()) return false;
 

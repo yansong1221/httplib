@@ -15,11 +15,10 @@
 
 namespace httplib {
 namespace detail {
-inline static bool
-is_valid_path(std::string_view path)
+inline static bool is_valid_path(std::string_view path)
 {
     size_t level = 0;
-    size_t i     = 0;
+    size_t i = 0;
 
     // Skip slash
     while (i < path.size() && path[i] == '/') {
@@ -59,25 +58,22 @@ is_valid_path(std::string_view path)
     return true;
 }
 
-static std::string
-make_whole_str(http::verb method, std::string_view target)
+static std::string make_whole_str(http::verb method, std::string_view target)
 {
     return fmt::format("{} {}", std::string_view(http::to_string(method)), target);
 }
-static std::string
-make_whole_str(const request& req)
+static std::string make_whole_str(const request& req)
 {
     return make_whole_str(req.base().method(), util::url_decode(req.target()));
 }
 
 } // namespace detail
 
-class router::impl {
+class Router::impl {
 public:
-    impl(std::shared_ptr<spdlog::logger> logger) : logger_(logger) { }
+    impl(const Server::Option& option) : option_(option) { }
 
-    net::awaitable<bool>
-    handle_file_request(request& req, response& res)
+    net::awaitable<bool> handle_file_request(request& req, response& res)
     {
         beast::error_code ec;
 
@@ -132,8 +128,7 @@ public:
 
         co_return false;
     }
-    net::awaitable<void>
-    proc_routing(request& req, response& resp)
+    net::awaitable<void> proc_routing(request& req, response& resp)
     {
         if (req.method() == http::verb::get || req.method() == http::verb::head) {
             if (co_await handle_file_request(req, resp)) co_return;
@@ -143,7 +138,7 @@ public:
             auto iter = coro_handles_.find(req.path);
             if (iter != coro_handles_.end()) {
                 const auto& map = iter->second;
-                auto iter       = map.find(req.method());
+                auto iter = map.find(req.method());
                 if (iter != map.end()) {
                     co_await iter->second(req, resp);
                     co_return;
@@ -157,7 +152,7 @@ public:
             co_await default_handler_(req, resp);
             co_return;
         }
-        auto key             = detail::make_whole_str(req);
+        auto key = detail::make_whole_str(req);
         std::string url_path = detail::make_whole_str(req.method(), req.target());
 
         bool is_coro_exist = false;
@@ -193,7 +188,7 @@ public:
     }
 
 public:
-    std::shared_ptr<spdlog::logger> logger_;
+    const Server::Option& option_;
 
     using verb_handler_map = std::unordered_map<http::verb, coro_http_handler_type>;
     std::unordered_map<std::string, verb_handler_map> coro_handles_;
@@ -214,36 +209,48 @@ public:
 
     std::vector<std::string> default_doc_name_ = {"index.html", "index.htm"};
 };
-router::router(std::shared_ptr<spdlog::logger> logger) : impl_(new impl(logger)) { }
-router::~router()
+Router::Router(const Server::Option& option) : impl_(new impl(option)) { }
+Router::~Router()
 {
     // delete impl_;
 }
-bool
-router::has_handler(http::verb method, std::string_view target) const
+bool Router::has_handler(http::verb method, std::string_view target) const
 {
     return true;
 }
-net::awaitable<void>
-router::routing(request& req, response& resp)
+net::awaitable<void> Router::routing(request& req, response& resp)
 {
     try {
+        auto tokens = util::split(req.target(), "?");
+        if (tokens.empty() || tokens.size() > 2) {
+            resp.set_empty_content(http::status::bad_request);
+            co_return;
+        }
+        req.path = util::url_decode(tokens[0]);
+        if (tokens.size() >= 2) {
+            bool is_valid = true;
+            req.query_params = html::parse_http_query_params(tokens[1], is_valid);
+            if (!is_valid) {
+                resp.set_empty_content(http::status::bad_request);
+                co_return;
+            }
+        }
         co_await impl_->proc_routing(req, resp);
     } catch (const std::exception& e) {
-        impl_->logger_->warn("exception in business function, reason: {}", e.what());
+        impl_->option_.logger->warn("exception in business function, reason: {}",
+                                    e.what());
         resp.set_string_content(
             std::string_view(e.what()), "text/html", http::status::internal_server_error);
     } catch (...) {
         using namespace std::string_view_literals;
-        impl_->logger_->warn("unknown exception in business function");
+        impl_->option_.logger->warn("unknown exception in business function");
         resp.set_string_content(
             "unknown exception"sv, "text/html", http::status::internal_server_error);
     }
 }
-bool
-router::set_mount_point(const std::string& mount_point,
-                        const fs::path& dir,
-                        const http::fields& headers /*= {}*/)
+bool Router::set_mount_point(const std::string& mount_point,
+                             const fs::path& dir,
+                             const http::fields& headers /*= {}*/)
 {
     if (fs::is_directory(dir)) {
         std::string mnt = !mount_point.empty() ? mount_point : "/";
@@ -257,11 +264,11 @@ router::set_mount_point(const std::string& mount_point,
             return true;
         }
     }
-    impl_->logger_->warn("set_mount_point path: {} is not directory", dir.string());
+    impl_->option_.logger->warn("set_mount_point path: {} is not directory",
+                                dir.string());
     return false;
 }
-bool
-router::remove_mount_point(const std::string& mount_point)
+bool Router::remove_mount_point(const std::string& mount_point)
 {
     for (auto it = impl_->static_file_entry_.begin();
          it != impl_->static_file_entry_.end();
@@ -274,10 +281,9 @@ router::remove_mount_point(const std::string& mount_point)
     return false;
 }
 
-void
-router::set_http_handler_impl(http::verb method,
-                              std::string_view key,
-                              coro_http_handler_type&& handler)
+void Router::set_http_handler_impl(http::verb method,
+                                   std::string_view key,
+                                   coro_http_handler_type&& handler)
 {
     auto whole_str = detail::make_whole_str(method, key);
 
@@ -299,23 +305,21 @@ router::set_http_handler_impl(http::verb method,
     }
     auto& map = impl_->coro_handles_[std::string(key)];
     if (map.count(method)) {
-        impl_->logger_->warn("router method: {} key: {} "
-                             "has already registered.",
-                             http::to_string(method),
-                             key);
+        impl_->option_.logger->warn("router method: {} key: {} "
+                                    "has already registered.",
+                                    http::to_string(method),
+                                    key);
         return;
     }
     map[method] = std::move(handler);
 }
 
-void
-router::set_default_handler_impl(coro_http_handler_type&& handler)
+void Router::set_default_handler_impl(coro_http_handler_type&& handler)
 {
     impl_->default_handler_ = std::move(handler);
 }
 
-void
-router::set_file_request_handler_impl(coro_http_handler_type&& handler)
+void Router::set_file_request_handler_impl(coro_http_handler_type&& handler)
 {
     impl_->file_request_handler_ = std::move(handler);
 }

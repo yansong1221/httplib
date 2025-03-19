@@ -104,7 +104,7 @@ create_router_coro_http_handler(Func&& handler, Aspects&&... asps)
 
 template<typename Func, typename... Aspects>
 void
-router::set_http_handler(http::verb method,
+Router::set_http_handler(http::verb method,
                          std::string_view key,
                          Func&& handler,
                          Aspects&&... asps)
@@ -117,7 +117,7 @@ router::set_http_handler(http::verb method,
 
 template<http::verb... method, typename Func, typename... Aspects>
 void
-router::set_http_handler(std::string_view key,
+Router::set_http_handler(std::string_view key,
                          Func&& handler,
                          util::class_type_t<Func>& owner,
                          Aspects&&... asps)
@@ -137,7 +137,7 @@ router::set_http_handler(std::string_view key,
 
 template<typename Func, typename... Aspects>
 void
-router::set_default_handler(Func&& handler, Aspects&&... asps)
+Router::set_default_handler(Func&& handler, Aspects&&... asps)
 {
     auto coro_handler = detail::create_router_coro_http_handler(
         std::move(handler), std::forward<Aspects>(asps)...);
@@ -146,7 +146,7 @@ router::set_default_handler(Func&& handler, Aspects&&... asps)
 
 template<typename Func, typename... Aspects>
 void
-router::set_file_request_handler(Func&& handler, Aspects&&... asps)
+Router::set_file_request_handler(Func&& handler, Aspects&&... asps)
 {
     auto coro_handler = detail::create_router_coro_http_handler(
         std::move(handler), std::forward<Aspects>(asps)...);

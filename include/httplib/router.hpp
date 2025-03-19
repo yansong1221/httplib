@@ -1,4 +1,5 @@
 #pragma once
+#include "httplib/server.hpp"
 #include "httplib/http_handler.hpp"
 #include <algorithm>
 #include <boost/asio/detached.hpp>
@@ -9,11 +10,11 @@
 #include <string_view>
 
 namespace httplib {
-class router
+class Router
 {
   public:
-    explicit router(std::shared_ptr<spdlog::logger> logger);
-    virtual ~router();
+    explicit Router(const Server::Option& option);
+    virtual ~Router();
 
   public:
     // eg: "GET hello/" as a key

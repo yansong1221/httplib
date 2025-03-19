@@ -1,5 +1,6 @@
 #pragma once
 #include "httplib/request.hpp"
+#include "httplib/server.hpp"
 #include "httplib/use_awaitable.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/websocket_conn.hpp"
@@ -17,31 +18,25 @@ namespace httplib {
 
 class websocket_conn_impl : public websocket_conn {
 public:
-    websocket_conn_impl(std::shared_ptr<spdlog::logger> logger,
-                        http_variant_stream_type&& stream)
-        : logger_(logger)
-        , strand_(stream.get_executor())
-        , ws_(create_websocket_variant_stream(std::move(stream)))
+    websocket_conn_impl(const Server::Option& option,
+                        websocket_variant_stream_type&& stream)
+        : option_(option), strand_(stream.get_executor()), ws_(std::move(stream))
     {
     }
 
-    void
-    set_message_handler(websocket_conn::message_handler_type handler) override
+    void set_message_handler(websocket_conn::message_handler_type handler) override
     {
         message_handler_ = handler;
     }
-    void
-    set_open_handler(websocket_conn::open_handler_type handler) override
+    void set_open_handler(websocket_conn::open_handler_type handler) override
     {
         open_handler_ = handler;
     }
-    void
-    set_close_handler(websocket_conn::close_handler_type handler) override
+    void set_close_handler(websocket_conn::close_handler_type handler) override
     {
         close_handler_ = handler;
     }
-    void
-    send_message(websocket_conn::message&& msg) override
+    void send_message(websocket_conn::message&& msg) override
     {
         if (!ws_.is_open()) return;
 
@@ -53,8 +48,7 @@ public:
                       net::co_spawn(strand_, process_write_data(), net::detached);
                   });
     }
-    void
-    close() override
+    void close() override
     {
         if (!ws_.is_open()) return;
 
@@ -72,8 +66,7 @@ public:
     }
 
 public:
-    net::awaitable<void>
-    process_write_data()
+    net::awaitable<void> process_write_data()
     {
         auto self = shared_from_this();
 
@@ -93,31 +86,30 @@ public:
             if (ec) co_return;
         }
     }
-    net::awaitable<void>
-    run(const request& req) override
+    net::awaitable<void> run(const request& req) override
     {
         boost::system::error_code ec;
         auto remote_endp = ws_.remote_endpoint(ec);
         co_await ws_.async_accept(req, net_awaitable[ec]);
         if (ec) {
-            logger_->error("websocket handshake failed: {}", ec.message());
+            option_.logger->error("websocket handshake failed: {}", ec.message());
             co_return;
         }
 
         if (open_handler_) co_await open_handler_(weak_from_this());
 
-        logger_->debug("websocket new connection: [{}:{}]",
-                       remote_endp.address().to_string(),
-                       remote_endp.port());
+        option_.logger->debug("websocket new connection: [{}:{}]",
+                              remote_endp.address().to_string(),
+                              remote_endp.port());
 
         beast::flat_buffer buffer;
         for (;;) {
             auto bytes = co_await ws_.async_read(buffer, net_awaitable[ec]);
             if (ec) {
-                logger_->debug("websocket disconnect: [{}:{}] what: {}",
-                               remote_endp.address().to_string(),
-                               remote_endp.port(),
-                               ec.message());
+                option_.logger->debug("websocket disconnect: [{}:{}] what: {}",
+                                      remote_endp.address().to_string(),
+                                      remote_endp.port(),
+                                      ec.message());
                 if (close_handler_) co_await close_handler_(weak_from_this());
                 co_return;
             }
@@ -136,8 +128,9 @@ public:
     }
 
 private:
+    const Server::Option& option_;
     net::strand<net::any_io_executor> strand_;
-    std::shared_ptr<spdlog::logger> logger_;
+
     websocket_variant_stream_type ws_;
 
     std::queue<websocket_conn::message> send_que_;

@@ -6,47 +6,52 @@
 #include <filesystem>
 
 namespace httplib {
-class router;
-class session;
+class Router;
+class Session;
 } // namespace httplib
 
 namespace httplib {
-class server {
+class Server {
 public:
-    struct ssl_config {
+    struct SSLConfig {
         std::filesystem::path cert_file;
         std::filesystem::path key_file;
         std::string passwd;
     };
+    struct Option {
+        std::optional<SSLConfig> ssl_conf;
+        std::shared_ptr<spdlog::logger> logger;
+        std::chrono::steady_clock::duration read_timeout = std::chrono::seconds(30);
+        std::chrono::steady_clock::duration write_timeout = std::chrono::seconds(30);
+    };
 
 public:
-    explicit server(std::shared_ptr<spdlog::logger> logger = nullptr,
-                    uint32_t num_threads = std::thread::hardware_concurrency());
+    explicit Server(uint32_t num_threads = std::thread::hardware_concurrency());
+    ~Server();
 
     net::any_io_executor get_executor() noexcept;
-    std::shared_ptr<spdlog::logger> get_logger() noexcept;
-    void set_logger(std::shared_ptr<spdlog::logger> logger);
 
-    void set_ssl_config(const ssl_config& config);
+    Option& option();
 
-    server& listen(std::string_view host,
+    Server& listen(std::string_view host,
                    uint16_t port,
                    int backlog = net::socket_base::max_listen_connections);
     void run();
     void async_run();
+    void wait();
     void stop();
 
 public:
     void set_websocket_message_handler(websocket_conn::message_handler_type&& handler);
     void set_websocket_open_handler(websocket_conn::open_handler_type&& handler);
     void set_websocket_close_handler(websocket_conn::close_handler_type&& handler);
-    router& get_router();
+    Router& get_router();
 
 private:
-    class impl;
-    std::shared_ptr<impl> impl_;
+    class Impl;
+    Impl* impl_;
 
-    friend class session;
-    friend class router;
+    friend class Session;
+    friend class Router;
 };
 } // namespace httplib

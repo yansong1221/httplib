@@ -24,6 +24,8 @@ class logger;
 }
 
 namespace httplib {
+
+
 namespace net       = boost::asio;
 namespace ssl       = boost::asio::ssl;
 using tcp           = net::ip::tcp;

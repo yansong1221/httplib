@@ -29,10 +29,9 @@ private:
 };
 
 template<class SyncStream>
-void
-teardown(boost::beast::role_type role,
-         ssl_stream<SyncStream>& stream,
-         boost::system::error_code& ec)
+void teardown(boost::beast::role_type role,
+              ssl_stream<SyncStream>& stream,
+              boost::system::error_code& ec)
 {
     // Just forward it to the underlying ssl::stream
     using boost::beast::websocket::teardown;
@@ -42,11 +41,11 @@ teardown(boost::beast::role_type role,
 template<class AsyncStream,
          typename TeardownHandler =
              net::default_completion_token_t<beast::executor_type<AsyncStream>>>
-void
-async_teardown(boost::beast::role_type role,
-               ssl_stream<AsyncStream>& stream,
-               TeardownHandler&& handler =
-                   net::default_completion_token_t<beast::executor_type<AsyncStream>> {})
+void async_teardown(
+    boost::beast::role_type role,
+    ssl_stream<AsyncStream>& stream,
+    TeardownHandler&& handler =
+        net::default_completion_token_t<beast::executor_type<AsyncStream>> {})
 {
     // Just forward it to the underlying ssl::stream
     using boost::beast::websocket::async_teardown;
@@ -54,4 +53,5 @@ async_teardown(boost::beast::role_type role,
                    static_cast<net::ssl::stream<AsyncStream>&>(stream),
                    std::forward<TeardownHandler>(handler));
 }
+
 } // namespace httplib

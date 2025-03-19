@@ -30,10 +30,12 @@ private:
 int main()
 { // HTTP
     using namespace std::string_view_literals;
-    httplib::server svr;
-    auto config = httplib::server::ssl_config {
+    httplib::Server svr;
+    auto config = httplib::Server::SSLConfig {
         R"(D:\code\http\lib\server.crt)", R"(D:\code\http\lib\server.key)", "test"};
-    svr.set_ssl_config(config);
+    svr.option().ssl_conf = config;
+    svr.option().logger->set_level(spdlog::level::trace);
+
     svr.listen("127.0.0.1", 8808);
     svr.set_websocket_open_handler(
         [](httplib::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> {
@@ -64,6 +66,8 @@ int main()
             co_return;
         },
         log_t {});
+    router.set_http_handler<httplib::http::verb::get>(
+        "/close", [&](httplib::request& req, httplib::response& resp) { svr.stop(); });
     router.set_http_handler<httplib::http::verb::post>(
         "/json",
         [](httplib::request& req,
