@@ -45,7 +45,7 @@ public:
     void set_websocket_message_handler(websocket_conn::message_handler_type&& handler);
     void set_websocket_open_handler(websocket_conn::open_handler_type&& handler);
     void set_websocket_close_handler(websocket_conn::close_handler_type&& handler);
-    Router& get_router();
+    Router& router();
 
 private:
     class Impl;

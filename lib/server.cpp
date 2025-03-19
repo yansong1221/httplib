@@ -148,6 +148,6 @@ void Server::set_websocket_close_handler(
 {
     impl_->websocket_close_handler_ = handler;
 }
-Router& Server::get_router() { return *impl_->router; }
+Router& Server::router() { return *impl_->router; }
 
 } // namespace httplib

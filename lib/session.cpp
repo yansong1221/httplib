@@ -328,7 +328,7 @@ private:
     tcp::endpoint local_endpoint_;
     tcp::endpoint remote_endpoint_;
 };
-
+#ifdef HTTPLIB_ENABLED_SSL
 class ssl_handshake_task : public Session::Task {
 public:
     explicit ssl_handshake_task(ssl_http_stream&& stream,
@@ -368,6 +368,7 @@ private:
     ssl_http_stream stream_;
     beast::flat_buffer buffer_;
 };
+#endif
 
 class detect_ssl_task : public Session::Task {
 public:
@@ -427,7 +428,6 @@ Session::Session(tcp::socket&& stream,
 {
     remote_endpoint_ = stream.remote_endpoint();
     local_endpoint_ = stream.local_endpoint();
-
     option_.logger->trace("accept new connection [{}:{}]",
                           remote_endpoint_.address().to_string(),
                           remote_endpoint_.port());
@@ -454,7 +454,7 @@ httplib::net::awaitable<void> Session::run()
 {
     auto self = shared_from_this();
     for (; !abort_ && task_;) {
-        auto next_task = co_await task_->then();
+        auto&& next_task = co_await task_->then();
         std::unique_lock<std::mutex> lck(task_mtx_);
         task_ = std::move(next_task);
     }
