@@ -18,7 +18,13 @@ AlwaysBreakTemplateDeclarations: true
 BinPackArguments: false
 BinPackParameters: false
 BreakBeforeBinaryOperators: None
-#BreakBeforeBraces: Allman
+
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterEnum: true
+  AfterStruct: false
+  SplitEmptyFunction: false
+
 BreakConstructorInitializersBeforeComma: true
 ColumnLimit: 90
 ConstructorInitializerAllOnOneLineOrOnePerLine: true
@@ -39,11 +45,10 @@ IndentWidth: 4
 KeepEmptyLinesAtTheStartOfBlocks: false
 MaxEmptyLinesToKeep: 2
 NamespaceIndentation: None
-PenaltyReturnTypeOnItsOwnLine: 1000
+PenaltyReturnTypeOnItsOwnLine: 100
 PointerAlignment: Left
 SpaceAfterTemplateKeyword: false
 Standard: Auto
 UseTab: Never
 
-#AlignConsecutiveAssignments: true
-#AlwaysBreakAfterReturnType: All
+AlignEscapedNewlines: Left
