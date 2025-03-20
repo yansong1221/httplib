@@ -20,9 +20,9 @@ namespace httplib {
 namespace detail {
 
 template<class Body>
-httplib::response make_respone(const http::request<Body>& req)
+httplib::Response make_respone(const http::request<Body>& req)
 {
-    httplib::response resp;
+    httplib::Response resp;
     resp.result(http::status::not_found);
     resp.version(req.version());
     resp.set(http::field::server, BOOST_BEAST_VERSION_STRING);
@@ -90,15 +90,12 @@ net::awaitable<void> transfer(S1& from, S2& to, size_t& bytes_transferred)
 class websocket_task : public Session::Task {
 public:
     explicit websocket_task(websocket_variant_stream_type&& stream,
-                            request&& req,
+                            Request&& req,
                             const Server::Option& option)
         : req_(std::move(req))
     {
         auto conn =
             std::make_shared<httplib::websocket_conn_impl>(option, std::move(stream));
-        conn->set_open_handler(nullptr);
-        conn->set_close_handler(nullptr);
-        conn->set_message_handler(nullptr);
     }
     net::awaitable<std::unique_ptr<Task>> then() override
     {
@@ -110,13 +107,13 @@ public:
 
 private:
     std::shared_ptr<httplib::websocket_conn_impl> conn_;
-    request req_;
+    Request req_;
 };
 
 class http_proxy_task : public Session::Task {
 public:
     explicit http_proxy_task(http_variant_stream_type&& stream,
-                             request&& req,
+                             Request&& req,
                              const Server::Option& option)
         : stream_(std::move(stream))
         , req_(std::move(req))
@@ -171,7 +168,7 @@ private:
     tcp::resolver resolver_;
     tcp::socket proxy_socket_;
 
-    request req_;
+    Request req_;
     const Server::Option& option_;
 };
 
@@ -215,7 +212,7 @@ public:
             if (websocket::is_upgrade(header)) {
 #ifdef HTTPLIB_ENABLED_WEBSOCKET
                 auto stream = create_websocket_variant_stream(std::move(stream_));
-                request req(header_parser.release());
+                Request req(header_parser.release());
                 co_return std::make_unique<websocket_task>(
                     std::move(stream), std::move(req), option_);
 #endif // HTTPLIB_ENABLED_WEBSOCKET
@@ -223,19 +220,19 @@ public:
             }
             // http proxy
             else if (header.method() == http::verb::connect) {
-                request req(header_parser.release());
+                Request req(header_parser.release());
                 co_return std::make_unique<http_proxy_task>(
                     std::move(stream_), std::move(req), option_);
             }
-            httplib::response resp = detail::make_respone(header);
-            httplib::request req;
+            httplib::Response resp = detail::make_respone(header);
+            httplib::Request req;
             if (router_.has_handler(header.method(), header.target())) {
                 switch (header.method()) {
                     case http::verb::get:
                     case http::verb::head:
                     case http::verb::trace:
                     case http::verb::connect:
-                        req = httplib::request(header_parser.release());
+                        req = httplib::Request(header_parser.release());
                         break;
                     default: {
                         http::request_parser<body::any_body> body_parser(

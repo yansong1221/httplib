@@ -23,19 +23,6 @@ public:
         : option_(option), strand_(stream.get_executor()), ws_(std::move(stream))
     {
     }
-
-    void set_message_handler(websocket_conn::message_handler_type handler) override
-    {
-        message_handler_ = handler;
-    }
-    void set_open_handler(websocket_conn::open_handler_type handler) override
-    {
-        open_handler_ = handler;
-    }
-    void set_close_handler(websocket_conn::close_handler_type handler) override
-    {
-        close_handler_ = handler;
-    }
     void send_message(websocket_conn::message&& msg) override
     {
         if (!ws_.is_open()) return;
@@ -86,7 +73,7 @@ public:
             if (ec) co_return;
         }
     }
-    net::awaitable<void> run(const request& req) override
+    net::awaitable<void> run(const Request& req)
     {
         boost::system::error_code ec;
         auto remote_endp = ws_.remote_endpoint(ec);
@@ -96,7 +83,8 @@ public:
             co_return;
         }
 
-        if (open_handler_) co_await open_handler_(weak_from_this());
+        if (option_.websocket_open_handler)
+            co_await option_.websocket_open_handler(weak_from_this());
 
         option_.logger->debug("websocket new connection: [{}:{}]",
                               remote_endp.address().to_string(),
@@ -110,18 +98,20 @@ public:
                                       remote_endp.address().to_string(),
                                       remote_endp.port(),
                                       ec.message());
-                if (close_handler_) co_await close_handler_(weak_from_this());
+                if (option_.websocket_close_handler)
+                    co_await option_.websocket_close_handler(weak_from_this());
                 co_return;
             }
 
-            if (message_handler_) {
+            if (option_.websocket_message_handler) {
                 websocket_conn::message msg(
                     util::buffer_to_string_view(buffer.data()),
                     ws_.got_text() ? websocket_conn::message::data_type::text
                                    : websocket_conn::message::data_type::binary);
-                net::co_spawn(co_await net::this_coro::executor,
-                              message_handler_(weak_from_this(), std::move(msg)),
-                              net::detached);
+                net::co_spawn(
+                    co_await net::this_coro::executor,
+                    option_.websocket_message_handler(weak_from_this(), std::move(msg)),
+                    net::detached);
             }
             buffer.consume(bytes);
         }
@@ -130,14 +120,8 @@ public:
 private:
     const Server::Option& option_;
     net::strand<net::any_io_executor> strand_;
-
     websocket_variant_stream_type ws_;
-
     std::queue<websocket_conn::message> send_que_;
-
-    websocket_conn::message_handler_type message_handler_;
-    websocket_conn::open_handler_type open_handler_;
-    websocket_conn::close_handler_type close_handler_;
 };
 
 } // namespace httplib

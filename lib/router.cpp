@@ -62,7 +62,7 @@ static std::string make_whole_str(http::verb method, std::string_view target)
 {
     return fmt::format("{} {}", std::string_view(http::to_string(method)), target);
 }
-static std::string make_whole_str(const request& req)
+static std::string make_whole_str(const Request& req)
 {
     return make_whole_str(req.base().method(), util::url_decode(req.target()));
 }
@@ -73,7 +73,7 @@ class Router::impl {
 public:
     impl(const Server::Option& option) : option_(option) { }
 
-    net::awaitable<bool> handle_file_request(request& req, response& res)
+    net::awaitable<bool> handle_file_request(Request& req, Response& res)
     {
         beast::error_code ec;
 
@@ -128,7 +128,7 @@ public:
 
         co_return false;
     }
-    net::awaitable<void> proc_routing(request& req, response& resp)
+    net::awaitable<void> proc_routing(Request& req, Response& resp)
     {
         if (req.method() == http::verb::get || req.method() == http::verb::head) {
             if (co_await handle_file_request(req, resp)) co_return;
@@ -218,7 +218,7 @@ bool Router::has_handler(http::verb method, std::string_view target) const
 {
     return true;
 }
-net::awaitable<void> Router::routing(request& req, response& resp)
+net::awaitable<void> Router::routing(Request& req, Response& resp)
 {
     try {
         auto tokens = util::split(req.target(), "?");

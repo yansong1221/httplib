@@ -59,7 +59,7 @@ class Router
     has_handler(http::verb method, std::string_view target) const;
 
     net::awaitable<void>
-    routing(request& req, response& resp);
+    routing(Request& req, Response& resp);
 
   private:
     void

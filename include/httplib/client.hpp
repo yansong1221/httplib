@@ -7,7 +7,7 @@
 
 namespace httplib {
 
-class client {
+class Client {
 public:
     enum class timeout_policy { overall, step, never };
     using response = http::response<body::any_body>;
@@ -16,9 +16,9 @@ public:
     using response_result = boost::system::result<response>;
 
 public:
-    explicit client(net::io_context& ex, std::string_view host, uint16_t port);
-    explicit client(const net::any_io_executor& ex, std::string_view host, uint16_t port);
-    ~client();
+    explicit Client(net::io_context& ex, std::string_view host, uint16_t port);
+    explicit Client(const net::any_io_executor& ex, std::string_view host, uint16_t port);
+    ~Client();
 
     void set_timeout_policy(const timeout_policy& policy);
 

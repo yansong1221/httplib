@@ -23,6 +23,10 @@ public:
         std::shared_ptr<spdlog::logger> logger;
         std::chrono::steady_clock::duration read_timeout = std::chrono::seconds(30);
         std::chrono::steady_clock::duration write_timeout = std::chrono::seconds(30);
+
+        websocket_conn::message_handler_type websocket_message_handler;
+        websocket_conn::open_handler_type websocket_open_handler;
+        websocket_conn::close_handler_type websocket_close_handler;
     };
 
 public:
@@ -41,10 +45,6 @@ public:
     void wait();
     void stop();
 
-public:
-    void set_websocket_message_handler(websocket_conn::message_handler_type&& handler);
-    void set_websocket_open_handler(websocket_conn::open_handler_type&& handler);
-    void set_websocket_close_handler(websocket_conn::close_handler_type&& handler);
     Router& router();
 
 private:

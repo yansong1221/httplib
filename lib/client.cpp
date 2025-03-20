@@ -17,7 +17,7 @@
 
 
 namespace httplib {
-class client::impl {
+class Client::impl {
 public:
     impl(const net::any_io_executor& ex, std::string_view host, uint16_t port)
         : executor_(ex), resolver_(ex), host_(host), port_(port)
@@ -68,17 +68,17 @@ public:
 
     bool is_connected() { return variant_stream_ && variant_stream_->is_connected(); }
 
-    net::awaitable<client::response_result> async_send_request(
+    net::awaitable<Client::response_result> async_send_request(
         http::request<body::any_body>& req)
     {
-        client::response resp;
+        Client::response resp;
         auto ec = co_await async_send_request(req, resp);
         if (ec) co_return ec;
         co_return resp;
     }
 
     net::awaitable<boost::system::error_code> async_send_request(
-        http::request<body::any_body>& req, client::response& resp)
+        http::request<body::any_body>& req, Client::response& resp)
     {
         try {
             auto expires_after = [this](auto& stream, bool first = false) {
@@ -179,31 +179,31 @@ public:
     bool use_ssl_ = false;
 };
 
-client::client(net::io_context& ex, std::string_view host, uint16_t port)
-    : client(ex.get_executor(), host, port)
+Client::Client(net::io_context& ex, std::string_view host, uint16_t port)
+    : Client(ex.get_executor(), host, port)
 {
 }
 
-client::client(const net::any_io_executor& ex, std::string_view host, uint16_t port)
-    : impl_(std::make_unique<client::impl>(ex, host, port))
+Client::Client(const net::any_io_executor& ex, std::string_view host, uint16_t port)
+    : impl_(std::make_unique<Client::impl>(ex, host, port))
 {
 }
 
-client::~client() { }
+Client::~Client() { }
 
-void client::set_timeout_policy(const timeout_policy& policy)
+void Client::set_timeout_policy(const timeout_policy& policy)
 {
     impl_->set_timeout_policy(policy);
 }
 
-void client::set_timeout(const std::chrono::steady_clock::duration& duration)
+void Client::set_timeout(const std::chrono::steady_clock::duration& duration)
 {
     impl_->set_timeout(duration);
 }
 
-void client::set_use_ssl(bool ssl) { impl_->set_use_ssl(ssl); }
+void Client::set_use_ssl(bool ssl) { impl_->set_use_ssl(ssl); }
 
-net::awaitable<client::response_result> client::async_get(
+net::awaitable<Client::response_result> Client::async_get(
     std::string_view path,
     const html::query_params& params,
     const http::fields& headers /*= http::fields()*/)
@@ -219,14 +219,14 @@ net::awaitable<client::response_result> client::async_get(
 }
 
 
-httplib::net::awaitable<client::response_result> client::async_head(
+httplib::net::awaitable<Client::response_result> Client::async_head(
     std::string_view path, const http::fields& headers /*= http::fields()*/)
 {
     auto req = impl_->make_http_request(http::verb::head, path, headers);
     co_return co_await impl_->async_send_request(req);
 }
 
-httplib::net::awaitable<client::response_result> client::async_post(
+httplib::net::awaitable<Client::response_result> Client::async_post(
     std::string_view path,
     std::string_view body,
     const http::fields& headers /*= http::fields()*/)
@@ -237,7 +237,7 @@ httplib::net::awaitable<client::response_result> client::async_post(
     co_return co_await impl_->async_send_request(request);
 }
 
-httplib::net::awaitable<client::response_result> client::async_post(
+httplib::net::awaitable<Client::response_result> Client::async_post(
     std::string_view path,
     boost::json::value&& body,
     const http::fields& headers /*= http::fields()*/)
@@ -249,7 +249,7 @@ httplib::net::awaitable<client::response_result> client::async_post(
     co_return co_await impl_->async_send_request(request);
 }
 
-client::response_result client::get(std::string_view path,
+Client::response_result Client::get(std::string_view path,
                                     const html::query_params& params,
                                     const http::fields& headers /*= http::fields()*/)
 {
@@ -258,8 +258,8 @@ client::response_result client::get(std::string_view path,
     return future.get();
 }
 
-void client::close() { impl_->close(); }
+void Client::close() { impl_->close(); }
 
-bool client::is_connected() { return impl_->is_connected(); }
+bool Client::is_connected() { return impl_->is_connected(); }
 
 } // namespace httplib

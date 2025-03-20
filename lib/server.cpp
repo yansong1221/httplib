@@ -28,10 +28,6 @@ public:
     net::thread_pool pool;
     tcp::acceptor acceptor;
 
-    websocket_conn::message_handler_type websocket_message_handler_;
-    websocket_conn::open_handler_type websocket_open_handler_;
-    websocket_conn::close_handler_type websocket_close_handler_;
-
     std::mutex session_mtx;
     std::unordered_set<std::shared_ptr<Session>> session_map;
 };
@@ -131,22 +127,6 @@ void Server::stop()
             v->abort();
     }
     impl_->pool.stop();
-}
-
-void Server::set_websocket_message_handler(
-    httplib::websocket_conn::message_handler_type&& handler)
-{
-    impl_->websocket_message_handler_ = handler;
-}
-void Server::set_websocket_open_handler(
-    httplib::websocket_conn::open_handler_type&& handler)
-{
-    impl_->websocket_open_handler_ = handler;
-}
-void Server::set_websocket_close_handler(
-    httplib::websocket_conn::close_handler_type&& handler)
-{
-    impl_->websocket_close_handler_ = handler;
 }
 Router& Server::router() { return *impl_->router; }
 
