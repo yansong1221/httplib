@@ -17,30 +17,26 @@
 
 
 namespace httplib {
-class Client::impl {
+class client::impl {
 public:
     impl(const net::any_io_executor& ex, std::string_view host, uint16_t port)
-        : executor_(ex), resolver_(ex), host_(host), port_(port)
-    {
-    }
+        : executor_(ex), resolver_(ex), host_(host), port_(port) { }
 
     void set_timeout_policy(const timeout_policy& policy) { timeout_policy_ = policy; }
 
-    void set_timeout(const std::chrono::steady_clock::duration& duration)
-    {
+    void set_timeout(const std::chrono::steady_clock::duration& duration) {
         timeout_ = duration;
     }
     void set_use_ssl(bool ssl) { use_ssl_ = ssl; }
 
-    http::request<body::any_body> make_http_request(http::verb method,
-                                                    std::string_view path,
-                                                    const http::fields& headers)
-    {
+    client::request make_http_request(http::verb method,
+                                      std::string_view path,
+                                      const http::fields& headers) {
         auto host = host_;
         if ((use_ssl_ && port_ != 443) || (!use_ssl_ && port_ != 80))
             host += fmt::format(":{}", port_);
 
-        http::request<body::any_body> req(method, path, 11);
+        client::request req(method, path, 11);
         req.set(http::field::host, host);
         req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
         req.set(http::field::accept, "*/*");
@@ -56,8 +52,7 @@ public:
     }
 
 public:
-    void close()
-    {
+    void close() {
         resolver_.cancel();
         if (variant_stream_) {
             variant_stream_->expires_never();
@@ -68,18 +63,15 @@ public:
 
     bool is_connected() { return variant_stream_ && variant_stream_->is_connected(); }
 
-    net::awaitable<Client::response_result> async_send_request(
-        http::request<body::any_body>& req)
-    {
-        Client::response resp;
+    net::awaitable<client::response_result> async_send_request(client::request& req) {
+        client::response resp;
         auto ec = co_await async_send_request(req, resp);
         if (ec) co_return ec;
         co_return resp;
     }
 
-    net::awaitable<boost::system::error_code> async_send_request(
-        http::request<body::any_body>& req, Client::response& resp)
-    {
+    net::awaitable<boost::system::error_code> async_send_request(client::request& req,
+                                                                 client::response& resp) {
         try {
             auto expires_after = [this](auto& stream, bool first = false) {
                 if (timeout_policy_ == timeout_policy::step)
@@ -179,35 +171,28 @@ public:
     bool use_ssl_ = false;
 };
 
-Client::Client(net::io_context& ex, std::string_view host, uint16_t port)
-    : Client(ex.get_executor(), host, port)
-{
-}
+client::client(net::io_context& ex, std::string_view host, uint16_t port)
+    : client(ex.get_executor(), host, port) { }
 
-Client::Client(const net::any_io_executor& ex, std::string_view host, uint16_t port)
-    : impl_(std::make_unique<Client::impl>(ex, host, port))
-{
-}
+client::client(const net::any_io_executor& ex, std::string_view host, uint16_t port)
+    : impl_(new client::impl(ex, host, port)) { }
 
-Client::~Client() { }
+client::~client() { delete impl_; }
 
-void Client::set_timeout_policy(const timeout_policy& policy)
-{
+void client::set_timeout_policy(const timeout_policy& policy) {
     impl_->set_timeout_policy(policy);
 }
 
-void Client::set_timeout(const std::chrono::steady_clock::duration& duration)
-{
+void client::set_timeout(const std::chrono::steady_clock::duration& duration) {
     impl_->set_timeout(duration);
 }
 
-void Client::set_use_ssl(bool ssl) { impl_->set_use_ssl(ssl); }
+void client::set_use_ssl(bool ssl) { impl_->set_use_ssl(ssl); }
 
-net::awaitable<Client::response_result> Client::async_get(
-    std::string_view path,
-    const html::query_params& params,
-    const http::fields& headers /*= http::fields()*/)
-{
+net::awaitable<client::response_result>
+client::async_get(std::string_view path,
+                  const html::query_params& params,
+                  const http::fields& headers /*= http::fields()*/) {
     auto query = html::make_http_query_params(params);
     std::string target(path);
     if (!query.empty()) {
@@ -219,29 +204,26 @@ net::awaitable<Client::response_result> Client::async_get(
 }
 
 
-httplib::net::awaitable<Client::response_result> Client::async_head(
-    std::string_view path, const http::fields& headers /*= http::fields()*/)
-{
+httplib::net::awaitable<client::response_result> client::async_head(
+    std::string_view path, const http::fields& headers /*= http::fields()*/) {
     auto req = impl_->make_http_request(http::verb::head, path, headers);
     co_return co_await impl_->async_send_request(req);
 }
 
-httplib::net::awaitable<Client::response_result> Client::async_post(
-    std::string_view path,
-    std::string_view body,
-    const http::fields& headers /*= http::fields()*/)
-{
+httplib::net::awaitable<client::response_result>
+client::async_post(std::string_view path,
+                   std::string_view body,
+                   const http::fields& headers /*= http::fields()*/) {
     auto request = impl_->make_http_request(http::verb::post, path, headers);
     request.content_length(body.size());
     request.body() = std::string(body);
     co_return co_await impl_->async_send_request(request);
 }
 
-httplib::net::awaitable<Client::response_result> Client::async_post(
-    std::string_view path,
-    boost::json::value&& body,
-    const http::fields& headers /*= http::fields()*/)
-{
+httplib::net::awaitable<client::response_result>
+client::async_post(std::string_view path,
+                   const boost::json::value&& body,
+                   const http::fields& headers /*= http::fields()*/) {
     auto request = impl_->make_http_request(http::verb::post, path, headers);
     request.set(http::field::content_type, "application/json");
     request.body() = std::move(body);
@@ -249,17 +231,16 @@ httplib::net::awaitable<Client::response_result> Client::async_post(
     co_return co_await impl_->async_send_request(request);
 }
 
-Client::response_result Client::get(std::string_view path,
-                                    const html::query_params& params,
-                                    const http::fields& headers /*= http::fields()*/)
-{
+client::response_result client::get(std::string_view path,
+                                   const html::query_params& params,
+                                   const http::fields& headers /*= http::fields()*/) {
     auto future = net::co_spawn(
         impl_->executor_, async_get(path, params, headers), net::use_future);
     return future.get();
 }
 
-void Client::close() { impl_->close(); }
+void client::close() { impl_->close(); }
 
-bool Client::is_connected() { return impl_->is_connected(); }
+bool client::is_connected() { return impl_->is_connected(); }
 
 } // namespace httplib

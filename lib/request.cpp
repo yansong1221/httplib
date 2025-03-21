@@ -2,13 +2,13 @@
 
 namespace httplib {
 
-Request::Request(http::request<body::any_body>&& other)
+request::request(http::request<body::any_body>&& other)
 {
     http::request<body::any_body>::operator=(std::move(other));
 }
 
 net::ip::address
-Request::get_client_ip() const
+request::get_client_ip() const
 {
     auto iter = this->find("X-Forwarded-For");
     if (iter == this->end()) return remote_endpoint.address();

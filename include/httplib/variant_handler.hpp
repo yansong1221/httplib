@@ -18,9 +18,7 @@ class variant_handler : public std::variant<T...> {
 
 public:
     template<typename... Args>
-    net::awaitable<void>
-    invoke(Args&&... args)
-    {
+    net::awaitable<void> invoke(Args&&... args) {
         co_await std::visit(
             [&](auto& handler) mutable -> net::awaitable<void> {
                 using handler_type = std::decay_t<decltype(handler)>;
@@ -38,13 +36,10 @@ public:
         co_return;
     }
     template<typename... Args>
-    net::awaitable<void>
-    operator()(Args&&... args)
-    {
+    net::awaitable<void> operator()(Args&&... args) {
         co_return co_await invoke(std::forward<Args>(args)...);
     }
-    operator bool() const
-    {
+    operator bool() const {
         return std::visit([&](auto& handler) { return !!handler; }, *this);
     }
 };

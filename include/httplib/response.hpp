@@ -7,10 +7,10 @@
 
 namespace httplib {
 
-struct Response : public http::response<body::any_body> {
+struct response : public http::response<body::any_body> {
     using http::response<body::any_body>::message;
 
-    Response(http::response<body::any_body>&& other)
+    response(http::response<body::any_body>&& other)
     {
         http::response<body::any_body>::operator=(std::move(other));
     }

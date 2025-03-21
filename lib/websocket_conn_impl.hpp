@@ -18,13 +18,10 @@ namespace httplib {
 
 class websocket_conn_impl : public websocket_conn {
 public:
-    websocket_conn_impl(const Server::Option& option,
+    websocket_conn_impl(const server::setting& option,
                         websocket_variant_stream_type&& stream)
-        : option_(option), strand_(stream.get_executor()), ws_(std::move(stream))
-    {
-    }
-    void send_message(websocket_conn::message&& msg) override
-    {
+        : option_(option), strand_(stream.get_executor()), ws_(std::move(stream)) { }
+    void send_message(websocket_conn::message&& msg) override {
         if (!ws_.is_open()) return;
 
         net::post(strand_,
@@ -35,8 +32,7 @@ public:
                       net::co_spawn(strand_, process_write_data(), net::detached);
                   });
     }
-    void close() override
-    {
+    void close() override {
         if (!ws_.is_open()) return;
 
         net::co_spawn(
@@ -53,8 +49,7 @@ public:
     }
 
 public:
-    net::awaitable<void> process_write_data()
-    {
+    net::awaitable<void> process_write_data() {
         auto self = shared_from_this();
 
         for (;;) {
@@ -73,31 +68,30 @@ public:
             if (ec) co_return;
         }
     }
-    net::awaitable<void> run(const Request& req)
-    {
+    net::awaitable<void> run(const request& req) {
         boost::system::error_code ec;
         auto remote_endp = ws_.remote_endpoint(ec);
         co_await ws_.async_accept(req, net_awaitable[ec]);
         if (ec) {
-            option_.logger->error("websocket handshake failed: {}", ec.message());
+            option_.get_logger()->error("websocket handshake failed: {}", ec.message());
             co_return;
         }
 
         if (option_.websocket_open_handler)
             co_await option_.websocket_open_handler(weak_from_this());
 
-        option_.logger->debug("websocket new connection: [{}:{}]",
-                              remote_endp.address().to_string(),
-                              remote_endp.port());
+        option_.get_logger()->debug("websocket new connection: [{}:{}]",
+                                    remote_endp.address().to_string(),
+                                    remote_endp.port());
 
         beast::flat_buffer buffer;
         for (;;) {
             auto bytes = co_await ws_.async_read(buffer, net_awaitable[ec]);
             if (ec) {
-                option_.logger->debug("websocket disconnect: [{}:{}] what: {}",
-                                      remote_endp.address().to_string(),
-                                      remote_endp.port(),
-                                      ec.message());
+                option_.get_logger()->debug("websocket disconnect: [{}:{}] what: {}",
+                                            remote_endp.address().to_string(),
+                                            remote_endp.port(),
+                                            ec.message());
                 if (option_.websocket_close_handler)
                     co_await option_.websocket_close_handler(weak_from_this());
                 co_return;
@@ -108,17 +102,15 @@ public:
                     util::buffer_to_string_view(buffer.data()),
                     ws_.got_text() ? websocket_conn::message::data_type::text
                                    : websocket_conn::message::data_type::binary);
-                net::co_spawn(
-                    co_await net::this_coro::executor,
-                    option_.websocket_message_handler(weak_from_this(), std::move(msg)),
-                    net::detached);
+                co_await option_.websocket_message_handler(weak_from_this(),
+                                                           std::move(msg));
             }
             buffer.consume(bytes);
         }
     }
 
 private:
-    const Server::Option& option_;
+    const server::setting& option_;
     net::strand<net::any_io_executor> strand_;
     websocket_variant_stream_type ws_;
     std::queue<websocket_conn::message> send_que_;

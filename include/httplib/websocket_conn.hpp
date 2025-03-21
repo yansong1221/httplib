@@ -13,7 +13,11 @@ class websocket_conn : public std::enable_shared_from_this<websocket_conn> {
 public:
     class message {
     public:
-        enum class data_type { text, binary };
+        enum class data_type
+        {
+            text,
+            binary
+        };
 
     public:
         explicit message(std::string&& payload, data_type type = data_type::text)

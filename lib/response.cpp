@@ -6,7 +6,7 @@
 namespace httplib {
 
 void
-Response::set_empty_content(http::status status)
+response::set_empty_content(http::status status)
 {
     result(status);
     body() = body::empty_body::value_type {};
@@ -14,7 +14,7 @@ Response::set_empty_content(http::status status)
 }
 
 void
-Response::set_error_content(http::status status)
+response::set_error_content(http::status status)
 {
     auto content = fmt::format(
         R"(<html>
@@ -32,7 +32,7 @@ Response::set_error_content(http::status status)
 }
 
 void
-Response::set_string_content(std::string&& data,
+response::set_string_content(std::string&& data,
                              std::string_view content_type,
                              http::status status /*= http::status::ok*/)
 {
@@ -43,7 +43,7 @@ Response::set_string_content(std::string&& data,
 }
 
 void
-Response::set_string_content(std::string_view data,
+response::set_string_content(std::string_view data,
                              std::string_view content_type,
                              http::status status /*= http::status::ok*/)
 {
@@ -51,7 +51,7 @@ Response::set_string_content(std::string_view data,
 }
 
 void
-Response::set_json_content(body::json_body::value_type&& data,
+response::set_json_content(body::json_body::value_type&& data,
                            http::status status /*= http::status::ok*/)
 {
     result(status);
@@ -61,14 +61,14 @@ Response::set_json_content(body::json_body::value_type&& data,
 }
 
 void
-Response::set_json_content(const body::json_body::value_type& data,
+response::set_json_content(const body::json_body::value_type& data,
                            http::status status /*= http::status::ok*/)
 {
     set_json_content(body::json_body::value_type(data));
 }
 
 void
-Response::set_file_content(const fs::path& path, const http::fields& req_header)
+response::set_file_content(const fs::path& path, const http::fields& req_header)
 {
     std::error_code ec;
     auto file_size = fs::file_size(path, ec);
@@ -133,7 +133,7 @@ Response::set_file_content(const fs::path& path, const http::fields& req_header)
 }
 
 void
-Response::set_form_data_content(const std::vector<form_data::field>& data)
+response::set_form_data_content(const std::vector<form_data::field>& data)
 {
     body::form_data_body::value_type value;
     value.boundary = html::generate_boundary();
@@ -146,7 +146,7 @@ Response::set_form_data_content(const std::vector<form_data::field>& data)
 }
 
 void
-Response::set_redirect(std::string_view url,
+response::set_redirect(std::string_view url,
                        http::status status /*= http::status::moved_permanently*/)
 {
     set(http::field::location, url);

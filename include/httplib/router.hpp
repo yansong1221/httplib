@@ -10,11 +10,11 @@
 #include <string_view>
 
 namespace httplib {
-class Router
+class router
 {
   public:
-    explicit Router(const Server::Option& option);
-    virtual ~Router();
+    explicit router(const server::setting& option);
+    virtual ~router();
 
   public:
     // eg: "GET hello/" as a key
@@ -59,7 +59,7 @@ class Router
     has_handler(http::verb method, std::string_view target) const;
 
     net::awaitable<void>
-    routing(Request& req, Response& resp);
+    routing(request& req, response& resp);
 
   private:
     void

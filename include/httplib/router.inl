@@ -9,7 +9,7 @@ struct has_before : std::false_type { };
 template<class T>
 struct has_before<T,
                   std::void_t<decltype(std::declval<T>().before(
-                      std::declval<Request&>(), std::declval<Response&>()))>>
+                      std::declval<request&>(), std::declval<response&>()))>>
     : std::true_type { };
 
 template<class, class = void>
@@ -18,7 +18,7 @@ struct has_after : std::false_type { };
 template<class T>
 struct has_after<T,
                  std::void_t<decltype(std::declval<T>().after(
-                     std::declval<Request&>(), std::declval<Response&>()))>>
+                     std::declval<request&>(), std::declval<response&>()))>>
     : std::true_type { };
 
 template<class T>
@@ -33,7 +33,7 @@ constexpr inline bool is_awaitable_v =
 
 template<typename T>
 net::awaitable<void>
-do_before(T& aspect, Request& req, Response& resp, bool& ok)
+do_before(T& aspect, request& req, response& resp, bool& ok)
 {
     if constexpr (has_before_v<T>) {
         if (!ok) { co_return; }
@@ -48,7 +48,7 @@ do_before(T& aspect, Request& req, Response& resp, bool& ok)
 
 template<typename T>
 net::awaitable<void>
-do_after(T& aspect, Request& req, Response& resp, bool& ok)
+do_after(T& aspect, request& req, response& resp, bool& ok)
 {
     if constexpr (has_after_v<T>) {
         if (!ok) { co_return; }
@@ -85,7 +85,7 @@ create_router_coro_http_handler(Func&& handler, Aspects&&... asps)
     if constexpr (sizeof...(Aspects) > 0) {
         http_handler = [handler_variant = std::move(handler_variant),
                         ... asps        = std::forward<Aspects>(asps)](
-                           Request& req, Response& resp) mutable -> net::awaitable<void> {
+                           request& req, response& resp) mutable -> net::awaitable<void> {
             bool ok = true;
             co_await (detail::do_before(asps, req, resp, ok), ...);
             if (ok) { co_await handler_variant(req, resp); }
@@ -94,7 +94,7 @@ create_router_coro_http_handler(Func&& handler, Aspects&&... asps)
         };
     } else {
         http_handler = [handler_variant = std::move(handler_variant)](
-                           Request& req, Response& resp) mutable -> net::awaitable<void> {
+                           request& req, response& resp) mutable -> net::awaitable<void> {
             co_await handler_variant(req, resp);
         };
     }
@@ -104,7 +104,7 @@ create_router_coro_http_handler(Func&& handler, Aspects&&... asps)
 
 template<typename Func, typename... Aspects>
 void
-Router::set_http_handler(http::verb method,
+router::set_http_handler(http::verb method,
                          std::string_view key,
                          Func&& handler,
                          Aspects&&... asps)
@@ -117,7 +117,7 @@ Router::set_http_handler(http::verb method,
 
 template<http::verb... method, typename Func, typename... Aspects>
 void
-Router::set_http_handler(std::string_view key,
+router::set_http_handler(std::string_view key,
                          Func&& handler,
                          util::class_type_t<Func>& owner,
                          Aspects&&... asps)
@@ -137,7 +137,7 @@ Router::set_http_handler(std::string_view key,
 
 template<typename Func, typename... Aspects>
 void
-Router::set_default_handler(Func&& handler, Aspects&&... asps)
+router::set_default_handler(Func&& handler, Aspects&&... asps)
 {
     auto coro_handler = detail::create_router_coro_http_handler(
         std::move(handler), std::forward<Aspects>(asps)...);
@@ -146,7 +146,7 @@ Router::set_default_handler(Func&& handler, Aspects&&... asps)
 
 template<typename Func, typename... Aspects>
 void
-Router::set_file_request_handler(Func&& handler, Aspects&&... asps)
+router::set_file_request_handler(Func&& handler, Aspects&&... asps)
 {
     auto coro_handler = detail::create_router_coro_http_handler(
         std::move(handler), std::forward<Aspects>(asps)...);

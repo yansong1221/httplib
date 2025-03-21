@@ -6,14 +6,13 @@
 
 namespace httplib {
 
-struct Request : public http::request<body::any_body> {
+struct request : public http::request<body::any_body> { 
     using http::request<body::any_body>::message;
 
-    Request(http::request<body::any_body>&& other);
+    request(http::request<body::any_body>&& other);
 
 public:
-    net::ip::address
-    get_client_ip() const;
+    net::ip::address get_client_ip() const;
 
 public:
     std::string path;

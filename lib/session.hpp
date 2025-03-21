@@ -6,23 +6,23 @@
 #include <memory>
 
 namespace httplib {
-class Server;
-class Router;
+class server;
+class router;
 
 
-class Session : public std::enable_shared_from_this<Session> {
+class session : public std::enable_shared_from_this<session> {
 public:
-    class Task {
+    class task {
     public:
-        virtual ~Task() = default;
-        virtual net::awaitable<std::unique_ptr<Task>> then() = 0;
+        virtual ~task() = default;
+        virtual net::awaitable<std::unique_ptr<task>> then() = 0;
         virtual void abort() = 0;
     };
 
-    explicit Session(tcp::socket&& stream,
-                     const Server::Option& option,
-                     httplib::Router& router);
-    ~Session();
+    explicit session(tcp::socket&& stream,
+                     const server::setting& option,
+                     httplib::router& router);
+    ~session();
 
 public:
     void abort();
@@ -32,8 +32,8 @@ private:
     net::ip::tcp::endpoint remote_endpoint_;
     net::ip::tcp::endpoint local_endpoint_;
 
-    std::unique_ptr<Task> task_;
-    const Server::Option& option_;
+    std::unique_ptr<task> task_;
+    const server::setting& option_;
     std::atomic_bool abort_ = false;
     std::mutex task_mtx_;
 };
