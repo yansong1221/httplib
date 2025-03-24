@@ -44,7 +44,7 @@ public:
                const http::fields& headers = http::fields());
     net::awaitable<response_result>
     async_post(std::string_view path,
-               const boost::json::value&& body,
+               boost::json::value&& body,
                const http::fields& headers = http::fields());
     response_result get(std::string_view path,
                         const html::query_params& params = {},

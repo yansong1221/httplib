@@ -222,7 +222,7 @@ client::async_post(std::string_view path,
 
 httplib::net::awaitable<client::response_result>
 client::async_post(std::string_view path,
-                   const boost::json::value&& body,
+                   boost::json::value&& body,
                    const http::fields& headers /*= http::fields()*/) {
     auto request = impl_->make_http_request(http::verb::post, path, headers);
     request.set(http::field::content_type, "application/json");
@@ -232,8 +232,8 @@ client::async_post(std::string_view path,
 }
 
 client::response_result client::get(std::string_view path,
-                                   const html::query_params& params,
-                                   const http::fields& headers /*= http::fields()*/) {
+                                    const html::query_params& params,
+                                    const http::fields& headers /*= http::fields()*/) {
     auto future = net::co_spawn(
         impl_->executor_, async_get(path, params, headers), net::use_future);
     return future.get();
