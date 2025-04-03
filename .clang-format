@@ -25,7 +25,7 @@ ConstructorInitializerAllOnOneLineOrOnePerLine: false
 ColumnLimit: 100
 Cpp11BracedListStyle: true
 FixNamespaceComments: true
-IncludeBlocks:   Regroup
+IncludeBlocks:  Preserve
 IncludeCategories:
   - Regex:           '^["<](stdafx|pch)\.h[">]$'
     Priority:        -1
