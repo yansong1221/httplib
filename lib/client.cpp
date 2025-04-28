@@ -61,7 +61,7 @@ public:
         }
     }
 
-    bool is_connected() { return variant_stream_ && variant_stream_->is_connected(); }
+    bool is_connected() const { return variant_stream_ && variant_stream_->is_connected(); }
 
     net::awaitable<client::response_result> async_send_request(client::request& req) {
         client::response resp;
