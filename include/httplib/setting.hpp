@@ -3,15 +3,17 @@
 
 namespace httplib {
 
-struct server::setting {
-    struct SSLConfig {
+struct server::setting
+{
+    struct SSLConfig
+    {
         std::filesystem::path cert_file;
         std::filesystem::path key_file;
         std::string passwd;
     };
 
     std::optional<SSLConfig> ssl_conf;
-    std::chrono::steady_clock::duration read_timeout = std::chrono::seconds(30);
+    std::chrono::steady_clock::duration read_timeout  = std::chrono::seconds(30);
     std::chrono::steady_clock::duration write_timeout = std::chrono::seconds(30);
 
     websocket_conn::message_handler_type websocket_message_handler;

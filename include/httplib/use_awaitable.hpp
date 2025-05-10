@@ -19,17 +19,22 @@
 
 namespace asio_util {
 template<typename Executor = boost::asio::any_io_executor>
-struct asio_use_awaitable_t : public boost::asio::use_awaitable_t<Executor> {
-    constexpr asio_use_awaitable_t() : boost::asio::use_awaitable_t<Executor>() { }
+struct asio_use_awaitable_t : public boost::asio::use_awaitable_t<Executor>
+{
+    constexpr asio_use_awaitable_t()
+        : boost::asio::use_awaitable_t<Executor>()
+    {
+    }
 
-    constexpr asio_use_awaitable_t(const char* file_name,
-                                   int line,
-                                   const char* function_name)
-        : boost::asio::use_awaitable_t<Executor>(file_name, line, function_name) { }
+    constexpr asio_use_awaitable_t(const char* file_name, int line, const char* function_name)
+        : boost::asio::use_awaitable_t<Executor>(file_name, line, function_name)
+    {
+    }
 
     inline boost::asio::redirect_error_t<
         typename boost::decay<decltype(boost::asio::use_awaitable_t<Executor>())>::type>
-    operator[](boost::system::error_code& ec) const noexcept {
+    operator[](boost::system::error_code& ec) const noexcept
+    {
         return boost::asio::redirect_error(boost::asio::use_awaitable_t<Executor>(), ec);
     }
 };

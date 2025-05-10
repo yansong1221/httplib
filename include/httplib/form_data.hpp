@@ -11,9 +11,11 @@ namespace httplib {
  *
  * @sa form
  */
-class form_data {
+class form_data
+{
 public:
-    struct field {
+    struct field
+    {
         std::string name; /// The field name.
         std::string filename;
         std::string content_type;

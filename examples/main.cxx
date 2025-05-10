@@ -1,15 +1,14 @@
 
-#include "httplib/client.hpp"
-#include "httplib/request.hpp"
-#include "httplib/response.hpp"
 #include "httplib/router.hpp"
 #include "httplib/server.hpp"
-#include <boost/beast/http/empty_body.hpp>
+#include "httplib/setting.hpp"
+
 #include <filesystem>
 #include <format>
 #include <iostream>
 // 日志切面
-struct log_t {
+struct log_t
+{
     httplib::net::awaitable<bool> before(httplib::request& req, httplib::response& res)
     {
         start_ = std::chrono::steady_clock::now();
@@ -30,35 +29,32 @@ private:
 int main()
 { // HTTP
     using namespace std::string_view_literals;
-    httplib::Server svr;
-    auto config = httplib::Server::SSLConfig {
+    httplib::server svr;
+
+    auto& option = svr.option();
+    auto& router = svr.router();
+
+    auto config = httplib::server::setting::SSLConfig {
         R"(D:\code\http\lib\server.crt)", R"(D:\code\http\lib\server.key)", "test"};
-    svr.option().ssl_conf = config;
-    svr.option().logger->set_level(spdlog::level::trace);
+    option.ssl_conf = config;
+    option.get_logger()->set_level(spdlog::level::trace);
 
     svr.listen("127.0.0.1", 8808);
-    svr.set_websocket_open_handler(
-        [](httplib::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> {
-            co_return;
-        });
-    svr.set_websocket_close_handler(
-        [](httplib::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> {
-            co_return;
-        });
-    svr.set_websocket_message_handler(
+    option.websocket_open_handler =
+        [](httplib::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> { co_return; };
+    option.websocket_close_handler =
+        [](httplib::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> { co_return; };
+    option.websocket_message_handler =
         [](httplib::websocket_conn::weak_ptr hdl,
            httplib::websocket_conn::message msg) -> boost::asio::awaitable<void> {
-            auto conn = hdl.lock();
-            conn->send_message(msg);
-            co_return;
-        });
-
-    auto& router = svr.get_router();
+        auto conn = hdl.lock();
+        conn->send_message(msg);
+        co_return;
+    };
 
     router.set_http_handler<httplib::http::verb::post, httplib::http::verb::get>(
         "/中文",
-        [](httplib::request& req,
-           httplib::response& resp) -> httplib::net::awaitable<void> {
+        [](httplib::request& req, httplib::response& resp) -> httplib::net::awaitable<void> {
             // req.is_body_type<httplib::body::form_data_body>();
 
             resp.base().result(httplib::http::status::ok);
@@ -70,8 +66,7 @@ int main()
         "/close", [&](httplib::request& req, httplib::response& resp) { svr.stop(); });
     router.set_http_handler<httplib::http::verb::post>(
         "/json",
-        [](httplib::request& req,
-           httplib::response& resp) -> httplib::net::awaitable<void> {
+        [](httplib::request& req, httplib::response& resp) -> httplib::net::awaitable<void> {
             auto& doc = req.body().as<httplib::body::json_body>();
 
             /*           const auto &obj = doc.get_object();
@@ -87,8 +82,7 @@ int main()
 
     router.set_http_handler<httplib::http::verb::post>(
         "/x-www-from-urlencoded",
-        [](httplib::request& req,
-           httplib::response& resp) -> httplib::net::awaitable<void> {
+        [](httplib::request& req, httplib::response& resp) -> httplib::net::awaitable<void> {
             auto& doc = req.body().as<httplib::body::query_params_body>();
 
             /*           const auto &obj = doc.get_object();

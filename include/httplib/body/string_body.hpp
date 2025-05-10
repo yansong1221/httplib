@@ -11,7 +11,8 @@
 
 namespace httplib::body {
 
-struct string_body {
+struct string_body
+{
 public:
     /** The type of container used for the body
 
@@ -24,19 +25,17 @@ public:
 
         Meets the requirements of <em>BodyReader</em>.
     */
-    class reader {
+    class reader
+    {
         value_type& body_;
 
     public:
         explicit reader(const http::fields&, value_type& b);
 
-        void
-        init(boost::optional<std::uint64_t> const& length, beast::error_code& ec);
-        std::size_t
-        put(net::const_buffer const& buffers, beast::error_code& ec);
+        void init(boost::optional<std::uint64_t> const& length, beast::error_code& ec);
+        std::size_t put(net::const_buffer const& buffers, beast::error_code& ec);
 
-        void
-        finish(beast::error_code& ec);
+        void finish(beast::error_code& ec);
     };
 
 
@@ -44,7 +43,8 @@ public:
 
         Meets the requirements of <em>BodyWriter</em>.
     */
-    class writer {
+    class writer
+    {
         value_type const& body_;
 
     public:
@@ -52,14 +52,9 @@ public:
 
         explicit writer(const http::fields&, value_type const& b);
 
-        void
-        init(beast::error_code& ec)
-        {
-            ec = {};
-        }
+        void init(beast::error_code& ec) { ec = {}; }
 
-        boost::optional<std::pair<const_buffers_type, bool>>
-        get(beast::error_code& ec);
+        boost::optional<std::pair<const_buffers_type, bool>> get(beast::error_code& ec);
     };
 };
 

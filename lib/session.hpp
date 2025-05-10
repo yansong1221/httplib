@@ -10,18 +10,18 @@ class server;
 class router;
 
 
-class session : public std::enable_shared_from_this<session> {
+class session : public std::enable_shared_from_this<session>
+{
 public:
-    class task {
+    class task
+    {
     public:
-        virtual ~task() = default;
+        virtual ~task()                                      = default;
         virtual net::awaitable<std::unique_ptr<task>> then() = 0;
-        virtual void abort() = 0;
+        virtual void abort()                                 = 0;
     };
 
-    explicit session(tcp::socket&& stream,
-                     const server::setting& option,
-                     httplib::router& router);
+    explicit session(tcp::socket&& stream, const server::setting& option, httplib::router& router);
     ~session();
 
 public:

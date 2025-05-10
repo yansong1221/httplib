@@ -18,10 +18,15 @@
 namespace httplib {
 using namespace std::chrono_literals;
 
-class server::impl {
+class server::impl
+{
 public:
     impl(uint32_t num_threads)
-        : pool(num_threads), acceptor(pool), router(this->option) { }
+        : pool(num_threads)
+        , acceptor(pool)
+        , router(this->option)
+    {
+    }
 
 public:
     server::setting option;
@@ -33,20 +38,31 @@ public:
     std::unordered_set<std::shared_ptr<session>> session_map;
 };
 
-server::server(uint32_t num_threads) : impl_(new impl(num_threads)) { }
+server::server(uint32_t num_threads)
+    : impl_(new impl(num_threads))
+{
+}
 
-server::~server() { delete impl_; }
+server::~server()
+{
+    delete impl_;
+}
 
-net::any_io_executor server::get_executor() noexcept {
+net::any_io_executor server::get_executor() noexcept
+{
     return impl_->pool.get_executor();
 }
 
 
-server::setting& server::option() { return impl_->option; }
+server::setting& server::option()
+{
+    return impl_->option;
+}
 
 server& server::listen(std::string_view host,
                        uint16_t port,
-                       int backlog /*= net::socket_base::max_listen_connections*/) {
+                       int backlog /*= net::socket_base::max_listen_connections*/)
+{
     tcp::resolver resolver(impl_->pool);
     auto results = resolver.resolve(host, std::to_string(port));
 
@@ -59,17 +75,19 @@ server& server::listen(std::string_view host,
     return *this;
 }
 
-server& server::listen(uint16_t port,
-                       int backlog /*= net::socket_base::max_listen_connections*/) {
+server& server::listen(uint16_t port, int backlog /*= net::socket_base::max_listen_connections*/)
+{
     return listen("0.0.0.0", port, backlog);
 }
 
-void server::run() {
+void server::run()
+{
     async_run();
     wait();
 }
 
-void server::async_run() {
+void server::async_run()
+{
     net::co_spawn(
         impl_->pool,
         [this]() -> net::awaitable<void> {
@@ -92,12 +110,13 @@ void server::async_run() {
                         }
                         try {
                             co_await session->run();
-                        } catch (const std::exception& e) {
-                            impl_->option.get_logger()->error(
-                                "session::run() exception: {}", e.what());
-                        } catch (...) {
-                            impl_->option.get_logger()->error(
-                                "session::run() unknown exception");
+                        }
+                        catch (const std::exception& e) {
+                            impl_->option.get_logger()->error("session::run() exception: {}",
+                                                              e.what());
+                        }
+                        catch (...) {
+                            impl_->option.get_logger()->error("session::run() unknown exception");
                         }
                         {
                             std::unique_lock<std::mutex> lck(impl_->session_mtx);
@@ -110,12 +129,14 @@ void server::async_run() {
         net::detached);
 }
 
-void server::wait() {
+void server::wait()
+{
     impl_->pool.wait();
     impl_->session_map.clear();
 }
 
-void server::stop() {
+void server::stop()
+{
     boost::system::error_code ec;
     impl_->acceptor.close(ec);
     {
@@ -125,6 +146,9 @@ void server::stop() {
     }
     impl_->pool.stop();
 }
-httplib::router& server::router() { return impl_->router; }
+httplib::router& server::router()
+{
+    return impl_->router;
+}
 
 } // namespace httplib

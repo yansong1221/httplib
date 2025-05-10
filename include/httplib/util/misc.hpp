@@ -20,8 +20,7 @@ using boost::beast::buffers_to_string;
  * @param c The hexadecimal input.
  * @return The decimal output.
  */
-static inline std::uint8_t
-hex2dec(std::uint8_t c)
+static inline std::uint8_t hex2dec(std::uint8_t c)
 {
     if (c >= '0' && c <= '9')
         c -= '0';
@@ -47,8 +46,7 @@ hex2dec(std::uint8_t c)
  * @param str The string to decode.
  */
 // ToDo: Consider using Boost.URL instead
-static inline void
-url_decode(std::string& str)
+static inline void url_decode(std::string& str)
 {
     size_t w = 0;
     for (size_t r = 0; r < str.size(); ++r) {
@@ -61,15 +59,13 @@ url_decode(std::string& str)
     }
     str.resize(w);
 }
-static inline std::string
-url_decode(std::string_view str)
+static inline std::string url_decode(std::string_view str)
 {
     std::string decode_str(str);
     url_decode(decode_str);
     return decode_str;
 }
-static inline std::string
-url_encode(std::string_view value)
+static inline std::string url_encode(std::string_view value)
 {
     std::ostringstream escaped;
     escaped.fill('0');
@@ -78,22 +74,25 @@ url_encode(std::string_view value)
     for (char c : value) {
         if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') {
             escaped << c;
-        } else if (c == ' ') {
+        }
+        else if (c == ' ') {
             escaped << '+';
-        } else {
+        }
+        else {
             escaped << '%' << std::setw(2) << int(static_cast<unsigned char>(c));
         }
     }
 
     return escaped.str();
 }
-static std::vector<std::string_view>
-split(std::string_view str, std::string_view delimiter)
+static std::vector<std::string_view> split(std::string_view str, std::string_view delimiter)
 { // Sanity check str
-    if (str.empty()) return {};
+    if (str.empty())
+        return {};
 
     // Sanity check delimiter
-    if (delimiter.empty()) return {str};
+    if (delimiter.empty())
+        return {str};
 
     // Split
     std::vector<std::string_view> parts;
@@ -112,10 +111,12 @@ split(std::string_view str, std::string_view delimiter)
         parts.emplace_back(boost::trim_copy(str.substr(pos, pos_found - pos)));
 
         // Drop trailing delimiters
-        if (pos_found + delimiter.size() >= str.size()) break;
+        if (pos_found + delimiter.size() >= str.size())
+            break;
 
         // Move on
-        if (pos_found == std::string_view::npos) break;
+        if (pos_found == std::string_view::npos)
+            break;
         pos = pos_found + delimiter.size();
     }
 
@@ -123,15 +124,15 @@ split(std::string_view str, std::string_view delimiter)
 }
 
 
-static auto
-parse_content_disposition(std::string_view header)
+static auto parse_content_disposition(std::string_view header)
 {
     std::vector<std::pair<std::string_view, std::string_view>> results;
 
     size_t pos = 0;
     while (pos < header.size()) {
         size_t eq = header.find('=', pos);
-        if (eq == std::string_view::npos) break;
+        if (eq == std::string_view::npos)
+            break;
 
         std::string_view key = header.substr(pos, eq - pos);
         key                  = boost::trim_copy(key);
@@ -145,18 +146,22 @@ parse_content_disposition(std::string_view header)
             while (end < header.size()) {
                 if (header[end] == '\\' && !escape) {
                     escape = true;
-                } else if (header[end] == '"' && !escape) {
+                }
+                else if (header[end] == '"' && !escape) {
                     break;
-                } else {
+                }
+                else {
                     escape = false;
                 }
                 end++;
             }
             value = header.substr(pos, end - pos);
             pos   = (end < header.size()) ? end + 1 : end;
-        } else {
+        }
+        else {
             size_t end = header.find(';', pos);
-            if (end == std::string_view::npos) end = header.size();
+            if (end == std::string_view::npos)
+                end = header.size();
             value = header.substr(pos, end - pos);
             value = boost::trim_copy(value);
             pos   = end;
@@ -164,14 +169,14 @@ parse_content_disposition(std::string_view header)
 
         results.emplace_back(key, value);
 
-        if (pos < header.size() && header[pos] == ';') pos++;
+        if (pos < header.size() && header[pos] == ';')
+            pos++;
         while (pos < header.size() && std::isspace(header[pos]))
             pos++;
     }
     return results;
 }
-static auto
-split_header_field_value(std::string_view header, boost::system::error_code& ec)
+static auto split_header_field_value(std::string_view header, boost::system::error_code& ec)
 {
     using namespace std::string_view_literals;
 
@@ -179,7 +184,8 @@ split_header_field_value(std::string_view header, boost::system::error_code& ec)
     auto lines = util::split(header, "\r\n"sv);
 
     for (const auto& line : lines) {
-        if (line.empty()) continue;
+        if (line.empty())
+            continue;
 
         auto pos = line.find(":");
         if (pos == std::string_view::npos) {
@@ -196,8 +202,7 @@ split_header_field_value(std::string_view header, boost::system::error_code& ec)
 }
 
 
-static std::string_view
-buffer_to_string_view(const boost::asio::const_buffer& buffer)
+static std::string_view buffer_to_string_view(const boost::asio::const_buffer& buffer)
 {
     return std::string_view(static_cast<const char*>(buffer.data()), buffer.size());
 }

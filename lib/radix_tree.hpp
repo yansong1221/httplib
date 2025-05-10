@@ -14,16 +14,17 @@ constexpr char type_asterisk = '*';
 constexpr char type_colon    = ':';
 constexpr char type_slash    = '/';
 
-typedef std::
-    tuple<bool, coro_http_handler_type, std::unordered_map<std::string, std::string>>
-        coro_result;
+typedef std::tuple<bool, coro_http_handler_type, std::unordered_map<std::string, std::string>>
+    coro_result;
 
-struct coro_handler_t {
+struct coro_handler_t
+{
     http::verb method = http::verb::unknown;
     coro_http_handler_type coro_handler;
 };
 
-struct radix_tree_node {
+struct radix_tree_node
+{
     std::string path;
     coro_handler_t coro_handler;
     std::string indices;
@@ -34,22 +35,22 @@ struct radix_tree_node {
     radix_tree_node(const std::string& path) { this->path = path; }
     ~radix_tree_node() { }
 
-    coro_http_handler_type
-    get_coro_handler(const http::verb& method)
+    coro_http_handler_type get_coro_handler(const http::verb& method)
     {
-        if (coro_handler.method == method) { return coro_handler.coro_handler; }
+        if (coro_handler.method == method) {
+            return coro_handler.coro_handler;
+        }
         return nullptr;
     }
 
-    int
-    add_coro_handler(coro_http_handler_type coro_handler, const http::verb& method)
+    int add_coro_handler(coro_http_handler_type coro_handler, const http::verb& method)
     {
         this->coro_handler = coro_handler_t {method, coro_handler};
         return 0;
     }
 
-    std::shared_ptr<radix_tree_node>
-    insert_child(char index, std::shared_ptr<radix_tree_node> child)
+    std::shared_ptr<radix_tree_node> insert_child(char index,
+                                                  std::shared_ptr<radix_tree_node> child)
     {
         auto i = this->get_index_position(index);
         this->indices.insert(this->indices.begin() + i, index);
@@ -57,15 +58,13 @@ struct radix_tree_node {
         return child;
     }
 
-    std::shared_ptr<radix_tree_node>
-    get_child(char index)
+    std::shared_ptr<radix_tree_node> get_child(char index)
     {
         auto i = this->get_index_position(index);
         return this->indices[i] != index ? nullptr : this->children[i];
     }
 
-    int
-    get_index_position(char target)
+    int get_index_position(char target)
     {
         int low = 0, high = this->indices.size(), mid;
 
@@ -80,16 +79,16 @@ struct radix_tree_node {
     }
 };
 
-class radix_tree {
+class radix_tree
+{
 public:
     radix_tree() { this->root = std::make_shared<radix_tree_node>(radix_tree_node()); }
 
     ~radix_tree() { }
 
-    int
-    coro_insert(const std::string& path,
-                coro_http_handler_type coro_handler,
-                const http::verb& method)
+    int coro_insert(const std::string& path,
+                    coro_http_handler_type coro_handler,
+                    const http::verb& method)
     {
         auto root = this->root;
         int i = 0, n = path.size(), param_count = 0, code = 0;
@@ -100,7 +99,8 @@ public:
                  (path[i] == type_colon && root->indices[0] != type_colon) ||
                  (path[i] == type_colon && root->indices[0] == type_colon &&
                   path.substr(i + 1, find_pos(path, type_slash, i) - i - 1) !=
-                      root->children[0]->path))) {
+                      root->children[0]->path)))
+            {
                 code = -1;
                 break;
             }
@@ -113,13 +113,11 @@ public:
                     p = find_pos(path, type_asterisk, i);
 
                     root = root->insert_child(
-                        path[i],
-                        std::make_shared<radix_tree_node>(path.substr(i, p - i)));
+                        path[i], std::make_shared<radix_tree_node>(path.substr(i, p - i)));
 
                     if (p < n) {
                         root = root->insert_child(
-                            type_asterisk,
-                            std::make_shared<radix_tree_node>(path.substr(p + 1)));
+                            type_asterisk, std::make_shared<radix_tree_node>(path.substr(p + 1)));
                         ++param_count;
                     }
 
@@ -127,21 +125,21 @@ public:
                     break;
                 }
 
-                root = root->insert_child(
-                    path[i], std::make_shared<radix_tree_node>(path.substr(i, p - i)));
+                root = root->insert_child(path[i],
+                                          std::make_shared<radix_tree_node>(path.substr(i, p - i)));
 
                 i = find_pos(path, type_slash, p);
 
                 root = root->insert_child(
-                    type_colon,
-                    std::make_shared<radix_tree_node>(path.substr(p + 1, i - p - 1)));
+                    type_colon, std::make_shared<radix_tree_node>(path.substr(p + 1, i - p - 1)));
                 ++param_count;
 
                 if (i == n) {
                     code = root->add_coro_handler(coro_handler, method);
                     break;
                 }
-            } else {
+            }
+            else {
                 root = child;
 
                 if (path[i] == type_colon) {
@@ -152,11 +150,13 @@ public:
                         code = root->add_coro_handler(coro_handler, method);
                         break;
                     }
-                } else {
+                }
+                else {
                     auto j = 0UL;
                     auto m = root->path.size();
 
-                    for (; i < n && j < m && path[i] == root->path[j]; ++i, ++j) { }
+                    for (; i < n && j < m && path[i] == root->path[j]; ++i, ++j) {
+                    }
 
                     if (j < m) {
                         std::shared_ptr<radix_tree_node> child(
@@ -179,13 +179,13 @@ public:
             }
         }
 
-        if (param_count > this->root->max_params) this->root->max_params = param_count;
+        if (param_count > this->root->max_params)
+            this->root->max_params = param_count;
 
         return code;
     }
 
-    coro_result
-    get_coro(const std::string& path, const http::verb& method)
+    coro_result get_coro(const std::string& path, const http::verb& method)
     {
         std::unordered_map<std::string, std::string> params;
         auto root = this->root;
@@ -193,7 +193,8 @@ public:
         int i = 0, n = path.size(), p;
 
         while (i < n) {
-            if (root->indices.empty()) return coro_result();
+            if (root->indices.empty())
+                return coro_result();
 
             if (root->indices[0] == type_colon) {
                 root = root->children[0];
@@ -201,11 +202,13 @@ public:
                 p                  = find_pos(path, type_slash, i);
                 params[root->path] = path.substr(i, p - i);
                 i                  = p;
-            } else if (root->indices[0] == type_asterisk) {
+            }
+            else if (root->indices[0] == type_asterisk) {
                 root               = root->children[0];
                 params[root->path] = path.substr(i);
                 break;
-            } else {
+            }
+            else {
                 root = root->get_child(path[i]);
                 if (!root || path.substr(i, root->path.size()) != root->path)
                     return coro_result();
@@ -217,8 +220,7 @@ public:
     }
 
 private:
-    int
-    find_pos(const std::string& str, char target, int start)
+    int find_pos(const std::string& str, char target, int start)
     {
         auto i = str.find(target, start);
         return i == -1 ? str.size() : i;

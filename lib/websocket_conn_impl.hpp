@@ -16,31 +16,40 @@
 
 namespace httplib {
 
-class websocket_conn_impl : public websocket_conn {
+class websocket_conn_impl : public websocket_conn
+{
 public:
-    websocket_conn_impl(const server::setting& option,
-                        websocket_variant_stream_type&& stream)
-        : option_(option), strand_(stream.get_executor()), ws_(std::move(stream)) { }
-    void send_message(websocket_conn::message&& msg) override {
-        if (!ws_.is_open()) return;
-
-        net::post(strand_,
-                  [this, msg = std::move(msg), self = shared_from_this()]() mutable {
-                      bool send_in_process = !send_que_.empty();
-                      send_que_.push(std::move(msg));
-                      if (send_in_process) return;
-                      net::co_spawn(strand_, process_write_data(), net::detached);
-                  });
+    websocket_conn_impl(const server::setting& option, websocket_variant_stream_type&& stream)
+        : option_(option)
+        , strand_(stream.get_executor())
+        , ws_(std::move(stream))
+    {
     }
-    void close() override {
-        if (!ws_.is_open()) return;
+    void send_message(websocket_conn::message&& msg) override
+    {
+        if (!ws_.is_open())
+            return;
+
+        net::post(strand_, [this, msg = std::move(msg), self = shared_from_this()]() mutable {
+            bool send_in_process = !send_que_.empty();
+            send_que_.push(std::move(msg));
+            if (send_in_process)
+                return;
+            net::co_spawn(strand_, process_write_data(), net::detached);
+        });
+    }
+    void close() override
+    {
+        if (!ws_.is_open())
+            return;
 
         net::co_spawn(
             strand_,
             [this, self = shared_from_this()]() -> net::awaitable<void> {
                 boost::system::error_code ec;
                 co_await net::post(strand_, net_awaitable[ec]);
-                if (ec) co_return;
+                if (ec)
+                    co_return;
 
                 websocket::close_reason reason("normal");
                 co_await ws_.async_close(reason, net_awaitable[ec]);
@@ -49,14 +58,17 @@ public:
     }
 
 public:
-    net::awaitable<void> process_write_data() {
+    net::awaitable<void> process_write_data()
+    {
         auto self = shared_from_this();
 
         for (;;) {
             boost::system::error_code ec;
             co_await net::post(strand_, net_awaitable[ec]);
-            if (ec) co_return;
-            if (send_que_.empty()) co_return;
+            if (ec)
+                co_return;
+            if (send_que_.empty())
+                co_return;
 
             websocket_conn::message msg = std::move(send_que_.front());
             send_que_.pop();
@@ -65,10 +77,12 @@ public:
             else
                 ws_.binary(true);
             co_await ws_.async_write(net::buffer(msg.payload()), net_awaitable[ec]);
-            if (ec) co_return;
+            if (ec)
+                co_return;
         }
     }
-    net::awaitable<void> run(const request& req) {
+    net::awaitable<void> run(const request& req)
+    {
         boost::system::error_code ec;
         auto remote_endp = ws_.remote_endpoint(ec);
         co_await ws_.async_accept(req, net_awaitable[ec]);
@@ -98,12 +112,11 @@ public:
             }
 
             if (option_.websocket_message_handler) {
-                websocket_conn::message msg(
-                    util::buffer_to_string_view(buffer.data()),
-                    ws_.got_text() ? websocket_conn::message::data_type::text
-                                   : websocket_conn::message::data_type::binary);
-                co_await option_.websocket_message_handler(weak_from_this(),
-                                                           std::move(msg));
+                websocket_conn::message msg(util::buffer_to_string_view(buffer.data()),
+                                            ws_.got_text()
+                                                ? websocket_conn::message::data_type::text
+                                                : websocket_conn::message::data_type::binary);
+                co_await option_.websocket_message_handler(weak_from_this(), std::move(msg));
             }
             buffer.consume(bytes);
         }

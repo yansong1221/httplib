@@ -11,7 +11,8 @@ class session;
 } // namespace httplib
 
 namespace httplib {
-class server {
+class server
+{
 public:
     struct setting;
 

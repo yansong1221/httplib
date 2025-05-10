@@ -6,7 +6,8 @@
 
 namespace httplib {
 
-struct request : public http::request<body::any_body> { 
+struct request : public http::request<body::any_body>
+{
     using http::request<body::any_body>::message;
 
     request(http::request<body::any_body>&& other);

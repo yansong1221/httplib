@@ -14,38 +14,33 @@ namespace httplib::body {
 
 namespace detail {
 
-struct brotli_compressor_impl {
+struct brotli_compressor_impl
+{
     typedef char char_type;
 
-    brotli_compressor_impl(int quality) : state_(nullptr, &BrotliEncoderDestroyInstance)
+    brotli_compressor_impl(int quality)
+        : state_(nullptr, &BrotliEncoderDestroyInstance)
     {
         state_.reset(BrotliEncoderCreateInstance(nullptr, nullptr, nullptr));
-        if (!state_) { throw std::runtime_error("Failed to create Brotli encoder"); }
+        if (!state_) {
+            throw std::runtime_error("Failed to create Brotli encoder");
+        }
         BrotliEncoderSetParameter(state_.get(), BROTLI_PARAM_QUALITY, quality);
     }
 
     bool
-    filter(const char*& src_begin,
-           const char* src_end,
-           char*& dst_begin,
-           char* dst_end,
-           bool flush)
+    filter(const char*& src_begin, const char* src_end, char*& dst_begin, char* dst_end, bool flush)
     {
         const uint8_t* next_in = reinterpret_cast<const uint8_t*>(src_begin);
         size_t available_in    = src_end - src_begin;
         uint8_t* next_out      = reinterpret_cast<uint8_t*>(dst_begin);
         size_t available_out   = dst_end - dst_begin;
 
-        BrotliEncoderOperation op =
-            flush ? BROTLI_OPERATION_FINISH : BROTLI_OPERATION_PROCESS;
+        BrotliEncoderOperation op = flush ? BROTLI_OPERATION_FINISH : BROTLI_OPERATION_PROCESS;
 
-        if (!BrotliEncoderCompressStream(state_.get(),
-                                         op,
-                                         &available_in,
-                                         &next_in,
-                                         &available_out,
-                                         &next_out,
-                                         nullptr)) {
+        if (!BrotliEncoderCompressStream(
+                state_.get(), op, &available_in, &next_in, &available_out, &next_out, nullptr))
+        {
             throw std::runtime_error("Brotli compression failed");
         }
 
@@ -55,10 +50,10 @@ struct brotli_compressor_impl {
         // 返回 true 表示需要更多输出空间
         return BrotliEncoderHasMoreOutput(state_.get());
     }
-    void
-    close()
+    void close()
     { // 确保所有数据已刷新
-        if (BrotliEncoderIsFinished(state_.get())) return;
+        if (BrotliEncoderIsFinished(state_.get()))
+            return;
 
         const uint8_t* next_in = nullptr;
         size_t available_in    = 0;
@@ -72,7 +67,8 @@ struct brotli_compressor_impl {
                                              &next_in,
                                              &available_out,
                                              &next_out,
-                                             nullptr)) {
+                                             nullptr))
+            {
                 throw std::runtime_error("Brotli finalization failed");
             }
         }
@@ -83,21 +79,21 @@ private:
 };
 
 
-struct brotli_decompressor_impl {
+struct brotli_decompressor_impl
+{
     typedef char char_type;
 
-    brotli_decompressor_impl() : state_(nullptr, &BrotliDecoderDestroyInstance)
+    brotli_decompressor_impl()
+        : state_(nullptr, &BrotliDecoderDestroyInstance)
     {
         state_.reset(BrotliDecoderCreateInstance(nullptr, nullptr, nullptr));
-        if (!state_) { throw std::runtime_error("Failed to create Brotli decoder"); }
+        if (!state_) {
+            throw std::runtime_error("Failed to create Brotli decoder");
+        }
     }
 
     bool
-    filter(const char*& src_begin,
-           const char* src_end,
-           char*& dst_begin,
-           char* dst_end,
-           bool flush)
+    filter(const char*& src_begin, const char* src_end, char*& dst_begin, char* dst_end, bool flush)
     {
         const uint8_t* next_in = reinterpret_cast<const uint8_t*>(src_begin);
         size_t available_in    = src_end - src_begin;
@@ -119,8 +115,7 @@ struct brotli_decompressor_impl {
             default: throw std::runtime_error("Unknown Brotli result");
         }
     }
-    void
-    close()
+    void close()
     { // 确保状态清理
         BrotliDecoderErrorCode code = BrotliDecoderGetErrorCode(state_.get());
         if (code != BROTLI_DECODER_RESULT_SUCCESS) {
@@ -137,7 +132,8 @@ private:
 
 template<typename Alloc = std::allocator<char>>
 struct basic_brotli_compressor
-    : boost::iostreams::symmetric_filter<detail::brotli_compressor_impl, Alloc> {
+    : boost::iostreams::symmetric_filter<detail::brotli_compressor_impl, Alloc>
+{
 private:
     typedef detail::brotli_compressor_impl impl_type;
     typedef boost::iostreams::symmetric_filter<impl_type, Alloc> base_type;
@@ -145,8 +141,7 @@ private:
 public:
     typedef typename base_type::char_type char_type;
     typedef typename base_type::category category;
-    basic_brotli_compressor(int quality                 = 6,
-                            std::streamsize buffer_size = 4096)
+    basic_brotli_compressor(int quality = 6, std::streamsize buffer_size = 4096)
         : base_type(buffer_size, quality)
     {
     }
@@ -158,7 +153,8 @@ typedef basic_brotli_compressor<> brotli_compressor;
 
 template<typename Alloc = std::allocator<char>>
 struct basic_brotli_decompressor
-    : boost::iostreams::symmetric_filter<detail::brotli_decompressor_impl, Alloc> {
+    : boost::iostreams::symmetric_filter<detail::brotli_decompressor_impl, Alloc>
+{
 private:
     typedef detail::brotli_decompressor_impl impl_type;
     typedef boost::iostreams::symmetric_filter<impl_type, Alloc> base_type;
@@ -166,7 +162,8 @@ private:
 public:
     typedef typename base_type::char_type char_type;
     typedef typename base_type::category category;
-    basic_brotli_decompressor(std::streamsize buffer_size = 4096) : base_type(buffer_size)
+    basic_brotli_decompressor(std::streamsize buffer_size = 4096)
+        : base_type(buffer_size)
     {
     }
 };

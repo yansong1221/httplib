@@ -9,9 +9,11 @@
 #include <spdlog/spdlog.h>
 
 namespace httplib {
-class websocket_conn : public std::enable_shared_from_this<websocket_conn> {
+class websocket_conn : public std::enable_shared_from_this<websocket_conn>
+{
 public:
-    class message {
+    class message
+    {
     public:
         enum class data_type
         {
@@ -21,12 +23,14 @@ public:
 
     public:
         explicit message(std::string&& payload, data_type type = data_type::text)
-            : payload_(std::move(payload)), type_(type) { };
+            : payload_(std::move(payload))
+            , type_(type) { };
         explicit message(std::string_view payload, data_type type = data_type::text)
-            : payload_(payload), type_(type) { };
-        message(const message&) = default;
-        message(message&&) = default;
-        message& operator=(message&&) = default;
+            : payload_(payload)
+            , type_(type) { };
+        message(const message&)            = default;
+        message(message&&)                 = default;
+        message& operator=(message&&)      = default;
         message& operator=(const message&) = default;
 
     public:
@@ -40,10 +44,8 @@ public:
 
     using weak_ptr = std::weak_ptr<websocket_conn>;
 
-    using open_handler_type =
-        std::function<net::awaitable<void>(websocket_conn::weak_ptr)>;
-    using close_handler_type =
-        std::function<net::awaitable<void>(websocket_conn::weak_ptr)>;
+    using open_handler_type  = std::function<net::awaitable<void>(websocket_conn::weak_ptr)>;
+    using close_handler_type = std::function<net::awaitable<void>(websocket_conn::weak_ptr)>;
     using message_handler_type =
         std::function<net::awaitable<void>(websocket_conn::weak_ptr, message)>;
 
@@ -51,7 +53,7 @@ public:
     virtual ~websocket_conn() = default;
 
     virtual void send_message(message&& msg) = 0;
-    virtual void close() = 0;
+    virtual void close()                     = 0;
     void send_message(const message& msg) { send_message(message(msg)); }
 };
 

@@ -9,11 +9,12 @@
 
 namespace httplib::body {
 
-string_body::reader::reader(const http::fields&, value_type& b) : body_(b) { }
+string_body::reader::reader(const http::fields&, value_type& b)
+    : body_(b)
+{
+}
 
-void
-string_body::reader::init(boost::optional<std::uint64_t> const& length,
-                          beast::error_code& ec)
+void string_body::reader::init(boost::optional<std::uint64_t> const& length, beast::error_code& ec)
 {
     if (length) {
         if (*length > body_.max_size()) {
@@ -25,8 +26,7 @@ string_body::reader::init(boost::optional<std::uint64_t> const& length,
     ec = {};
 }
 
-std::size_t
-string_body::reader::put(net::const_buffer const& buffers, beast::error_code& ec)
+std::size_t string_body::reader::put(net::const_buffer const& buffers, beast::error_code& ec)
 {
     auto const extra = net::buffer_size(buffers);
     auto const size  = body_.size();
@@ -45,13 +45,15 @@ string_body::reader::put(net::const_buffer const& buffers, beast::error_code& ec
     return extra;
 }
 
-void
-string_body::reader::finish(beast::error_code& ec)
+void string_body::reader::finish(beast::error_code& ec)
 {
     ec = {};
 }
 
-string_body::writer::writer(const http::fields&, value_type const& b) : body_(b) { }
+string_body::writer::writer(const http::fields&, value_type const& b)
+    : body_(b)
+{
+}
 
 boost::optional<std::pair<string_body::writer::const_buffers_type, bool>>
 string_body::writer::get(beast::error_code& ec)

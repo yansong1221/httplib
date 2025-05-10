@@ -7,54 +7,59 @@
 
 namespace httplib::body {
 
-class form_data_body {
+class form_data_body
+{
 public:
     using value_type = form_data;
 
-    class writer {
+    class writer
+    {
     public:
         using const_buffers_type = net::const_buffer;
 
 
         writer(http::fields const& h, value_type& b);
 
-        void
-        init(boost::system::error_code& ec);
-        boost::optional<std::pair<const_buffers_type, bool>>
-        get(boost::system::error_code& ec);
+        void init(boost::system::error_code& ec);
+        boost::optional<std::pair<const_buffers_type, bool>> get(boost::system::error_code& ec);
 
     private:
         value_type& body_;
         int field_data_index_ = 0;
         beast::flat_buffer buffer_;
 
-        enum class step { header, content, content_end, eof };
+        enum class step
+        {
+            header,
+            content,
+            content_end,
+            eof
+        };
         step step_ = step::header;
     };
 
     //--------------------------------------------------------------------------
 
-    class reader {
+    class reader
+    {
     public:
         using const_buffers_type = net::const_buffer;
 
         reader(http::fields const& h, value_type& b);
 
-        void
-        init(boost::optional<std::uint64_t> const& content_length,
-             boost::system::error_code& ec);
+        void init(boost::optional<std::uint64_t> const& content_length,
+                  boost::system::error_code& ec);
 
-        std::size_t
-        put(const_buffers_type const& buffers, boost::system::error_code& ec);
+        std::size_t put(const_buffers_type const& buffers, boost::system::error_code& ec);
 
-        void
-        finish(boost::system::error_code& ec);
+        void finish(boost::system::error_code& ec);
 
     private:
         value_type& body_;
         std::string content_type_;
         std::string boundary_;
-        enum class step {
+        enum class step
+        {
             boundary_line,
             boundary_header,
             boundary_content,

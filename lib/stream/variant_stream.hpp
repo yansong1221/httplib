@@ -13,12 +13,13 @@ constexpr inline bool is_basic_stream_v =
     util::is_specialization_v<std::remove_cvref_t<T>, beast::basic_stream>;
 
 template<typename... T>
-class variant_stream : public std::variant<T...> {
+class variant_stream : public std::variant<T...>
+{
 public:
     using std::variant<T...>::variant;
 
 public:
-    using executor_type = net::any_io_executor;
+    using executor_type     = net::any_io_executor;
     using lowest_layer_type = tcp::socket::lowest_layer_type;
 
     executor_type get_executor()
@@ -32,7 +33,8 @@ public:
                 using stream_type = std::decay_t<decltype(beast::get_lowest_layer(t))>;
                 if constexpr (is_basic_stream_v<stream_type>) {
                     return beast::get_lowest_layer(t).socket().lowest_layer();
-                } else {
+                }
+                else {
                     return t.lowest_layer();
                 }
             },
@@ -45,7 +47,8 @@ public:
                 using stream_type = std::decay_t<decltype(beast::get_lowest_layer(t))>;
                 if constexpr (is_basic_stream_v<stream_type>) {
                     return beast::get_lowest_layer(t).socket().lowest_layer();
-                } else {
+                }
+                else {
                     return t.lowest_layer();
                 }
             },
@@ -92,7 +95,8 @@ public:
     void close(boost::system::error_code& ec) { lowest_layer().close(ec); }
     bool is_connected()
     {
-        if (!lowest_layer().is_open()) return false;
+        if (!lowest_layer().is_open())
+            return false;
 
         boost::system::error_code ec;
         static_cast<tcp::socket&>(lowest_layer()).receive(net::mutable_buffer(), 0, ec);

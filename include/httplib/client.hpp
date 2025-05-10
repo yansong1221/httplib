@@ -7,7 +7,8 @@
 
 namespace httplib {
 
-class client {
+class client
+{
 public:
     enum class timeout_policy
     {
@@ -17,7 +18,7 @@ public:
     };
 
     using response = http::response<body::any_body>;
-    using request = http::request<body::any_body>;
+    using request  = http::request<body::any_body>;
 
     using response_result = boost::system::result<response>;
 
@@ -32,23 +33,20 @@ public:
     void set_use_ssl(bool ssl);
 
 public:
-    net::awaitable<response_result>
-    async_get(std::string_view path,
-              const html::query_params& params = {},
-              const http::fields& headers = http::fields());
-    net::awaitable<response_result>
-    async_head(std::string_view path, const http::fields& headers = http::fields());
-    net::awaitable<response_result>
-    async_post(std::string_view path,
-               std::string_view body,
-               const http::fields& headers = http::fields());
-    net::awaitable<response_result>
-    async_post(std::string_view path,
-               boost::json::value&& body,
-               const http::fields& headers = http::fields());
+    net::awaitable<response_result> async_get(std::string_view path,
+                                              const html::query_params& params = {},
+                                              const http::fields& headers      = http::fields());
+    net::awaitable<response_result> async_head(std::string_view path,
+                                               const http::fields& headers = http::fields());
+    net::awaitable<response_result> async_post(std::string_view path,
+                                               std::string_view body,
+                                               const http::fields& headers = http::fields());
+    net::awaitable<response_result> async_post(std::string_view path,
+                                               boost::json::value&& body,
+                                               const http::fields& headers = http::fields());
     response_result get(std::string_view path,
                         const html::query_params& params = {},
-                        const http::fields& headers = http::fields());
+                        const http::fields& headers      = http::fields());
 
     void close();
     bool is_connected();

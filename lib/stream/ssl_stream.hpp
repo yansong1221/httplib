@@ -15,12 +15,14 @@
 namespace httplib {
 
 template<class NextLayer>
-struct ssl_stream : public net::ssl::stream<NextLayer> {
+struct ssl_stream : public net::ssl::stream<NextLayer>
+{
     using net::ssl::stream<NextLayer>::stream;
 
     template<typename Arg>
     ssl_stream(Arg&& arg, std::shared_ptr<net::ssl::context> ctx)
-        : net::ssl::stream<NextLayer>(std::move(arg), *ctx), ssl_ctx_(ctx)
+        : net::ssl::stream<NextLayer>(std::move(arg), *ctx)
+        , ssl_ctx_(ctx)
     {
     }
 
@@ -38,14 +40,13 @@ void teardown(boost::beast::role_type role,
     teardown(role, static_cast<net::ssl::stream<SyncStream>&>(stream), ec);
 }
 
-template<class AsyncStream,
-         typename TeardownHandler =
-             net::default_completion_token_t<beast::executor_type<AsyncStream>>>
-void async_teardown(
-    boost::beast::role_type role,
-    ssl_stream<AsyncStream>& stream,
-    TeardownHandler&& handler =
-        net::default_completion_token_t<beast::executor_type<AsyncStream>> {})
+template<
+    class AsyncStream,
+    typename TeardownHandler = net::default_completion_token_t<beast::executor_type<AsyncStream>>>
+void async_teardown(boost::beast::role_type role,
+                    ssl_stream<AsyncStream>& stream,
+                    TeardownHandler&& handler =
+                        net::default_completion_token_t<beast::executor_type<AsyncStream>> {})
 {
     // Just forward it to the underlying ssl::stream
     using boost::beast::websocket::async_teardown;

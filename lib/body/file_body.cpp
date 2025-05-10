@@ -1,10 +1,12 @@
 #include "httplib/body/file_body.hpp"
 namespace httplib::body {
 
-file_body::writer::writer(const http::fields&, value_type& b) : body_(b) { }
+file_body::writer::writer(const http::fields&, value_type& b)
+    : body_(b)
+{
+}
 
-void
-file_body::writer::init(boost::system::error_code& ec)
+void file_body::writer::init(boost::system::error_code& ec)
 {
     ec.clear();
 }
@@ -25,8 +27,7 @@ file_body::writer::get(boost::system::error_code& ec)
             pos_ = range.first;
             body_.seekg(*pos_);
         }
-        std::size_t const n =
-            (std::min)(sizeof(buf_), beast::detail::clamp(range.second - *pos_));
+        std::size_t const n = (std::min)(sizeof(buf_), beast::detail::clamp(range.second - *pos_));
         if (n == 0) {
             ec = {};
             return boost::none;
@@ -58,10 +59,8 @@ file_body::writer::get(boost::system::error_code& ec)
         case step::header: {
             std::string header = fmt::format("--{}\r\n", body_.boundary);
             header += fmt::format("Content-Type: {}\r\n", body_.content_type);
-            header += fmt::format("Content-Range: bytes {}-{}/{}\r\n",
-                                  range.first,
-                                  range.second,
-                                  file_size_);
+            header += fmt::format(
+                "Content-Range: bytes {}-{}/{}\r\n", range.first, range.second, file_size_);
             header += "\r\n";
             strcpy(buf_, header.c_str());
             step_ = step::content;
@@ -96,13 +95,13 @@ file_body::writer::get(boost::system::error_code& ec)
             if (is_eof) {
                 end += fmt::format("--{}--\r\n", body_.boundary);
                 step_ = step::eof;
-            } else {
+            }
+            else {
                 step_ = step::header;
                 (*range_index_)++;
             }
             net::buffer_copy(net::buffer(buf_, sizeof(buf_)), net::buffer(end));
-            return std::make_pair<net::const_buffer>(net::buffer(buf_, end.size()),
-                                                     !is_eof);
+            return std::make_pair<net::const_buffer>(net::buffer(buf_, end.size()), !is_eof);
         } break;
         case step::eof: break;
         default: break;
@@ -111,16 +110,17 @@ file_body::writer::get(boost::system::error_code& ec)
     return boost::none;
 }
 
-file_body::reader::reader(const http::fields&, value_type& b) : body_(b) { }
-
-void
-file_body::reader::init(boost::optional<std::uint64_t> const& content_length,
-                        boost::system::error_code& ec)
+file_body::reader::reader(const http::fields&, value_type& b)
+    : body_(b)
 {
 }
 
-void
-file_body::reader::finish(boost::system::error_code& ec)
+void file_body::reader::init(boost::optional<std::uint64_t> const& content_length,
+                             boost::system::error_code& ec)
+{
+}
+
+void file_body::reader::finish(boost::system::error_code& ec)
 {
     ec.clear();
 }
