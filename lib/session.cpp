@@ -82,7 +82,6 @@ net::awaitable<void> transfer(S1& from, S2& to, size_t& bytes_transferred)
         }
         co_await net::async_write(to, net::buffer(buffer, bytes), net_awaitable[ec]);
         if (ec) {
-            to.shutdown(net::socket_base::shutdown_send, ec);
             from.shutdown(net::socket_base::shutdown_receive, ec);
             co_return;
         }
