@@ -1,14 +1,11 @@
 #pragma once
 #include "httplib/config.hpp"
-#include "httplib/server.hpp"
-#include "stream/http_stream.hpp"
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/ip/tcp.hpp>
 #include <memory>
 
 namespace httplib {
 class server;
-class router;
-
 
 class session : public std::enable_shared_from_this<session>
 {
@@ -21,7 +18,7 @@ public:
         virtual void abort()                                 = 0;
     };
 
-    explicit session(tcp::socket&& stream, const server::setting& option, httplib::router& router);
+    explicit session(tcp::socket&& stream, server& serv);
     ~session();
 
 public:
@@ -29,11 +26,8 @@ public:
     net::awaitable<void> run();
 
 private:
-    net::ip::tcp::endpoint remote_endpoint_;
-    net::ip::tcp::endpoint local_endpoint_;
-
     std::unique_ptr<task> task_;
-    const server::setting& option_;
+
     std::atomic_bool abort_ = false;
     std::mutex task_mtx_;
 };

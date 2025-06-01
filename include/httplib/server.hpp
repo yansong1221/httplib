@@ -35,6 +35,12 @@ public:
 
     httplib::router& router();
 
+    void set_read_timeout(const std::chrono::steady_clock::duration& dur);
+    void set_write_timeout(const std::chrono::steady_clock::duration& dur);
+
+    const std::chrono::steady_clock::duration& read_timeout() const;
+    const std::chrono::steady_clock::duration& write_timeout() const;
+
 private:
     class impl;
     impl* impl_;

@@ -13,8 +13,7 @@ struct server::setting
     };
 
     std::optional<SSLConfig> ssl_conf;
-    std::chrono::steady_clock::duration read_timeout  = std::chrono::seconds(30);
-    std::chrono::steady_clock::duration write_timeout = std::chrono::seconds(30);
+
 
     websocket_conn::message_handler_type websocket_message_handler;
     websocket_conn::open_handler_type websocket_open_handler;

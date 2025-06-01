@@ -1,10 +1,12 @@
 #include "session.hpp"
 
 #include "body/compressor.hpp"
+
 #include "httplib/response.hpp"
 #include "httplib/router.hpp"
 #include "httplib/server.hpp"
 #include "httplib/setting.hpp"
+#include "stream/http_stream.hpp"
 #include "websocket_conn_impl.hpp"
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/write.hpp>
@@ -32,7 +34,7 @@ httplib::response make_respone(const http::request<Body>& req)
     return resp;
 }
 #ifdef HTTPLIB_ENABLED_SSL
-static std::shared_ptr<ssl::context> create_ssl_context(const server::SSLConfig& ssl_conf,
+static std::shared_ptr<ssl::context> create_ssl_context(const server::setting::SSLConfig& ssl_conf,
                                                         boost::system::error_code& ec)
 {
     unsigned long ssl_options =
@@ -92,12 +94,11 @@ net::awaitable<void> transfer(S1& from, S2& to, size_t& bytes_transferred)
 class websocket_task : public session::task
 {
 public:
-    explicit websocket_task(websocket_variant_stream_type&& stream,
-                            request&& req,
-                            const server::setting& option)
+    explicit websocket_task(websocket_variant_stream_type&& stream, request&& req, server& serv)
         : req_(std::move(req))
     {
-        auto conn = std::make_shared<httplib::websocket_conn_impl>(option, std::move(stream));
+        auto conn =
+            std::make_shared<httplib::websocket_conn_impl>(serv.option(), std::move(stream));
     }
     net::awaitable<std::unique_ptr<task>> then() override
     {
@@ -115,12 +116,10 @@ private:
 class http_proxy_task : public session::task
 {
 public:
-    explicit http_proxy_task(http_variant_stream_type&& stream,
-                             request&& req,
-                             const server::setting& option)
+    explicit http_proxy_task(http_variant_stream_type&& stream, request&& req, server& serv)
         : stream_(std::move(stream))
         , req_(std::move(req))
-        , option_(option)
+        , serv_(serv)
         , resolver_(stream_.get_executor())
         , proxy_socket_(stream_.get_executor())
     {
@@ -176,19 +175,15 @@ private:
     tcp::socket proxy_socket_;
 
     request req_;
-    const server::setting& option_;
+    server& serv_;
 };
 
 
 class http_task : public session::task
 {
 public:
-    explicit http_task(http_variant_stream_type&& stream,
-                       beast::flat_buffer&& buffer,
-                       httplib::router& router,
-                       const server::setting& option)
-        : option_(option)
-        , router_(router)
+    explicit http_task(http_variant_stream_type&& stream, beast::flat_buffer&& buffer, server& serv)
+        : serv_(serv)
         , buffer_(std::move(buffer))
         , stream_(std::move(stream))
     {
@@ -204,11 +199,11 @@ public:
             http::request_parser<http::empty_body> header_parser;
             header_parser.body_limit(std::numeric_limits<unsigned long long>::max());
             while (!header_parser.is_header_done()) {
-                stream_.expires_after(option_.read_timeout);
+                stream_.expires_after(serv_.read_timeout());
                 co_await http::async_read_some(stream_, buffer_, header_parser, net_awaitable[ec]);
                 stream_.expires_never();
                 if (ec) {
-                    option_.get_logger()->trace("read http header failed: {}", ec.message());
+                    serv_.option().get_logger()->trace("read http header failed: {}", ec.message());
                     co_return nullptr;
                 }
             }
@@ -221,7 +216,7 @@ public:
                 auto stream = create_websocket_variant_stream(std::move(stream_));
                 request req(header_parser.release());
                 co_return std::make_unique<websocket_task>(
-                    std::move(stream), std::move(req), option_);
+                    std::move(stream), std::move(req), serv_);
 #endif // HTTPLIB_ENABLED_WEBSOCKET
                 co_return nullptr;
             }
@@ -229,11 +224,11 @@ public:
             else if (header.method() == http::verb::connect) {
                 request req(header_parser.release());
                 co_return std::make_unique<http_proxy_task>(
-                    std::move(stream_), std::move(req), option_);
+                    std::move(stream_), std::move(req), serv_);
             }
             httplib::response resp = detail::make_respone(header);
             httplib::request req;
-            if (router_.has_handler(header.method(), header.target())) {
+            if (serv_.router().has_handler(header.method(), header.target())) {
                 switch (header.method()) {
                     case http::verb::get:
                     case http::verb::head:
@@ -244,13 +239,13 @@ public:
                     default: {
                         http::request_parser<body::any_body> body_parser(std::move(header_parser));
                         while (!body_parser.is_done()) {
-                            stream_.expires_after(option_.read_timeout);
+                            stream_.expires_after(serv_.read_timeout());
                             co_await http::async_read_some(
                                 stream_, buffer_, body_parser, net_awaitable[ec]);
                             stream_.expires_never();
                             if (ec) {
-                                option_.get_logger()->trace("read http body failed: {}",
-                                                            ec.message());
+                                serv_.option().get_logger()->trace("read http body failed: {}",
+                                                                   ec.message());
                                 co_return nullptr;
                             }
                         }
@@ -263,11 +258,11 @@ public:
 
                 auto start_time = std::chrono::steady_clock::now();
 
-                co_await router_.routing(req, resp);
+                co_await serv_.router().routing(req, resp);
 
                 auto span_time = std::chrono::steady_clock::now() - start_time;
 
-                option_.get_logger()->info(
+                serv_.option().get_logger()->info(
                     "{} {} ({}:{} -> {}:{}) {} {}ms",
                     req.method_string(),
                     req.target(),
@@ -292,11 +287,11 @@ public:
 
             http::response_serializer<body::any_body> serializer(resp);
             while (!serializer.is_done()) {
-                stream_.expires_after(option_.write_timeout);
+                stream_.expires_after(serv_.write_timeout());
                 co_await http::async_write_some(stream_, serializer, net_awaitable[ec]);
                 stream_.expires_never();
                 if (ec) {
-                    option_.get_logger()->trace("write http body failed: {}", ec.message());
+                    serv_.option().get_logger()->trace("write http body failed: {}", ec.message());
                     co_return nullptr;
                 }
             }
@@ -321,8 +316,8 @@ public:
     }
 
 private:
-    const server::setting& option_;
-    httplib::router& router_;
+    server& serv_;
+
     http_variant_stream_type stream_;
     beast::flat_buffer buffer_;
 
@@ -333,12 +328,8 @@ private:
 class ssl_handshake_task : public session::task
 {
 public:
-    explicit ssl_handshake_task(ssl_http_stream&& stream,
-                                beast::flat_buffer&& buffer,
-                                httplib::router& router,
-                                const server::Option& option)
-        : option_(option)
-        , router_(router)
+    explicit ssl_handshake_task(ssl_http_stream&& stream, beast::flat_buffer&& buffer, server& serv)
+        : serv_(serv)
         , stream_(std::move(stream))
         , buffer_(std::move(buffer))
     {
@@ -351,22 +342,20 @@ public:
         auto bytes_used = co_await stream_.async_handshake(
             ssl::stream_base::server, buffer_.data(), net_awaitable[ec]);
         if (ec) {
-            option_.get_logger()->error("ssl handshake failed: {}", ec.message());
+            serv_.option().get_logger()->error("ssl handshake failed: {}", ec.message());
             co_return nullptr;
         }
         buffer_.consume(bytes_used);
 
         http_variant_stream_type variant_stream(std::move(stream_));
-        co_return std::make_unique<http_task>(
-            std::move(variant_stream), std::move(buffer_), router_, option_);
+        co_return std::make_unique<http_task>(std::move(variant_stream), std::move(buffer_), serv_);
     }
 
 
     void abort() override { stream_.shutdown(); }
 
 private:
-    const server::setting& option_;
-    httplib::router& router_;
+    server& serv_;
     ssl_http_stream stream_;
     beast::flat_buffer buffer_;
 };
@@ -375,14 +364,11 @@ private:
 class detect_ssl_task : public session::task
 {
 public:
-    explicit detect_ssl_task(tcp::socket&& stream,
-                             const server::setting& option,
-                             httplib::router& router)
-        : option_(option)
-        , router_(router)
+    explicit detect_ssl_task(tcp::socket&& stream, server& sevr)
+        : sevr_(sevr)
         , stream_(std::move(stream))
     {
-        stream_.expires_after(option_.read_timeout);
+        stream_.expires_after(sevr_.read_timeout());
     }
     ~detect_ssl_task() { stream_.expires_never(); }
 
@@ -391,56 +377,46 @@ public:
     {
         beast::flat_buffer buffer;
 #ifdef HTTPLIB_ENABLED_SSL
-        if (option_.ssl_conf) {
+        if (sevr_.option().ssl_conf) {
             boost::system::error_code ec;
             bool is_ssl = co_await beast::async_detect_ssl(stream_, buffer, net_awaitable[ec]);
             if (ec) {
-                option_.get_logger()->error("async_detect_ssl failed: {}", ec.message());
+                sevr_.option().get_logger()->error("async_detect_ssl failed: {}", ec.message());
                 co_return nullptr;
             }
             if (is_ssl) {
-                auto ssl_ctx = detail::create_ssl_context(*option_.ssl_conf, ec);
+                auto ssl_ctx = detail::create_ssl_context(*sevr_.option().ssl_conf, ec);
                 if (!ssl_ctx) {
-                    option_.get_logger()->error("create_ssl_context failed: {}", ec.message());
+                    sevr_.option().get_logger()->error("create_ssl_context failed: {}",
+                                                       ec.message());
                     co_return nullptr;
                 }
                 ssl_http_stream use_ssl_stream(std::move(stream_), ssl_ctx);
                 co_return std::make_unique<ssl_handshake_task>(
-                    std::move(use_ssl_stream), std::move(buffer), router_, option_);
+                    std::move(use_ssl_stream), std::move(buffer), sevr_);
             }
         }
 #endif
         http_variant_stream_type variant_stream(std::move(stream_));
-        co_return std::make_unique<http_task>(
-            std::move(variant_stream), std::move(buffer), router_, option_);
+        co_return std::make_unique<http_task>(std::move(variant_stream), std::move(buffer), sevr_);
     }
 
     void abort() override { stream_.close(); }
 
 private:
-    const server::setting& option_;
-    httplib::router& router_;
+    server& sevr_;
     http_stream stream_;
 };
 
 } // namespace detail
 
-session::session(tcp::socket&& stream, const server::setting& option, httplib::router& router)
-    : option_(option)
+session::session(tcp::socket&& stream, server& serv)
+    : task_(std::make_unique<detail::detect_ssl_task>(std::move(stream), serv))
 {
-    remote_endpoint_ = stream.remote_endpoint();
-    local_endpoint_  = stream.local_endpoint();
-    option_.get_logger()->trace("accept new connection [{}:{}]",
-                                remote_endpoint_.address().to_string(),
-                                remote_endpoint_.port());
-    task_ = std::make_unique<detail::detect_ssl_task>(std::move(stream), option, router);
 }
 
 session::~session()
 {
-    option_.get_logger()->trace("close connection [{}:{}]",
-                                remote_endpoint_.address().to_string(),
-                                remote_endpoint_.port());
 }
 
 void session::abort()
