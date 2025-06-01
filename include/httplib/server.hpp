@@ -11,6 +11,8 @@ class session;
 } // namespace httplib
 
 namespace httplib {
+
+class server_impl;
 class server
 {
 public:
@@ -21,8 +23,6 @@ public:
     ~server();
 
     net::any_io_executor get_executor() noexcept;
-
-    setting& option();
 
     server& listen(std::string_view host,
                    uint16_t port,
@@ -41,11 +41,16 @@ public:
     const std::chrono::steady_clock::duration& read_timeout() const;
     const std::chrono::steady_clock::duration& write_timeout() const;
 
-private:
-    class impl;
-    impl* impl_;
+    std::shared_ptr<spdlog::logger> get_logger() const;
+    void set_logger(std::shared_ptr<spdlog::logger> logger);
 
-    friend class session;
-    friend class router;
+    void use_ssl(const fs::path& cert_file, const fs::path& key_file, std::string passwd = {});
+
+    void set_websocket_open_handler(websocket_conn::open_handler_type&& handle);
+    void set_websocket_close_handler(websocket_conn::close_handler_type&& handle);
+    void set_websocket_message_handler(websocket_conn::message_handler_type&& handle);
+
+private:
+    server_impl* impl_;
 };
 } // namespace httplib

@@ -5,7 +5,7 @@
 #include <memory>
 
 namespace httplib {
-class server;
+class server_impl;
 
 class session : public std::enable_shared_from_this<session>
 {
@@ -17,8 +17,13 @@ public:
         virtual net::awaitable<std::unique_ptr<task>> then() = 0;
         virtual void abort()                                 = 0;
     };
+    class detect_ssl_task;
+    class ssl_handshake_task;
+    class http_task;
+    class http_proxy_task;
+    class websocket_task;
 
-    explicit session(tcp::socket&& stream, server& serv);
+    explicit session(tcp::socket&& stream, server_impl& serv);
     ~session();
 
 public:

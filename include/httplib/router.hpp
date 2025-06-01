@@ -1,6 +1,5 @@
 #pragma once
 #include "httplib/http_handler.hpp"
-#include "httplib/server.hpp"
 #include <algorithm>
 #include <boost/asio/detached.hpp>
 #include <boost/beast/http/fields.hpp>
@@ -10,10 +9,11 @@
 #include <string_view>
 
 namespace httplib {
+class router_impl;
 class router
 {
 public:
-    explicit router(const server::setting& option);
+    explicit router();
     virtual ~router();
 
 public:
@@ -26,7 +26,7 @@ public:
     void set_http_handler(std::string_view key, Func&& handler, Aspects&&... asps)
     {
         static_assert(sizeof...(method) >= 1, "must set http_method");
-        (set_http_handler(method, key, handler, std::forward<Aspects>(std::move(asps))...), ...);
+        (set_http_handler(method, key, handler, std::forward<Aspects>(asps)...), ...);
     }
     template<http::verb... method, typename Func, typename... Aspects>
     void set_http_handler(std::string_view key,
@@ -58,8 +58,7 @@ private:
     void set_file_request_handler_impl(coro_http_handler_type&& handler);
 
 private:
-    class impl;
-    std::unique_ptr<impl> impl_;
+    router_impl* impl_;
 };
 
 } // namespace httplib

@@ -2,7 +2,6 @@
 #include "httplib/server.hpp"
 
 #include "httplib/router.hpp"
-#include "httplib/setting.hpp"
 #include "session.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
@@ -16,15 +15,14 @@
 #include <unordered_set>
 
 namespace httplib {
-class server::impl
+class server_impl
 {
 public:
-    explicit impl(server& self, uint32_t num_threads);
-    ~impl() = default;
+    explicit server_impl(uint32_t num_threads);
+    ~server_impl() = default;
 
 public:
     net::any_io_executor get_executor() noexcept;
-    setting& option();
 
     void listen(std::string_view host,
                 uint16_t port,
@@ -42,16 +40,22 @@ public:
     const std::chrono::steady_clock::duration& read_timeout() const;
     const std::chrono::steady_clock::duration& write_timeout() const;
 
+    std::shared_ptr<spdlog::logger> get_logger() const;
+    void set_logger(std::shared_ptr<spdlog::logger> logger);
+
+    void use_ssl(const fs::path& cert_file, const fs::path& key_file, std::string passwd = {});
+
+    void set_websocket_open_handler(websocket_conn::open_handler_type&& handle);
+    void set_websocket_close_handler(websocket_conn::close_handler_type&& handle);
+    void set_websocket_message_handler(websocket_conn::message_handler_type&& handle);
+
 private:
     net::awaitable<void> accept_loop();
     net::awaitable<void> handle_accept(tcp::socket&& sock);
 
 private:
-    server& self_;
-
     net::thread_pool pool_;
 
-    server::setting option_;
     httplib::router router_;
     tcp::acceptor acceptor_;
 
@@ -60,6 +64,25 @@ private:
 
     std::chrono::steady_clock::duration read_timeout_  = std::chrono::seconds(30);
     std::chrono::steady_clock::duration write_timeout_ = std::chrono::seconds(30);
+
+    std::shared_ptr<spdlog::logger> default_logger_;
+    std::shared_ptr<spdlog::logger> custom_logger_;
+
+    websocket_conn::message_handler_type websocket_message_handler_;
+    websocket_conn::open_handler_type websocket_open_handler_;
+    websocket_conn::close_handler_type websocket_close_handler_;
+
+    struct SSLConfig
+    {
+        std::filesystem::path cert_file;
+        std::filesystem::path key_file;
+        std::string passwd;
+    };
+
+    std::optional<SSLConfig> ssl_conf_;
+
+    friend class websocket_conn_impl;
+    friend class session;
 };
 
 } // namespace httplib

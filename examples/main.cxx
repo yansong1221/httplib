@@ -1,7 +1,6 @@
 
 #include "httplib/router.hpp"
 #include "httplib/server.hpp"
-#include "httplib/setting.hpp"
 
 #include <filesystem>
 #include <format>
@@ -31,34 +30,28 @@ int main()
     using namespace std::string_view_literals;
     httplib::server svr;
 
-    auto& option = svr.option();
     auto& router = svr.router();
 
-    auto config = httplib::server::setting::SSLConfig {
-        R"(D:\code\http\lib\server.crt)", R"(D:\code\http\lib\server.key)", "test"};
-    option.ssl_conf = config;
-    option.get_logger()->set_level(spdlog::level::trace);
+    svr.get_logger()->set_level(spdlog::level::trace);
+    svr.use_ssl(R"(D:\code\httplib\lib\server.crt)", R"(D:\code\httplib\lib\server.key)", "test");
 
     svr.listen("127.0.0.1", 8808);
-    option.websocket_open_handler =
-        [](httplib::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> { co_return; };
-    option.websocket_close_handler =
-        [](httplib::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> { co_return; };
-    option.websocket_message_handler =
+    svr.set_websocket_open_handler(
+        [](httplib::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> { co_return; });
+    svr.set_websocket_close_handler(
+        [](httplib::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> { co_return; });
+    svr.set_websocket_message_handler(
         [](httplib::websocket_conn::weak_ptr hdl,
            httplib::websocket_conn::message msg) -> boost::asio::awaitable<void> {
-        auto conn = hdl.lock();
-        conn->send_message(msg);
-        co_return;
-    };
+            auto conn = hdl.lock();
+            conn->send_message(msg);
+            co_return;
+        });
 
     router.set_http_handler<httplib::http::verb::post, httplib::http::verb::get>(
         "/中文",
         [](httplib::request& req, httplib::response& resp) -> httplib::net::awaitable<void> {
-            // req.is_body_type<httplib::body::form_data_body>();
-
-            resp.base().result(httplib::http::status::ok);
-            // resp.set_body<httplib::body::form_data_body>(req.body<httplib::body::form_data_body>());
+            resp.set_string_content("hello"sv, "text/html");
             co_return;
         },
         log_t {});

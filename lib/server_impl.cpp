@@ -1,18 +1,23 @@
 #include "server_impl.h"
 
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/spdlog.h>
+
 namespace httplib {
 
-server::impl::impl(server& self, uint32_t num_threads)
-    : self_(self)
-    , pool_(num_threads)
+server_impl::server_impl(uint32_t num_threads)
+    : pool_(num_threads)
     , acceptor_(pool_)
-    , router_(option_)
 {
+    auto console_sink                 = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+    spdlog::sinks_init_list sink_list = {console_sink};
+    default_logger_ = std::make_shared<spdlog::logger>("httplib.server", sink_list);
+    default_logger_->set_level(spdlog::level::info);
 }
 
-void server::impl::listen(std::string_view host,
-                          uint16_t port,
-                          int backlog /*= net::socket_base::max_listen_connections*/)
+void server_impl::listen(std::string_view host,
+                         uint16_t port,
+                         int backlog /*= net::socket_base::max_listen_connections*/)
 {
     tcp::resolver resolver(pool_);
     auto results = resolver.resolve(host, std::to_string(port));
@@ -21,32 +26,26 @@ void server::impl::listen(std::string_view host,
     acceptor_.open(endp.protocol());
     acceptor_.bind(endp);
     acceptor_.listen(backlog);
-    option_.get_logger()->info(
-        "Server Listen on: [{}:{}]", endp.address().to_string(), endp.port());
+    get_logger()->info("Server Listen on: [{}:{}]", endp.address().to_string(), endp.port());
 }
 
-httplib::net::any_io_executor server::impl::get_executor() noexcept
+httplib::net::any_io_executor server_impl::get_executor() noexcept
 {
     return pool_.get_executor();
 }
 
-httplib::server::setting& server::impl::option()
-{
-    return option_;
-}
-
-void server::impl::async_run()
+void server_impl::async_run()
 {
     net::co_spawn(pool_, accept_loop(), net::detached);
 }
 
-void server::impl::wait()
+void server_impl::wait()
 {
     pool_.wait();
     session_map_.clear();
 }
 
-void server::impl::stop()
+void server_impl::stop()
 {
     boost::system::error_code ec;
     acceptor_.close(ec);
@@ -58,33 +57,33 @@ void server::impl::stop()
     pool_.stop();
 }
 
-httplib::router& server::impl::router()
+httplib::router& server_impl::router()
 {
     return router_;
 }
 
-httplib::net::awaitable<void> server::impl::accept_loop()
+httplib::net::awaitable<void> server_impl::accept_loop()
 {
     boost::system::error_code ec;
     for (;;) {
         tcp::socket sock(pool_);
         co_await acceptor_.async_accept(sock, net_awaitable[ec]);
         if (ec) {
-            option_.get_logger()->trace("async_accept: {}", ec.message());
+            get_logger()->trace("async_accept: {}", ec.message());
             co_return;
         }
         net::co_spawn(pool_, handle_accept(std::move(sock)), net::detached);
     }
 }
 
-httplib::net::awaitable<void> server::impl::handle_accept(tcp::socket&& sock)
+httplib::net::awaitable<void> server_impl::handle_accept(tcp::socket&& sock)
 {
     auto remote_endp = sock.remote_endpoint();
     auto local_endp  = sock.local_endpoint();
-    option_.get_logger()->trace(
+    get_logger()->trace(
         "accept new connection [{}:{}]", remote_endp.address().to_string(), remote_endp.port());
 
-    auto session = std::make_shared<httplib::session>(std::move(sock), self_);
+    auto session = std::make_shared<httplib::session>(std::move(sock), *this);
     {
         std::unique_lock<std::mutex> lck(session_mtx_);
         session_map_.insert(session);
@@ -93,37 +92,75 @@ httplib::net::awaitable<void> server::impl::handle_accept(tcp::socket&& sock)
         co_await session->run();
     }
     catch (const std::exception& e) {
-        option_.get_logger()->error("session::run() exception: {}", e.what());
+        get_logger()->error("session::run() exception: {}", e.what());
     }
     catch (...) {
-        option_.get_logger()->error("session::run() unknown exception");
+        get_logger()->error("session::run() unknown exception");
     }
     {
         std::unique_lock<std::mutex> lck(session_mtx_);
         session_map_.erase(session);
     }
-    option_.get_logger()->trace(
+    get_logger()->trace(
         "close connection [{}:{}]", remote_endp.address().to_string(), remote_endp.port());
 }
 
-void server::impl::set_read_timeout(const std::chrono::steady_clock::duration& dur)
+void server_impl::set_read_timeout(const std::chrono::steady_clock::duration& dur)
 {
     read_timeout_ = dur;
 }
 
-void server::impl::set_write_timeout(const std::chrono::steady_clock::duration& dur)
+void server_impl::set_write_timeout(const std::chrono::steady_clock::duration& dur)
 {
     write_timeout_ = dur;
 }
 
-const std::chrono::steady_clock::duration& server::impl::read_timeout() const
+const std::chrono::steady_clock::duration& server_impl::read_timeout() const
 {
     return read_timeout_;
 }
 
-const std::chrono::steady_clock::duration& server::impl::write_timeout() const
+const std::chrono::steady_clock::duration& server_impl::write_timeout() const
 {
     return write_timeout_;
+}
+
+std::shared_ptr<spdlog::logger> server_impl::get_logger() const
+{
+    if (custom_logger_)
+        return custom_logger_;
+    return default_logger_;
+}
+
+void server_impl::set_logger(std::shared_ptr<spdlog::logger> logger)
+{
+    custom_logger_ = logger;
+}
+
+void server_impl::use_ssl(const fs::path& cert_file,
+                          const fs::path& key_file,
+                          std::string passwd /*= {}*/)
+{
+    SSLConfig conf;
+    conf.cert_file = cert_file;
+    conf.key_file  = key_file;
+    conf.passwd    = passwd;
+    ssl_conf_      = conf;
+}
+
+void server_impl::set_websocket_open_handler(websocket_conn::open_handler_type&& handle)
+{
+    websocket_open_handler_ = std::move(handle);
+}
+
+void server_impl::set_websocket_close_handler(websocket_conn::close_handler_type&& handle)
+{
+    websocket_close_handler_ = std::move(handle);
+}
+
+void server_impl::set_websocket_message_handler(websocket_conn::message_handler_type&& handle)
+{
+    websocket_message_handler_ = std::move(handle);
 }
 
 } // namespace httplib

@@ -5,7 +5,6 @@
 #include "httplib/response.hpp"
 #include "httplib/router.hpp"
 #include "httplib/server.hpp"
-#include "httplib/setting.hpp"
 #include "stream/http_stream.hpp"
 #include "websocket_conn_impl.hpp"
 #include <boost/asio/experimental/awaitable_operators.hpp>
@@ -34,7 +33,9 @@ httplib::response make_respone(const http::request<Body>& req)
     return resp;
 }
 #ifdef HTTPLIB_ENABLED_SSL
-static std::shared_ptr<ssl::context> create_ssl_context(const server::setting::SSLConfig& ssl_conf,
+static std::shared_ptr<ssl::context> create_ssl_context(const fs::path& cert_file,
+                                                        const fs::path& key_file,
+                                                        std::string passwd,
                                                         boost::system::error_code& ec)
 {
     unsigned long ssl_options =
@@ -45,16 +46,16 @@ static std::shared_ptr<ssl::context> create_ssl_context(const server::setting::S
     if (ec)
         return nullptr;
 
-    if (!ssl_conf.passwd.empty()) {
-        ssl_ctx->set_password_callback([pass = ssl_conf.passwd](auto, auto) { return pass; }, ec);
+    if (!passwd.empty()) {
+        ssl_ctx->set_password_callback([pass = passwd](auto, auto) { return pass; }, ec);
         if (ec)
             return nullptr;
     }
-    ssl_ctx->use_certificate_chain_file(ssl_conf.cert_file.string(), ec);
+    ssl_ctx->use_certificate_chain_file(cert_file.string(), ec);
     if (ec)
         return nullptr;
 
-    ssl_ctx->use_private_key_file(ssl_conf.key_file.string(), ssl::context::pem, ec);
+    ssl_ctx->use_private_key_file(key_file.string(), ssl::context::pem, ec);
     if (ec)
         return nullptr;
 
@@ -90,14 +91,17 @@ net::awaitable<void> transfer(S1& from, S2& to, size_t& bytes_transferred)
 }
 
 
-class websocket_task : public session::task
+} // namespace detail
+
+class session::websocket_task : public session::task
 {
 public:
-    explicit websocket_task(websocket_variant_stream_type&& stream, request&& req, server& serv)
+    explicit websocket_task(websocket_variant_stream_type&& stream,
+                            request&& req,
+                            server_impl& serv)
         : req_(std::move(req))
     {
-        auto conn =
-            std::make_shared<httplib::websocket_conn_impl>(serv.option(), std::move(stream));
+        auto conn = std::make_shared<httplib::websocket_conn_impl>(serv, std::move(stream));
     }
     net::awaitable<std::unique_ptr<task>> then() override
     {
@@ -112,10 +116,10 @@ private:
     request req_;
 };
 
-class http_proxy_task : public session::task
+class session::http_proxy_task : public session::task
 {
 public:
-    explicit http_proxy_task(http_variant_stream_type&& stream, request&& req, server& serv)
+    explicit http_proxy_task(http_variant_stream_type&& stream, request&& req, server_impl& serv)
         : stream_(std::move(stream))
         , req_(std::move(req))
         , serv_(serv)
@@ -174,14 +178,15 @@ private:
     tcp::socket proxy_socket_;
 
     request req_;
-    server& serv_;
+    server_impl& serv_;
 };
 
-
-class http_task : public session::task
+class session::http_task : public session::task
 {
 public:
-    explicit http_task(http_variant_stream_type&& stream, beast::flat_buffer&& buffer, server& serv)
+    explicit http_task(http_variant_stream_type&& stream,
+                       beast::flat_buffer&& buffer,
+                       server_impl& serv)
         : serv_(serv)
         , buffer_(std::move(buffer))
         , stream_(std::move(stream))
@@ -202,7 +207,7 @@ public:
                 co_await http::async_read_some(stream_, buffer_, header_parser, net_awaitable[ec]);
                 stream_.expires_never();
                 if (ec) {
-                    serv_.option().get_logger()->trace("read http header failed: {}", ec.message());
+                    serv_.get_logger()->trace("read http header failed: {}", ec.message());
                     co_return nullptr;
                 }
             }
@@ -243,8 +248,8 @@ public:
                                 stream_, buffer_, body_parser, net_awaitable[ec]);
                             stream_.expires_never();
                             if (ec) {
-                                serv_.option().get_logger()->trace("read http body failed: {}",
-                                                                   ec.message());
+                                serv_.get_logger()->trace("read http body failed: {}",
+                                                          ec.message());
                                 co_return nullptr;
                             }
                         }
@@ -256,12 +261,26 @@ public:
                 req.remote_endpoint = remote_endpoint_;
 
                 auto start_time = std::chrono::steady_clock::now();
-
-                co_await serv_.router().routing(req, resp);
+                try {
+                    co_await serv_.router().routing(req, resp);
+                }
+                catch (const std::exception& e) {
+                    serv_.get_logger()->warn("exception in business function, reason: {}",
+                                             e.what());
+                    resp.set_string_content(std::string_view(e.what()),
+                                            "text/html",
+                                            http::status::internal_server_error);
+                }
+                catch (...) {
+                    using namespace std::string_view_literals;
+                    serv_.get_logger()->warn("unknown exception in business function");
+                    resp.set_string_content(
+                        "unknown exception"sv, "text/html", http::status::internal_server_error);
+                }
 
                 auto span_time = std::chrono::steady_clock::now() - start_time;
 
-                serv_.option().get_logger()->info(
+                serv_.get_logger()->info(
                     "{} {} ({}:{} -> {}:{}) {} {}ms",
                     req.method_string(),
                     req.target(),
@@ -290,7 +309,7 @@ public:
                 co_await http::async_write_some(stream_, serializer, net_awaitable[ec]);
                 stream_.expires_never();
                 if (ec) {
-                    serv_.option().get_logger()->trace("write http body failed: {}", ec.message());
+                    serv_.get_logger()->trace("write http body failed: {}", ec.message());
                     co_return nullptr;
                 }
             }
@@ -315,7 +334,7 @@ public:
     }
 
 private:
-    server& serv_;
+    server_impl& serv_;
 
     http_variant_stream_type stream_;
     beast::flat_buffer buffer_;
@@ -323,11 +342,15 @@ private:
     tcp::endpoint local_endpoint_;
     tcp::endpoint remote_endpoint_;
 };
+
+
 #ifdef HTTPLIB_ENABLED_SSL
-class ssl_handshake_task : public session::task
+class session::ssl_handshake_task : public session::task
 {
 public:
-    explicit ssl_handshake_task(ssl_http_stream&& stream, beast::flat_buffer&& buffer, server& serv)
+    explicit ssl_handshake_task(ssl_http_stream&& stream,
+                                beast::flat_buffer&& buffer,
+                                server_impl& serv)
         : serv_(serv)
         , stream_(std::move(stream))
         , buffer_(std::move(buffer))
@@ -341,7 +364,7 @@ public:
         auto bytes_used = co_await stream_.async_handshake(
             ssl::stream_base::server, buffer_.data(), net_awaitable[ec]);
         if (ec) {
-            serv_.option().get_logger()->error("ssl handshake failed: {}", ec.message());
+            serv_.get_logger()->error("ssl handshake failed: {}", ec.message());
             co_return nullptr;
         }
         buffer_.consume(bytes_used);
@@ -354,16 +377,16 @@ public:
     void abort() override { stream_.shutdown(); }
 
 private:
-    server& serv_;
+    server_impl& serv_;
     ssl_http_stream stream_;
     beast::flat_buffer buffer_;
 };
 #endif
 
-class detect_ssl_task : public session::task
+class session::detect_ssl_task : public session::task
 {
 public:
-    explicit detect_ssl_task(tcp::socket&& stream, server& sevr)
+    explicit detect_ssl_task(tcp::socket&& stream, server_impl& sevr)
         : sevr_(sevr)
         , stream_(std::move(stream))
     {
@@ -376,18 +399,20 @@ public:
     {
         beast::flat_buffer buffer;
 #ifdef HTTPLIB_ENABLED_SSL
-        if (sevr_.option().ssl_conf) {
+        if (sevr_.ssl_conf_) {
             boost::system::error_code ec;
             bool is_ssl = co_await beast::async_detect_ssl(stream_, buffer, net_awaitable[ec]);
             if (ec) {
-                sevr_.option().get_logger()->error("async_detect_ssl failed: {}", ec.message());
+                sevr_.get_logger()->error("async_detect_ssl failed: {}", ec.message());
                 co_return nullptr;
             }
             if (is_ssl) {
-                auto ssl_ctx = detail::create_ssl_context(*sevr_.option().ssl_conf, ec);
+                auto ssl_ctx = detail::create_ssl_context(sevr_.ssl_conf_->cert_file,
+                                                          sevr_.ssl_conf_->key_file,
+                                                          sevr_.ssl_conf_->passwd,
+                                                          ec);
                 if (!ssl_ctx) {
-                    sevr_.option().get_logger()->error("create_ssl_context failed: {}",
-                                                       ec.message());
+                    sevr_.get_logger()->error("create_ssl_context failed: {}", ec.message());
                     co_return nullptr;
                 }
                 ssl_http_stream use_ssl_stream(std::move(stream_), ssl_ctx);
@@ -403,14 +428,13 @@ public:
     void abort() override { stream_.close(); }
 
 private:
-    server& sevr_;
+    server_impl& sevr_;
     http_stream stream_;
 };
 
-} // namespace detail
 
-session::session(tcp::socket&& stream, server& serv)
-    : task_(std::make_unique<detail::detect_ssl_task>(std::move(stream), serv))
+session::session(tcp::socket&& stream, server_impl& serv)
+    : task_(std::make_unique<detect_ssl_task>(std::move(stream), serv))
 {
 }
 
