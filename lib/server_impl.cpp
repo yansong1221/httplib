@@ -54,7 +54,6 @@ void server_impl::stop()
         for (const auto& v : session_map_)
             v->abort();
     }
-    pool_.stop();
 }
 
 httplib::router& server_impl::router()
