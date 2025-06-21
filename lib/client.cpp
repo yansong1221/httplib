@@ -209,6 +209,21 @@ void client::set_use_ssl(bool ssl)
     impl_->set_use_ssl(ssl);
 }
 
+std::string_view client::host() const
+{
+    return impl_->host_;
+}
+
+uint16_t client::port() const
+{
+    return impl_->port_;
+}
+
+bool client::is_use_ssl() const
+{
+    return impl_->use_ssl_;
+}
+
 net::awaitable<client::response_result>
 client::async_get(std::string_view path,
                   const html::query_params& params,

@@ -32,6 +32,10 @@ public:
     void set_timeout(const std::chrono::steady_clock::duration& duration);
     void set_use_ssl(bool ssl);
 
+    std::string_view host() const;
+    uint16_t port() const;
+    bool is_use_ssl() const;
+
 public:
     net::awaitable<response_result> async_get(std::string_view path,
                                               const html::query_params& params = {},
