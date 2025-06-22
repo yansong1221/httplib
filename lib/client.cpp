@@ -27,6 +27,13 @@ public:
         , port_(port)
     {
     }
+    ~impl()
+    {
+        if (variant_stream_) {
+            boost::system::error_code ec;
+            variant_stream_->close(ec);
+        }
+    }
 
     void set_timeout_policy(const timeout_policy& policy) { timeout_policy_ = policy; }
 
@@ -69,30 +76,29 @@ public:
 
     bool is_open() const { return variant_stream_ && variant_stream_->is_open(); }
 
-    net::awaitable<client::response_result> async_send_request(client::request& req)
+    net::awaitable<client::response_result> async_send_request(client::request& req,
+                                                               bool retry = true)
     {
         boost::system::error_code ec;
-        for (int i = 0; i < 2; ++i) {
-            try {
-                client::response resp = co_await async_send_request_impl(req);
-                co_return resp;
-            }
-            catch (const boost::system::system_error& error) {
-                close();
-                ec = error.code();
-                if (ec == boost::asio::error::connection_aborted ||
-                    ec == boost::asio::error::connection_reset)
-                {
-                    continue;
-                }
-                co_return ec;
-            }
-            catch (...) {
-                close();
-                co_return boost::system::errc::make_error_code(
-                    boost::system::errc::invalid_argument);
-            }
+        try {
+            client::response resp = co_await async_send_request_impl(req);
+            co_return resp;
         }
+        catch (const boost::system::system_error& error) {
+            ec = error.code();
+        }
+        catch (...) {
+            ec = boost::system::errc::make_error_code(boost::system::errc::invalid_argument);
+        }
+        close();
+
+        if (ec == boost::asio::error::connection_aborted ||
+            ec == boost::asio::error::connection_reset)
+        {
+            if (retry)
+                co_return co_await async_send_request(req, false);
+        }
+        co_return ec;
     }
 
     net::awaitable<client::response> async_send_request_impl(client::request& req)
