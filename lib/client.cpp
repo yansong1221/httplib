@@ -67,21 +67,31 @@ public:
         }
     }
 
-    bool is_connected() const { return variant_stream_ && variant_stream_->is_connected(); }
+    bool is_open() const { return variant_stream_ && variant_stream_->is_open(); }
 
     net::awaitable<client::response_result> async_send_request(client::request& req)
     {
-        try {
-            client::response resp = co_await async_send_request_impl(req);
-            co_return resp;
-        }
-        catch (const boost::system::system_error& error) {
-            close();
-            co_return error.code();
-        }
-        catch (...) {
-            close();
-            co_return boost::system::errc::make_error_code(boost::system::errc::invalid_argument);
+        boost::system::error_code ec;
+        for (int i = 0; i < 2; ++i) {
+            try {
+                client::response resp = co_await async_send_request_impl(req);
+                co_return resp;
+            }
+            catch (const boost::system::system_error& error) {
+                close();
+                ec = error.code();
+                if (ec == boost::asio::error::connection_aborted ||
+                    ec == boost::asio::error::connection_reset)
+                {
+                    continue;
+                }
+                co_return ec;
+            }
+            catch (...) {
+                close();
+                co_return boost::system::errc::make_error_code(
+                    boost::system::errc::invalid_argument);
+            }
         }
     }
 
@@ -100,8 +110,7 @@ public:
         };
 
         // Set up an HTTP GET request message
-        if (!is_connected()) {
-            close();
+        if (!is_open()) {
             auto endpoints =
                 co_await resolver_.async_resolve(host_, std::to_string(port_), net::use_awaitable);
 
@@ -280,9 +289,9 @@ void client::close()
     impl_->close();
 }
 
-bool client::is_connected()
+bool client::is_open() const
 {
-    return impl_->is_connected();
+    return impl_->is_open();
 }
 
 } // namespace httplib

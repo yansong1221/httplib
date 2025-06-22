@@ -53,7 +53,7 @@ public:
                         const http::fields& headers      = http::fields());
 
     void close();
-    bool is_connected();
+    bool is_open() const;
 
 private:
     class impl;
