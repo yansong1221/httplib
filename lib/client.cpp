@@ -71,101 +71,99 @@ public:
 
     net::awaitable<client::response_result> async_send_request(client::request& req)
     {
-        client::response resp;
-        auto ec = co_await async_send_request(req, resp);
-        if (ec)
-            co_return ec;
-        co_return resp;
-    }
-
-    net::awaitable<boost::system::error_code> async_send_request(client::request& req,
-                                                                 client::response& resp)
-    {
         try {
-            auto expires_after = [this](auto& stream, bool first = false) {
-                if (timeout_policy_ == timeout_policy::step)
-                    beast::get_lowest_layer(stream).expires_after(timeout_);
-                else if (timeout_policy_ == timeout_policy::never)
-                    beast::get_lowest_layer(stream).expires_never();
-                else if (timeout_policy_ == timeout_policy::overall) {
-                    if (!first)
-                        return;
-                    beast::get_lowest_layer(stream).expires_after(timeout_);
-                }
-            };
-
-            // Set up an HTTP GET request message
-            if (!is_connected()) {
-                close();
-                auto endpoints = co_await resolver_.async_resolve(
-                    host_, std::to_string(port_), net::use_awaitable);
-
-                if (use_ssl_) {
-#ifdef HTTPLIB_ENABLED_SSL
-                    unsigned long ssl_options = ssl::context::default_workarounds |
-                                                ssl::context::no_sslv2 |
-                                                ssl::context::single_dh_use;
-
-                    auto ssl_ctx = std::make_shared<ssl::context>(ssl::context::sslv23);
-                    ssl_ctx->set_options(ssl_options);
-                    ssl_ctx->set_default_verify_paths();
-                    ssl_ctx->set_verify_mode(ssl::verify_none);
-
-                    ssl_http_stream stream(co_await net::this_coro::executor, ssl_ctx);
-                    if (!SSL_set_tlsext_host_name(stream.native_handle(), host_.c_str())) {
-                        beast::error_code ec {static_cast<int>(::ERR_get_error()),
-                                              net::error::get_ssl_category()};
-                        throw boost::system::system_error(ec);
-                    }
-                    expires_after(stream, true);
-                    co_await stream.next_layer().async_connect(endpoints, net::use_awaitable);
-                    co_await stream.async_handshake(ssl::stream_base::client, net::use_awaitable);
-
-                    variant_stream_ = std::make_unique<http_variant_stream_type>(
-                        ssl_http_stream(std::move(stream)));
-#else
-                    throw boost::system::system_error(boost::system::errc::make_error_code(
-                        boost::system::errc::protocol_not_supported));
-#endif
-                }
-                else {
-                    http_stream stream(co_await net::this_coro::executor);
-                    expires_after(stream, true);
-                    co_await stream.async_connect(endpoints, net::use_awaitable);
-                    variant_stream_ =
-                        std::make_unique<http_variant_stream_type>(http_stream(std::move(stream)));
-                }
-            }
-
-            http::request_serializer<body::any_body> serializer(req);
-            while (!serializer.is_done()) {
-                expires_after(*variant_stream_);
-                co_await http::async_write_some(*variant_stream_, serializer);
-            }
-
-            beast::flat_buffer buffer;
-
-            http::response_parser<http::empty_body> header_parser;
-            while (!header_parser.is_header_done()) {
-                expires_after(*variant_stream_);
-                co_await http::async_read_some(*variant_stream_, buffer, header_parser);
-            }
-
-            http::response_parser<body::any_body> body_parser(std::move(header_parser));
-            if (req.method() != http::verb::head) {
-                while (!body_parser.is_done()) {
-                    expires_after(*variant_stream_);
-                    co_await http::async_read_some(*variant_stream_, buffer, body_parser);
-                }
-            }
-            resp = body_parser.release();
-            variant_stream_->expires_never();
-            co_return boost::system::error_code {};
+            client::response resp = co_await async_send_request_impl(req);
+            co_return resp;
         }
         catch (const boost::system::system_error& error) {
             close();
             co_return error.code();
         }
+        catch (...) {
+            close();
+            co_return boost::system::errc::make_error_code(boost::system::errc::invalid_argument);
+        }
+    }
+
+    net::awaitable<client::response> async_send_request_impl(client::request& req)
+    {
+        auto expires_after = [this](auto& stream, bool first = false) {
+            if (timeout_policy_ == timeout_policy::step)
+                beast::get_lowest_layer(stream).expires_after(timeout_);
+            else if (timeout_policy_ == timeout_policy::never)
+                beast::get_lowest_layer(stream).expires_never();
+            else if (timeout_policy_ == timeout_policy::overall) {
+                if (!first)
+                    return;
+                beast::get_lowest_layer(stream).expires_after(timeout_);
+            }
+        };
+
+        // Set up an HTTP GET request message
+        if (!is_connected()) {
+            close();
+            auto endpoints =
+                co_await resolver_.async_resolve(host_, std::to_string(port_), net::use_awaitable);
+
+            if (use_ssl_) {
+#ifdef HTTPLIB_ENABLED_SSL
+                unsigned long ssl_options = ssl::context::default_workarounds |
+                                            ssl::context::no_sslv2 | ssl::context::single_dh_use;
+
+                auto ssl_ctx = std::make_shared<ssl::context>(ssl::context::sslv23);
+                ssl_ctx->set_options(ssl_options);
+                ssl_ctx->set_default_verify_paths();
+                ssl_ctx->set_verify_mode(ssl::verify_none);
+
+                ssl_http_stream stream(co_await net::this_coro::executor, ssl_ctx);
+                if (!SSL_set_tlsext_host_name(stream.native_handle(), host_.c_str())) {
+                    beast::error_code ec {static_cast<int>(::ERR_get_error()),
+                                          net::error::get_ssl_category()};
+                    throw boost::system::system_error(ec);
+                }
+                expires_after(stream, true);
+                co_await stream.next_layer().async_connect(endpoints, net::use_awaitable);
+                co_await stream.async_handshake(ssl::stream_base::client, net::use_awaitable);
+
+                variant_stream_ =
+                    std::make_unique<http_variant_stream_type>(ssl_http_stream(std::move(stream)));
+#else
+                throw boost::system::system_error(boost::system::errc::make_error_code(
+                    boost::system::errc::protocol_not_supported));
+#endif
+            }
+            else {
+                http_stream stream(co_await net::this_coro::executor);
+                expires_after(stream, true);
+                co_await stream.async_connect(endpoints, net::use_awaitable);
+                variant_stream_ =
+                    std::make_unique<http_variant_stream_type>(http_stream(std::move(stream)));
+            }
+        }
+
+        http::request_serializer<body::any_body> serializer(req);
+        while (!serializer.is_done()) {
+            expires_after(*variant_stream_);
+            co_await http::async_write_some(*variant_stream_, serializer);
+        }
+
+        beast::flat_buffer buffer;
+
+        http::response_parser<http::empty_body> header_parser;
+        while (!header_parser.is_header_done()) {
+            expires_after(*variant_stream_);
+            co_await http::async_read_some(*variant_stream_, buffer, header_parser);
+        }
+
+        http::response_parser<body::any_body> body_parser(std::move(header_parser));
+        if (req.method() != http::verb::head) {
+            while (!body_parser.is_done()) {
+                expires_after(*variant_stream_);
+                co_await http::async_read_some(*variant_stream_, buffer, body_parser);
+            }
+        }
+        variant_stream_->expires_never();
+        co_return body_parser.release();
     }
 
 
