@@ -93,7 +93,7 @@ public:
         close();
 
         if (ec == boost::asio::error::connection_aborted ||
-            ec == boost::asio::error::connection_reset)
+            ec == boost::asio::error::connection_reset || ec == http::error::end_of_stream)
         {
             if (retry)
                 co_return co_await async_send_request(req, false);

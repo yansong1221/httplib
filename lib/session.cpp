@@ -319,7 +319,7 @@ public:
                 // because the response indicated the "Connection: close"
                 // semantic.
                 boost::system::error_code ec;
-                stream_.shutdown(net::socket_base::shutdown_send, ec);
+                stream_.shutdown(net::socket_base::shutdown_both, ec);
                 co_return nullptr;
             }
         }
