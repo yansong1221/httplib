@@ -27,13 +27,7 @@ public:
         , port_(port)
     {
     }
-    ~impl()
-    {
-        if (variant_stream_) {
-            boost::system::error_code ec;
-            variant_stream_->close(ec);
-        }
-    }
+    ~impl() { close(); }
 
     void set_timeout_policy(const timeout_policy& policy) { timeout_policy_ = policy; }
 
@@ -44,9 +38,11 @@ public:
                                       std::string_view path,
                                       const http::fields& headers)
     {
-        auto host = host_;
+        std::string host;
         if ((use_ssl_ && port_ != 443) || (!use_ssl_ && port_ != 80))
-            host += fmt::format(":{}", port_);
+            host += fmt::format("{}:{}", host_, port_);
+        else
+            host = host_;
 
         client::request req(method, path, 11);
         req.set(http::field::host, host);
@@ -70,6 +66,7 @@ public:
         if (variant_stream_) {
             variant_stream_->expires_never();
             boost::system::error_code ec;
+            variant_stream_->shutdown(net::socket_base::shutdown_type::shutdown_both, ec);
             variant_stream_->close(ec);
         }
     }
@@ -178,6 +175,8 @@ public:
             }
         }
         variant_stream_->expires_never();
+        if (!body_parser.keep_alive())
+            close();
         co_return body_parser.release();
     }
 

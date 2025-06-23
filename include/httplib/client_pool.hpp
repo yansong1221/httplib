@@ -41,7 +41,10 @@ public:
         }
 
         client* operator->() { return conn_.get(); }
+        const client* operator->() const { return conn_.get(); }
+
         client& operator*() { return *conn_; }
+        const client& operator*() const { return *conn_; }
     };
 
 public:
