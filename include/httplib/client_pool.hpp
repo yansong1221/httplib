@@ -92,5 +92,6 @@ public:
             pool_.push(std::move(conn));
         }
     }
+    net::any_io_executor get_executor() noexcept { return ex_; }
 };
 } // namespace httplib
