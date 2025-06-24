@@ -17,14 +17,16 @@
 
 
 namespace httplib {
+
 class client::impl
 {
 public:
-    impl(const net::any_io_executor& ex, std::string_view host, uint16_t port)
+    impl(const net::any_io_executor& ex, std::string_view host, uint16_t port, bool ssl)
         : executor_(ex)
         , resolver_(ex)
         , host_(host)
         , port_(port)
+        , use_ssl_(ssl)
     {
     }
     ~impl() { close(); }
@@ -32,7 +34,6 @@ public:
     void set_timeout_policy(const timeout_policy& policy) { timeout_policy_ = policy; }
 
     void set_timeout(const std::chrono::steady_clock::duration& duration) { timeout_ = duration; }
-    void set_use_ssl(bool ssl) { use_ssl_ = ssl; }
 
     client::request make_http_request(http::verb method,
                                       std::string_view path,
@@ -63,15 +64,32 @@ public:
     void close()
     {
         resolver_.cancel();
+
+        std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
         if (variant_stream_) {
             variant_stream_->expires_never();
+            std::visit(
+                [](auto&& stream) {
+                    using stream_type = std::decay_t<decltype(stream)>;
+#ifdef HTTPLIB_ENABLED_SSL
+                    if constexpr (std::is_same_v<stream_type, ssl_http_stream>) {
+                        boost::system::error_code ec;
+                        stream.shutdown(ec);
+                    }
+#endif
+                },
+                *variant_stream_);
             boost::system::error_code ec;
             variant_stream_->shutdown(net::socket_base::shutdown_type::shutdown_both, ec);
             variant_stream_->close(ec);
         }
     }
 
-    bool is_open() const { return variant_stream_ && variant_stream_->is_open(); }
+    bool is_open() const
+    {
+        std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
+        return variant_stream_ && variant_stream_->is_open();
+    }
 
     net::awaitable<client::response_result> async_send_request(client::request& req,
                                                                bool retry = true)
@@ -97,21 +115,24 @@ public:
         }
         co_return ec;
     }
+    void expires_after(bool first = false)
+    {
+        std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
+        if (!variant_stream_)
+            return;
 
+        if (timeout_policy_ == timeout_policy::step)
+            variant_stream_->expires_after(timeout_);
+        else if (timeout_policy_ == timeout_policy::never)
+            variant_stream_->expires_never();
+        else if (timeout_policy_ == timeout_policy::overall) {
+            if (!first)
+                return;
+            variant_stream_->expires_after(timeout_);
+        }
+    }
     net::awaitable<client::response> async_send_request_impl(client::request& req)
     {
-        auto expires_after = [this](auto& stream, bool first = false) {
-            if (timeout_policy_ == timeout_policy::step)
-                beast::get_lowest_layer(stream).expires_after(timeout_);
-            else if (timeout_policy_ == timeout_policy::never)
-                beast::get_lowest_layer(stream).expires_never();
-            else if (timeout_policy_ == timeout_policy::overall) {
-                if (!first)
-                    return;
-                beast::get_lowest_layer(stream).expires_after(timeout_);
-            }
-        };
-
         // Set up an HTTP GET request message
         if (!is_open()) {
             auto endpoints =
@@ -127,35 +148,47 @@ public:
                 ssl_ctx->set_default_verify_paths();
                 ssl_ctx->set_verify_mode(ssl::verify_none);
 
-                ssl_http_stream stream(co_await net::this_coro::executor, ssl_ctx);
-                if (!SSL_set_tlsext_host_name(stream.native_handle(), host_.c_str())) {
+                ssl_http_stream ssl_stream(executor_, ssl_ctx);
+                if (!SSL_set_tlsext_host_name(ssl_stream.native_handle(), host_.c_str())) {
                     beast::error_code ec {static_cast<int>(::ERR_get_error()),
                                           net::error::get_ssl_category()};
                     throw boost::system::system_error(ec);
                 }
-                expires_after(stream, true);
-                co_await stream.next_layer().async_connect(endpoints, net::use_awaitable);
-                co_await stream.async_handshake(ssl::stream_base::client, net::use_awaitable);
 
-                variant_stream_ =
-                    std::make_unique<http_variant_stream_type>(ssl_http_stream(std::move(stream)));
+                std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
+                variant_stream_ = std::make_unique<http_variant_stream_type>(std::move(ssl_stream));
 #else
                 throw boost::system::system_error(boost::system::errc::make_error_code(
                     boost::system::errc::protocol_not_supported));
 #endif
             }
             else {
-                http_stream stream(co_await net::this_coro::executor);
-                expires_after(stream, true);
-                co_await stream.async_connect(endpoints, net::use_awaitable);
-                variant_stream_ =
-                    std::make_unique<http_variant_stream_type>(http_stream(std::move(stream)));
+                http_stream stream(executor_);
+                std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
+                variant_stream_ = std::make_unique<http_variant_stream_type>(std::move(stream));
             }
+            expires_after(true);
+
+            co_await std::visit(
+                [&](auto&& stream) -> net::awaitable<void> {
+                    using stream_type = std::decay_t<decltype(stream)>;
+#ifdef HTTPLIB_ENABLED_SSL
+                    if constexpr (std::is_same_v<stream_type, ssl_http_stream>) {
+                        co_await stream.next_layer().async_connect(endpoints, net::use_awaitable);
+                        co_await stream.async_handshake(ssl::stream_base::client,
+                                                        net::use_awaitable);
+                    }
+#endif
+                    if constexpr (std::is_same_v<stream_type, http_stream>) {
+                        co_await stream.async_connect(endpoints, net::use_awaitable);
+                    }
+                },
+                *variant_stream_);
         }
 
         http::request_serializer<body::any_body> serializer(req);
         while (!serializer.is_done()) {
-            expires_after(*variant_stream_);
+            expires_after();
             co_await http::async_write_some(*variant_stream_, serializer);
         }
 
@@ -163,14 +196,14 @@ public:
 
         http::response_parser<http::empty_body> header_parser;
         while (!header_parser.is_header_done()) {
-            expires_after(*variant_stream_);
+            expires_after();
             co_await http::async_read_some(*variant_stream_, buffer, header_parser);
         }
 
         http::response_parser<body::any_body> body_parser(std::move(header_parser));
         if (req.method() != http::verb::head) {
             while (!body_parser.is_done()) {
-                expires_after(*variant_stream_);
+                expires_after();
                 co_await http::async_read_some(*variant_stream_, buffer, body_parser);
             }
         }
@@ -187,17 +220,19 @@ public:
     std::chrono::steady_clock::duration timeout_ = std::chrono::seconds(30);
     std::string host_;
     uint16_t port_ = 0;
+    bool use_ssl_  = false;
+
     std::unique_ptr<http_variant_stream_type> variant_stream_;
-    bool use_ssl_ = false;
+    mutable std::recursive_mutex stream_mutex_;
 };
 
-client::client(net::io_context& ex, std::string_view host, uint16_t port)
-    : client(ex.get_executor(), host, port)
+client::client(net::io_context& ex, std::string_view host, uint16_t port, bool ssl)
+    : client(ex.get_executor(), host, port, ssl)
 {
 }
 
-client::client(const net::any_io_executor& ex, std::string_view host, uint16_t port)
-    : impl_(new client::impl(ex, host, port))
+client::client(const net::any_io_executor& ex, std::string_view host, uint16_t port, bool ssl)
+    : impl_(new client::impl(ex, host, port, ssl))
 {
 }
 
@@ -214,11 +249,6 @@ void client::set_timeout_policy(const timeout_policy& policy)
 void client::set_timeout(const std::chrono::steady_clock::duration& duration)
 {
     impl_->set_timeout(duration);
-}
-
-void client::set_use_ssl(bool ssl)
-{
-    impl_->set_use_ssl(ssl);
 }
 
 std::string_view client::host() const

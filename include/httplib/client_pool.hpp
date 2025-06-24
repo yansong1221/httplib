@@ -57,9 +57,6 @@ public:
         , port_(port)
         , max_size_(max_size)
     {
-        for (size_t i = 0; i < max_size_; ++i) {
-            pool_.push(std::make_unique<client>(ex_, host_, port_));
-        }
     }
     ~client_pool()
     {

@@ -23,14 +23,16 @@ public:
     using response_result = boost::system::result<response>;
 
 public:
-    explicit client(net::io_context& ex, std::string_view host, uint16_t port);
-    explicit client(const net::any_io_executor& ex, std::string_view host, uint16_t port);
+    explicit client(net::io_context& ex, std::string_view host, uint16_t port, bool ssl = false);
+    explicit client(const net::any_io_executor& ex,
+                    std::string_view host,
+                    uint16_t port,
+                    bool ssl = false);
     ~client();
 
     void set_timeout_policy(const timeout_policy& policy);
 
     void set_timeout(const std::chrono::steady_clock::duration& duration);
-    void set_use_ssl(bool ssl);
 
     std::string_view host() const;
     uint16_t port() const;

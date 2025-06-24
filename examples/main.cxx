@@ -1,7 +1,7 @@
 
+#include "httplib/client.hpp"
 #include "httplib/router.hpp"
 #include "httplib/server.hpp"
-
 #include <filesystem>
 #include <format>
 #include <iostream>
@@ -51,6 +51,18 @@ int main()
     router.set_http_handler<httplib::http::verb::post, httplib::http::verb::get>(
         "/中文",
         [](httplib::request& req, httplib::response& resp) -> httplib::net::awaitable<void> {
+            httplib::client cli(
+                co_await boost::asio::this_coro::executor, "wwww.baidu.com", 443, true);
+
+            co_await cli.async_get("/");
+            cli.close();
+            auto cli_resp = co_await cli.async_get("/");
+            if (!cli_resp)
+            {
+                spdlog::error(cli_resp.error().message());
+            }
+
+
             resp.set_string_content("hello"sv, "text/html");
             co_return;
         },
