@@ -68,6 +68,9 @@ public:
     }
 
 public:
+    std::string_view host() const { return host_; }
+    uint16_t port() const { return port_; }
+
     ClientHandle acquire()
     {
         std::lock_guard<std::mutex> lock(mutex_);
