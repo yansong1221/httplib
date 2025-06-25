@@ -51,7 +51,7 @@ public:
     client_pool(const net::any_io_executor& ex,
                 std::string_view host,
                 uint16_t port,
-                size_t max_size)
+                size_t max_size = 10)
         : ex_(ex)
         , host_(host)
         , port_(port)
