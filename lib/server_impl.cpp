@@ -46,11 +46,6 @@ void server_impl::stop()
 {
     boost::system::error_code ec;
     acceptor_.close(ec);
-    {
-        std::unique_lock<std::mutex> lck(session_mtx_);
-        for (const auto& v : session_map_)
-            v->abort();
-    }
 }
 
 httplib::router& server_impl::router()
@@ -70,6 +65,11 @@ httplib::net::awaitable<boost::system::error_code> server_impl::co_run()
         }
         net::co_spawn(ex_, handle_accept(std::move(sock)), net::detached);
     }
+
+    std::unique_lock<std::mutex> lck(session_mtx_);
+    for (const auto& v : session_map_)
+        v->abort();
+
     co_return ec;
 }
 
