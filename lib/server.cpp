@@ -5,8 +5,13 @@
 
 namespace httplib {
 
-server::server(uint32_t num_threads)
-    : impl_(new server_impl(num_threads))
+server::server(net::io_context& ioc)
+    : impl_(new server_impl(ioc.get_executor()))
+{
+}
+
+server::server(const net::any_io_executor& ex)
+    : impl_(new server_impl(ex))
 {
 }
 
@@ -34,20 +39,14 @@ server& server::listen(uint16_t port, int backlog /*= net::socket_base::max_list
     return listen("0.0.0.0", port, backlog);
 }
 
-void server::run()
+net::awaitable<boost::system::error_code> server::co_run()
 {
-    impl_->async_run();
-    impl_->wait();
+    co_return co_await impl_->co_run();
 }
 
 void server::async_run()
 {
     impl_->async_run();
-}
-
-void server::wait()
-{
-    impl_->wait();
 }
 
 void server::stop()

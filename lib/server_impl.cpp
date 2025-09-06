@@ -5,9 +5,9 @@
 
 namespace httplib {
 
-server_impl::server_impl(uint32_t num_threads)
-    : pool_(num_threads)
-    , acceptor_(pool_)
+server_impl::server_impl(const net::any_io_executor& ex)
+    : ex_(ex)
+    , acceptor_(ex)
 {
     auto console_sink                 = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
     spdlog::sinks_init_list sink_list = {console_sink};
@@ -19,7 +19,7 @@ void server_impl::listen(std::string_view host,
                          uint16_t port,
                          int backlog /*= net::socket_base::max_listen_connections*/)
 {
-    tcp::resolver resolver(pool_);
+    tcp::resolver resolver(ex_);
     auto results = resolver.resolve(host, std::to_string(port));
 
     tcp::endpoint endp(*results.begin());
@@ -31,18 +31,12 @@ void server_impl::listen(std::string_view host,
 
 httplib::net::any_io_executor server_impl::get_executor() noexcept
 {
-    return pool_.get_executor();
+    return ex_;
 }
 
 void server_impl::async_run()
 {
-    net::co_spawn(pool_, accept_loop(), net::detached);
-}
-
-void server_impl::wait()
-{
-    pool_.wait();
-    session_map_.clear();
+    net::co_spawn(ex_, co_run(), net::detached);
 }
 
 void server_impl::stop()
@@ -54,7 +48,6 @@ void server_impl::stop()
         for (const auto& v : session_map_)
             v->abort();
     }
-    pool_.stop();
 }
 
 httplib::router& server_impl::router()
@@ -62,18 +55,19 @@ httplib::router& server_impl::router()
     return router_;
 }
 
-httplib::net::awaitable<void> server_impl::accept_loop()
+httplib::net::awaitable<boost::system::error_code> server_impl::co_run()
 {
     boost::system::error_code ec;
     for (;;) {
-        tcp::socket sock(pool_);
+        tcp::socket sock(ex_);
         co_await acceptor_.async_accept(sock, net_awaitable[ec]);
         if (ec) {
             get_logger()->trace("async_accept: {}", ec.message());
-            co_return;
+            break;
         }
-        net::co_spawn(pool_, handle_accept(std::move(sock)), net::detached);
+        net::co_spawn(ex_, handle_accept(std::move(sock)), net::detached);
     }
+    co_return ec;
 }
 
 httplib::net::awaitable<void> server_impl::handle_accept(tcp::socket&& sock)

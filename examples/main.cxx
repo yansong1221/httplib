@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <format>
 #include <iostream>
+#include <boost/asio/thread_pool.hpp>
 // 日志切面
 struct log_t
 {
@@ -28,7 +29,8 @@ private:
 int main()
 { // HTTP
     using namespace std::string_view_literals;
-    httplib::server svr;
+    boost::asio::thread_pool pool;
+    httplib::server svr(pool.get_executor());
 
     auto& router = svr.router();
 
@@ -139,5 +141,5 @@ int main()
 
     router.set_mount_point("/files", R"(D:/)", header);
 
-    svr.run();
+    pool.wait();
 }

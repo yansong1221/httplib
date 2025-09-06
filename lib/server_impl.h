@@ -18,7 +18,7 @@ namespace httplib {
 class server_impl
 {
 public:
-    explicit server_impl(uint32_t num_threads);
+    explicit server_impl(const net::any_io_executor& ex);
     ~server_impl() = default;
 
 public:
@@ -29,7 +29,7 @@ public:
                 int backlog = net::socket_base::max_listen_connections);
 
     void async_run();
-    void wait();
+    net::awaitable<boost::system::error_code> co_run();
 
     void stop();
     httplib::router& router();
@@ -50,11 +50,10 @@ public:
     void set_websocket_message_handler(websocket_conn::message_handler_type&& handle);
 
 private:
-    net::awaitable<void> accept_loop();
     net::awaitable<void> handle_accept(tcp::socket&& sock);
 
 private:
-    net::thread_pool pool_;
+    net::any_io_executor ex_;
 
     httplib::router router_;
     tcp::acceptor acceptor_;
