@@ -93,15 +93,6 @@ public:
     bool is_open() const { return lowest_layer().is_open(); }
 
     void close(boost::system::error_code& ec) { lowest_layer().close(ec); }
-    bool is_connected()
-    {
-        if (!lowest_layer().is_open())
-            return false;
-
-        boost::system::error_code ec;
-        static_cast<tcp::socket&>(lowest_layer()).receive(net::mutable_buffer(), 0, ec);
-        return !ec;
-    }
 };
 
 } // namespace httplib

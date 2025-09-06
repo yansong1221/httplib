@@ -26,7 +26,10 @@ void server_impl::listen(std::string_view host,
     acceptor_.open(endp.protocol());
     acceptor_.bind(endp);
     acceptor_.listen(backlog);
-    get_logger()->info("Server Listen on: [{}:{}]", endp.address().to_string(), endp.port());
+
+    auto listen_endp = acceptor_.local_endpoint();
+    get_logger()->info(
+        "Server Listen on: [{}:{}]", listen_endp.address().to_string(), listen_endp.port());
 }
 
 httplib::net::any_io_executor server_impl::get_executor() noexcept
