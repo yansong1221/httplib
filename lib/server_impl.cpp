@@ -73,7 +73,7 @@ httplib::net::awaitable<boost::system::error_code> server_impl::co_run()
     co_return ec;
 }
 
-httplib::net::awaitable<void> server_impl::handle_accept(tcp::socket&& sock)
+httplib::net::awaitable<void> server_impl::handle_accept(tcp::socket sock)
 {
     auto remote_endp = sock.remote_endpoint();
     auto local_endp  = sock.local_endpoint();

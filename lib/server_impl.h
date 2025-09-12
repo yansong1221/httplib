@@ -50,7 +50,7 @@ public:
     void set_websocket_message_handler(websocket_conn::message_handler_type&& handle);
 
 private:
-    net::awaitable<void> handle_accept(tcp::socket&& sock);
+    net::awaitable<void> handle_accept(tcp::socket sock);
 
 private:
     net::any_io_executor ex_;
