@@ -29,7 +29,7 @@ void server_impl::listen(std::string_view host,
 
     auto listen_endp = local_endpoint();
     get_logger()->info(
-        "Server Listen on: [{}:{}]", listen_endp.address().to_string(), listen_endp.port());
+        "Http Server Listen on: [{}:{}]", listen_endp.address().to_string(), listen_endp.port());
 }
 
 httplib::net::any_io_executor server_impl::get_executor() noexcept
