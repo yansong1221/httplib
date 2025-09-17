@@ -27,7 +27,7 @@ void server_impl::listen(std::string_view host,
     acceptor_.bind(endp);
     acceptor_.listen(backlog);
 
-    auto listen_endp = acceptor_.local_endpoint();
+    auto listen_endp = local_endpoint();
     get_logger()->info(
         "Server Listen on: [{}:{}]", listen_endp.address().to_string(), listen_endp.port());
 }
@@ -120,6 +120,12 @@ const std::chrono::steady_clock::duration& server_impl::read_timeout() const
 const std::chrono::steady_clock::duration& server_impl::write_timeout() const
 {
     return write_timeout_;
+}
+
+tcp::endpoint server_impl::local_endpoint() const
+{
+    boost::system::error_code ec;
+    return acceptor_.local_endpoint(ec);
 }
 
 std::shared_ptr<spdlog::logger> server_impl::get_logger() const

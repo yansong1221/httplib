@@ -2,8 +2,8 @@
 #include "config.hpp"
 #include "websocket_conn.hpp"
 #include <boost/asio/any_io_executor.hpp>
-#include <boost/asio/socket_base.hpp>
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/socket_base.hpp>
 #include <filesystem>
 
 namespace httplib {
@@ -35,6 +35,8 @@ public:
     void stop();
 
     httplib::router& router();
+
+    tcp::endpoint local_endpoint() const;
 
     void set_read_timeout(const std::chrono::steady_clock::duration& dur);
     void set_write_timeout(const std::chrono::steady_clock::duration& dur);

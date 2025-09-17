@@ -40,6 +40,8 @@ public:
     const std::chrono::steady_clock::duration& read_timeout() const;
     const std::chrono::steady_clock::duration& write_timeout() const;
 
+    tcp::endpoint local_endpoint() const;
+
     std::shared_ptr<spdlog::logger> get_logger() const;
     void set_logger(std::shared_ptr<spdlog::logger> logger);
 
