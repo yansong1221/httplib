@@ -58,6 +58,11 @@ httplib::router& server::router()
     return impl_->router();
 }
 
+tcp::endpoint server::local_endpoint() const
+{
+    return impl_->local_endpoint();
+}
+
 void server::set_read_timeout(const std::chrono::steady_clock::duration& dur)
 {
     impl_->set_read_timeout(dur);
