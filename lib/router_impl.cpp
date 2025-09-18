@@ -136,6 +136,9 @@ httplib::net::awaitable<bool> router_impl::handle_file_request(request& req, res
         if (!target.starts_with(entry.mount_point))
             continue;
         target.remove_prefix(entry.mount_point.size());
+        if (target.starts_with("/"))
+            target.remove_prefix(1);
+
         if (!detail::is_valid_path(target))
             continue;
 
