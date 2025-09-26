@@ -245,11 +245,23 @@ std::string format_http_gmt_date(const std::time_t& time)
 
     detail::_gmtime(&tm, &time);
 
-    // Format the date in HTTP format
-    std::ostringstream oss;
-    oss << std::put_time(&tm, "%a, %d %b %Y %H:%M:%S GMT");
+    static const std::array<const char*, 7> WEEKDAY = {
+        "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    static const std::array<const char*, 12> MONTH = {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
 
-    return oss.str();
+    char buf[64];
+    std::snprintf(buf,
+                  sizeof(buf),
+                  "%s, %02d %s %04d %02d:%02d:%02d GMT",
+                  WEEKDAY[tm.tm_wday],
+                  tm.tm_mday,
+                  MONTH[tm.tm_mon],
+                  tm.tm_year + 1900,
+                  tm.tm_hour,
+                  tm.tm_min,
+                  tm.tm_sec);
+    return buf;
 }
 std::time_t parse_http_gmt_date(const std::string& http_date)
 {

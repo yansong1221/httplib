@@ -24,4 +24,8 @@ net::ip::address request::get_client_ip() const
     return address;
 }
 
+void request::set_custom_data(std::any&& data)
+{
+    custom_data_ = std::move(data);
+}
 } // namespace httplib
