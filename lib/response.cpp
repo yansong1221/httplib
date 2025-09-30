@@ -105,8 +105,8 @@ void response::set_file_content(const fs::path& path, const http::fields& req_he
     if (file.ranges.empty()) {
         set(http::field::accept_ranges, "bytes");
         set(http::field::content_type, file.content_type);
-        set(http::field::content_disposition,
-            fmt::format("attachment;filename={}", (const char*)path.filename().u8string().c_str()));
+        //set(http::field::content_disposition,
+        //    fmt::format("attachment;filename={}", (const char*)path.filename().u8string().c_str()));
         result(http::status::ok);
         content_length(file_size);
     }

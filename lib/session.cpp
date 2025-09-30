@@ -280,7 +280,7 @@ public:
 
                 auto span_time = std::chrono::steady_clock::now() - start_time;
 
-                serv_.get_logger()->info(
+                serv_.get_logger()->debug(
                     "{} {} ({}:{} -> {}:{}) {} {}ms",
                     req.method_string(),
                     req.target(),
