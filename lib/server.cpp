@@ -5,6 +5,22 @@
 
 namespace httplib {
 
+static std::string read_file_fast(const fs::path& path)
+{
+    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    if (!file)
+        throw std::runtime_error("Cannot open file: " + path.string());
+
+    std::streamsize size = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    std::string buffer(size, 0);
+    if (!file.read(buffer.data(), size))
+        throw std::runtime_error("Failed to read file: " + path.string());
+
+    return buffer;
+}
+
 server::server(net::io_context& ioc)
     : impl_(new server_impl(ioc.get_executor()))
 {
@@ -91,11 +107,18 @@ void server::set_logger(std::shared_ptr<spdlog::logger> logger)
     impl_->set_logger(logger);
 }
 
-void server::use_ssl(const fs::path& cert_file,
-                     const fs::path& key_file,
+void server::use_ssl(const std::span<const char>& cert_file,
+                     const std::span<const char>& key_file,
                      std::string passwd /*= {}*/)
 {
     impl_->use_ssl(cert_file, key_file, passwd);
+}
+
+void server::use_ssl_file(const fs::path& cert_file,
+                          const fs::path& key_file,
+                          std::string passwd /*= {}*/)
+{
+    use_ssl(read_file_fast(cert_file), read_file_fast(key_file), passwd);
 }
 
 void server::set_websocket_open_handler(websocket_conn::open_handler_type&& handle)

@@ -140,15 +140,18 @@ void server_impl::set_logger(std::shared_ptr<spdlog::logger> logger)
     custom_logger_ = logger;
 }
 
-void server_impl::use_ssl(const fs::path& cert_file,
-                          const fs::path& key_file,
+void server_impl::use_ssl(const net::const_buffer& cert_file,
+                          const net::const_buffer& key_file,
                           std::string passwd /*= {}*/)
 {
     SSLConfig conf;
-    conf.cert_file = cert_file;
-    conf.key_file  = key_file;
-    conf.passwd    = passwd;
-    ssl_conf_      = conf;
+    conf.cert_file.assign(static_cast<const uint8_t*>(cert_file.data()),
+                          static_cast<const uint8_t*>(cert_file.data()) + cert_file.size());
+    conf.key_file.assign(static_cast<const uint8_t*>(key_file.data()),
+                         static_cast<const uint8_t*>(key_file.data()) + key_file.size());
+    conf.passwd = passwd;
+
+    ssl_conf_ = conf;
 }
 
 void server_impl::set_websocket_open_handler(websocket_conn::open_handler_type&& handle)

@@ -33,8 +33,9 @@ httplib::response make_respone(const http::request<Body>& req)
     return resp;
 }
 #ifdef HTTPLIB_ENABLED_SSL
-static std::shared_ptr<ssl::context> create_ssl_context(const fs::path& cert_file,
-                                                        const fs::path& key_file,
+
+static std::shared_ptr<ssl::context> create_ssl_context(const net::const_buffer& cert_file,
+                                                        const net::const_buffer& key_file,
                                                         std::string passwd,
                                                         boost::system::error_code& ec)
 {
@@ -47,15 +48,21 @@ static std::shared_ptr<ssl::context> create_ssl_context(const fs::path& cert_fil
         return nullptr;
 
     if (!passwd.empty()) {
-        ssl_ctx->set_password_callback([pass = passwd](auto, auto) { return pass; }, ec);
+        ssl_ctx->set_password_callback(
+            [pass = std::move(passwd)](auto, auto) {
+                if (pass.empty())
+                    throw std::runtime_error("ssl password is empty!");
+                return pass;
+            },
+            ec);
         if (ec)
             return nullptr;
     }
-    ssl_ctx->use_certificate_chain_file(cert_file.string(), ec);
+    ssl_ctx->use_certificate(cert_file, ssl::context_base::pem, ec);
     if (ec)
         return nullptr;
 
-    ssl_ctx->use_private_key_file(key_file.string(), ssl::context::pem, ec);
+    ssl_ctx->use_rsa_private_key(key_file, ssl::context::pem, ec);
     if (ec)
         return nullptr;
 
@@ -342,8 +349,8 @@ private:
     tcp::endpoint local_endpoint_;
     tcp::endpoint remote_endpoint_;
 };
-
-
+#include <openssl/err.h>
+#include <openssl/ssl.h>
 #ifdef HTTPLIB_ENABLED_SSL
 class session::ssl_handshake_task : public session::task
 {
@@ -407,8 +414,8 @@ public:
                 co_return nullptr;
             }
             if (is_ssl) {
-                auto ssl_ctx = detail::create_ssl_context(sevr_.ssl_conf_->cert_file,
-                                                          sevr_.ssl_conf_->key_file,
+                auto ssl_ctx = detail::create_ssl_context(net::buffer(sevr_.ssl_conf_->cert_file),
+                                                          net::buffer(sevr_.ssl_conf_->key_file),
                                                           sevr_.ssl_conf_->passwd,
                                                           ec);
                 if (!ssl_ctx) {
