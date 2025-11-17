@@ -233,7 +233,22 @@ std::time_t file_last_write_time(const fs::path& path, std::error_code& ec)
 
 std::string format_http_current_gmt_date()
 {
-    return format_http_gmt_date(time(nullptr));
+    static std::atomic<std::time_t> last_time {0};
+    static std::string last_time_format;
+    static std::mutex mtx;
+
+    auto now = time(nullptr);
+
+    if (last_time != now) {
+        std::lock_guard<std::mutex> lock(mtx);
+        // double check
+        if (last_time != now) {
+            last_time_format = format_http_gmt_date(now);
+            last_time = now;
+        }
+    }
+
+    return last_time_format;
 }
 
 std::string format_http_gmt_date(const std::time_t& time)
@@ -250,7 +265,7 @@ std::string format_http_gmt_date(const std::time_t& time)
     static const std::array<const char*, 12> MONTH = {
         "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
 
-    char buf[64];
+    char buf[64] = {0};
     std::snprintf(buf,
                   sizeof(buf),
                   "%s, %02d %s %04d %02d:%02d:%02d GMT",

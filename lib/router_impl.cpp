@@ -73,8 +73,7 @@ net::awaitable<void> httplib::router_impl::proc_routing(request& req, response& 
         auto iter = coro_handles_.find(req.path);
         if (iter != coro_handles_.end()) {
             const auto& map = iter->second;
-            auto iter       = map.find(req.method());
-            if (iter != map.end()) {
+            if (auto iter = map.find(req.method()); iter != map.end()) {
                 co_await iter->second(req, resp);
                 co_return;
             }
@@ -84,10 +83,7 @@ net::awaitable<void> httplib::router_impl::proc_routing(request& req, response& 
             }
         }
     }
-    if (default_handler_) {
-        co_await default_handler_(req, resp);
-        co_return;
-    }
+
     auto key             = detail::make_whole_str(req);
     std::string url_path = detail::make_whole_str(req.method(), req.target());
 
@@ -97,22 +93,19 @@ net::awaitable<void> httplib::router_impl::proc_routing(request& req, response& 
         coro_router_tree_->get_coro(url_path, req.method());
 
     if (is_coro_exist) {
-        if (coro_handler) {
+        if (coro_handler)
             co_await coro_handler(req, resp);
-        }
-        else {
+        else
             resp.set_error_content(http::status::not_found);
-        }
         co_return;
     }
     bool is_matched_regex_router = false;
     // coro regex router
-    for (auto& pair : coro_regex_handles_) {
+    for (const auto& pair : coro_regex_handles_) {
         std::string coro_regex_key {key};
 
         if (std::regex_match(coro_regex_key, req.matches, std::get<0>(pair))) {
-            auto coro_handler = std::get<1>(pair);
-            if (coro_handler) {
+            if (auto coro_handler = std::get<1>(pair); coro_handler) {
                 co_await coro_handler(req, resp);
                 is_matched_regex_router = true;
             }
@@ -121,7 +114,10 @@ net::awaitable<void> httplib::router_impl::proc_routing(request& req, response& 
 
     // not found
     if (!is_matched_regex_router) {
-        resp.set_error_content(http::status::not_found);
+        if (default_handler_)
+            co_await default_handler_(req, resp);
+        else
+            resp.set_error_content(http::status::not_found);
     }
     co_return;
 }

@@ -106,13 +106,13 @@ public:
     explicit websocket_task(websocket_variant_stream_type&& stream,
                             request&& req,
                             server_impl& serv)
-        : req_(std::move(req))
     {
-        auto conn = std::make_shared<httplib::websocket_conn_impl>(serv, std::move(stream));
+        auto conn =
+            std::make_shared<httplib::websocket_conn_impl>(serv, std::move(stream), std::move(req));
     }
     net::awaitable<std::unique_ptr<task>> then() override
     {
-        co_await conn_->run(req_);
+        co_await conn_->run();
         co_return nullptr;
     }
 
@@ -120,7 +120,6 @@ public:
 
 private:
     std::shared_ptr<httplib::websocket_conn_impl> conn_;
-    request req_;
 };
 
 class session::http_proxy_task : public session::task
