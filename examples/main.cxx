@@ -28,7 +28,7 @@ int main()
 
     auto& router = svr.router();
 
-    svr.get_logger()->set_level(spdlog::level::trace);
+    svr.get_logger()->set_level(spdlog::level::info);
     // svr.use_ssl(R"(D:\code\httplib\lib\server.crt)", R"(D:\code\httplib\lib\server.key)",
     // "test");
 
@@ -48,13 +48,16 @@ int main()
         [](httplib::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> { co_return; },
         [](httplib::websocket_conn::weak_ptr conn,
            std::string_view msg,
-           httplib::websocket_conn::data_type type) {
+           httplib::websocket_conn::data_type type) -> boost::asio::awaitable<void> {
             spdlog::info("msg hello: {}", msg);
             auto hdl = conn.lock();
             hdl->send_message(msg);
             hdl->close();
+            co_return;
         },
-        [](httplib::websocket_conn::weak_ptr conn) { spdlog::info("111111111");
+        [](httplib::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> {
+            spdlog::info("111111111");
+            co_return;
         });
 
     router.set_http_handler<httplib::http::verb::post, httplib::http::verb::get>(

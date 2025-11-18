@@ -8,6 +8,7 @@ namespace httplib {
 server_impl::server_impl(const net::any_io_executor& ex)
     : ex_(ex)
     , acceptor_(ex)
+    , session_strand_(ex)
 {
     auto console_sink                 = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
     spdlog::sinks_init_list sink_list = {console_sink};
@@ -67,7 +68,7 @@ httplib::net::awaitable<boost::system::error_code> server_impl::co_run()
         net::co_spawn(ex_, handle_accept(std::move(sock)), net::detached);
     }
 
-    std::unique_lock<std::mutex> lck(session_mtx_);
+    co_await net::post(session_strand_);
     for (const auto& v : session_map_)
         v->abort();
 
@@ -83,7 +84,7 @@ httplib::net::awaitable<void> server_impl::handle_accept(tcp::socket sock)
 
     auto session = std::make_shared<httplib::session>(std::move(sock), *this);
     {
-        std::unique_lock<std::mutex> lck(session_mtx_);
+        co_await net::post(session_strand_);
         session_map_.insert(session);
     }
     try {
@@ -96,7 +97,7 @@ httplib::net::awaitable<void> server_impl::handle_accept(tcp::socket sock)
         get_logger()->error("session::run() unknown exception");
     }
     {
-        std::unique_lock<std::mutex> lck(session_mtx_);
+        co_await net::post(session_strand_);
         session_map_.erase(session);
     }
     get_logger()->trace(

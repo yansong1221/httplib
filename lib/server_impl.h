@@ -4,6 +4,7 @@
 #include "httplib/router.hpp"
 #include "session.hpp"
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/strand.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/thread_pool.hpp>
 #include <functional>
@@ -58,7 +59,7 @@ private:
     httplib::router router_;
     tcp::acceptor acceptor_;
 
-    std::mutex session_mtx_;
+    net::strand<net::any_io_executor> session_strand_;
     std::unordered_set<std::shared_ptr<session>> session_map_;
 
     std::chrono::steady_clock::duration read_timeout_  = std::chrono::seconds(30);
