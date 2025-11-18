@@ -39,7 +39,8 @@ httplib::net::any_io_executor server_impl::get_executor() noexcept
 
 void server_impl::async_run()
 {
-    net::co_spawn(ex_, co_run(), net::detached);
+    for (int i = 0; i < 32; ++i)
+        net::co_spawn(ex_, co_run(), net::detached);
 }
 
 void server_impl::stop()

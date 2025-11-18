@@ -53,6 +53,6 @@ public:
     void use_ssl_file(const fs::path& cert_file, const fs::path& key_file, std::string passwd = {});
 
 private:
-    server_impl* impl_;
+    std::unique_ptr<server_impl> impl_;
 };
 } // namespace httplib

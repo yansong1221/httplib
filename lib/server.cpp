@@ -33,7 +33,6 @@ server::server(const net::any_io_executor& ex)
 
 server::~server()
 {
-    delete impl_;
 }
 
 net::any_io_executor server::get_executor() noexcept
