@@ -217,6 +217,15 @@ bool router_impl::remove_mount_point(const std::string& mount_point)
     return false;
 }
 
+std::optional<httplib::router::ws_handler_entry>
+router_impl::find_ws_handler(std::string_view key) const
+{
+    auto iter = ws_coro_handlers_.find(std::string(key));
+    if (iter == ws_coro_handlers_.end())
+        return std::nullopt;
+    return iter->second;
+}
+
 void router_impl::set_http_handler_impl(http::verb method,
                                         std::string_view key,
                                         coro_http_handler_type&& handler)
@@ -253,6 +262,18 @@ void router_impl::set_default_handler_impl(coro_http_handler_type&& handler)
 void router_impl::set_file_request_handler_impl(coro_http_handler_type&& handler)
 {
     file_request_handler_ = std::move(handler);
+}
+
+void router_impl::set_ws_handler_impl(std::string_view key,
+                                      websocket_conn::coro_open_handler_type&& open_handler,
+                                      websocket_conn::coro_message_handler_type&& message_handler,
+                                      websocket_conn::coro_close_handler_type&& close_handler)
+{
+    router::ws_handler_entry entry;
+    entry.open_handler                  = std::move(open_handler);
+    entry.message_handler               = std::move(message_handler);
+    entry.close_handler                 = std::move(close_handler);
+    ws_coro_handlers_[std::string(key)] = entry;
 }
 
 } // namespace httplib

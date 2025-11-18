@@ -6,126 +6,31 @@
 #include "server_impl.h"
 #include "stream/websocket_stream.hpp"
 #include <boost/asio/awaitable.hpp>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/detached.hpp>
 #include <boost/asio/strand.hpp>
 #include <memory>
 #include <queue>
 #include <span>
-#include <spdlog/spdlog.h>
+
 
 namespace httplib {
 
 class websocket_conn_impl : public websocket_conn
 {
 public:
-    websocket_conn_impl(server_impl& serv, websocket_variant_stream_type&& stream, request&& req)
-        : serv_(serv)
-        , req_(std::move(req))
-        , strand_(stream.get_executor())
-        , ws_(std::move(stream))
-    {
-    }
-    void send_message(std::string&& msg, data_type type) override
-    {
-        if (!ws_.is_open())
-            return;
+    websocket_conn_impl(server_impl& serv, websocket_variant_stream_type&& stream, request&& req);
 
-        net::post(strand_, [this, msg = std::move(msg), type, self = shared_from_this()]() mutable {
-            bool send_in_process = !send_que_.empty();
-            send_que_.push(std::make_pair(std::move(msg), type));
-            if (send_in_process)
-                return;
-            net::co_spawn(strand_, process_write_data(), net::detached);
-        });
-    }
-    void close() override
-    {
-        if (!ws_.is_open())
-            return;
-
-        net::co_spawn(
-            strand_,
-            [this, self = shared_from_this()]() -> net::awaitable<void> {
-                boost::system::error_code ec;
-                co_await net::post(strand_, net_awaitable[ec]);
-                if (ec)
-                    co_return;
-
-                websocket::close_reason reason("normal");
-                co_await ws_.async_close(reason, net_awaitable[ec]);
-            },
-            net::detached);
-    }
+public:
+    void send_message(std::string&& msg, data_type type) override;
+    void close() override;
     const request& http_request() const override { return req_; }
 
 public:
-    net::awaitable<void> process_write_data()
-    {
-        auto self = shared_from_this();
-
-        for (;;) {
-            boost::system::error_code ec;
-            co_await net::post(strand_, net_awaitable[ec]);
-            if (ec)
-                co_return;
-            if (send_que_.empty())
-                co_return;
-
-            auto msg = std::move(send_que_.front());
-            send_que_.pop();
-            if (msg.second == websocket_conn::data_type::text)
-                ws_.text(true);
-            else
-                ws_.binary(true);
-            co_await ws_.async_write(net::buffer(msg.first), net_awaitable[ec]);
-            if (ec)
-                co_return;
-        }
-    }
-    net::awaitable<void> run()
-    {
-        boost::system::error_code ec;
-        auto remote_endp = ws_.remote_endpoint(ec);
-        co_await ws_.async_accept(req_, net_awaitable[ec]);
-        if (ec) {
-            serv_.get_logger()->error("websocket handshake failed: {}", ec.message());
-            co_return;
-        }
-
-        if (serv_.websocket_open_handler_)
-            co_await serv_.websocket_open_handler_(weak_from_this());
-
-        serv_.get_logger()->debug("websocket new connection: [{}:{}]",
-                                  remote_endp.address().to_string(),
-                                  remote_endp.port());
-
-        beast::flat_buffer buffer;
-        for (;;) {
-            auto bytes = co_await ws_.async_read(buffer, net_awaitable[ec]);
-            if (ec) {
-                serv_.get_logger()->debug("websocket disconnect: [{}:{}] what: {}",
-                                          remote_endp.address().to_string(),
-                                          remote_endp.port(),
-                                          ec.message());
-                if (serv_.websocket_close_handler_)
-                    co_await serv_.websocket_close_handler_(weak_from_this());
-                co_return;
-            }
-
-            if (serv_.websocket_message_handler_) {
-                co_await serv_.websocket_message_handler_(
-                    weak_from_this(),
-                    util::buffer_to_string_view(buffer.data()),
-                    ws_.got_text() ? websocket_conn::data_type::text
-                                   : websocket_conn::data_type::binary);
-            }
-            buffer.consume(bytes);
-        }
-    }
+    net::awaitable<void> process_write_data();
+    net::awaitable<void> run();
 
 private:
     server_impl& serv_;
+
     request req_;
     net::strand<net::any_io_executor> strand_;
     websocket_variant_stream_type ws_;

@@ -28,12 +28,19 @@ public:
                          const http::fields& headers = {});
     bool remove_mount_point(const std::string& mount_point);
 
+    std::optional<router::ws_handler_entry> find_ws_handler(std::string_view key) const;
+
 public:
     void set_http_handler_impl(http::verb method,
                                std::string_view key,
                                coro_http_handler_type&& handler);
     void set_default_handler_impl(coro_http_handler_type&& handler);
     void set_file_request_handler_impl(coro_http_handler_type&& handler);
+
+    void set_ws_handler_impl(std::string_view key,
+                             websocket_conn::coro_open_handler_type&& open_handler,
+                             websocket_conn::coro_message_handler_type&& message_handler,
+                             websocket_conn::coro_close_handler_type&& close_handler);
 
 private:
     using verb_handler_map = std::unordered_map<http::verb, coro_http_handler_type>;
@@ -52,6 +59,7 @@ private:
         http::fields headers;
     };
     std::vector<mount_point_entry> static_file_entry_;
+    std::unordered_map<std::string, router::ws_handler_entry> ws_coro_handlers_;
 
     std::vector<std::string> default_doc_name_ = {"index.html", "index.htm"};
 };

@@ -49,10 +49,6 @@ public:
                  const net::const_buffer& key_file,
                  std::string passwd = {});
 
-    void set_websocket_open_handler(websocket_conn::open_handler_type&& handle);
-    void set_websocket_close_handler(websocket_conn::close_handler_type&& handle);
-    void set_websocket_message_handler(websocket_conn::message_handler_type&& handle);
-
 private:
     net::awaitable<void> handle_accept(tcp::socket sock);
 
@@ -70,10 +66,6 @@ private:
 
     std::shared_ptr<spdlog::logger> default_logger_;
     std::shared_ptr<spdlog::logger> custom_logger_;
-
-    websocket_conn::message_handler_type websocket_message_handler_;
-    websocket_conn::open_handler_type websocket_open_handler_;
-    websocket_conn::close_handler_type websocket_close_handler_;
 
     struct SSLConfig
     {

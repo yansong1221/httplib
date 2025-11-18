@@ -1,5 +1,6 @@
 #pragma once
 #include "httplib/http_handler.hpp"
+#include "httplib/websocket_conn.hpp"
 #include <algorithm>
 #include <boost/asio/detached.hpp>
 #include <boost/beast/http/fields.hpp>
@@ -46,9 +47,23 @@ public:
 
     bool remove_mount_point(const std::string& mount_point);
 
+    template<typename OpenFunc, typename MessageFunc, typename CloseFunc>
+    void set_ws_handler(std::string_view key,
+                        OpenFunc&& open_handler,
+                        MessageFunc&& message_handler,
+                        CloseFunc&& close_handler);
+
     bool has_handler(http::verb method, std::string_view target) const;
 
     net::awaitable<void> routing(request& req, response& resp);
+
+    struct ws_handler_entry
+    {
+        websocket_conn::coro_open_handler_type open_handler;
+        websocket_conn::coro_close_handler_type close_handler;
+        websocket_conn::coro_message_handler_type message_handler;
+    };
+    std::optional<ws_handler_entry> find_ws_handler(std::string_view key) const;
 
 private:
     void set_http_handler_impl(http::verb method,
@@ -56,9 +71,13 @@ private:
                                coro_http_handler_type&& handler);
     void set_default_handler_impl(coro_http_handler_type&& handler);
     void set_file_request_handler_impl(coro_http_handler_type&& handler);
+    void set_ws_handler_impl(std::string_view key,
+                             websocket_conn::coro_open_handler_type&& open_handler,
+                             websocket_conn::coro_message_handler_type&& message_handler,
+                             websocket_conn::coro_close_handler_type&& close_handler);
 
 private:
-    router_impl* impl_;
+    std::unique_ptr<router_impl> impl_;
 };
 
 } // namespace httplib

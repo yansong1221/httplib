@@ -121,18 +121,4 @@ void server::use_ssl_file(const fs::path& cert_file,
     use_ssl(read_file_fast(cert_file), read_file_fast(key_file), passwd);
 }
 
-void server::set_websocket_open_handler(websocket_conn::open_handler_type&& handle)
-{
-    impl_->set_websocket_open_handler(std::move(handle));
-}
-
-void server::set_websocket_close_handler(websocket_conn::close_handler_type&& handle)
-{
-    impl_->set_websocket_close_handler(std::move(handle));
-}
-
-void server::set_websocket_message_handler(websocket_conn::message_handler_type&& handle)
-{
-    impl_->set_websocket_message_handler(std::move(handle));
-}
 } // namespace httplib

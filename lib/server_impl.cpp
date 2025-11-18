@@ -154,19 +154,4 @@ void server_impl::use_ssl(const net::const_buffer& cert_file,
     ssl_conf_ = conf;
 }
 
-void server_impl::set_websocket_open_handler(websocket_conn::open_handler_type&& handle)
-{
-    websocket_open_handler_ = std::move(handle);
-}
-
-void server_impl::set_websocket_close_handler(websocket_conn::close_handler_type&& handle)
-{
-    websocket_close_handler_ = std::move(handle);
-}
-
-void server_impl::set_websocket_message_handler(websocket_conn::message_handler_type&& handle)
-{
-    websocket_message_handler_ = std::move(handle);
-}
-
 } // namespace httplib

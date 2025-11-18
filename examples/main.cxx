@@ -2,26 +2,20 @@
 #include "httplib/client.hpp"
 #include "httplib/router.hpp"
 #include "httplib/server.hpp"
+#include <boost/asio/thread_pool.hpp>
 #include <filesystem>
 #include <format>
 #include <iostream>
-#include <boost/asio/thread_pool.hpp>
 // 日志切面
 struct log_t
 {
     httplib::net::awaitable<bool> before(httplib::request& req, httplib::response& res)
     {
-        start_ = std::chrono::steady_clock::now();
+        // start_ = std::chrono::steady_clock::now();
         co_return true;
     }
 
-    bool after(httplib::request& req, httplib::response& res)
-    {
-        auto span = std::chrono::steady_clock::now() - start_;
-        std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(span).count()
-                  << std::endl;
-        return true;
-    }
+    bool after(httplib::request& req, httplib::response& res) { return true; }
 
 private:
     std::chrono::steady_clock::time_point start_;
@@ -29,42 +23,43 @@ private:
 int main()
 { // HTTP
     using namespace std::string_view_literals;
-    boost::asio::thread_pool pool;
+    boost::asio::thread_pool pool(std::thread::hardware_concurrency());
     httplib::server svr(pool.get_executor());
 
     auto& router = svr.router();
 
     svr.get_logger()->set_level(spdlog::level::trace);
-    svr.use_ssl(R"(D:\code\httplib\lib\server.crt)", R"(D:\code\httplib\lib\server.key)", "test");
+    // svr.use_ssl(R"(D:\code\httplib\lib\server.crt)", R"(D:\code\httplib\lib\server.key)",
+    // "test");
 
-    svr.listen("127.0.0.1", 8808);
-    svr.set_websocket_open_handler(
-        [](httplib::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> { co_return; });
-    svr.set_websocket_close_handler(
-        [](httplib::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> { co_return; });
-    svr.set_websocket_message_handler(
-        [](httplib::websocket_conn::weak_ptr hdl,
-           httplib::websocket_conn::message msg) -> boost::asio::awaitable<void> {
-            auto conn = hdl.lock();
-            conn->send_message(msg);
-            co_return;
+    svr.listen("0.0.0.0", 18808);
+
+    router.set_ws_handler(
+        "/ws",
+        [](httplib::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> { co_return; },
+        [](httplib::websocket_conn::weak_ptr conn,
+           std::string_view msg,
+           httplib::websocket_conn::data_type type) { spdlog::info("msg: {}", msg); },
+        [](httplib::websocket_conn::weak_ptr conn) {
+
+        });
+    router.set_ws_handler(
+        "/ws/hello",
+        [](httplib::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> { co_return; },
+        [](httplib::websocket_conn::weak_ptr conn,
+           std::string_view msg,
+           httplib::websocket_conn::data_type type) {
+            spdlog::info("msg hello: {}", msg);
+            auto hdl = conn.lock();
+            hdl->send_message(msg);
+            hdl->close();
+        },
+        [](httplib::websocket_conn::weak_ptr conn) { spdlog::info("111111111");
         });
 
     router.set_http_handler<httplib::http::verb::post, httplib::http::verb::get>(
-        "/中文",
+        "/hello",
         [](httplib::request& req, httplib::response& resp) -> httplib::net::awaitable<void> {
-            httplib::client cli(
-                co_await boost::asio::this_coro::executor, "wwww.baidu.com", 443, true);
-
-            co_await cli.async_get("/");
-            cli.close();
-            auto cli_resp = co_await cli.async_get("/");
-            if (!cli_resp)
-            {
-                spdlog::error(cli_resp.error().message());
-            }
-
-
             resp.set_string_content("hello"sv, "text/html");
             co_return;
         },
@@ -152,6 +147,7 @@ int main()
         header);
 
     router.set_mount_point("/files", R"(D:/)", header);
+    svr.async_run();
 
     pool.wait();
 }

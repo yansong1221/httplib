@@ -52,10 +52,6 @@ public:
                  std::string passwd = {});
     void use_ssl_file(const fs::path& cert_file, const fs::path& key_file, std::string passwd = {});
 
-    void set_websocket_open_handler(websocket_conn::open_handler_type&& handle);
-    void set_websocket_close_handler(websocket_conn::close_handler_type&& handle);
-    void set_websocket_message_handler(websocket_conn::message_handler_type&& handle);
-
 private:
     server_impl* impl_;
 };

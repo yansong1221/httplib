@@ -16,6 +16,10 @@
 #include <boost/beast/http/read.hpp>
 #include <boost/beast/http/serializer.hpp>
 #include <boost/beast/websocket/rfc6455.hpp>
+#ifdef HTTPLIB_ENABLED_SSL
+#include <openssl/err.h>
+#include <openssl/ssl.h>
+#endif
 
 namespace httplib {
 
@@ -106,9 +110,9 @@ public:
     explicit websocket_task(websocket_variant_stream_type&& stream,
                             request&& req,
                             server_impl& serv)
+        : conn_(std::make_shared<httplib::websocket_conn_impl>(
+              serv, std::move(stream), std::move(req)))
     {
-        auto conn =
-            std::make_shared<httplib::websocket_conn_impl>(serv, std::move(stream), std::move(req));
     }
     net::awaitable<std::unique_ptr<task>> then() override
     {
@@ -220,19 +224,9 @@ public:
 
             const auto& header = header_parser.get();
 
-            // websocket
-            if (websocket::is_upgrade(header)) {
-#ifdef HTTPLIB_ENABLED_WEBSOCKET
-                auto stream = create_websocket_variant_stream(std::move(stream_));
-                request req(header_parser.release());
-                co_return std::make_unique<websocket_task>(
-                    std::move(stream), std::move(req), serv_);
-#endif // HTTPLIB_ENABLED_WEBSOCKET
-                co_return nullptr;
-            }
             // http proxy
-            else if (header.method() == http::verb::connect) {
-                request req(header_parser.release());
+            if (header.method() == http::verb::connect) {
+                httplib::request req(header_parser.release());
                 co_return std::make_unique<http_proxy_task>(
                     std::move(stream_), std::move(req), serv_);
             }
@@ -262,26 +256,36 @@ public:
                         req = body_parser.release();
                     } break;
                 }
-                // init request
-                req.local_endpoint  = local_endpoint_;
-                req.remote_endpoint = remote_endpoint_;
-
                 auto start_time = std::chrono::steady_clock::now();
-                try {
-                    co_await serv_.router().routing(req, resp);
+
+                // init request
+                if (init_request(req)) {
+                    try {
+                        // websocket
+                        if (websocket::is_upgrade(req)) {
+                            auto stream = create_websocket_variant_stream(std::move(stream_));
+                            co_return std::make_unique<websocket_task>(
+                                std::move(stream), std::move(req), serv_);
+                        }
+                        co_await serv_.router().routing(req, resp);
+                    }
+                    catch (const std::exception& e) {
+                        serv_.get_logger()->warn("exception in business function, reason: {}",
+                                                 e.what());
+                        resp.set_string_content(std::string_view(e.what()),
+                                                "text/html",
+                                                http::status::internal_server_error);
+                    }
+                    catch (...) {
+                        using namespace std::string_view_literals;
+                        serv_.get_logger()->warn("unknown exception in business function");
+                        resp.set_string_content("unknown exception"sv,
+                                                "text/html",
+                                                http::status::internal_server_error);
+                    }
                 }
-                catch (const std::exception& e) {
-                    serv_.get_logger()->warn("exception in business function, reason: {}",
-                                             e.what());
-                    resp.set_string_content(std::string_view(e.what()),
-                                            "text/html",
-                                            http::status::internal_server_error);
-                }
-                catch (...) {
-                    using namespace std::string_view_literals;
-                    serv_.get_logger()->warn("unknown exception in business function");
-                    resp.set_string_content(
-                        "unknown exception"sv, "text/html", http::status::internal_server_error);
+                else {
+                    resp.set_error_content(http::status::bad_request);
                 }
 
                 auto span_time = std::chrono::steady_clock::now() - start_time;
@@ -340,6 +344,26 @@ public:
     }
 
 private:
+    bool init_request(httplib::request& req) const
+    {
+        req.local_endpoint  = local_endpoint_;
+        req.remote_endpoint = remote_endpoint_;
+
+        auto tokens = util::split(req.target(), "?");
+        if (tokens.empty() || tokens.size() > 2)
+            return false;
+
+        req.path = util::url_decode(tokens[0]);
+        if (tokens.size() >= 2) {
+            bool is_valid    = true;
+            req.query_params = html::parse_http_query_params(tokens[1], is_valid);
+            if (!is_valid)
+                return false;
+        }
+        return true;
+    }
+
+private:
     server_impl& serv_;
 
     http_variant_stream_type stream_;
@@ -348,8 +372,7 @@ private:
     tcp::endpoint local_endpoint_;
     tcp::endpoint remote_endpoint_;
 };
-#include <openssl/err.h>
-#include <openssl/ssl.h>
+
 #ifdef HTTPLIB_ENABLED_SSL
 class session::ssl_handshake_task : public session::task
 {
