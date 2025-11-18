@@ -393,7 +393,7 @@ public:
         auto bytes_used = co_await stream_.async_handshake(
             ssl::stream_base::server, buffer_.data(), net_awaitable[ec]);
         if (ec) {
-            serv_.get_logger()->error("ssl handshake failed: {}", ec.message());
+            serv_.get_logger()->trace("ssl handshake failed: {}", ec.message());
             co_return nullptr;
         }
         buffer_.consume(bytes_used);
@@ -432,7 +432,7 @@ public:
             boost::system::error_code ec;
             bool is_ssl = co_await beast::async_detect_ssl(stream_, buffer, net_awaitable[ec]);
             if (ec) {
-                sevr_.get_logger()->error("async_detect_ssl failed: {}", ec.message());
+                sevr_.get_logger()->debug("async_detect_ssl failed: {}", ec.message());
                 co_return nullptr;
             }
             if (is_ssl) {
