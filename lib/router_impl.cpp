@@ -1,5 +1,5 @@
 #include "router_impl.h"
-
+#include <iostream>
 namespace httplib {
 
 namespace detail {
@@ -51,78 +51,253 @@ inline static bool is_valid_path(std::string_view path)
     return true;
 }
 
-static std::string make_whole_str(http::verb method, std::string_view target)
-{
-    return fmt::format("{} {}", std::string_view(http::to_string(method)), target);
-}
-static std::string make_whole_str(const request& req)
-{
-    return make_whole_str(req.base().method(), util::url_decode(req.target()));
-}
-
 } // namespace detail
 
-net::awaitable<void> httplib::router_impl::proc_routing(request& req, response& resp)
+router_impl::router_impl()
 {
+    root_      = std::make_unique<Node>();
+    root_->key = "";
+}
+
+// ---------------- 特殊节点 ----------------
+std::unique_ptr<router_impl::Node> router_impl::make_special_node(std::string_view seg)
+{
+    auto node = std::make_unique<Node>();
+    node->key = seg;
+
+    if (seg == "*") {
+        node->is_wildcard = true;
+        return node;
+    }
+
+    if (!seg.empty() && seg[0] == ':') {
+        node->is_param   = true;
+        node->param_name = seg.substr(1);
+        return node;
+    }
+
+    if (seg.front() == '{' && seg.back() == '}') {
+        node->is_regex          = true;
+        std::string_view inside = seg.substr(1, seg.size() - 2);
+        size_t pos              = inside.find(':');
+        node->param_name        = inside.substr(0, pos);
+        node->regex             = std::regex(std::string(inside.substr(pos + 1)));
+        return node;
+    }
+
+    return node;
+}
+
+void router_impl::set_http_handler_impl(http::verb method,
+                                        std::string_view path,
+                                        coro_http_handler_type&& handler)
+{
+   // std::unique_lock lock(mutex_);
+    auto segments          = util::split(path, "/");
+    auto node              = insert(root_.get(), segments, 0);
+    node->handlers[method] = std::move(handler);
+}
+
+
+httplib::router_impl::Node* router_impl::insert(Node* node,
+                                                const std::vector<std::string_view>& segments,
+                                                size_t index)
+{
+    if (index >= segments.size())
+        return node;
+
+    const auto& seg = segments[index];
+    Node* found     = nullptr;
+
+    for (auto& child : node->children) {
+        if (child->key == seg)
+            found = child.get();
+    }
+
+    if (!found) {
+        auto new_node = make_special_node(seg);
+        found         = new_node.get();
+        node->children.push_back(std::move(new_node));
+    }
+    return insert(found, segments, index + 1);
+}
+
+
+// ---------------- 匹配路由 ----------------
+net::awaitable<void> router_impl::proc_routing(request& req, response& resp) const
+{
+    //std::shared_lock lock(mutex_);
+
     if (req.method() == http::verb::get || req.method() == http::verb::head) {
         if (co_await handle_file_request(req, resp))
             co_return;
     }
 
-    {
-        auto iter = coro_handles_.find(req.path);
-        if (iter != coro_handles_.end()) {
-            const auto& map = iter->second;
-            if (auto iter = map.find(req.method()); iter != map.end()) {
-                co_await iter->second(req, resp);
-                co_return;
-            }
-            else {
-                resp.set_error_content(http::status::method_not_allowed);
-                co_return;
-            }
+    auto segments = util::split(req.path, "/");
+    if (auto node = match_node(root_.get(), segments, 0, req.path_params); node) {
+        auto iter = node->handlers.find(req.method());
+        if (iter == node->handlers.end()) {
+            resp.set_error_content(node->handlers.empty()
+                                       ? httplib::http::status::not_found
+                                       : httplib::http::status::method_not_allowed);
+            co_return;
         }
-    }
-
-    auto key             = detail::make_whole_str(req);
-    std::string url_path = detail::make_whole_str(req.method(), req.target());
-
-    bool is_coro_exist = false;
-    coro_http_handler_type coro_handler;
-    std::tie(is_coro_exist, coro_handler, req.path_params) =
-        coro_router_tree_.get_coro(url_path, req.method());
-
-    if (is_coro_exist) {
-        if (coro_handler)
-            co_await coro_handler(req, resp);
-        else
-            resp.set_error_content(http::status::method_not_allowed);
+        co_await iter->second(req, resp);
         co_return;
     }
-    bool is_matched_regex_router = false;
-    // coro regex router
-    for (const auto& pair : coro_regex_handles_) {
-        std::string coro_regex_key {key};
 
-        if (std::regex_match(coro_regex_key, req.matches, std::get<0>(pair))) {
-            if (auto coro_handler = std::get<1>(pair); coro_handler) {
-                co_await coro_handler(req, resp);
-                is_matched_regex_router = true;
+    if (default_handler_) {
+        co_await default_handler_(req, resp);
+        co_return;
+    }
+
+    resp.set_error_content(httplib::http::status::not_found);
+}
+
+bool router_impl::set_mount_point(const std::string& mount_point,
+                                  const std::filesystem::path& dir,
+                                  const http::fields& headers /*= {}*/)
+{
+    std::error_code ec;
+    if (fs::is_directory(dir, ec)) {
+        std::string mnt = !mount_point.empty() ? mount_point : "/";
+        if (!mnt.empty() && mnt[0] == '/') {
+            static_file_entry_.push_back({mnt, dir, headers});
+            std::sort(static_file_entry_.begin(),
+                      static_file_entry_.end(),
+                      [](const auto& left, const auto& right) {
+                          return left.mount_point.size() > right.mount_point.size();
+                      });
+            return true;
+        }
+    }
+    return false;
+}
+
+bool router_impl::remove_mount_point(const std::string& mount_point)
+{
+    for (auto it = static_file_entry_.begin(); it != static_file_entry_.end(); ++it) {
+        if (it->mount_point == mount_point) {
+            static_file_entry_.erase(it);
+            return true;
+        }
+    }
+    return false;
+}
+
+void router_impl::set_default_handler_impl(coro_http_handler_type&& handler)
+{
+    default_handler_ = std::move(handler);
+}
+
+void router_impl::set_file_request_handler_impl(coro_http_handler_type&& handler)
+{
+    file_request_handler_ = std::move(handler);
+}
+
+void router_impl::set_ws_handler_impl(std::string_view path,
+                                      websocket_conn::coro_open_handler_type&& open_handler,
+                                      websocket_conn::coro_message_handler_type&& message_handler,
+                                      websocket_conn::coro_close_handler_type&& close_handler)
+{
+    //std::unique_lock lock(mutex_);
+    auto segments = util::split(path, "/");
+
+    auto node = insert(root_.get(), segments, 0);
+
+    router::ws_handler_entry entry;
+    entry.open_handler    = std::move(open_handler);
+    entry.message_handler = std::move(message_handler);
+    entry.close_handler   = std::move(close_handler);
+    node->ws_handler      = std::move(entry);
+}
+
+std::optional<httplib::router::ws_handler_entry> router_impl::find_ws_handler(request& req) const
+{
+    //std::shared_lock lock(mutex_);
+    auto segments = util::split(req.path, "/");
+    if (auto node = match_node(root_.get(), segments, 0, req.path_params); node)
+        return node->ws_handler;
+    return std::nullopt;
+}
+
+// ---------------- match_node ----------------
+const router_impl::Node*
+router_impl::match_node(const Node* node,
+                        const std::vector<std::string_view>& segments,
+                        size_t index,
+                        std::unordered_map<std::string, std::string>& path_params) const
+{
+    if (!node)
+        return nullptr;
+
+    if (index == segments.size())
+        return node;
+
+    const auto& seg = segments[index];
+
+    // 1️⃣ 静态匹配
+    for (auto& child : node->children) {
+        if (!child->is_param && !child->is_regex && !child->is_wildcard) {
+            if (child->key == seg) {
+                if (auto node = match_node(child.get(), segments, index + 1, path_params); node)
+                    return node;
             }
         }
     }
 
-    // not found
-    if (!is_matched_regex_router) {
-        if (default_handler_)
-            co_await default_handler_(req, resp);
-        else
-            resp.set_error_content(http::status::not_found);
+    // 2️⃣ 正则匹配
+    for (auto& child : node->children) {
+        if (child->is_regex) {
+            if (std::regex_match(std::string(seg), child->regex)) {
+                path_params[child->param_name] = seg;
+                if (auto node = match_node(child.get(), segments, index + 1, path_params); node)
+                    return node;
+                path_params.erase(child->param_name);
+            }
+        }
     }
-    co_return;
+
+    // 3️⃣ 动态参数匹配
+    for (auto& child : node->children) {
+        if (child->is_param) {
+            path_params[child->param_name] = seg;
+            if (auto node = match_node(child.get(), segments, index + 1, path_params); node)
+                return node;
+            path_params.erase(child->param_name);
+        }
+    }
+
+    // 4️⃣ wildcard 匹配
+    for (auto& child : node->children) {
+        if (child->is_wildcard) {
+            // 贪心 + 回溯匹配
+            for (size_t len = 1; index + len <= segments.size(); ++len) {
+                std::string captured;
+                for (size_t i = 0; i < len; ++i) {
+                    if (!captured.empty())
+                        captured += "/";
+                    captured += segments[index + i];
+                }
+                path_params["*"] = captured;
+                if (auto node = match_node(child.get(), segments, index + len, path_params); node)
+                    return node;
+                path_params.erase("*");
+            }
+            /*std::string rest;
+            for (size_t i = index; i < segments.size(); ++i) {
+                if (!rest.empty())
+                    rest += "/";
+                rest += segments[i];
+            }
+            path_params["*"] = rest;
+            return child.get();*/
+        }
+    }
+    return nullptr;
 }
 
-httplib::net::awaitable<bool> router_impl::handle_file_request(request& req, response& res)
+httplib::net::awaitable<bool> router_impl::handle_file_request(request& req, response& res) const
 {
     beast::error_code ec;
 
@@ -160,7 +335,7 @@ httplib::net::awaitable<bool> router_impl::handle_file_request(request& req, res
                 break;
             }
         }
-        if (path.has_filename()) {
+        if (path.has_filename()) { 
             if (fs::is_regular_file(path, ec)) {
                 for (const auto& kv : entry.headers) {
                     res.base().set(kv.name_string(), kv.value());
@@ -184,96 +359,6 @@ httplib::net::awaitable<bool> router_impl::handle_file_request(request& req, res
     }
 
     co_return false;
-}
-
-bool router_impl::set_mount_point(const std::string& mount_point,
-                                  const std::filesystem::path& dir,
-                                  const http::fields& headers /*= {}*/)
-{
-    std::error_code ec;
-    if (fs::is_directory(dir, ec)) {
-        std::string mnt = !mount_point.empty() ? mount_point : "/";
-        if (!mnt.empty() && mnt[0] == '/') {
-            static_file_entry_.push_back({mnt, dir, headers});
-            std::sort(static_file_entry_.begin(),
-                      static_file_entry_.end(),
-                      [](const auto& left, const auto& right) {
-                          return left.mount_point.size() > right.mount_point.size();
-                      });
-            return true;
-        }
-    }
-    return false;
-}
-
-bool router_impl::remove_mount_point(const std::string& mount_point)
-{
-    for (auto it = static_file_entry_.begin(); it != static_file_entry_.end(); ++it) {
-        if (it->mount_point == mount_point) {
-            static_file_entry_.erase(it);
-            return true;
-        }
-    }
-    return false;
-}
-
-std::optional<httplib::router::ws_handler_entry>
-router_impl::find_ws_handler(std::string_view key) const
-{
-    auto iter = ws_coro_handlers_.find(std::string(key));
-    if (iter == ws_coro_handlers_.end())
-        return std::nullopt;
-    return iter->second;
-}
-
-void router_impl::set_http_handler_impl(http::verb method,
-                                        std::string_view key,
-                                        coro_http_handler_type&& handler)
-{
-    auto whole_str = detail::make_whole_str(method, key);
-
-    if (whole_str.find(":") != std::string::npos) {
-        coro_router_tree_.coro_insert(whole_str, std::move(handler), method);
-        return;
-    }
-
-    if (whole_str.find("{") != std::string::npos || whole_str.find(")") != std::string::npos) {
-        std::string pattern = whole_str;
-
-        if (pattern.find("{}") != std::string::npos) {
-            boost::replace_all(pattern, "{}", "([^/]+)");
-        }
-
-        coro_regex_handles_.emplace_back(std::regex(pattern), std::move(handler));
-        return;
-    }
-    auto& map = coro_handles_[std::string(key)];
-    if (map.count(method)) {
-        return;
-    }
-    map[method] = std::move(handler);
-}
-
-void router_impl::set_default_handler_impl(coro_http_handler_type&& handler)
-{
-    default_handler_ = std::move(handler);
-}
-
-void router_impl::set_file_request_handler_impl(coro_http_handler_type&& handler)
-{
-    file_request_handler_ = std::move(handler);
-}
-
-void router_impl::set_ws_handler_impl(std::string_view key,
-                                      websocket_conn::coro_open_handler_type&& open_handler,
-                                      websocket_conn::coro_message_handler_type&& message_handler,
-                                      websocket_conn::coro_close_handler_type&& close_handler)
-{
-    router::ws_handler_entry entry;
-    entry.open_handler                  = std::move(open_handler);
-    entry.message_handler               = std::move(message_handler);
-    entry.close_handler                 = std::move(close_handler);
-    ws_coro_handlers_[std::string(key)] = entry;
 }
 
 } // namespace httplib

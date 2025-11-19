@@ -63,7 +63,7 @@ public:
         websocket_conn::coro_close_handler_type close_handler;
         websocket_conn::coro_message_handler_type message_handler;
     };
-    std::optional<ws_handler_entry> find_ws_handler(std::string_view key) const;
+    std::optional<ws_handler_entry> find_ws_handler(request& req) const;
 
 private:
     void set_http_handler_impl(http::verb method,

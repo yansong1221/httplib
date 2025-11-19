@@ -17,9 +17,9 @@ net::awaitable<void> router::routing(request& req, response& resp)
     co_await impl_->proc_routing(req, resp);
 }
 
-std::optional<httplib::router::ws_handler_entry> router::find_ws_handler(std::string_view key) const
+std::optional<httplib::router::ws_handler_entry> router::find_ws_handler(request& req) const
 {
-    return impl_->find_ws_handler(key); 
+    return impl_->find_ws_handler(req); 
 }
 
 bool router::set_mount_point(const std::string& mount_point,

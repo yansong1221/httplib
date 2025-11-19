@@ -82,7 +82,7 @@ httplib::net::awaitable<void> websocket_conn_impl::process_write_data()
 
 httplib::net::awaitable<void> websocket_conn_impl::run()
 {
-    auto entry = serv_.router().find_ws_handler(req_.path);
+    auto entry = serv_.router().find_ws_handler(req_);
     if (!entry)
         co_return;
 
