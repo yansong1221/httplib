@@ -81,7 +81,9 @@ std::unique_ptr<router_impl::Node> router_impl::make_special_node(std::string_vi
         std::string_view inside = seg.substr(1, seg.size() - 2);
         size_t pos              = inside.find(':');
         node->param_name        = inside.substr(0, pos);
-        node->regex             = std::regex(std::string(inside.substr(pos + 1)));
+
+        auto key = inside.substr(pos + 1);
+        node->regex.assign(key.begin(),key.end());
         return node;
     }
 
@@ -92,7 +94,7 @@ void router_impl::set_http_handler_impl(http::verb method,
                                         std::string_view path,
                                         coro_http_handler_type&& handler)
 {
-   // std::unique_lock lock(mutex_);
+    // std::unique_lock lock(mutex_);
     auto segments          = util::split(path, "/");
     auto node              = insert(root_.get(), segments, 0);
     node->handlers[method] = std::move(handler);
@@ -126,7 +128,7 @@ httplib::router_impl::Node* router_impl::insert(Node* node,
 // ---------------- 匹配路由 ----------------
 net::awaitable<void> router_impl::proc_routing(request& req, response& resp) const
 {
-    //std::shared_lock lock(mutex_);
+    // std::shared_lock lock(mutex_);
 
     if (req.method() == http::verb::get || req.method() == http::verb::head) {
         if (co_await handle_file_request(req, resp))
@@ -200,7 +202,7 @@ void router_impl::set_ws_handler_impl(std::string_view path,
                                       websocket_conn::coro_message_handler_type&& message_handler,
                                       websocket_conn::coro_close_handler_type&& close_handler)
 {
-    //std::unique_lock lock(mutex_);
+    // std::unique_lock lock(mutex_);
     auto segments = util::split(path, "/");
 
     auto node = insert(root_.get(), segments, 0);
@@ -214,7 +216,7 @@ void router_impl::set_ws_handler_impl(std::string_view path,
 
 std::optional<httplib::router::ws_handler_entry> router_impl::find_ws_handler(request& req) const
 {
-    //std::shared_lock lock(mutex_);
+    // std::shared_lock lock(mutex_);
     auto segments = util::split(req.path, "/");
     if (auto node = match_node(root_.get(), segments, 0, req.path_params); node)
         return node->ws_handler;
@@ -249,7 +251,7 @@ router_impl::match_node(const Node* node,
     // 2️⃣ 正则匹配
     for (auto& child : node->children) {
         if (child->is_regex) {
-            if (std::regex_match(std::string(seg), child->regex)) {
+            if (std::regex_match(seg.begin(), seg.end(), child->regex)) {
                 path_params[child->param_name] = seg;
                 if (auto node = match_node(child.get(), segments, index + 1, path_params); node)
                     return node;
@@ -335,7 +337,7 @@ httplib::net::awaitable<bool> router_impl::handle_file_request(request& req, res
                 break;
             }
         }
-        if (path.has_filename()) { 
+        if (path.has_filename()) {
             if (fs::is_regular_file(path, ec)) {
                 for (const auto& kv : entry.headers) {
                     res.base().set(kv.name_string(), kv.value());
