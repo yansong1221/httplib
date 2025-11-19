@@ -46,7 +46,7 @@ private:
     using verb_handler_map = std::unordered_map<http::verb, coro_http_handler_type>;
     std::unordered_map<std::string, verb_handler_map> coro_handles_;
 
-    std::shared_ptr<radix_tree> coro_router_tree_ = std::make_shared<radix_tree>(radix_tree());
+    radix_tree coro_router_tree_;
     std::vector<std::tuple<std::regex, coro_http_handler_type>> coro_regex_handles_;
 
     coro_http_handler_type default_handler_;

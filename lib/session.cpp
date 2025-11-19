@@ -484,7 +484,6 @@ void session::abort()
 
 httplib::net::awaitable<void> session::run()
 {
-    auto self = shared_from_this();
     for (; !abort_ && task_;) {
         auto&& next_task = co_await task_->then();
         std::unique_lock<std::mutex> lck(task_mtx_);

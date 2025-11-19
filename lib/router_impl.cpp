@@ -90,13 +90,13 @@ net::awaitable<void> httplib::router_impl::proc_routing(request& req, response& 
     bool is_coro_exist = false;
     coro_http_handler_type coro_handler;
     std::tie(is_coro_exist, coro_handler, req.path_params) =
-        coro_router_tree_->get_coro(url_path, req.method());
+        coro_router_tree_.get_coro(url_path, req.method());
 
     if (is_coro_exist) {
         if (coro_handler)
             co_await coro_handler(req, resp);
         else
-            resp.set_error_content(http::status::not_found);
+            resp.set_error_content(http::status::method_not_allowed);
         co_return;
     }
     bool is_matched_regex_router = false;
@@ -233,7 +233,7 @@ void router_impl::set_http_handler_impl(http::verb method,
     auto whole_str = detail::make_whole_str(method, key);
 
     if (whole_str.find(":") != std::string::npos) {
-        coro_router_tree_->coro_insert(whole_str, std::move(handler), method);
+        coro_router_tree_.coro_insert(whole_str, std::move(handler), method);
         return;
     }
 
