@@ -29,7 +29,7 @@ if(HTTPLIB_ENABLED_SSL)
     target_link_libraries(${MOUDLE} PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 endif()
 if(HTTPLIB_ENABLED_COMPRESS)
-    find_package(Boost REQUIRED COMPONENTS iostreams)
+    find_package(Boost REQUIRED COMPONENTS iostreams CONFIG)
     find_package(unofficial-brotli CONFIG REQUIRED)
 
     target_compile_definitions(${MOUDLE} PUBLIC HTTPLIB_ENABLED_COMPRESS)
