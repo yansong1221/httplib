@@ -59,7 +59,6 @@ router_impl::router_impl()
     root_->key = "";
 }
 
-// ---------------- 特殊节点 ----------------
 std::unique_ptr<router_impl::Node> router_impl::make_special_node(std::string_view seg)
 {
     auto node = std::make_unique<Node>();
@@ -76,14 +75,14 @@ std::unique_ptr<router_impl::Node> router_impl::make_special_node(std::string_vi
         return node;
     }
 
-    if (seg.front() == '{' && seg.back() == '}') {
+    if (!seg.empty() && seg.front() == '{' && seg.back() == '}') {
         node->is_regex          = true;
         std::string_view inside = seg.substr(1, seg.size() - 2);
         size_t pos              = inside.find(':');
         node->param_name        = inside.substr(0, pos);
 
         auto key = inside.substr(pos + 1);
-        node->regex.assign(key.begin(),key.end());
+        node->regex.assign(key.begin(), key.end());
         return node;
     }
 
