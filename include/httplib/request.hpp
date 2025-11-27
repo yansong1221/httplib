@@ -7,13 +7,19 @@
 
 namespace httplib {
 
-struct request : public http::request<body::any_body>
+struct request
 {
-    using http::request<body::any_body>::message;
-
+public:
+    request() = default;
     request(http::request<body::any_body>&& other);
+    request(const http::request_header<>& other);
 
 public:
+    http::request_header<>& header() { return message_; }
+    auto& body() { return message_.body(); }
+
+    bool keep_alive() const { return message_.keep_alive(); }
+
     net::ip::address get_client_ip() const;
 
     void set_custom_data(std::any&& data);
@@ -33,6 +39,7 @@ public:
 
 private:
     std::any custom_data_;
+    http::request<body::any_body> message_;
 };
 
 

@@ -88,7 +88,9 @@ httplib::net::awaitable<void> websocket_conn_impl::run()
 
     boost::system::error_code ec;
     auto remote_endp = ws_.remote_endpoint(ec);
-    co_await ws_.async_accept(req_, net_awaitable[ec]);
+
+    http::request<http::empty_body> req(req_.header());
+    co_await ws_.async_accept(req, net_awaitable[ec]);
     if (ec) {
         serv_.get_logger()->error("websocket handshake failed: {}", ec.message());
         co_return;

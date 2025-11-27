@@ -83,7 +83,7 @@ std::unique_ptr<router_impl::Node> router_impl::make_special_node(std::string_vi
         node->param_name        = inside.substr(0, pos);
 
         auto key = inside.substr(pos + 1);
-        node->regex.assign(key.begin(),key.end());
+        node->regex.assign(key.begin(), key.end());
         return node;
     }
 
@@ -130,14 +130,14 @@ net::awaitable<void> router_impl::proc_routing(request& req, response& resp) con
 {
     // std::shared_lock lock(mutex_);
 
-    if (req.method() == http::verb::get || req.method() == http::verb::head) {
+    if (req.header().method() == http::verb::get || req.header().method() == http::verb::head) {
         if (co_await handle_file_request(req, resp))
             co_return;
     }
 
     auto segments = util::split(req.path, "/");
     if (auto node = match_node(root_.get(), segments, 0, req.path_params); node) {
-        auto iter = node->handlers.find(req.method());
+        auto iter = node->handlers.find(req.header().method());
         if (iter == node->handlers.end()) {
             resp.set_error_content(node->handlers.empty()
                                        ? httplib::http::status::not_found
@@ -340,10 +340,10 @@ httplib::net::awaitable<bool> router_impl::handle_file_request(request& req, res
         if (path.has_filename()) {
             if (fs::is_regular_file(path, ec)) {
                 for (const auto& kv : entry.headers) {
-                    res.base().set(kv.name_string(), kv.value());
+                    res.header().set(kv.name_string(), kv.value());
                 }
-                res.set_file_content(path, req);
-                if (req.method() != http::verb::head && file_request_handler_) {
+                res.set_file_content(path, req.header());
+                if (req.header().method() != http::verb::head && file_request_handler_) {
                     co_await file_request_handler_(req, res);
                 }
 

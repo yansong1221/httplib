@@ -3,14 +3,19 @@
 namespace httplib {
 
 request::request(http::request<body::any_body>&& other)
+    : message_(std::move(other))
 {
-    http::request<body::any_body>::operator=(std::move(other));
+}
+
+request::request(const http::request_header<>& other)
+    : message_(other)
+{
 }
 
 net::ip::address request::get_client_ip() const
 {
-    auto iter = this->find("X-Forwarded-For");
-    if (iter == this->end())
+    auto iter = message_.find("X-Forwarded-For");
+    if (iter == message_.end())
         return remote_endpoint.address();
 
     auto tokens = util::split(iter->value(), ",");

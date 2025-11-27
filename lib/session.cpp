@@ -25,17 +25,6 @@ namespace httplib {
 
 namespace detail {
 
-template<class Body>
-httplib::response make_respone(const http::request<Body>& req)
-{
-    httplib::response resp;
-    resp.result(http::status::not_found);
-    resp.version(req.version());
-    resp.set(http::field::server, BOOST_BEAST_VERSION_STRING);
-    resp.set(http::field::date, html::format_http_current_gmt_date());
-    resp.keep_alive(req.keep_alive());
-    return resp;
-}
 #ifdef HTTPLIB_ENABLED_SSL
 
 static std::shared_ptr<ssl::context> create_ssl_context(const net::const_buffer& cert_file,
@@ -141,7 +130,7 @@ public:
 public:
     net::awaitable<std::unique_ptr<task>> then() override
     {
-        auto target = req_.target();
+        auto target = req_.header().target();
         auto pos    = target.find(":");
         if (pos == std::string_view::npos)
             co_return nullptr;
@@ -158,10 +147,10 @@ public:
         if (ec)
             co_return nullptr;
 
-        auto resp = detail::make_respone(req_);
-        resp.reason("Connection Established");
-        resp.result(http::status::ok);
-        co_await http::async_write(stream_, resp, net_awaitable[ec]);
+        httplib::response resp(req_.header().version(), req_.keep_alive());
+        resp.header().reason("Connection Established");
+        resp.header().result(http::status::ok);
+        co_await http::async_write(stream_, resp.message(), net_awaitable[ec]);
         if (ec)
             co_return nullptr;
 
@@ -230,7 +219,7 @@ public:
                 co_return std::make_unique<http_proxy_task>(
                     std::move(stream_), std::move(req), serv_);
             }
-            httplib::response resp = detail::make_respone(header);
+            httplib::response resp(header.version(), header.keep_alive());
             httplib::request req;
             if (serv_.router().has_handler(header.method(), header.target())) {
                 switch (header.method()) {
@@ -262,7 +251,7 @@ public:
                 if (init_request(req)) {
                     try {
                         // websocket
-                        if (websocket::is_upgrade(req)) {
+                        if (websocket::is_upgrade(req.header())) {
                             auto stream = create_websocket_variant_stream(std::move(stream_));
                             co_return std::make_unique<websocket_task>(
                                 std::move(stream), std::move(req), serv_);
@@ -292,28 +281,29 @@ public:
 
                 serv_.get_logger()->debug(
                     "{} {} ({}:{} -> {}:{}) {} {}ms",
-                    req.method_string(),
-                    req.target(),
+                    req.header().method_string(),
+                    req.header().target(),
                     remote_endpoint_.address().to_string(),
                     remote_endpoint_.port(),
                     local_endpoint_.address().to_string(),
                     local_endpoint_.port(),
-                    resp.result_int(),
+                    resp.header().result_int(),
                     std::chrono::duration_cast<std::chrono::milliseconds>(span_time).count());
             }
 
-            for (const auto& encoding : util::split(req[http::field::accept_encoding], ",")) {
+            resp.prepare_payload();
+
+            for (const auto& encoding :
+                 util::split(req.header()[http::field::accept_encoding], ","))
+            {
                 if (body::compressor_factory::instance().is_supported_encoding(encoding)) {
-                    resp.set(http::field::content_encoding, encoding);
-                    resp.chunked(true);
+                    resp.header().set(http::field::content_encoding, encoding);
+                    resp.message().chunked(true);
                     break;
                 }
             }
 
-            if (!resp.has_content_length())
-                resp.prepare_payload();
-
-            http::response_serializer<body::any_body> serializer(resp);
+            http::response_serializer<body::any_body> serializer(resp.message());
             while (!serializer.is_done()) {
                 stream_.expires_after(serv_.write_timeout());
                 co_await http::async_write_some(stream_, serializer, net_awaitable[ec]);
@@ -349,7 +339,7 @@ private:
         req.local_endpoint  = local_endpoint_;
         req.remote_endpoint = remote_endpoint_;
 
-        auto tokens = util::split(req.target(), "?");
+        auto tokens = util::split(req.header().target(), "?");
         if (tokens.empty() || tokens.size() > 2)
             return false;
 

@@ -3,20 +3,20 @@
 #include "httplib/form_data.hpp"
 #include "httplib/html.hpp"
 #include <boost/beast/http/message.hpp>
+#include <boost/beast/http/message_generator.hpp>
 #include <filesystem>
 
 namespace httplib {
 
-struct response : public http::response<body::any_body>
+struct response
 {
-    using http::response<body::any_body>::message;
-
-    response(http::response<body::any_body>&& other)
-    {
-        http::response<body::any_body>::operator=(std::move(other));
-    }
+    response(unsigned int version, bool keep_alive);
+    response(http::response<body::any_body>&& other);
 
 public:
+    http::response_header<>& header() { return message_; }
+    bool keep_alive() const;
+
     void set_empty_content(http::status status);
     void set_error_content(http::status status);
 
@@ -36,6 +36,14 @@ public:
     void set_form_data_content(const std::vector<form_data::field>& data);
 
     void set_redirect(std::string_view url, http::status status = http::status::moved_permanently);
+
+    http::response<body::any_body>& message() { return message_; }
+    http::message_generator to_message() { return std::move(message_); }
+
+    void prepare_payload();
+
+private:
+    http::response<body::any_body> message_;
 };
 
 } // namespace httplib
