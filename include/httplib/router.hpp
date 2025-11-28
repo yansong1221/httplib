@@ -17,10 +17,6 @@ class response;
 class router
 {
 public:
-    using coro_http_handler_type =
-        std::function<net::awaitable<void>(request& req, response& resp)>;
-    using http_handler_type = std::function<void(request& req, response& resp)>;
-
     virtual ~router() = default;
 
 public:
@@ -61,6 +57,14 @@ public:
     virtual bool remove_mount_point(const std::string& mount_point) = 0;
 
 protected:
+    using coro_http_handler_type =
+        std::function<net::awaitable<void>(request& req, response& resp)>;
+    using http_handler_type = std::function<void(request& req, response& resp)>;
+
+    template<typename Func, typename... Aspects>
+    coro_http_handler_type make_coro_http_handler(Func&& handler, Aspects&&... asps);
+
+
     virtual void set_http_handler_impl(http::verb method,
                                        std::string_view key,
                                        coro_http_handler_type&& handler)                      = 0;

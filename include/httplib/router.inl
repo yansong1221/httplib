@@ -92,14 +92,15 @@ auto make_coro_handler(Func&& handler)
     }
 }
 
-template<typename Func, typename... Aspects>
-router::coro_http_handler_type make_coro_http_handler(Func&& handler, Aspects&&... asps)
-{
-    auto coro_handler = make_coro_handler(std::move(handler));
 
-    // auto handler_variant = create_http_handler_variant(handler);
-    //  hold keys to make sure map_handles_ key is
-    //  std::string_view, avoid memcpy when route
+} // namespace detail
+
+
+template<typename Func, typename... Aspects>
+router::coro_http_handler_type router::make_coro_http_handler(Func&& handler, Aspects&&... asps)
+{
+    auto coro_handler = detail::make_coro_handler(std::move(handler));
+
     router::coro_http_handler_type http_handler;
     if constexpr (sizeof...(Aspects) > 0) {
         http_handler = [coro_handler = std::move(coro_handler),
@@ -123,7 +124,6 @@ router::coro_http_handler_type make_coro_http_handler(Func&& handler, Aspects&&.
     return std::move(http_handler);
 }
 
-} // namespace detail
 
 template<typename Func, typename... Aspects>
 void router::set_http_handler(http::verb method,
@@ -131,8 +131,7 @@ void router::set_http_handler(http::verb method,
                               Func&& handler,
                               Aspects&&... asps)
 {
-    coro_http_handler_type http_handler =
-        detail::make_coro_http_handler(std::move(handler), asps...);
+    coro_http_handler_type http_handler = make_coro_http_handler(std::move(handler), asps...);
 
     set_http_handler_impl(method, key, std::move(http_handler));
 }
@@ -157,16 +156,14 @@ void router::set_http_handler(std::string_view key,
 template<typename Func, typename... Aspects>
 void router::set_default_handler(Func&& handler, Aspects&&... asps)
 {
-    auto coro_handler =
-        detail::make_coro_http_handler(std::move(handler), std::forward<Aspects>(asps)...);
+    auto coro_handler = make_coro_http_handler(std::move(handler), std::forward<Aspects>(asps)...);
     this->set_default_handler_impl(std::move(coro_handler));
 }
 
 template<typename Func, typename... Aspects>
 void router::set_file_request_handler(Func&& handler, Aspects&&... asps)
 {
-    auto coro_handler =
-        detail::make_coro_http_handler(std::move(handler), std::forward<Aspects>(asps)...);
+    auto coro_handler = make_coro_http_handler(std::move(handler), std::forward<Aspects>(asps)...);
     set_file_request_handler_impl(std::move(coro_handler));
 }
 template<typename OpenFunc, typename MessageFunc, typename CloseFunc>
