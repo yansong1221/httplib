@@ -2,9 +2,9 @@
 
 #include "body/compressor.hpp"
 
-#include "httplib/response.hpp"
-#include "httplib/router.hpp"
-#include "httplib/server.hpp"
+#include "httplib/server/response.hpp"
+#include "httplib/server/router.hpp"
+#include "httplib/server/server.hpp"
 #include "stream/http_stream.hpp"
 #include "websocket_conn_impl.hpp"
 #include <boost/asio/experimental/awaitable_operators.hpp>
@@ -23,7 +23,7 @@
 #include "request_impl.h"
 #include "response_impl.h"
 
-namespace httplib {
+namespace httplib::server {
 
 namespace detail {
 
@@ -100,9 +100,8 @@ class session::websocket_task : public session::task
 public:
     explicit websocket_task(websocket_variant_stream_type&& stream,
                             request_impl&& req,
-                            server_impl& serv)
-        : conn_(std::make_shared<httplib::websocket_conn_impl>(
-              serv, std::move(stream), std::move(req)))
+                            http_server_impl& serv)
+        : conn_(std::make_shared<websocket_conn_impl>(serv, std::move(stream), std::move(req)))
     {
     }
     net::awaitable<std::unique_ptr<task>> then() override
@@ -114,7 +113,7 @@ public:
     void abort() override { conn_->close(); }
 
 private:
-    std::shared_ptr<httplib::websocket_conn_impl> conn_;
+    std::shared_ptr<websocket_conn_impl> conn_;
 };
 
 class session::http_proxy_task : public session::task
@@ -122,7 +121,7 @@ class session::http_proxy_task : public session::task
 public:
     explicit http_proxy_task(http_variant_stream_type&& stream,
                              request_impl&& req,
-                             server_impl& serv)
+                             http_server_impl& serv)
         : stream_(std::move(stream))
         , req_(std::move(req))
         , serv_(serv)
@@ -151,7 +150,7 @@ public:
         if (ec)
             co_return nullptr;
 
-        httplib::response_impl resp(stream_, req_.header().version(), req_.keep_alive());
+        response_impl resp(stream_, req_.header().version(), req_.keep_alive());
         resp.header().reason("Connection Established");
         resp.header().result(http::status::ok);
         ec = co_await resp.reply(std::chrono::seconds(10));
@@ -181,7 +180,7 @@ private:
     tcp::socket proxy_socket_;
 
     request_impl req_;
-    server_impl& serv_;
+    http_server_impl& serv_;
 };
 
 class session::http_task : public session::task
@@ -189,7 +188,7 @@ class session::http_task : public session::task
 public:
     explicit http_task(http_variant_stream_type&& stream,
                        beast::flat_buffer&& buffer,
-                       server_impl& serv)
+                       http_server_impl& serv)
         : serv_(serv)
         , buffer_(std::move(buffer))
         , stream_(std::move(stream))
@@ -219,13 +218,12 @@ public:
 
             // http proxy
             if (header.method() == http::verb::connect) {
-                httplib::request_impl req(
-                    local_endpoint_, remote_endpoint_, header_parser.release());
+                request_impl req(local_endpoint_, remote_endpoint_, header_parser.release());
                 co_return std::make_unique<http_proxy_task>(
                     std::move(stream_), std::move(req), serv_);
             }
-            httplib::response_impl resp(stream_, header.version(), header.keep_alive());
-            std::optional<httplib::request_impl> req;
+            response_impl resp(stream_, header.version(), header.keep_alive());
+            std::optional<request_impl> req;
 
             std::chrono::steady_clock::time_point start_time;
 
@@ -235,7 +233,7 @@ public:
                     case http::verb::head:
                     case http::verb::trace:
                     case http::verb::connect:
-                        req = httplib::request_impl(
+                        req = request_impl(
                             local_endpoint_, remote_endpoint_, header_parser.release());
                         break;
                     default: {
@@ -251,8 +249,8 @@ public:
                                 co_return nullptr;
                             }
                         }
-                        req = httplib::request_impl(
-                            local_endpoint_, remote_endpoint_, body_parser.release());
+                        req =
+                            request_impl(local_endpoint_, remote_endpoint_, body_parser.release());
                     } break;
                 }
 
@@ -328,7 +326,7 @@ public:
     }
 
 private:
-    server_impl& serv_;
+    http_server_impl& serv_;
 
     http_variant_stream_type stream_;
     beast::flat_buffer buffer_;
@@ -343,7 +341,7 @@ class session::ssl_handshake_task : public session::task
 public:
     explicit ssl_handshake_task(ssl_http_stream&& stream,
                                 beast::flat_buffer&& buffer,
-                                server_impl& serv)
+                                http_server_impl& serv)
         : serv_(serv)
         , stream_(std::move(stream))
         , buffer_(std::move(buffer))
@@ -370,7 +368,7 @@ public:
     void abort() override { stream_.shutdown(); }
 
 private:
-    server_impl& serv_;
+    http_server_impl& serv_;
     ssl_http_stream stream_;
     beast::flat_buffer buffer_;
 };
@@ -379,7 +377,7 @@ private:
 class session::detect_ssl_task : public session::task
 {
 public:
-    explicit detect_ssl_task(tcp::socket&& stream, server_impl& sevr)
+    explicit detect_ssl_task(tcp::socket&& stream, http_server_impl& sevr)
         : sevr_(sevr)
         , stream_(std::move(stream))
     {
@@ -421,12 +419,12 @@ public:
     void abort() override { stream_.close(); }
 
 private:
-    server_impl& sevr_;
+    http_server_impl& sevr_;
     http_stream stream_;
 };
 
 
-session::session(tcp::socket&& stream, server_impl& serv)
+session::session(tcp::socket&& stream, http_server_impl& serv)
     : task_(std::make_unique<detect_ssl_task>(std::move(stream), serv))
 {
 }
@@ -455,4 +453,4 @@ httplib::net::awaitable<void> session::run()
     }
     co_return;
 }
-} // namespace httplib
+} // namespace httplib::server

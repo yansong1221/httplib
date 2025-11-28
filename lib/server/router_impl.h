@@ -1,5 +1,5 @@
 #pragma once
-#include "httplib/router.hpp"
+#include "httplib/server/router.hpp"
 #include "request_impl.h"
 #include "response_impl.h"
 #include <boost/beast/http.hpp>
@@ -11,7 +11,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace httplib {
+namespace httplib::server {
 
 class router_impl : public router
 {
@@ -92,4 +92,4 @@ private:
 
     net::awaitable<bool> handle_file_request(request& req, response& res) const;
 };
-} // namespace httplib
+} // namespace httplib::server

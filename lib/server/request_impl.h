@@ -1,8 +1,8 @@
 #pragma once
-#include "httplib/request.hpp"
+#include "httplib/server/request.hpp"
 #include "stream/http_stream.hpp"
 
-namespace httplib {
+namespace httplib::server {
 
 class request_impl : public request
 {

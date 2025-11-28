@@ -2,13 +2,14 @@
 #include "httplib/body/any_body.hpp"
 #include "httplib/form_data.hpp"
 #include "httplib/html.hpp"
-#include "httplib/response.hpp"
+#include "httplib/server/response.hpp"
 #include "stream/http_stream.hpp"
 #include <boost/asio/awaitable.hpp>
+#include <boost/beast/http/string_body.hpp>
 
-namespace httplib {
+namespace httplib::server {
 
-class response_impl : public httplib::response
+class response_impl : public response
 {
 public:
     response_impl(http_variant_stream_type& stream, unsigned int version, bool keep_alive);
@@ -52,4 +53,4 @@ private:
     http_variant_stream_type& stream_;
     http::response<body::any_body> message_;
 };
-} // namespace httplib
+} // namespace httplib::server

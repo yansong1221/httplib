@@ -18,6 +18,7 @@ PUBLIC  spdlog::spdlog fmt::fmt
 )
 
 target_include_directories(${MOUDLE} PUBLIC ${HTTPLIB_INCLUDE_DIR})
+target_include_directories(${MOUDLE} PRIVATE ${HTTPLIB_LIB_DIR})
 
 if (MSVC)
     target_compile_options(${MOUDLE} PRIVATE /bigobj)

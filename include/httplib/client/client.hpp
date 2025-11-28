@@ -5,9 +5,9 @@
 #include <filesystem>
 #include <limits>
 
-namespace httplib {
+namespace httplib::client {
 
-class client
+class http_client
 {
 public:
     enum class timeout_policy
@@ -23,12 +23,15 @@ public:
     using response_result = boost::system::result<response>;
 
 public:
-    explicit client(net::io_context& ex, std::string_view host, uint16_t port, bool ssl = false);
-    explicit client(const net::any_io_executor& ex,
-                    std::string_view host,
-                    uint16_t port,
-                    bool ssl = false);
-    ~client();
+    explicit http_client(net::io_context& ex,
+                         std::string_view host,
+                         uint16_t port,
+                         bool ssl = false);
+    explicit http_client(const net::any_io_executor& ex,
+                         std::string_view host,
+                         uint16_t port,
+                         bool ssl = false);
+    ~http_client();
 
     void set_timeout_policy(const timeout_policy& policy);
 
@@ -59,6 +62,6 @@ public:
 
 private:
     class impl;
-    impl* impl_;
+    std::unique_ptr<impl> impl_;
 };
-} // namespace httplib
+} // namespace httplib::client

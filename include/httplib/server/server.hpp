@@ -1,40 +1,40 @@
 #pragma once
-#include "config.hpp"
-#include "websocket_conn.hpp"
+#include "httplib/config.hpp"
+#include "httplib/server/websocket_conn.hpp"
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/socket_base.hpp>
 #include <filesystem>
 
-namespace httplib {
+
+namespace httplib::server {
+
 class router;
 class session;
-} // namespace httplib
+class http_server_impl;
 
-namespace httplib {
 
-class server_impl;
-class server
+class http_server
 {
 public:
     struct setting;
 
 public:
-    explicit server(net::io_context& ioc);
-    explicit server(const net::any_io_executor& ex);
-    ~server();
+    explicit http_server(net::io_context& ioc);
+    explicit http_server(const net::any_io_executor& ex);
+    ~http_server();
 
     net::any_io_executor get_executor() noexcept;
 
-    server& listen(std::string_view host,
-                   uint16_t port,
-                   int backlog = net::socket_base::max_listen_connections);
-    server& listen(uint16_t port, int backlog = net::socket_base::max_listen_connections);
+    http_server& listen(std::string_view host,
+                        uint16_t port,
+                        int backlog = net::socket_base::max_listen_connections);
+    http_server& listen(uint16_t port, int backlog = net::socket_base::max_listen_connections);
     net::awaitable<boost::system::error_code> co_run();
     void async_run();
     void stop();
 
-    httplib::router& router();
+    router& router();
 
     tcp::endpoint local_endpoint() const;
 
@@ -53,6 +53,6 @@ public:
     void use_ssl_file(const fs::path& cert_file, const fs::path& key_file, std::string passwd = {});
 
 private:
-    std::unique_ptr<server_impl> impl_;
+    std::unique_ptr<http_server_impl> impl_;
 };
-} // namespace httplib
+} // namespace httplib::server

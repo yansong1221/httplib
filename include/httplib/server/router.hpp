@@ -1,6 +1,6 @@
 #pragma once
+#include "httplib/server/websocket_conn.hpp"
 #include "httplib/util/type_traits.h"
-#include "httplib/websocket_conn.hpp"
 #include <algorithm>
 #include <boost/asio/detached.hpp>
 #include <boost/beast/http/fields.hpp>
@@ -9,7 +9,7 @@
 #include <string>
 #include <string_view>
 
-namespace httplib {
+namespace httplib::server {
 
 class request;
 class response;
@@ -76,6 +76,6 @@ protected:
                                      websocket_conn::coro_close_handler_type&& close_handler) = 0;
 };
 
-} // namespace httplib
+} // namespace httplib::server
 
-#include "httplib/router.inl"
+#include "httplib/server/router.inl"

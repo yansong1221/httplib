@@ -3,9 +3,9 @@
 #include <boost/asio/detached.hpp>
 #include <spdlog/spdlog.h>
 
-namespace httplib {
+namespace httplib::server {
 
-websocket_conn_impl::websocket_conn_impl(server_impl& serv,
+websocket_conn_impl::websocket_conn_impl(http_server_impl& serv,
                                          websocket_variant_stream_type&& stream,
                                          request_impl&& req)
 
@@ -124,4 +124,4 @@ httplib::net::awaitable<void> websocket_conn_impl::run()
     }
 }
 
-} // namespace httplib
+} // namespace httplib::server

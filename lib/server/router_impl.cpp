@@ -1,6 +1,6 @@
 #include "router_impl.h"
 #include <iostream>
-namespace httplib {
+namespace httplib::server {
 
 namespace detail {
 inline static bool is_valid_path(std::string_view path)
@@ -101,9 +101,9 @@ void router_impl::set_http_handler_impl(http::verb method,
 }
 
 
-httplib::router_impl::Node* router_impl::insert(Node* node,
-                                                const std::vector<std::string_view>& segments,
-                                                size_t index)
+router_impl::Node* router_impl::insert(Node* node,
+                                       const std::vector<std::string_view>& segments,
+                                       size_t index)
 {
     if (index >= segments.size())
         return node;
@@ -368,4 +368,4 @@ httplib::net::awaitable<bool> router_impl::handle_file_request(request& req, res
     co_return false;
 }
 
-} // namespace httplib
+} // namespace httplib::server

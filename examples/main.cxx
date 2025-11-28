@@ -1,9 +1,9 @@
 
-#include "httplib/client.hpp"
-#include "httplib/request.hpp"
-#include "httplib/response.hpp"
-#include "httplib/router.hpp"
-#include "httplib/server.hpp"
+#include "httplib/client/client.hpp"
+#include "httplib/server/request.hpp"
+#include "httplib/server/response.hpp"
+#include "httplib/server/router.hpp"
+#include "httplib/server/server.hpp"
 #include <boost/asio/thread_pool.hpp>
 #include <filesystem>
 #include <format>
@@ -11,13 +11,14 @@
 // 日志切面
 struct log_t
 {
-    httplib::net::awaitable<bool> before(httplib::request& req, httplib::response& res)
+    httplib::net::awaitable<bool> before(httplib::server::request& req,
+                                         httplib::server::response& res)
     {
         // start_ = std::chrono::steady_clock::now();
         co_return true;
     }
 
-    bool after(httplib::request& req, httplib::response& res) { return true; }
+    bool after(httplib::server::request& req, httplib::server::response& res) { return true; }
 
 private:
     std::chrono::steady_clock::time_point start_;
@@ -25,7 +26,8 @@ private:
 
 struct test
 {
-    httplib::net::awaitable<void> get(httplib::request& req, httplib::response& resp)
+    httplib::net::awaitable<void> get(httplib::server::request& req,
+                                      httplib::server::response& resp)
     {
         using namespace std::string_view_literals;
         resp.set_string_content("hello"sv, "text/html");
@@ -37,7 +39,7 @@ int main()
 { // HTTP
     using namespace std::string_view_literals;
     boost::asio::thread_pool pool(std::thread::hardware_concurrency());
-    httplib::server svr(pool.get_executor());
+    httplib::server::http_server svr(pool.get_executor());
 
     auto& router = svr.router();
 
@@ -49,33 +51,37 @@ int main()
 
     router.set_ws_handler(
         "/ws",
-        [](httplib::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> { co_return; },
-        [](httplib::websocket_conn::weak_ptr conn,
+        [](httplib::server::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> {
+            co_return;
+        },
+        [](httplib::server::websocket_conn::weak_ptr conn,
            std::string_view msg,
-           httplib::websocket_conn::data_type type) { spdlog::info("msg: {}", msg); },
-        [](httplib::websocket_conn::weak_ptr conn) {
+           httplib::server::websocket_conn::data_type type) { spdlog::info("msg: {}", msg); },
+        [](httplib::server::websocket_conn::weak_ptr conn) {
 
         });
     router.set_ws_handler(
         "/ws/hello",
-        [](httplib::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> { co_return; },
-        [](httplib::websocket_conn::weak_ptr conn,
+        [](httplib::server::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> {
+            co_return;
+        },
+        [](httplib::server::websocket_conn::weak_ptr conn,
            std::string_view msg,
-           httplib::websocket_conn::data_type type) -> boost::asio::awaitable<void> {
+           httplib::server::websocket_conn::data_type type) -> boost::asio::awaitable<void> {
             spdlog::info("msg hello: {}", msg);
             auto hdl = conn.lock();
             hdl->send_message(msg);
             hdl->close();
             co_return;
         },
-        [](httplib::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> {
+        [](httplib::server::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> {
             spdlog::info("111111111");
             co_return;
         });
 
     router.set_http_handler<httplib::http::verb::get>(
         "/hello",
-        [](httplib::request& req, httplib::response& resp) -> void {
+        [](httplib::server::request& req, httplib::server::response& resp) -> void {
             resp.set_string_content("hello"sv, "text/html");
             return;
         },

@@ -1,8 +1,8 @@
 #pragma once
-#include "httplib/request.hpp"
+#include "httplib/server/request.hpp"
+#include "httplib/server/websocket_conn.hpp"
 #include "httplib/use_awaitable.hpp"
 #include "httplib/util/misc.hpp"
-#include "httplib/websocket_conn.hpp"
 #include "request_impl.h"
 #include "server_impl.h"
 #include "stream/websocket_stream.hpp"
@@ -13,12 +13,12 @@
 #include <span>
 
 
-namespace httplib {
+namespace httplib::server {
 
 class websocket_conn_impl : public websocket_conn
 {
 public:
-    websocket_conn_impl(server_impl& serv,
+    websocket_conn_impl(http_server_impl& serv,
                         websocket_variant_stream_type&& stream,
                         request_impl&& req);
 
@@ -32,7 +32,7 @@ public:
     net::awaitable<void> run();
 
 private:
-    server_impl& serv_;
+    http_server_impl& serv_;
 
     request_impl req_;
     net::strand<net::any_io_executor> strand_;
@@ -42,4 +42,4 @@ private:
     std::queue<message_type> send_que_;
 };
 
-} // namespace httplib
+} // namespace httplib::server

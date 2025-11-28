@@ -1,7 +1,6 @@
 #pragma once
-#include "httplib/server.hpp"
-
-#include "httplib/router.hpp"
+#include "httplib/server/router.hpp"
+#include "httplib/server/server.hpp"
 #include "router_impl.h"
 #include "session.hpp"
 #include <boost/asio/co_spawn.hpp>
@@ -16,12 +15,12 @@
 #include <spdlog/spdlog.h>
 #include <unordered_set>
 
-namespace httplib {
-class server_impl
+namespace httplib::server {
+class http_server_impl
 {
 public:
-    explicit server_impl(const net::any_io_executor& ex);
-    ~server_impl() = default;
+    explicit http_server_impl(const net::any_io_executor& ex);
+    ~http_server_impl() = default;
 
 public:
     net::any_io_executor get_executor() noexcept;
@@ -34,7 +33,7 @@ public:
     net::awaitable<boost::system::error_code> co_run();
 
     void stop();
-    httplib::router_impl& router();
+    router_impl& router();
 
     void set_read_timeout(const std::chrono::steady_clock::duration& dur);
     void set_write_timeout(const std::chrono::steady_clock::duration& dur);
@@ -57,7 +56,7 @@ private:
 private:
     net::any_io_executor ex_;
 
-    httplib::router_impl router_;
+    router_impl router_;
     tcp::acceptor acceptor_;
 
     net::strand<net::any_io_executor> session_strand_;
@@ -82,4 +81,4 @@ private:
     friend class session;
 };
 
-} // namespace httplib
+} // namespace httplib::server

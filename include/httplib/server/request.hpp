@@ -5,7 +5,7 @@
 #include <boost/beast/http/message.hpp>
 #include <regex>
 
-namespace httplib {
+namespace httplib::server {
 
 struct request
 {
@@ -35,4 +35,4 @@ public:
 };
 
 
-} // namespace httplib
+} // namespace httplib::server

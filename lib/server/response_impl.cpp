@@ -5,7 +5,7 @@
 #include <boost/beast/http/write.hpp>
 #include <boost/beast/version.hpp>
 
-namespace httplib {
+namespace httplib::server {
 
 response_impl::response_impl(http_variant_stream_type& stream,
                              unsigned int version,
@@ -31,7 +31,7 @@ bool response_impl::keep_alive() const
     return message_.keep_alive();
 }
 
-httplib::response::header_type& response_impl::header()
+response::header_type& response_impl::header()
 {
     return message_.base();
 }
@@ -194,4 +194,4 @@ response_impl::reply(const std::chrono::steady_clock::duration& timeout,
     co_return ec;
 }
 
-} // namespace httplib
+} // namespace httplib::server

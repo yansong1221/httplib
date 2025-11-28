@@ -4,8 +4,8 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <memory>
 
-namespace httplib {
-class server_impl;
+namespace httplib::server {
+class http_server_impl;
 
 class session : public std::enable_shared_from_this<session>
 {
@@ -23,7 +23,7 @@ public:
     class http_proxy_task;
     class websocket_task;
 
-    explicit session(tcp::socket&& stream, server_impl& serv);
+    explicit session(tcp::socket&& stream, http_server_impl& serv);
     ~session();
 
 public:
@@ -36,4 +36,4 @@ private:
     std::atomic_bool abort_ = false;
     std::mutex task_mtx_;
 };
-} // namespace httplib
+} // namespace httplib::server

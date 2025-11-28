@@ -1,5 +1,5 @@
 #pragma once
-namespace httplib {
+namespace httplib::server {
 
 namespace detail {
 
@@ -161,4 +161,4 @@ void router::set_ws_handler(std::string_view key,
                         detail::make_coro_handler(std::move(close_handler)));
 }
 
-} // namespace httplib
+} // namespace httplib::server

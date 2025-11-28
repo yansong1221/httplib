@@ -1,6 +1,6 @@
 #include "request_impl.h"
 
-namespace httplib {
+namespace httplib::server {
 
 request_impl::request_impl(tcp::endpoint local_endpoint,
                            tcp::endpoint remote_endpoint,
@@ -22,12 +22,12 @@ request_impl::request_impl(tcp::endpoint local_endpoint,
     parse_target();
 }
 
-httplib::request::header_type& request_impl::header()
+request::header_type& request_impl::header()
 {
     return message_.base();
 }
 
-httplib::net::ip::address request_impl::get_client_ip() const
+net::ip::address request_impl::get_client_ip() const
 {
     auto iter = message_.find("X-Forwarded-For");
     if (iter == message_.end())

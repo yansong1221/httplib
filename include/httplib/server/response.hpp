@@ -7,7 +7,7 @@
 #include <filesystem>
 
 
-namespace httplib {
+namespace httplib::server {
 
 struct response
 {
@@ -47,4 +47,4 @@ public:
                               http::status status = http::status::moved_permanently) = 0;
 };
 
-} // namespace httplib
+} // namespace httplib::server
