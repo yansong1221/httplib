@@ -79,15 +79,7 @@ auto make_coro_handler(Func&& handler)
     }
     else {
         return [handler = std::move(handler)](auto&&... args) -> net::awaitable<return_type> {
-            if constexpr (std::is_void_v<return_type>) {
-                // handler();
-
-                std::invoke(handler, std::forward<decltype(args)>(args)...);
-                co_return;
-            }
-            else {
-                co_return handler(std::forward<decltype(args)>(args)...);
-            }
+            co_return std::invoke(handler, std::forward<decltype(args)>(args)...);
         };
     }
 }
@@ -100,12 +92,9 @@ template<typename Func, typename... Aspects>
 router::coro_http_handler_type router::make_coro_http_handler(Func&& handler, Aspects&&... asps)
 {
     auto coro_handler = detail::make_coro_handler(std::move(handler));
-
-    router::coro_http_handler_type http_handler;
     if constexpr (sizeof...(Aspects) > 0) {
-        http_handler = [coro_handler = std::move(coro_handler),
-                        ... asps     = std::forward<Aspects>(asps)](
-                           request& req, response& resp) mutable -> net::awaitable<void> {
+        return [coro_handler = std::move(coro_handler), ... asps = std::forward<Aspects>(asps)](
+                   request& req, response& resp) mutable -> net::awaitable<void> {
             bool ok = true;
             co_await (detail::do_before(asps, req, resp, ok), ...);
             if (ok) {
@@ -116,12 +105,8 @@ router::coro_http_handler_type router::make_coro_http_handler(Func&& handler, As
         };
     }
     else {
-        http_handler = [coro_handler = std::move(coro_handler)](
-                           request& req, response& resp) mutable -> net::awaitable<void> {
-            co_await coro_handler(req, resp);
-        };
+        return coro_handler;
     }
-    return std::move(http_handler);
 }
 
 
@@ -131,9 +116,7 @@ void router::set_http_handler(http::verb method,
                               Func&& handler,
                               Aspects&&... asps)
 {
-    coro_http_handler_type http_handler = make_coro_http_handler(std::move(handler), asps...);
-
-    set_http_handler_impl(method, key, std::move(http_handler));
+    set_http_handler_impl(method, key, make_coro_http_handler(std::move(handler), asps...));
 }
 
 template<http::verb... method, typename Func, typename... Aspects>
@@ -156,15 +139,15 @@ void router::set_http_handler(std::string_view key,
 template<typename Func, typename... Aspects>
 void router::set_default_handler(Func&& handler, Aspects&&... asps)
 {
-    auto coro_handler = make_coro_http_handler(std::move(handler), std::forward<Aspects>(asps)...);
-    this->set_default_handler_impl(std::move(coro_handler));
+    set_default_handler_impl(
+        make_coro_http_handler(std::move(handler), std::forward<Aspects>(asps)...));
 }
 
 template<typename Func, typename... Aspects>
 void router::set_file_request_handler(Func&& handler, Aspects&&... asps)
 {
-    auto coro_handler = make_coro_http_handler(std::move(handler), std::forward<Aspects>(asps)...);
-    set_file_request_handler_impl(std::move(coro_handler));
+    set_file_request_handler_impl(
+        make_coro_http_handler(std::move(handler), std::forward<Aspects>(asps)...));
 }
 template<typename OpenFunc, typename MessageFunc, typename CloseFunc>
 void router::set_ws_handler(std::string_view key,
@@ -172,14 +155,10 @@ void router::set_ws_handler(std::string_view key,
                             MessageFunc&& message_handler,
                             CloseFunc&& close_handler)
 {
-    auto coro_open_handler    = detail::make_coro_handler(std::move(open_handler));
-    auto coro_close_handler   = detail::make_coro_handler(std::move(close_handler));
-    auto coro_message_handler = detail::make_coro_handler(std::move(message_handler));
-
     set_ws_handler_impl(key,
-                        std::move(coro_open_handler),
-                        std::move(coro_message_handler),
-                        std::move(coro_close_handler));
+                        detail::make_coro_handler(std::move(open_handler)),
+                        detail::make_coro_handler(std::move(message_handler)),
+                        detail::make_coro_handler(std::move(close_handler)));
 }
 
 } // namespace httplib
