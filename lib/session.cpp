@@ -20,6 +20,7 @@
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 #endif
+#include "response_impl.h"
 
 namespace httplib {
 
@@ -147,10 +148,10 @@ public:
         if (ec)
             co_return nullptr;
 
-        httplib::response resp(req_.header().version(), req_.keep_alive());
+        httplib::response_impl resp(stream_, req_.header().version(), req_.keep_alive());
         resp.header().reason("Connection Established");
         resp.header().result(http::status::ok);
-        co_await http::async_write(stream_, resp.message(), net_awaitable[ec]);
+        ec = co_await resp.reply(std::chrono::seconds(10));
         if (ec)
             co_return nullptr;
 
@@ -219,7 +220,7 @@ public:
                 co_return std::make_unique<http_proxy_task>(
                     std::move(stream_), std::move(req), serv_);
             }
-            httplib::response resp(header.version(), header.keep_alive());
+            httplib::response_impl resp(stream_, header.version(), header.keep_alive());
             httplib::request req;
             if (serv_.router().has_handler(header.method(), header.target())) {
                 switch (header.method()) {
@@ -261,14 +262,14 @@ public:
                     catch (const std::exception& e) {
                         serv_.get_logger()->warn("exception in business function, reason: {}",
                                                  e.what());
-                        resp.set_string_content(std::string_view(e.what()),
+                        resp.set_string_content(std::string(e.what()),
                                                 "text/html",
                                                 http::status::internal_server_error);
                     }
                     catch (...) {
                         using namespace std::string_view_literals;
                         serv_.get_logger()->warn("unknown exception in business function");
-                        resp.set_string_content("unknown exception"sv,
+                        resp.set_string_content(std::string("unknown exception"),
                                                 "text/html",
                                                 http::status::internal_server_error);
                     }
@@ -291,27 +292,12 @@ public:
                     std::chrono::duration_cast<std::chrono::milliseconds>(span_time).count());
             }
 
-            resp.prepare_payload();
+            auto accept_encodings = util::split(req.header()[http::field::accept_encoding], ",");
 
-            for (const auto& encoding :
-                 util::split(req.header()[http::field::accept_encoding], ","))
-            {
-                if (body::compressor_factory::instance().is_supported_encoding(encoding)) {
-                    resp.header().set(http::field::content_encoding, encoding);
-                    resp.message().chunked(true);
-                    break;
-                }
-            }
-
-            http::response_serializer<body::any_body> serializer(resp.message());
-            while (!serializer.is_done()) {
-                stream_.expires_after(serv_.write_timeout());
-                co_await http::async_write_some(stream_, serializer, net_awaitable[ec]);
-                stream_.expires_never();
-                if (ec) {
-                    serv_.get_logger()->trace("write http body failed: {}", ec.message());
-                    co_return nullptr;
-                }
+            ec = co_await resp.reply(serv_.write_timeout(), accept_encodings);
+            if (ec) {
+                serv_.get_logger()->trace("reply http body failed: {}", ec.message());
+                co_return nullptr;
             }
 
             if (!resp.keep_alive()) {

@@ -1,17 +1,16 @@
-#include "httplib/response.hpp"
-
+#include "response_impl.h"
+#include "body/compressor.hpp"
+#include "httplib/use_awaitable.hpp"
 #include "mime_types.hpp"
+#include <boost/beast/http/write.hpp>
 #include <boost/beast/version.hpp>
-#include <fmt/format.h>
 
 namespace httplib {
 
-response::response(http::response<body::any_body>&& other)
-    : message_(std::move(other))
-{
-}
-
-response::response(unsigned int version, bool keep_alive)
+response_impl::response_impl(http_variant_stream_type& stream,
+                             unsigned int version,
+                             bool keep_alive)
+    : stream_(stream)
 {
     message_.result(http::status::not_found);
     message_.version(version);
@@ -20,19 +19,31 @@ response::response(unsigned int version, bool keep_alive)
     message_.keep_alive(keep_alive);
 }
 
-bool response::keep_alive() const
+response_impl::response_impl(http_variant_stream_type& stream,
+                             http::response<body::any_body>&& other)
+    : stream_(stream)
+    , message_(std::move(other))
+{
+}
+
+bool response_impl::keep_alive() const
 {
     return message_.keep_alive();
 }
 
-void response::set_empty_content(http::status status)
+httplib::response::header_type& response_impl::header()
+{
+    return message_.base();
+}
+
+void response_impl::set_empty_content(http::status status)
 {
     message_.result(status);
     message_.body() = body::empty_body::value_type {};
     message_.content_length(0);
 }
 
-void response::set_error_content(http::status status)
+void response_impl::set_error_content(http::status status)
 {
     auto content = fmt::format(
         R"(<html>
@@ -49,9 +60,9 @@ void response::set_error_content(http::status status)
     set_string_content(std::move(content), "text/html; charset=utf-8", status);
 }
 
-void response::set_string_content(std::string&& data,
-                                  std::string_view content_type,
-                                  http::status status /*= http::status::ok*/)
+void response_impl::set_string_content(std::string&& data,
+                                       std::string_view content_type,
+                                       http::status status /*= http::status::ok*/)
 {
     message_.content_length(data.size());
     message_.set(http::field::content_type, content_type);
@@ -59,15 +70,8 @@ void response::set_string_content(std::string&& data,
     message_.body() = std::move(data);
 }
 
-void response::set_string_content(std::string_view data,
-                                  std::string_view content_type,
-                                  http::status status /*= http::status::ok*/)
-{
-    set_string_content(std::string(data), content_type, status);
-}
-
-void response::set_json_content(body::json_body::value_type&& data,
-                                http::status status /*= http::status::ok*/)
+void response_impl::set_json_content(boost::json::value&& data,
+                                     http::status status /*= http::status::ok*/)
 {
     message_.result(status);
     message_.set(http::field::content_type, "application/json; charset=utf-8");
@@ -75,13 +79,7 @@ void response::set_json_content(body::json_body::value_type&& data,
     message_.body() = std::move(data);
 }
 
-void response::set_json_content(const body::json_body::value_type& data,
-                                http::status status /*= http::status::ok*/)
-{
-    set_json_content(body::json_body::value_type(data));
-}
-
-void response::set_file_content(const fs::path& path, const http::fields& req_header)
+void response_impl::set_file_content(const fs::path& path, const http::fields& req_header /*=*/)
 {
     std::error_code ec;
     auto file_size = fs::file_size(path, ec);
@@ -149,7 +147,7 @@ void response::set_file_content(const fs::path& path, const http::fields& req_he
     message_.body() = std::move(file);
 }
 
-void response::set_form_data_content(const std::vector<form_data::field>& data)
+void response_impl::set_form_data_content(const std::vector<form_data::field>& data)
 {
     body::form_data_body::value_type value;
     value.boundary = html::generate_boundary();
@@ -161,17 +159,39 @@ void response::set_form_data_content(const std::vector<form_data::field>& data)
     message_.body() = std::move(value);
 }
 
-void response::set_redirect(std::string_view url,
-                            http::status status /*= http::status::moved_permanently*/)
+void response_impl::set_redirect(std::string_view url,
+                                 http::status status /*= http::status::moved_permanently*/)
 {
     message_.set(http::field::location, url);
     set_empty_content(status);
 }
 
-void response::prepare_payload()
+httplib::net::awaitable<boost::system::error_code>
+response_impl::reply(const std::chrono::steady_clock::duration& timeout,
+                     const std::vector<std::string_view>& accept_encodings)
 {
     if (!message_.has_content_length())
         message_.prepare_payload();
+
+    for (const auto& encoding : accept_encodings) {
+        if (body::compressor_factory::instance().is_supported_encoding(encoding)) {
+            message_.set(http::field::content_encoding, encoding);
+            message_.chunked(true);
+            break;
+        }
+    }
+
+    boost::system::error_code ec;
+
+    http::response_serializer<body::any_body> serializer(message_);
+    while (!serializer.is_done()) {
+        stream_.expires_after(timeout);
+        co_await http::async_write_some(stream_, serializer, net_awaitable[ec]);
+        stream_.expires_never();
+        if (ec)
+            break;
+    }
+    co_return ec;
 }
 
 } // namespace httplib
