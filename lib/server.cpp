@@ -22,12 +22,12 @@ static std::string read_file_fast(const fs::path& path)
 }
 
 server::server(net::io_context& ioc)
-    : impl_(new server_impl(ioc.get_executor()))
+    : server(ioc.get_executor())
 {
 }
 
 server::server(const net::any_io_executor& ex)
-    : impl_(new server_impl(ex))
+    : impl_(std::make_unique<server_impl>(ex))
 {
 }
 

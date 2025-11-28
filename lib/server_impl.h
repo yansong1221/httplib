@@ -2,10 +2,11 @@
 #include "httplib/server.hpp"
 
 #include "httplib/router.hpp"
+#include "router_impl.h"
 #include "session.hpp"
 #include <boost/asio/co_spawn.hpp>
-#include <boost/asio/strand.hpp>
 #include <boost/asio/detached.hpp>
+#include <boost/asio/strand.hpp>
 #include <boost/asio/thread_pool.hpp>
 #include <functional>
 #include <iostream>
@@ -33,7 +34,7 @@ public:
     net::awaitable<boost::system::error_code> co_run();
 
     void stop();
-    httplib::router& router();
+    httplib::router_impl& router();
 
     void set_read_timeout(const std::chrono::steady_clock::duration& dur);
     void set_write_timeout(const std::chrono::steady_clock::duration& dur);
@@ -56,7 +57,7 @@ private:
 private:
     net::any_io_executor ex_;
 
-    httplib::router router_;
+    httplib::router_impl router_;
     tcp::acceptor acceptor_;
 
     net::strand<net::any_io_executor> session_strand_;

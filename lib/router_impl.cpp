@@ -126,7 +126,7 @@ httplib::router_impl::Node* router_impl::insert(Node* node,
 
 
 // ---------------- 匹配路由 ----------------
-net::awaitable<void> router_impl::proc_routing(request& req, response& resp) const
+net::awaitable<void> router_impl::proc_routing(request_impl& req, response_impl& resp) const
 {
     // std::shared_lock lock(mutex_);
 
@@ -135,7 +135,7 @@ net::awaitable<void> router_impl::proc_routing(request& req, response& resp) con
             co_return;
     }
 
-    auto segments = util::split(req.path, "/");
+    auto segments = util::split(req.decoded_path(), "/");
     if (auto node = match_node(root_.get(), segments, 0, req.path_params); node) {
         auto iter = node->handlers.find(req.header().method());
         if (iter == node->handlers.end()) {
@@ -207,20 +207,25 @@ void router_impl::set_ws_handler_impl(std::string_view path,
 
     auto node = insert(root_.get(), segments, 0);
 
-    router::ws_handler_entry entry;
+    ws_handler_entry entry;
     entry.open_handler    = std::move(open_handler);
     entry.message_handler = std::move(message_handler);
     entry.close_handler   = std::move(close_handler);
     node->ws_handler      = std::move(entry);
 }
 
-std::optional<httplib::router::ws_handler_entry> router_impl::find_ws_handler(request& req) const
+std::optional<router_impl::ws_handler_entry> router_impl::find_ws_handler(request& req) const
 {
     // std::shared_lock lock(mutex_);
-    auto segments = util::split(req.path, "/");
+    auto segments = util::split(req.decoded_path(), "/");
     if (auto node = match_node(root_.get(), segments, 0, req.path_params); node)
         return node->ws_handler;
     return std::nullopt;
+}
+
+bool router_impl::has_handler(http::verb method, std::string_view target) const
+{
+    return true;
 }
 
 // ---------------- match_node ----------------
@@ -304,7 +309,7 @@ httplib::net::awaitable<bool> router_impl::handle_file_request(request& req, res
     beast::error_code ec;
 
     for (const auto& entry : static_file_entry_) {
-        std::string_view target(req.path);
+        std::string_view target(req.decoded_path());
         // Prefix match
         if (!target.starts_with(entry.mount_point))
             continue;
@@ -320,8 +325,8 @@ httplib::net::awaitable<bool> router_impl::handle_file_request(request& req, res
         if (!fs::exists(path, ec))
             continue;
 
-        if (target.empty() && !req.path.ends_with("/")) {
-            res.set_redirect(req.path + "/");
+        if (target.empty() && !req.decoded_path().ends_with("/")) {
+            res.set_redirect(std::string(req.decoded_path()) + "/");
             co_return true;
         }
 
@@ -352,7 +357,7 @@ httplib::net::awaitable<bool> router_impl::handle_file_request(request& req, res
         }
         else if (fs::is_directory(path, ec)) {
             beast::error_code ec;
-            auto body = html::format_dir_to_html(req.path, path, ec);
+            auto body = html::format_dir_to_html(req.decoded_path(), path, ec);
             if (ec)
                 co_return false;
             res.set_string_content(body, "text/html; charset=utf-8");

@@ -1,5 +1,7 @@
 
 #include "httplib/client.hpp"
+#include "httplib/request.hpp"
+#include "httplib/response.hpp"
 #include "httplib/router.hpp"
 #include "httplib/server.hpp"
 #include <boost/asio/thread_pool.hpp>
@@ -20,6 +22,17 @@ struct log_t
 private:
     std::chrono::steady_clock::time_point start_;
 };
+
+struct test
+{
+    httplib::net::awaitable<void> get(httplib::request& req, httplib::response& resp)
+    {
+        using namespace std::string_view_literals;
+        resp.set_string_content("hello"sv, "text/html");
+        co_return;
+    }
+};
+
 int main()
 { // HTTP
     using namespace std::string_view_literals;
@@ -62,17 +75,20 @@ int main()
 
     router.set_http_handler<httplib::http::verb::get>(
         "/hello",
-        [](httplib::request& req, httplib::response& resp) -> httplib::net::awaitable<void> {
+        [](httplib::request& req, httplib::response& resp) -> void {
             resp.set_string_content("hello"sv, "text/html");
-            co_return;
+            return;
         },
         log_t {});
-    //router.set_http_handler<httplib::http::verb::get>(
-    //    "/close", [&](httplib::request& req, httplib::response& resp) { svr.stop(); });
-    //router.set_http_handler<httplib::http::verb::post>(
-    //    "/json",
-    //    [](httplib::request& req, httplib::response& resp) -> httplib::net::awaitable<void> {
-    //        auto& doc = req.body().as<httplib::body::json_body>();
+
+    test tt;
+    router.set_http_handler<httplib::http::verb::get>("/test", &test::get, tt, log_t {});
+    // router.set_http_handler<httplib::http::verb::get>(
+    //     "/close", [&](httplib::request& req, httplib::response& resp) { svr.stop(); });
+    // router.set_http_handler<httplib::http::verb::post>(
+    //     "/json",
+    //     [](httplib::request& req, httplib::response& resp) -> httplib::net::awaitable<void> {
+    //         auto& doc = req.body().as<httplib::body::json_body>();
 
     //        /*           const auto &obj = doc.get_object();
     //        for (const auto &item : obj.at("statuses").as_array()) {
@@ -85,10 +101,10 @@ int main()
     //    },
     //    log_t {});
 
-    //router.set_http_handler<httplib::http::verb::post>(
-    //    "/x-www-from-urlencoded",
-    //    [](httplib::request& req, httplib::response& resp) -> httplib::net::awaitable<void> {
-    //        auto& doc = req.body().as<httplib::body::query_params_body>();
+    // router.set_http_handler<httplib::http::verb::post>(
+    //     "/x-www-from-urlencoded",
+    //     [](httplib::request& req, httplib::response& resp) -> httplib::net::awaitable<void> {
+    //         auto& doc = req.body().as<httplib::body::query_params_body>();
 
     //        /*           const auto &obj = doc.get_object();
     //        for (const auto &item : obj.at("statuses").as_array()) {
@@ -140,16 +156,16 @@ int main()
     ////        co_return;
     ////    },
     ////    log_t{});
-    //httplib::http::fields header;
-    //header.set("Cross-Origin-Opener-Policy", "same-origin");
-    //header.set("Cross-Origin-Embedder-Policy", "require-corp");
-    //header.set("Access-Control-Allow-Origin", "*");
-    //router.set_mount_point(
-    //    "/",
-    //    R"(E:/)",
-    //    header);
+    // httplib::http::fields header;
+    // header.set("Cross-Origin-Opener-Policy", "same-origin");
+    // header.set("Cross-Origin-Embedder-Policy", "require-corp");
+    // header.set("Access-Control-Allow-Origin", "*");
+    // router.set_mount_point(
+    //     "/",
+    //     R"(E:/)",
+    //     header);
 
-    //router.set_mount_point("/files", R"(D:/)", header);
+    // router.set_mount_point("/files", R"(D:/)", header);
     svr.async_run();
 
     pool.wait();

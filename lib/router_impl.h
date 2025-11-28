@@ -1,7 +1,7 @@
 #pragma once
-
-#include "httplib/http_handler.hpp"
 #include "httplib/router.hpp"
+#include "request_impl.h"
+#include "response_impl.h"
 #include <boost/beast/http.hpp>
 #include <functional>
 #include <memory>
@@ -13,33 +13,39 @@
 
 namespace httplib {
 
-class router_impl
+class router_impl : public router
 {
 public:
     router_impl();
 
-    // 添加路由
-    void set_http_handler_impl(http::verb method,
-                               std::string_view path,
-                               coro_http_handler_type&& handler);
 
-    // 匹配路由
-    net::awaitable<void> proc_routing(request& req, response& resp) const;
+    net::awaitable<void> proc_routing(request_impl& req, response_impl& resp) const;
 
     bool set_mount_point(const std::string& mount_point,
                          const std::filesystem::path& dir,
-                         const http::fields& headers = {});
-    bool remove_mount_point(const std::string& mount_point);
+                         const http::fields& headers = {}) override;
+    bool remove_mount_point(const std::string& mount_point) override;
 
-    void set_default_handler_impl(coro_http_handler_type&& handler);
-    void set_file_request_handler_impl(coro_http_handler_type&& handler);
+    struct ws_handler_entry
+    {
+        websocket_conn::coro_open_handler_type open_handler;
+        websocket_conn::coro_close_handler_type close_handler;
+        websocket_conn::coro_message_handler_type message_handler;
+    };
+    std::optional<ws_handler_entry> find_ws_handler(request& req) const;
 
+    bool has_handler(http::verb method, std::string_view target) const;
+
+protected:
+    void set_http_handler_impl(http::verb method,
+                               std::string_view path,
+                               coro_http_handler_type&& handler) override;
+    void set_default_handler_impl(coro_http_handler_type&& handler) override;
+    void set_file_request_handler_impl(coro_http_handler_type&& handler) override;
     void set_ws_handler_impl(std::string_view path,
                              websocket_conn::coro_open_handler_type&& open_handler,
                              websocket_conn::coro_message_handler_type&& message_handler,
-                             websocket_conn::coro_close_handler_type&& close_handler);
-
-    std::optional<router::ws_handler_entry> find_ws_handler(request& req) const;
+                             websocket_conn::coro_close_handler_type&& close_handler) override;
 
 private:
     struct Node
@@ -53,13 +59,13 @@ private:
         std::regex regex;
 
         std::unordered_map<http::verb, coro_http_handler_type> handlers;
-        std::optional<router::ws_handler_entry> ws_handler;
+        std::optional<ws_handler_entry> ws_handler;
 
         std::vector<std::unique_ptr<Node>> children;
     };
 
     std::unique_ptr<Node> root_;
-   // mutable std::shared_mutex mutex_;
+    // mutable std::shared_mutex mutex_;
 
     coro_http_handler_type default_handler_;
     coro_http_handler_type file_request_handler_;

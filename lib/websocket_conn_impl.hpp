@@ -3,6 +3,7 @@
 #include "httplib/use_awaitable.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/websocket_conn.hpp"
+#include "request_impl.h"
 #include "server_impl.h"
 #include "stream/websocket_stream.hpp"
 #include <boost/asio/awaitable.hpp>
@@ -17,7 +18,9 @@ namespace httplib {
 class websocket_conn_impl : public websocket_conn
 {
 public:
-    websocket_conn_impl(server_impl& serv, websocket_variant_stream_type&& stream, request&& req);
+    websocket_conn_impl(server_impl& serv,
+                        websocket_variant_stream_type&& stream,
+                        request_impl&& req);
 
 public:
     void send_message(std::string&& msg, data_type type) override;
@@ -31,7 +34,7 @@ public:
 private:
     server_impl& serv_;
 
-    request req_;
+    request_impl req_;
     net::strand<net::any_io_executor> strand_;
     websocket_variant_stream_type ws_;
 

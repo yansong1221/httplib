@@ -20,6 +20,7 @@
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 #endif
+#include "request_impl.h"
 #include "response_impl.h"
 
 namespace httplib {
@@ -98,7 +99,7 @@ class session::websocket_task : public session::task
 {
 public:
     explicit websocket_task(websocket_variant_stream_type&& stream,
-                            request&& req,
+                            request_impl&& req,
                             server_impl& serv)
         : conn_(std::make_shared<httplib::websocket_conn_impl>(
               serv, std::move(stream), std::move(req)))
@@ -119,7 +120,9 @@ private:
 class session::http_proxy_task : public session::task
 {
 public:
-    explicit http_proxy_task(http_variant_stream_type&& stream, request&& req, server_impl& serv)
+    explicit http_proxy_task(http_variant_stream_type&& stream,
+                             request_impl&& req,
+                             server_impl& serv)
         : stream_(std::move(stream))
         , req_(std::move(req))
         , serv_(serv)
@@ -177,7 +180,7 @@ private:
     tcp::resolver resolver_;
     tcp::socket proxy_socket_;
 
-    request req_;
+    request_impl req_;
     server_impl& serv_;
 };
 
@@ -216,19 +219,24 @@ public:
 
             // http proxy
             if (header.method() == http::verb::connect) {
-                httplib::request req(header_parser.release());
+                httplib::request_impl req(
+                    local_endpoint_, remote_endpoint_, header_parser.release());
                 co_return std::make_unique<http_proxy_task>(
                     std::move(stream_), std::move(req), serv_);
             }
             httplib::response_impl resp(stream_, header.version(), header.keep_alive());
-            httplib::request req;
+            std::optional<httplib::request_impl> req;
+
+            std::chrono::steady_clock::time_point start_time;
+
             if (serv_.router().has_handler(header.method(), header.target())) {
                 switch (header.method()) {
                     case http::verb::get:
                     case http::verb::head:
                     case http::verb::trace:
                     case http::verb::connect:
-                        req = httplib::request(header_parser.release());
+                        req = httplib::request_impl(
+                            local_endpoint_, remote_endpoint_, header_parser.release());
                         break;
                     default: {
                         http::request_parser<body::any_body> body_parser(std::move(header_parser));
@@ -243,56 +251,56 @@ public:
                                 co_return nullptr;
                             }
                         }
-                        req = body_parser.release();
+                        req = httplib::request_impl(
+                            local_endpoint_, remote_endpoint_, body_parser.release());
                     } break;
                 }
-                auto start_time = std::chrono::steady_clock::now();
 
-                // init request
-                if (init_request(req)) {
-                    try {
-                        // websocket
-                        if (websocket::is_upgrade(req.header())) {
-                            auto stream = create_websocket_variant_stream(std::move(stream_));
-                            co_return std::make_unique<websocket_task>(
-                                std::move(stream), std::move(req), serv_);
-                        }
-                        co_await serv_.router().routing(req, resp);
+                start_time = std::chrono::steady_clock::now();
+
+                try {
+                    // websocket
+                    if (websocket::is_upgrade(req->header())) {
+                        auto stream = create_websocket_variant_stream(std::move(stream_));
+                        co_return std::make_unique<websocket_task>(
+                            std::move(stream), std::move(req.value()), serv_);
                     }
-                    catch (const std::exception& e) {
-                        serv_.get_logger()->warn("exception in business function, reason: {}",
-                                                 e.what());
-                        resp.set_string_content(std::string(e.what()),
-                                                "text/html",
-                                                http::status::internal_server_error);
-                    }
-                    catch (...) {
-                        using namespace std::string_view_literals;
-                        serv_.get_logger()->warn("unknown exception in business function");
-                        resp.set_string_content(std::string("unknown exception"),
-                                                "text/html",
-                                                http::status::internal_server_error);
-                    }
+                    co_await serv_.router().proc_routing(req.value(), resp);
                 }
-                else {
-                    resp.set_error_content(http::status::bad_request);
+                catch (const std::exception& e) {
+                    serv_.get_logger()->warn("exception in business function, reason: {}",
+                                             e.what());
+                    resp.set_string_content(
+                        std::string(e.what()), "text/html", http::status::internal_server_error);
                 }
-
-                auto span_time = std::chrono::steady_clock::now() - start_time;
-
-                serv_.get_logger()->debug(
-                    "{} {} ({}:{} -> {}:{}) {} {}ms",
-                    req.header().method_string(),
-                    req.header().target(),
-                    remote_endpoint_.address().to_string(),
-                    remote_endpoint_.port(),
-                    local_endpoint_.address().to_string(),
-                    local_endpoint_.port(),
-                    resp.header().result_int(),
-                    std::chrono::duration_cast<std::chrono::milliseconds>(span_time).count());
+                catch (...) {
+                    using namespace std::string_view_literals;
+                    serv_.get_logger()->warn("unknown exception in business function");
+                    resp.set_string_content(std::string("unknown exception"),
+                                            "text/html",
+                                            http::status::internal_server_error);
+                }
+            }
+            else {
+                start_time = std::chrono::steady_clock::now();
+                resp.set_error_content(http::status::bad_request);
             }
 
-            auto accept_encodings = util::split(req.header()[http::field::accept_encoding], ",");
+            auto span_time = std::chrono::steady_clock::now() - start_time;
+
+            serv_.get_logger()->debug(
+                "{} {} ({}:{} -> {}:{}) {} {}ms",
+                req->header().method_string(),
+                req->header().target(),
+                remote_endpoint_.address().to_string(),
+                remote_endpoint_.port(),
+                local_endpoint_.address().to_string(),
+                local_endpoint_.port(),
+                resp.header().result_int(),
+                std::chrono::duration_cast<std::chrono::milliseconds>(span_time).count());
+
+
+            auto accept_encodings = util::split(req->header()[http::field::accept_encoding], ",");
 
             ec = co_await resp.reply(serv_.write_timeout(), accept_encodings);
             if (ec) {
@@ -317,26 +325,6 @@ public:
     {
         boost::system::error_code ec;
         stream_.close(ec);
-    }
-
-private:
-    bool init_request(httplib::request& req) const
-    {
-        req.local_endpoint  = local_endpoint_;
-        req.remote_endpoint = remote_endpoint_;
-
-        auto tokens = util::split(req.header().target(), "?");
-        if (tokens.empty() || tokens.size() > 2)
-            return false;
-
-        req.path = util::url_decode(tokens[0]);
-        if (tokens.size() >= 2) {
-            bool is_valid    = true;
-            req.query_params = html::parse_http_query_params(tokens[1], is_valid);
-            if (!is_valid)
-                return false;
-        }
-        return true;
     }
 
 private:

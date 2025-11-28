@@ -50,7 +50,7 @@ void server_impl::stop()
     acceptor_.close(ec);
 }
 
-httplib::router& server_impl::router()
+httplib::router_impl& server_impl::router()
 {
     return router_;
 }

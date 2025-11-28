@@ -7,7 +7,7 @@ namespace httplib {
 
 websocket_conn_impl::websocket_conn_impl(server_impl& serv,
                                          websocket_variant_stream_type&& stream,
-                                         request&& req)
+                                         request_impl&& req)
 
     : serv_(serv)
     , req_(std::move(req))
