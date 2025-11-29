@@ -165,6 +165,10 @@ http_client::impl::async_send_request_impl(http_client::request& req)
             std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
             variant_stream_ = std::make_unique<http_variant_stream_type>(std::move(stream));
         }
+
+        net::socket_base::reuse_address option(true);
+        variant_stream_->lowest_layer().set_option(option);
+
         expires_after(true);
 
         co_await std::visit(

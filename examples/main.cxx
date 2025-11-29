@@ -1,5 +1,6 @@
 
 #include "httplib/client/client.hpp"
+#include "httplib/client/multi_client_pool.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
@@ -49,6 +50,9 @@ int main()
 
     svr.listen("0.0.0.0", 18808);
 
+    auto client_pool =
+        std::make_shared<httplib::client::multi_http_client_pool>(pool.get_executor());
+
     router.set_ws_handler(
         "/ws",
         [](httplib::server::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> {
@@ -81,9 +85,18 @@ int main()
 
     router.set_http_handler<httplib::http::verb::get>(
         "/hello",
-        [](httplib::server::request& req, httplib::server::response& resp) -> void {
-            resp.set_string_content("hello"sv, "text/html");
-            return;
+        [&](httplib::server::request& req,
+            httplib::server::response& resp) -> boost::asio::awaitable<void> {
+            auto hdl     = client_pool->acquire("www.baidu.com", 80, false);
+            auto cli_res = co_await hdl->async_get("/");
+
+            if (!cli_res) {
+                resp.set_string_content(cli_res.error().message(), "text/html");
+                co_return;
+            }
+
+            resp.set_string_content(cli_res->body().as<httplib::body::string_body>(), "text/html");
+            co_return;
         },
         log_t {});
 
