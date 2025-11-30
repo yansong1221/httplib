@@ -1,7 +1,7 @@
 #pragma once
+#include "httplib/server/request.hpp"
+#include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
-#include "request_impl.h"
-#include "response_impl.h"
 #include <boost/beast/http.hpp>
 #include <functional>
 #include <memory>
@@ -19,7 +19,7 @@ public:
     router_impl();
 
 
-    net::awaitable<void> proc_routing(request_impl& req, response_impl& resp) const;
+    net::awaitable<void> proc_routing(request& req, response& resp) const;
 
     bool set_mount_point(const std::string& mount_point,
                          const std::filesystem::path& dir,

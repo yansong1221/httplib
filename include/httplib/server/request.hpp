@@ -2,36 +2,43 @@
 #include "httplib/body/any_body.hpp"
 #include <any>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/message.hpp>
 #include <regex>
 
 namespace httplib::server {
 
-struct request
+struct request : public http::request<body::any_body>
 {
 public:
-    using header_type  = http::request_header<http::fields>;
-    virtual ~request() = default;
+    request(tcp::endpoint local_endpoint,
+            tcp::endpoint remote_endpoint,
+            http::request<body::any_body>&& other);
 
-    virtual header_type& header()                                  = 0;
-    virtual std::string_view decoded_path() const                  = 0;
-    virtual const html::query_params& decoded_query_params() const = 0;
+    request(tcp::endpoint local_endpoint,
+            tcp::endpoint remote_endpoint,
+            http::request<http::empty_body>&& other);
 
-    virtual const std::string& as_string() const      = 0;
-    virtual const boost::json::value& as_json() const = 0;
+    request& operator=(request&& other) noexcept;
+    request(request&& other) noexcept;
 
-    virtual bool keep_alive() const = 0;
+    ~request();
 
-    virtual net::ip::address get_client_ip() const       = 0;
-    virtual const tcp::endpoint& local_endpoint() const  = 0;
-    virtual const tcp::endpoint& remote_endpoint() const = 0;
+    std::string decoded_path() const;
+    const html::query_params& decoded_query_params() const;
 
-    virtual void set_custom_data(std::any&& data) = 0;
-    virtual std::any& custom_data()               = 0;
+    net::ip::address get_client_ip() const;
+    const tcp::endpoint& local_endpoint() const;
+    const tcp::endpoint& remote_endpoint() const;
+
+    void set_custom_data(std::any&& data);
+    std::any& custom_data();
 
 public:
+    class impl;
+    std::unique_ptr<impl> impl_;
+
     std::unordered_map<std::string, std::string> path_params;
-    std::smatch matches;
 };
 
 

@@ -212,13 +212,12 @@ private:
 };
 
 any_body::writer::writer(http::fields& h, value_type& b)
-    : impl_(new any_body::writer::impl(h, b))
+    : impl_(std::make_unique<any_body::writer::impl>(h, b))
 {
 }
 
 any_body::writer::~writer()
 {
-    delete impl_;
 }
 void any_body::writer::init(boost::system::error_code& ec)
 {
@@ -232,12 +231,11 @@ any_body::writer::get(boost::system::error_code& ec)
 }
 
 any_body::reader::reader(http::fields& h, value_type& b)
-    : impl_(new any_body::reader::impl(h, b))
+    : impl_(std::make_unique<any_body::reader::impl>(h, b))
 {
 }
 any_body::reader::~reader()
 {
-    delete impl_;
 }
 void any_body::reader::init(boost::optional<std::uint64_t> const& content_length,
                             boost::system::error_code& ec)

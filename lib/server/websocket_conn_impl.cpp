@@ -7,7 +7,7 @@ namespace httplib::server {
 
 websocket_conn_impl::websocket_conn_impl(http_server_impl& serv,
                                          websocket_variant_stream_type&& stream,
-                                         request_impl&& req)
+                                         request&& req)
 
     : serv_(serv)
     , req_(std::move(req))
@@ -89,8 +89,7 @@ httplib::net::awaitable<void> websocket_conn_impl::run()
     boost::system::error_code ec;
     auto remote_endp = ws_.remote_endpoint(ec);
 
-    http::request<http::empty_body> req(req_.header());
-    co_await ws_.async_accept(req, net_awaitable[ec]);
+    co_await ws_.async_accept(req_, net_awaitable[ec]);
     if (ec) {
         serv_.get_logger()->error("websocket handshake failed: {}", ec.message());
         co_return;

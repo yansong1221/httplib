@@ -90,7 +90,7 @@ struct any_body
 
     private:
         class impl;
-        impl* impl_ = nullptr;
+        std::unique_ptr<impl> impl_;
     };
     //--------------------------------------------------------------------------
 
@@ -116,7 +116,7 @@ struct any_body
 
     private:
         class impl;
-        impl* impl_ = nullptr;
+        std::unique_ptr<impl> impl_;
     };
 };
 

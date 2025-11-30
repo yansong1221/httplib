@@ -166,9 +166,6 @@ http_client::impl::async_send_request_impl(http_client::request& req)
             variant_stream_ = std::make_unique<http_variant_stream_type>(std::move(stream));
         }
 
-        net::socket_base::reuse_address option(true);
-        variant_stream_->lowest_layer().set_option(option);
-
         expires_after(true);
 
         co_await std::visit(
@@ -185,6 +182,9 @@ http_client::impl::async_send_request_impl(http_client::request& req)
                 }
             },
             *variant_stream_);
+
+        net::socket_base::reuse_address option(true);
+        variant_stream_->lowest_layer().set_option(option);
     }
 
     http::request_serializer<body::any_body> serializer(req);
