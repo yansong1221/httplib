@@ -9,35 +9,9 @@
 
 namespace httplib {
 namespace html {
-using range_type  = std::pair<int64_t, int64_t>;
-using http_ranges = std::vector<range_type>;
-
-
-class query_params : public std::unordered_multimap<std::string, std::string>
-{
-    using std::unordered_multimap<std::string, std::string>::unordered_multimap;
-
-public:
-    std::string at(const std::string& key) const
-    {
-        auto iter = this->find(key);
-        if (iter == end()) {
-            throw std::runtime_error("Key not found: " + key);
-        }
-        return iter->second;
-    }
-    std::vector<std::string> all(const std::string& key) const
-    {
-        std::vector<std::string> values;
-        auto range = this->equal_range(key);
-        for (auto it = range.first; it != range.second; ++it) {
-            values.push_back(it->second);
-        }
-        return values;
-    }
-};
-
-// using query_params = std::unordered_multimap<std::string, std::string>;
+using range_type   = std::pair<int64_t, int64_t>;
+using http_ranges  = std::vector<range_type>;
+using query_params = std::unordered_multimap<std::string, std::string>;
 
 query_params parse_http_query_params(std::string_view content, bool& is_valid);
 std::string make_http_query_params(const query_params& params);

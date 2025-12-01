@@ -200,6 +200,8 @@ public:
     {
         boost::system::error_code ec;
         http::request_parser<http::empty_body> header_parser;
+        header_parser.header_limit(std::numeric_limits<unsigned long long>::max());
+
         while (!header_parser.is_header_done()) {
             stream_.expires_after(serv_.read_timeout());
             co_await http::async_read_some(stream_, buffer_, header_parser, net_awaitable[ec]);
@@ -254,11 +256,18 @@ public:
                 co_return std::make_unique<http_proxy_task>(
                     std::move(stream_), std::move(req), serv_);
             }
+            // websocket
+            if (websocket::is_upgrade(header->base())) {
+                auto stream = create_websocket_variant_stream(std::move(stream_));
+                request req(local_endpoint_, remote_endpoint_, std::move(header.value()));
+                co_return std::make_unique<websocket_task>(
+                    std::move(stream), std::move(req), serv_);
+            }
 
             response resp(header->version(), header->keep_alive());
             std::optional<request> req;
 
-            std::chrono::steady_clock::time_point start_time;
+            auto start_time = std::chrono::steady_clock::now();
 
             if (serv_.router().has_handler(header->method(), header->target())) {
                 auto body = co_await async_read_body(std::move(header.value()));
@@ -267,16 +276,7 @@ public:
                     co_return nullptr;
                 }
                 req = request(local_endpoint_, remote_endpoint_, std::move(body.value()));
-
-                start_time = std::chrono::steady_clock::now();
-
                 try {
-                    // websocket
-                    if (websocket::is_upgrade(req->base())) {
-                        auto stream = create_websocket_variant_stream(std::move(stream_));
-                        co_return std::make_unique<websocket_task>(
-                            std::move(stream), std::move(req.value()), serv_);
-                    }
                     co_await serv_.router().proc_routing(req.value(), resp);
                 }
                 catch (const std::exception& e) {
@@ -294,7 +294,6 @@ public:
                 }
             }
             else {
-                start_time = std::chrono::steady_clock::now();
                 resp.set_error_content(http::status::bad_request);
             }
 
@@ -315,12 +314,14 @@ public:
             if (!resp.has_content_length())
                 resp.prepare_payload();
 
-            auto accept_encodings = util::split(req->at(http::field::accept_encoding), ",");
-            for (const auto& encoding : accept_encodings) {
-                if (body::compressor_factory::instance().is_supported_encoding(encoding)) {
-                    resp.set(http::field::content_encoding, encoding);
-                    resp.chunked(true);
-                    break;
+            if (auto iter = req->find(http::field::accept_encoding); iter != req->end()) {
+                auto accept_encodings = util::split(iter->value(), ",");
+                for (const auto& encoding : accept_encodings) {
+                    if (body::compressor_factory::instance().is_supported_encoding(encoding)) {
+                        resp.set(http::field::content_encoding, encoding);
+                        resp.chunked(true);
+                        break;
+                    }
                 }
             }
 

@@ -134,9 +134,10 @@ net::awaitable<void> router_impl::proc_routing(request& req, response& resp) con
         if (co_await handle_file_request(req, resp))
             co_return;
     }
+    std::unordered_map<std::string, std::string> path_params;
 
     auto segments = util::split(req.decoded_path(), "/");
-    if (auto node = match_node(root_.get(), segments, 0, req.path_params); node) {
+    if (auto node = match_node(root_.get(), segments, 0, path_params); node) {
         auto iter = node->handlers.find(req.method());
         if (iter == node->handlers.end()) {
             resp.set_error_content(node->handlers.empty()
@@ -144,6 +145,9 @@ net::awaitable<void> router_impl::proc_routing(request& req, response& resp) con
                                        : httplib::http::status::method_not_allowed);
             co_return;
         }
+        for (const auto& [key, value] : path_params)
+            req.path_param(key, value);
+
         co_await iter->second(req, resp);
         co_return;
     }
@@ -217,9 +221,14 @@ void router_impl::set_ws_handler_impl(std::string_view path,
 std::optional<router_impl::ws_handler_entry> router_impl::find_ws_handler(request& req) const
 {
     // std::shared_lock lock(mutex_);
+    std::unordered_map<std::string, std::string> path_params;
     auto segments = util::split(req.decoded_path(), "/");
-    if (auto node = match_node(root_.get(), segments, 0, req.path_params); node)
+    if (auto node = match_node(root_.get(), segments, 0, path_params); node) {
+        for (const auto& [key, value] : path_params)
+            req.path_param(key, value);
         return node->ws_handler;
+    }
+
     return std::nullopt;
 }
 

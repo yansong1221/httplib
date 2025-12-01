@@ -4,7 +4,6 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/message.hpp>
-#include <regex>
 
 namespace httplib::server {
 
@@ -24,7 +23,8 @@ public:
 
     ~request();
 
-    std::string decoded_path() const;
+public:
+    std::string_view decoded_path() const;
     const html::query_params& decoded_query_params() const;
 
     net::ip::address get_client_ip() const;
@@ -34,11 +34,21 @@ public:
     void set_custom_data(std::any&& data);
     std::any& custom_data();
 
-public:
-    class impl;
-    std::unique_ptr<impl> impl_;
+    std::string_view path_param(const std::string& key) const;
+    void path_param(const std::string& key, const std::string& val);
 
-    std::unordered_map<std::string, std::string> path_params;
+    std::vector<std::string_view> query_param(const std::string& key) const;
+    std::string_view query_param_front(const std::string& key) const;
+
+public:
+    std::string decoded_path_;
+    html::query_params query_params_;
+
+    tcp::endpoint local_endpoint_;
+    tcp::endpoint remote_endpoint_;
+
+    std::unordered_map<std::string, std::string> path_params_;
+    std::any custom_data_;
 };
 
 
