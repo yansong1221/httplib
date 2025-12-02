@@ -30,8 +30,20 @@ struct test
     httplib::net::awaitable<void> get(httplib::server::request& req,
                                       httplib::server::response& resp)
     {
+        httplib::client::http_client cli(
+            co_await httplib::net::this_coro::executor, "127.0.0.1", 18808);
+
+        resp.set_stream_content([](httplib::beast::flat_buffer& buffer) -> bool { return true; },
+                                "text/html");
+
+        auto respones = co_await cli.async_get("/hello");
+        if (!respones) {
+            resp.set_error_content(httplib::http::status::internal_server_error);
+            co_return;
+        }
+
         using namespace std::string_view_literals;
-        resp.set_string_content("hello"sv, "text/html");
+        resp.set_string_content(respones->body().as<httplib::body::string_body>(), "text/html");
         co_return;
     }
 };

@@ -16,6 +16,8 @@ void response::set_empty_content(http::status status)
     this->result(status);
     this->body() = body::empty_body::value_type {};
     this->content_length(0);
+
+    stream_handler_ = nullptr;
 }
 
 void response::set_error_content(http::status status)
@@ -43,6 +45,8 @@ void response::set_string_content(std::string&& data,
     this->set(http::field::content_type, content_type);
     this->result(status);
     this->body() = std::move(data);
+
+    stream_handler_ = nullptr;
 }
 
 void response::set_json_content(boost::json::value&& data,
@@ -52,6 +56,8 @@ void response::set_json_content(boost::json::value&& data,
     this->set(http::field::content_type, "application/json; charset=utf-8");
     this->set(http::field::cache_control, "no-store");
     this->body() = std::move(data);
+
+    stream_handler_ = nullptr;
 }
 
 void response::set_file_content(const fs::path& path, const http::fields& req_header /*= {}*/)
@@ -120,6 +126,8 @@ void response::set_file_content(const fs::path& path, const http::fields& req_he
         this->result(http::status::partial_content);
     }
     body() = std::move(file);
+
+    stream_handler_ = nullptr;
 }
 
 void response::set_form_data_content(std::vector<form_data::field>&& data)
