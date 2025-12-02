@@ -88,14 +88,14 @@ int main()
         [&](httplib::server::request& req,
             httplib::server::response& resp) -> boost::asio::awaitable<void> {
             resp.set_stream_content(
-                [](httplib::beast::flat_buffer& buffer) -> bool {
+                [](httplib::beast::flat_buffer& buffer) -> boost::asio::awaitable<bool> {
                     static int count = 0;
                     std::string data = std::format("hello stream content {}\n", count++);
                     buffer.commit(boost::asio::buffer_copy(buffer.prepare(data.size()),
                                                            boost::asio::buffer(data)));
                     if (count > 10)
-                        return false;
-                    return true;
+                        co_return false;
+                    co_return true;
                 },
                 "text/html");
             co_return;

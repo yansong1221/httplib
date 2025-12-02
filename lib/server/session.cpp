@@ -326,22 +326,28 @@ public:
                 stream_.expires_never();
 
                 beast::flat_buffer buffer;
-                while (co_await resp.stream_handler_(buffer)) {
-                    http::chunk_body chunk_b(buffer.data());
-                    stream_.expires_after(serv_.write_timeout());
-                    co_await net::async_write(stream_, chunk_b, net_awaitable[ec]);
-                    if (ec) {
-                        serv_.get_logger()->trace("write chunk body failed: {}", ec.message());
-                        co_return nullptr;
+
+                for (;;) {
+                    bool has_more = co_await resp.stream_handler_(buffer);
+                    if (buffer.size() != 0) {
+                        http::chunk_body chunk_b(buffer.data());
+                        stream_.expires_after(serv_.write_timeout());
+                        co_await net::async_write(stream_, chunk_b, net_awaitable[ec]);
+                        if (ec) {
+                            serv_.get_logger()->trace("write chunk body failed: {}", ec.message());
+                            co_return nullptr;
+                        }
+                        stream_.expires_never();
                     }
-                    stream_.expires_never();
-                    buffer.consume(buffer.size());
-                }
-                http::chunk_last chunk_last;
-                co_await net::async_write(stream_, chunk_last, net_awaitable[ec]);
-                if (ec) {
-                    serv_.get_logger()->trace("write chunk last failed: {}", ec.message());
-                    co_return nullptr;
+                    if (!has_more) {
+                        http::chunk_last chunk_last;
+                        co_await net::async_write(stream_, chunk_last, net_awaitable[ec]);
+                        if (ec) {
+                            serv_.get_logger()->trace("write chunk last failed: {}", ec.message());
+                            co_return nullptr;
+                        }
+                        break;
+                    }
                 }
             }
             else {
