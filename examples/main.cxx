@@ -87,15 +87,17 @@ int main()
         "/hello",
         [&](httplib::server::request& req,
             httplib::server::response& resp) -> boost::asio::awaitable<void> {
-            auto hdl     = client_pool->acquire("www.baidu.com", 80, false);
-            auto cli_res = co_await hdl->async_get("/");
-
-            if (!cli_res) {
-                resp.set_string_content(cli_res.error().message(), "text/html");
-                co_return;
-            }
-
-            resp.set_string_content(cli_res->body().as<httplib::body::string_body>(), "text/html");
+            resp.set_stream_content(
+                [](httplib::beast::flat_buffer& buffer) -> bool {
+                    static int count = 0;
+                    std::string data = std::format("hello stream content {}\n", count++);
+                    buffer.commit(boost::asio::buffer_copy(buffer.prepare(data.size()),
+                                                           boost::asio::buffer(data)));
+                    if (count > 10)
+                        return false;
+                    return true;
+                },
+                "text/html");
             co_return;
         },
         log_t {});

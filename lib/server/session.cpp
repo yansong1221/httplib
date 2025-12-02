@@ -311,33 +311,68 @@ public:
                 std::chrono::duration_cast<std::chrono::milliseconds>(span_time).count());
 
 
-            if (!resp.has_content_length())
-                resp.prepare_payload();
+            if (resp.stream_handler_) {
+                resp.chunked(true);
 
-            if (auto iter = req->find(http::field::accept_encoding); iter != req->end()) {
-                auto accept_encodings = util::split(iter->value(), ",");
-                for (const auto& encoding : accept_encodings) {
-                    if (body::compressor_factory::instance().is_supported_encoding(encoding)) {
-                        resp.set(http::field::content_encoding, encoding);
-                        resp.chunked(true);
-                        break;
+                boost::system::error_code ec;
+                http::response_serializer<body::any_body> serializer(resp);
+
+                stream_.expires_after(serv_.write_timeout());
+                co_await http::async_write_header(stream_, serializer, net_awaitable[ec]);
+                if (ec) {
+                    serv_.get_logger()->trace("write http header failed: {}", ec.message());
+                    co_return nullptr;
+                }
+                stream_.expires_never();
+
+                beast::flat_buffer buffer;
+                while (co_await resp.stream_handler_(buffer)) {
+                    http::chunk_body chunk_b(buffer.data());
+                    stream_.expires_after(serv_.write_timeout());
+                    co_await net::async_write(stream_, chunk_b, net_awaitable[ec]);
+                    if (ec) {
+                        serv_.get_logger()->trace("write chunk body failed: {}", ec.message());
+                        co_return nullptr;
+                    }
+                    stream_.expires_never();
+                    buffer.consume(buffer.size());
+                }
+                http::chunk_last chunk_last;
+                co_await net::async_write(stream_, chunk_last, net_awaitable[ec]);
+                if (ec) {
+                    serv_.get_logger()->trace("write chunk last failed: {}", ec.message());
+                    co_return nullptr;
+                }
+            }
+            else {
+                if (!resp.has_content_length())
+                    resp.prepare_payload();
+
+                if (auto iter = req->find(http::field::accept_encoding); iter != req->end()) {
+                    auto accept_encodings = util::split(iter->value(), ",");
+                    for (const auto& encoding : accept_encodings) {
+                        if (body::compressor_factory::instance().is_supported_encoding(encoding)) {
+                            resp.set(http::field::content_encoding, encoding);
+                            resp.chunked(true);
+                            break;
+                        }
+                    }
+                }
+                boost::system::error_code ec;
+                http::response_serializer<body::any_body> serializer(resp);
+                while (!serializer.is_done()) {
+                    stream_.expires_after(serv_.write_timeout());
+                    co_await http::async_write_some(stream_, serializer, net_awaitable[ec]);
+                    stream_.expires_never();
+                    if (ec) {
+                        serv_.get_logger()->trace("write http body failed: {}", ec.message());
+                        co_return nullptr;
                     }
                 }
             }
 
-            boost::system::error_code ec;
-            http::response_serializer<body::any_body> serializer(resp);
-            while (!serializer.is_done()) {
-                stream_.expires_after(serv_.write_timeout());
-                co_await http::async_write_some(stream_, serializer, net_awaitable[ec]);
-                stream_.expires_never();
-                if (ec) {
-                    serv_.get_logger()->trace("reply http body failed: {}", ec.message());
-                    co_return nullptr;
-                }
-            }
-
             if (!resp.keep_alive()) {
+                boost::system::error_code ec;
                 // This means we should close the connection, usually
                 // because the response indicated the "Connection: close"
                 // semantic.

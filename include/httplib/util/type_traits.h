@@ -16,7 +16,7 @@ using remove_cvref_t = typename remove_cvref<T>::type;
 #endif
 #endif
 
-namespace util {
+namespace httplib::util {
 template<typename Function>
 struct function_traits;
 

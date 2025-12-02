@@ -10,16 +10,14 @@ request::request(tcp::endpoint local_endpoint,
     , local_endpoint_(std::move(local_endpoint))
     , remote_endpoint_(std::move(remote_endpoint))
 {
-    auto tokens = util::split(this->target(), "?");
-    if (tokens.empty() || tokens.size() > 2)
-        return;
-
-    this->decoded_path_ = util::url_decode(tokens[0]);
-    if (tokens.size() >= 2) {
+    if (auto pos = this->target().find("?"); pos == std::string_view::npos) {
+        this->decoded_path_ = util::url_decode(this->target());
+    }
+    else {
+        this->decoded_path_ = util::url_decode(this->target().substr(0, pos));
         bool is_valid       = true;
-        this->query_params_ = html::parse_http_query_params(tokens[1], is_valid);
-        if (!is_valid)
-            return;
+        this->query_params_ =
+            html::parse_http_query_params(this->target().substr(pos + 1), is_valid);
     }
 }
 request::request(tcp::endpoint local_endpoint,
@@ -90,11 +88,6 @@ void request::set_custom_data(std::any&& data)
     this->custom_data_ = std::move(data);
 }
 
-std::any& request::custom_data()
-{
-    return this->custom_data_;
-}
-
 const httplib::html::query_params& request::decoded_query_params() const
 {
     return this->query_params_;
@@ -127,6 +120,11 @@ std::string_view request::query_param_front(const std::string& key) const
         throw std::runtime_error("Key not found: " + key);
     }
     return iter->second;
+}
+
+bool request::has_query_param(const std::string& key) const
+{
+    return query_params_.find(key) != query_params_.end();
 }
 
 } // namespace httplib::server

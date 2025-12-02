@@ -32,15 +32,20 @@ public:
     const tcp::endpoint& remote_endpoint() const;
 
     void set_custom_data(std::any&& data);
-    std::any& custom_data();
+    template<typename T>
+    inline auto custom_data()
+    {
+        return std::any_cast<T>(custom_data_);
+    }
 
     std::string_view path_param(const std::string& key) const;
     void path_param(const std::string& key, const std::string& val);
 
     std::vector<std::string_view> query_param(const std::string& key) const;
     std::string_view query_param_front(const std::string& key) const;
+    bool has_query_param(const std::string& key) const;
 
-public:
+private:
     std::string decoded_path_;
     html::query_params query_params_;
 

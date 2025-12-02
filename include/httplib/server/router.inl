@@ -1,4 +1,6 @@
 #pragma once
+#include "httplib/util/misc.hpp"
+
 namespace httplib::server {
 
 namespace detail {
@@ -34,10 +36,6 @@ template<class T>
 constexpr bool has_after_v = has_after<T>::value;
 
 template<typename T>
-constexpr inline bool is_awaitable_v =
-    util::is_specialization_v<std::remove_cvref_t<T>, net::awaitable>;
-
-template<typename T>
 net::awaitable<void> do_before(T& aspect, request& req, response& resp, bool& ok)
 {
     if constexpr (has_before_v<T>) {
@@ -45,7 +43,7 @@ net::awaitable<void> do_before(T& aspect, request& req, response& resp, bool& ok
             co_return;
         }
         using return_type = std::decay_t<decltype(aspect.before(req, resp))>;
-        if constexpr (is_awaitable_v<return_type>)
+        if constexpr (util::is_awaitable_v<return_type>)
             ok = co_await aspect.before(req, resp);
         else
             ok = aspect.before(req, resp);
@@ -61,7 +59,7 @@ net::awaitable<void> do_after(T& aspect, request& req, response& resp, bool& ok)
             co_return;
         }
         using return_type = std::decay_t<decltype(aspect.after(req, resp))>;
-        if constexpr (is_awaitable_v<return_type>)
+        if constexpr (util::is_awaitable_v<return_type>)
             ok = co_await aspect.after(req, resp);
         else
             ok = aspect.after(req, resp);
@@ -69,29 +67,13 @@ net::awaitable<void> do_after(T& aspect, request& req, response& resp, bool& ok)
     co_return;
 }
 
-template<typename Func>
-auto make_coro_handler(Func&& handler)
-{
-    using return_type =
-        typename util::function_traits<std::decay_t<decltype(handler)>>::return_type;
-    if constexpr (is_awaitable_v<return_type>) {
-        return handler;
-    }
-    else {
-        return [handler = std::move(handler)](auto&&... args) -> net::awaitable<return_type> {
-            co_return std::invoke(handler, std::forward<decltype(args)>(args)...);
-        };
-    }
-}
-
-
 } // namespace detail
 
 
 template<typename Func, typename... Aspects>
 router::coro_http_handler_type router::make_coro_http_handler(Func&& handler, Aspects&&... asps)
 {
-    auto coro_handler = detail::make_coro_handler(std::move(handler));
+    auto coro_handler = util::make_coro_handler(std::move(handler));
     if constexpr (sizeof...(Aspects) > 0) {
         return [coro_handler = std::move(coro_handler), ... asps = std::forward<Aspects>(asps)](
                    request& req, response& resp) mutable -> net::awaitable<void> {
@@ -128,9 +110,8 @@ void router::set_http_handler(std::string_view key,
 {
     using return_type = typename util::function_traits<Func>::return_type;
 
-    using handler_type = std::conditional_t<detail::is_awaitable_v<return_type>,
-                                            coro_http_handler_type,
-                                            http_handler_type>;
+    using handler_type = std::
+        conditional_t<util::is_awaitable_v<return_type>, coro_http_handler_type, http_handler_type>;
 
     handler_type f = std::bind(handler, &owner, std::placeholders::_1, std::placeholders::_2);
     set_http_handler<method...>(key, std::move(f), std::forward<Aspects>(asps)...);
@@ -156,9 +137,9 @@ void router::set_ws_handler(std::string_view key,
                             CloseFunc&& close_handler)
 {
     set_ws_handler_impl(key,
-                        detail::make_coro_handler(std::move(open_handler)),
-                        detail::make_coro_handler(std::move(message_handler)),
-                        detail::make_coro_handler(std::move(close_handler)));
+                        util::make_coro_handler(std::move(open_handler)),
+                        util::make_coro_handler(std::move(message_handler)),
+                        util::make_coro_handler(std::move(close_handler)));
 }
 
 } // namespace httplib::server

@@ -1,19 +1,35 @@
 #pragma once
+#include "httplib/config.hpp"
+#include "type_traits.h"
 #include <boost/algorithm/string/trim.hpp>
+#include <boost/asio/awaitable.hpp>
 #include <boost/asio/buffer.hpp>
-#include <boost/beast/core/bind_handler.hpp>
-#include <boost/beast/core/buffers_to_string.hpp>
 #include <boost/beast/http/error.hpp>
 #include <filesystem>
 #include <fstream>
 #include <random>
 #include <sstream>
 
-namespace util {
-using boost::asio::buffer;
-using boost::beast::bind_front_handler;
-using boost::beast::buffers_to_string;
+namespace httplib::util {
 
+template<typename T>
+constexpr inline bool is_awaitable_v =
+    util::is_specialization_v<std::remove_cvref_t<T>, net::awaitable>;
+
+template<typename Func>
+static inline auto make_coro_handler(Func&& handler)
+{
+    using return_type =
+        typename util::function_traits<std::decay_t<decltype(handler)>>::return_type;
+    if constexpr (is_awaitable_v<return_type>) {
+        return handler;
+    }
+    else {
+        return [handler = std::move(handler)](auto&&... args) -> net::awaitable<return_type> {
+            co_return std::invoke(handler, std::forward<decltype(args)>(args)...);
+        };
+    }
+}
 /**
  * Convert a hex value to a decimal value.
  *
@@ -207,4 +223,5 @@ static std::string_view buffer_to_string_view(const boost::asio::const_buffer& b
     return std::string_view(static_cast<const char*>(buffer.data()), buffer.size());
 }
 
-} // namespace util
+
+} // namespace httplib::util

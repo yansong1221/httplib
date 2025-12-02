@@ -122,11 +122,11 @@ void response::set_file_content(const fs::path& path, const http::fields& req_he
     body() = std::move(file);
 }
 
-void response::set_form_data_content(const std::vector<form_data::field>& data)
+void response::set_form_data_content(std::vector<form_data::field>&& data)
 {
     body::form_data_body::value_type value;
     value.boundary = html::generate_boundary();
-    value.fields   = data;
+    value.fields   = std::move(data);
 
     this->result(http::status::ok);
     this->set(http::field::content_type,
@@ -141,5 +141,14 @@ void response::set_redirect(std::string_view url,
     set_empty_content(status);
 }
 
+void response::set_stream_content_impl(coro_stream_handler_type&& handler,
+                                       std::string_view content_type,
+                                       http::status status /*= http::status::ok*/)
+{
+    stream_handler_ = std::move(handler);
+    this->set(http::field::content_type, content_type);
+    this->result(status);
+    this->body() = body::empty_body::value_type {};
+}
 
 } // namespace httplib::server

@@ -37,9 +37,30 @@ public:
     }
     void set_json_content(boost::json::value&& data, http::status status = http::status::ok);
     void set_file_content(const fs::path& path, const http::fields& req_header = {});
-    void set_form_data_content(const std::vector<form_data::field>& data);
+    void set_form_data_content(std::vector<form_data::field>&& data);
 
     void set_redirect(std::string_view url, http::status status = http::status::moved_permanently);
+
+    template<typename Func>
+    void set_stream_content(Func&& func,
+                            std::string_view content_type,
+                            http::status status = http::status::ok)
+    {
+        auto handler = util::make_coro_handler(std::move(func));
+        set_stream_content_impl(std::move(handler), content_type, status);
+    }
+
+private:
+    using coro_stream_handler_type =
+        std::function<net::awaitable<bool>(beast::flat_buffer& buffer)>;
+
+    void set_stream_content_impl(coro_stream_handler_type&& handler,
+                                 std::string_view content_type,
+                                 http::status status = http::status::ok);
+
+    coro_stream_handler_type stream_handler_;
+
+    friend class session;
 };
 
 } // namespace httplib::server
