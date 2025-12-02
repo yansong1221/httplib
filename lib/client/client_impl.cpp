@@ -46,9 +46,11 @@ http_client::request http_client::impl::make_http_request(http::verb method,
     req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
     req.set(http::field::accept, "*/*");
 
-    const auto& encoding = body::compressor_factory::instance().supported_encoding();
-    if (!encoding.empty())
-        req.set(http::field::accept_encoding, boost::join(encoding, ","));
+    if (!chunk_handler_) {
+        const auto& encoding = body::compressor_factory::instance().supported_encoding();
+        if (!encoding.empty())
+            req.set(http::field::accept_encoding, boost::join(encoding, ","));
+    }
 
     for (const auto& field : headers)
         req.set(field.name_string(), field.value());
@@ -193,19 +195,24 @@ http_client::impl::async_send_request_impl(http_client::request& req)
         co_await http::async_write_some(*variant_stream_, serializer);
     }
 
-    beast::flat_buffer buffer;
 
     http::response_parser<http::empty_body> header_parser;
+    header_parser.header_limit(std::numeric_limits<std::uint32_t>::max());
     while (!header_parser.is_header_done()) {
         expires_after();
-        co_await http::async_read_some(*variant_stream_, buffer, header_parser);
+        co_await http::async_read_some(*variant_stream_, buffer_, header_parser);
     }
 
     http::response_parser<body::any_body> body_parser(std::move(header_parser));
+    body_parser.body_limit(std::numeric_limits<std::uint64_t>::max());
+
+    if (chunk_handler_)
+        body_parser.on_chunk_body(chunk_handler_);
+
     if (req.method() != http::verb::head) {
         while (!body_parser.is_done()) {
             expires_after();
-            co_await http::async_read_some(*variant_stream_, buffer, body_parser);
+            co_await http::async_read_some(*variant_stream_, buffer_, body_parser);
         }
     }
     variant_stream_->expires_never();
@@ -214,5 +221,18 @@ http_client::impl::async_send_request_impl(http_client::request& req)
     co_return body_parser.release();
 }
 
+void http_client::impl::set_chunk_handler(chunk_handler_type&& handler)
+{
+    if (!handler) {
+        chunk_handler_ = nullptr;
+        return;
+    }
+    chunk_handler_ = [handler = std::move(handler)](std::uint64_t remain,
+                                                    std::string_view body,
+                                                    boost::system::error_code& ec) -> std::size_t {
+        handler(body, ec);
+        return remain;
+    };
+}
 
 } // namespace httplib::client

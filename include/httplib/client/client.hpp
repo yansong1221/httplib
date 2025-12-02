@@ -3,6 +3,7 @@
 #include "httplib/config.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <filesystem>
+#include <functional>
 #include <limits>
 
 namespace httplib::client {
@@ -16,6 +17,8 @@ public:
         step,
         never
     };
+
+    using chunk_handler_type = std::function<void(std::string_view, boost::system::error_code&)>;
 
     using response = http::response<body::any_body>;
     using request  = http::request<body::any_body>;
@@ -40,6 +43,8 @@ public:
     std::string_view host() const;
     uint16_t port() const;
     bool is_use_ssl() const;
+
+    void set_chunk_handler(chunk_handler_type&& handler);
 
 public:
     net::awaitable<response_result> async_get(std::string_view path,

@@ -110,4 +110,9 @@ bool http_client::is_open() const
     return impl_->is_open();
 }
 
+void http_client::set_chunk_handler(chunk_handler_type&& handler)
+{
+    impl_->set_chunk_handler(std::move(handler));
+}
+
 } // namespace httplib::client

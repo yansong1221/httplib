@@ -1,11 +1,8 @@
 #include "session.hpp"
-
 #include "body/compressor.hpp"
-
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
-#include "stream/http_stream.hpp"
 #include "websocket_conn_impl.hpp"
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/write.hpp>
@@ -20,6 +17,7 @@
 #include <openssl/err.h>
 #include <openssl/ssl.h>
 #endif
+
 
 namespace httplib::server {
 
@@ -93,318 +91,6 @@ net::awaitable<void> transfer(S1& from, S2& to, size_t& bytes_transferred)
 
 } // namespace detail
 
-class session::websocket_task : public session::task
-{
-public:
-    explicit websocket_task(websocket_variant_stream_type&& stream,
-                            request&& req,
-                            http_server_impl& serv)
-        : conn_(std::make_shared<websocket_conn_impl>(serv, std::move(stream), std::move(req)))
-    {
-    }
-    net::awaitable<std::unique_ptr<task>> then() override
-    {
-        co_await conn_->run();
-        co_return nullptr;
-    }
-
-    void abort() override { conn_->close(); }
-
-private:
-    std::shared_ptr<websocket_conn_impl> conn_;
-};
-
-class session::http_proxy_task : public session::task
-{
-public:
-    explicit http_proxy_task(http_variant_stream_type&& stream,
-                             request&& req,
-                             http_server_impl& serv)
-        : stream_(std::move(stream))
-        , req_(std::move(req))
-        , serv_(serv)
-        , resolver_(stream_.get_executor())
-        , proxy_socket_(stream_.get_executor())
-    {
-    }
-
-public:
-    net::awaitable<std::unique_ptr<task>> then() override
-    {
-        auto target = req_.target();
-        auto pos    = target.find(":");
-        if (pos == std::string_view::npos)
-            co_return nullptr;
-
-        auto host = target.substr(0, pos);
-        auto port = target.substr(pos + 1);
-
-        boost::system::error_code ec;
-        auto results = co_await resolver_.async_resolve(host, port, net_awaitable[ec]);
-        if (ec)
-            co_return nullptr;
-
-        co_await net::async_connect(proxy_socket_, results, net_awaitable[ec]);
-        if (ec)
-            co_return nullptr;
-
-        response resp(req_.version(), req_.keep_alive());
-        resp.reason("Connection Established");
-        resp.result(http::status::ok);
-        co_await http::async_write(stream_, resp, net_awaitable[ec]);
-        if (ec)
-            co_return nullptr;
-
-        // proxy
-        using namespace net::experimental::awaitable_operators;
-        size_t l2r_transferred = 0;
-        size_t r2l_transferred = 0;
-        co_await (detail::transfer(stream_, proxy_socket_, l2r_transferred) &&
-                  detail::transfer(proxy_socket_, stream_, r2l_transferred));
-        co_return nullptr;
-    }
-
-    void abort() override
-    {
-        boost::system::error_code ec;
-        stream_.close(ec);
-        resolver_.cancel();
-        proxy_socket_.close(ec);
-    }
-
-private:
-    http_variant_stream_type stream_;
-    tcp::resolver resolver_;
-    tcp::socket proxy_socket_;
-
-    request req_;
-    http_server_impl& serv_;
-};
-
-class session::http_task : public session::task
-{
-public:
-    explicit http_task(http_variant_stream_type&& stream,
-                       beast::flat_buffer&& buffer,
-                       http_server_impl& serv)
-        : serv_(serv)
-        , buffer_(std::move(buffer))
-        , stream_(std::move(stream))
-    {
-        local_endpoint_  = stream_.local_endpoint();
-        remote_endpoint_ = stream_.remote_endpoint();
-    }
-
-
-    net::awaitable<boost::system::result<http::request<http::empty_body>>> async_read_header()
-    {
-        boost::system::error_code ec;
-        http::request_parser<http::empty_body> header_parser;
-        header_parser.header_limit(std::numeric_limits<unsigned long long>::max());
-
-        while (!header_parser.is_header_done()) {
-            stream_.expires_after(serv_.read_timeout());
-            co_await http::async_read_some(stream_, buffer_, header_parser, net_awaitable[ec]);
-            stream_.expires_never();
-            if (ec) {
-                serv_.get_logger()->trace("read http header failed: {}", ec.message());
-                co_return ec;
-            }
-        }
-        co_return header_parser.release();
-    }
-    net::awaitable<boost::system::result<http::request<body::any_body>>>
-    async_read_body(http::request<http::empty_body>&& header)
-    {
-        switch (header.method()) {
-            case http::verb::get:
-            case http::verb::head:
-            case http::verb::trace:
-            case http::verb::connect:
-                co_return http::request<body::any_body>(std::move(header));
-                break;
-            default: {
-                boost::system::error_code ec;
-
-                http::request_parser<body::any_body> body_parser(std::move(header));
-                body_parser.body_limit(std::numeric_limits<unsigned long long>::max());
-                while (!body_parser.is_done()) {
-                    stream_.expires_after(serv_.read_timeout());
-                    co_await http::async_read_some(
-                        stream_, buffer_, body_parser, net_awaitable[ec]);
-                    stream_.expires_never();
-                    if (ec)
-                        co_return ec;
-                }
-                co_return http::request<body::any_body>(body_parser.release());
-            } break;
-        }
-    }
-
-    net::awaitable<std::unique_ptr<task>> then() override
-    {
-        for (;;) {
-            auto header = co_await async_read_header();
-            if (!header) {
-                serv_.get_logger()->trace("read http header failed: {}", header.error().message());
-                co_return nullptr;
-            }
-
-            // http proxy
-            if (header->method() == http::verb::connect) {
-                request req(local_endpoint_, remote_endpoint_, std::move(header.value()));
-                co_return std::make_unique<http_proxy_task>(
-                    std::move(stream_), std::move(req), serv_);
-            }
-            // websocket
-            if (websocket::is_upgrade(header->base())) {
-                auto stream = create_websocket_variant_stream(std::move(stream_));
-                request req(local_endpoint_, remote_endpoint_, std::move(header.value()));
-                co_return std::make_unique<websocket_task>(
-                    std::move(stream), std::move(req), serv_);
-            }
-
-            response resp(header->version(), header->keep_alive());
-            std::optional<request> req;
-
-            auto start_time = std::chrono::steady_clock::now();
-
-            if (serv_.router().has_handler(header->method(), header->target())) {
-                auto body = co_await async_read_body(std::move(header.value()));
-                if (!body) {
-                    serv_.get_logger()->trace("read http body failed: {}", body.error().message());
-                    co_return nullptr;
-                }
-                req = request(local_endpoint_, remote_endpoint_, std::move(body.value()));
-                try {
-                    co_await serv_.router().proc_routing(req.value(), resp);
-                }
-                catch (const std::exception& e) {
-                    serv_.get_logger()->warn("exception in business function, reason: {}",
-                                             e.what());
-                    resp.set_string_content(
-                        std::string(e.what()), "text/html", http::status::internal_server_error);
-                }
-                catch (...) {
-                    using namespace std::string_view_literals;
-                    serv_.get_logger()->warn("unknown exception in business function");
-                    resp.set_string_content(std::string("unknown exception"),
-                                            "text/html",
-                                            http::status::internal_server_error);
-                }
-            }
-            else {
-                resp.set_error_content(http::status::bad_request);
-            }
-
-            auto span_time = std::chrono::steady_clock::now() - start_time;
-
-            serv_.get_logger()->debug(
-                "{} {} ({}:{} -> {}:{}) {} {}ms",
-                req->method_string(),
-                req->target(),
-                remote_endpoint_.address().to_string(),
-                remote_endpoint_.port(),
-                local_endpoint_.address().to_string(),
-                local_endpoint_.port(),
-                resp.result_int(),
-                std::chrono::duration_cast<std::chrono::milliseconds>(span_time).count());
-
-
-            if (resp.stream_handler_) {
-                resp.chunked(true);
-
-                boost::system::error_code ec;
-                http::response_serializer<body::any_body> serializer(resp);
-
-                stream_.expires_after(serv_.write_timeout());
-                co_await http::async_write_header(stream_, serializer, net_awaitable[ec]);
-                if (ec) {
-                    serv_.get_logger()->trace("write http header failed: {}", ec.message());
-                    co_return nullptr;
-                }
-                stream_.expires_never();
-
-                beast::flat_buffer buffer;
-
-                for (;;) {
-                    bool has_more = co_await resp.stream_handler_(buffer);
-                    if (buffer.size() != 0) {
-                        http::chunk_body chunk_b(buffer.data());
-                        stream_.expires_after(serv_.write_timeout());
-                        co_await net::async_write(stream_, chunk_b, net_awaitable[ec]);
-                        if (ec) {
-                            serv_.get_logger()->trace("write chunk body failed: {}", ec.message());
-                            co_return nullptr;
-                        }
-                        stream_.expires_never();
-                    }
-                    if (!has_more) {
-                        http::chunk_last chunk_last;
-                        co_await net::async_write(stream_, chunk_last, net_awaitable[ec]);
-                        if (ec) {
-                            serv_.get_logger()->trace("write chunk last failed: {}", ec.message());
-                            co_return nullptr;
-                        }
-                        break;
-                    }
-                }
-            }
-            else {
-                if (!resp.has_content_length())
-                    resp.prepare_payload();
-
-                if (auto iter = req->find(http::field::accept_encoding); iter != req->end()) {
-                    auto accept_encodings = util::split(iter->value(), ",");
-                    for (const auto& encoding : accept_encodings) {
-                        if (body::compressor_factory::instance().is_supported_encoding(encoding)) {
-                            resp.set(http::field::content_encoding, encoding);
-                            resp.chunked(true);
-                            break;
-                        }
-                    }
-                }
-                boost::system::error_code ec;
-                http::response_serializer<body::any_body> serializer(resp);
-                while (!serializer.is_done()) {
-                    stream_.expires_after(serv_.write_timeout());
-                    co_await http::async_write_some(stream_, serializer, net_awaitable[ec]);
-                    stream_.expires_never();
-                    if (ec) {
-                        serv_.get_logger()->trace("write http body failed: {}", ec.message());
-                        co_return nullptr;
-                    }
-                }
-            }
-
-            if (!resp.keep_alive()) {
-                boost::system::error_code ec;
-                // This means we should close the connection, usually
-                // because the response indicated the "Connection: close"
-                // semantic.
-                stream_.shutdown(net::socket_base::shutdown_both, ec);
-                co_return nullptr;
-            }
-        }
-        co_return nullptr;
-    }
-
-
-    void abort() override
-    {
-        boost::system::error_code ec;
-        stream_.close(ec);
-    }
-
-private:
-    http_server_impl& serv_;
-
-    http_variant_stream_type stream_;
-    beast::flat_buffer buffer_;
-
-    tcp::endpoint local_endpoint_;
-    tcp::endpoint remote_endpoint_;
-};
 
 #ifdef HTTPLIB_ENABLED_SSL
 class session::ssl_handshake_task : public session::task
@@ -445,56 +131,6 @@ private:
 };
 #endif
 
-class session::detect_ssl_task : public session::task
-{
-public:
-    explicit detect_ssl_task(tcp::socket&& stream, http_server_impl& sevr)
-        : sevr_(sevr)
-        , stream_(std::move(stream))
-    {
-        stream_.expires_after(sevr_.read_timeout());
-    }
-    ~detect_ssl_task() { stream_.expires_never(); }
-
-public:
-    net::awaitable<std::unique_ptr<task>> then() override
-    {
-        beast::flat_buffer buffer;
-#ifdef HTTPLIB_ENABLED_SSL
-        if (sevr_.ssl_conf_) {
-            boost::system::error_code ec;
-            bool is_ssl = co_await beast::async_detect_ssl(stream_, buffer, net_awaitable[ec]);
-            if (ec) {
-                sevr_.get_logger()->debug("async_detect_ssl failed: {}", ec.message());
-                co_return nullptr;
-            }
-            if (is_ssl) {
-                auto ssl_ctx = detail::create_ssl_context(net::buffer(sevr_.ssl_conf_->cert_file),
-                                                          net::buffer(sevr_.ssl_conf_->key_file),
-                                                          sevr_.ssl_conf_->passwd,
-                                                          ec);
-                if (!ssl_ctx) {
-                    sevr_.get_logger()->error("create_ssl_context failed: {}", ec.message());
-                    co_return nullptr;
-                }
-                ssl_http_stream use_ssl_stream(std::move(stream_), ssl_ctx);
-                co_return std::make_unique<ssl_handshake_task>(
-                    std::move(use_ssl_stream), std::move(buffer), sevr_);
-            }
-        }
-#endif
-        http_variant_stream_type variant_stream(std::move(stream_));
-        co_return std::make_unique<http_task>(std::move(variant_stream), std::move(buffer), sevr_);
-    }
-
-    void abort() override { stream_.close(); }
-
-private:
-    http_server_impl& sevr_;
-    http_stream stream_;
-};
-
-
 session::session(tcp::socket&& stream, http_server_impl& serv)
     : task_(std::make_unique<detect_ssl_task>(std::move(stream), serv))
 {
@@ -524,4 +160,328 @@ httplib::net::awaitable<void> session::run()
     }
     co_return;
 }
+
+session::detect_ssl_task::detect_ssl_task(tcp::socket&& stream, http_server_impl& sevr)
+    : sevr_(sevr)
+    , stream_(std::move(stream))
+{
+    stream_.expires_after(sevr_.read_timeout());
+}
+session::detect_ssl_task::~detect_ssl_task()
+{
+    stream_.expires_never();
+}
+net::awaitable<std::unique_ptr<session::task>> session::detect_ssl_task::then()
+{
+    beast::flat_buffer buffer;
+#ifdef HTTPLIB_ENABLED_SSL
+    if (sevr_.ssl_conf_) {
+        boost::system::error_code ec;
+        bool is_ssl = co_await beast::async_detect_ssl(stream_, buffer, net_awaitable[ec]);
+        if (ec) {
+            sevr_.get_logger()->debug("async_detect_ssl failed: {}", ec.message());
+            co_return nullptr;
+        }
+        if (is_ssl) {
+            auto ssl_ctx = detail::create_ssl_context(net::buffer(sevr_.ssl_conf_->cert_file),
+                                                      net::buffer(sevr_.ssl_conf_->key_file),
+                                                      sevr_.ssl_conf_->passwd,
+                                                      ec);
+            if (!ssl_ctx) {
+                sevr_.get_logger()->error("create_ssl_context failed: {}", ec.message());
+                co_return nullptr;
+            }
+            ssl_http_stream use_ssl_stream(std::move(stream_), ssl_ctx);
+            co_return std::make_unique<session::ssl_handshake_task>(
+                std::move(use_ssl_stream), std::move(buffer), sevr_);
+        }
+    }
+#endif
+    http_variant_stream_type variant_stream(std::move(stream_));
+    co_return std::make_unique<session::http_task>(
+        std::move(variant_stream), std::move(buffer), sevr_);
+}
+void session::detect_ssl_task::abort()
+{
+    stream_.close();
+}
+
+session::http_task::http_task(http_variant_stream_type&& stream,
+                              beast::flat_buffer&& buffer,
+                              http_server_impl& serv)
+    : serv_(serv)
+    , buffer_(std::move(buffer))
+    , stream_(std::move(stream))
+{
+    local_endpoint_  = stream_.local_endpoint();
+    remote_endpoint_ = stream_.remote_endpoint();
+}
+
+httplib::net::awaitable<boost::system::result<httplib::http::request<httplib::http::empty_body>>>
+session::http_task::async_read_header()
+{
+    boost::system::error_code ec;
+    http::request_parser<http::empty_body> header_parser;
+    header_parser.header_limit(std::numeric_limits<std::uint32_t>::max());
+
+    while (!header_parser.is_header_done()) {
+        stream_.expires_after(serv_.read_timeout());
+        co_await http::async_read_some(stream_, buffer_, header_parser, net_awaitable[ec]);
+        stream_.expires_never();
+        if (ec)
+            co_return ec;
+    }
+    co_return header_parser.release();
+}
+
+httplib::net::awaitable<boost::system::result<httplib::http::request<httplib::body::any_body>>>
+session::http_task::async_read_body(http::request<http::empty_body>&& header)
+{
+    switch (header.method()) {
+        case http::verb::get:
+        case http::verb::head:
+        case http::verb::trace:
+        case http::verb::connect: co_return http::request<body::any_body>(std::move(header)); break;
+        default: {
+            boost::system::error_code ec;
+
+            http::request_parser<body::any_body> body_parser(std::move(header));
+            body_parser.body_limit(std::numeric_limits<unsigned long long>::max());
+            while (!body_parser.is_done()) {
+                stream_.expires_after(serv_.read_timeout());
+                co_await http::async_read_some(stream_, buffer_, body_parser, net_awaitable[ec]);
+                stream_.expires_never();
+                if (ec)
+                    co_return ec;
+            }
+            co_return http::request<body::any_body>(body_parser.release());
+        } break;
+    }
+}
+
+httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then()
+
+{
+    for (;;) {
+        auto header = co_await async_read_header();
+        if (!header) {
+            serv_.get_logger()->trace("read http header failed: {}", header.error().message());
+            co_return nullptr;
+        }
+
+        // http proxy
+        if (header->method() == http::verb::connect) {
+            request req(local_endpoint_, remote_endpoint_, std::move(header.value()));
+            co_return std::make_unique<http_proxy_task>(std::move(stream_), std::move(req), serv_);
+        }
+        // websocket
+        if (websocket::is_upgrade(header->base())) {
+            auto stream = create_websocket_variant_stream(std::move(stream_));
+            request req(local_endpoint_, remote_endpoint_, std::move(header.value()));
+            co_return std::make_unique<websocket_task>(std::move(stream), std::move(req), serv_);
+        }
+
+        response resp(header->version(), header->keep_alive());
+        std::optional<request> req;
+
+        auto start_time = std::chrono::steady_clock::now();
+
+        if (serv_.router().has_handler(header->method(), header->target())) {
+            auto body = co_await async_read_body(std::move(header.value()));
+            if (!body) {
+                serv_.get_logger()->trace("read http body failed: {}", body.error().message());
+                co_return nullptr;
+            }
+            req = request(local_endpoint_, remote_endpoint_, std::move(body.value()));
+            try {
+                co_await serv_.router().proc_routing(req.value(), resp);
+            }
+            catch (const std::exception& e) {
+                serv_.get_logger()->warn("exception in business function, reason: {}", e.what());
+                resp.set_string_content(
+                    std::string(e.what()), "text/html", http::status::internal_server_error);
+            }
+            catch (...) {
+                using namespace std::string_view_literals;
+                serv_.get_logger()->warn("unknown exception in business function");
+                resp.set_string_content(std::string("unknown exception"),
+                                        "text/html",
+                                        http::status::internal_server_error);
+            }
+        }
+        else {
+            resp.set_error_content(http::status::bad_request);
+        }
+
+        auto span_time = std::chrono::steady_clock::now() - start_time;
+
+        serv_.get_logger()->debug(
+            "{} {} ({}:{} -> {}:{}) {} {}ms",
+            req->method_string(),
+            req->target(),
+            remote_endpoint_.address().to_string(),
+            remote_endpoint_.port(),
+            local_endpoint_.address().to_string(),
+            local_endpoint_.port(),
+            resp.result_int(),
+            std::chrono::duration_cast<std::chrono::milliseconds>(span_time).count());
+
+
+        if (resp.stream_handler_) {
+            resp.chunked(true);
+
+            boost::system::error_code ec;
+            http::response_serializer<body::any_body> serializer(resp);
+
+            stream_.expires_after(serv_.write_timeout());
+            co_await http::async_write_header(stream_, serializer, net_awaitable[ec]);
+            if (ec) {
+                serv_.get_logger()->trace("write http header failed: {}", ec.message());
+                co_return nullptr;
+            }
+            stream_.expires_never();
+
+            for (;;) {
+                bool has_more = co_await resp.stream_handler_(buffer_);
+                if (buffer_.size() != 0) {
+                    http::chunk_body chunk_b(buffer_.data());
+                    stream_.expires_after(serv_.write_timeout());
+                    co_await net::async_write(stream_, chunk_b, net_awaitable[ec]);
+                    if (ec) {
+                        serv_.get_logger()->trace("write chunk body failed: {}", ec.message());
+                        co_return nullptr;
+                    }
+                    stream_.expires_never();
+                    buffer_.consume(buffer_.size());
+                }
+                if (!has_more) {
+                    http::chunk_last chunk_last;
+                    co_await net::async_write(stream_, chunk_last, net_awaitable[ec]);
+                    if (ec) {
+                        serv_.get_logger()->trace("write chunk last failed: {}", ec.message());
+                        co_return nullptr;
+                    }
+                    break;
+                }
+            }
+        }
+        else {
+            if (!resp.has_content_length())
+                resp.prepare_payload();
+
+            if (auto iter = req->find(http::field::accept_encoding); iter != req->end()) {
+                auto accept_encodings = util::split(iter->value(), ",");
+                for (const auto& encoding : accept_encodings) {
+                    if (httplib::body::compressor_factory::instance().is_supported_encoding(
+                            encoding))
+                    {
+                        resp.set(http::field::content_encoding, encoding);
+                        resp.chunked(true);
+                        break;
+                    }
+                }
+            }
+            boost::system::error_code ec;
+            http::response_serializer<body::any_body> serializer(resp);
+            while (!serializer.is_done()) {
+                stream_.expires_after(serv_.write_timeout());
+                co_await http::async_write_some(stream_, serializer, net_awaitable[ec]);
+                stream_.expires_never();
+                if (ec) {
+                    serv_.get_logger()->trace("write http body failed: {}", ec.message());
+                    co_return nullptr;
+                }
+            }
+        }
+
+        if (!resp.keep_alive()) {
+            boost::system::error_code ec;
+            // This means we should close the connection, usually
+            // because the response indicated the "Connection: close"
+            // semantic.
+            stream_.shutdown(net::socket_base::shutdown_both, ec);
+            co_return nullptr;
+        }
+    }
+    co_return nullptr;
+}
+
+void session::http_task::abort()
+{
+    boost::system::error_code ec;
+    stream_.close(ec);
+}
+
+session::websocket_task::websocket_task(websocket_variant_stream_type&& stream,
+                                        request&& req,
+                                        http_server_impl& serv)
+    : conn_(std::make_shared<websocket_conn_impl>(serv, std::move(stream), std::move(req)))
+{
+}
+
+httplib::net::awaitable<std::unique_ptr<session::task>> session::websocket_task::then()
+{
+    co_await conn_->run();
+    co_return nullptr;
+}
+
+void session::websocket_task::abort()
+{
+    conn_->close();
+}
+
+session::http_proxy_task::http_proxy_task(http_variant_stream_type&& stream,
+                                          request&& req,
+                                          http_server_impl& serv)
+    : stream_(std::move(stream))
+    , req_(std::move(req))
+    , serv_(serv)
+    , resolver_(stream_.get_executor())
+    , proxy_socket_(stream_.get_executor())
+{
+}
+
+httplib::net::awaitable<std::unique_ptr<session::task>> session::http_proxy_task::then()
+{
+    auto target = req_.target();
+    auto pos    = target.find(":");
+    if (pos == std::string_view::npos)
+        co_return nullptr;
+
+    auto host = target.substr(0, pos);
+    auto port = target.substr(pos + 1);
+
+    boost::system::error_code ec;
+    auto results = co_await resolver_.async_resolve(host, port, net_awaitable[ec]);
+    if (ec)
+        co_return nullptr;
+
+    co_await net::async_connect(proxy_socket_, results, net_awaitable[ec]);
+    if (ec)
+        co_return nullptr;
+
+    response resp(req_.version(), req_.keep_alive());
+    resp.reason("Connection Established");
+    resp.result(http::status::ok);
+    co_await http::async_write(stream_, resp, net_awaitable[ec]);
+    if (ec)
+        co_return nullptr;
+
+    // proxy
+    using namespace net::experimental::awaitable_operators;
+    size_t l2r_transferred = 0;
+    size_t r2l_transferred = 0;
+    co_await (detail::transfer(stream_, proxy_socket_, l2r_transferred) &&
+              detail::transfer(proxy_socket_, stream_, r2l_transferred));
+    co_return nullptr;
+}
+
+void session::http_proxy_task::abort()
+{
+    boost::system::error_code ec;
+    stream_.close(ec);
+    resolver_.cancel();
+    proxy_socket_.close(ec);
+}
+
 } // namespace httplib::server
