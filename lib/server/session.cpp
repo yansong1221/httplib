@@ -265,10 +265,7 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
                     co_return nullptr;
                 }
             }
-            req = request(local_endpoint_,
-                          remote_endpoint_,
-                          http::request<body::any_body>(body_parser.release()));
-
+            req.body() = std::move(body_parser.release().body());
             start_time = std::chrono::steady_clock::now();
 
             try {
@@ -277,13 +274,13 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
             catch (const std::exception& e) {
                 serv_.get_logger()->warn("exception in business function, reason: {}", e.what());
                 resp.set_string_content(
-                    std::string(e.what()), "text/html", http::status::internal_server_error);
+                    std::string(e.what()), "text/plain", http::status::internal_server_error);
             }
             catch (...) {
                 using namespace std::string_view_literals;
                 serv_.get_logger()->warn("unknown exception in business function");
                 resp.set_string_content(std::string("unknown exception"),
-                                        "text/html",
+                                        "text/plain",
                                         http::status::internal_server_error);
             }
         }
