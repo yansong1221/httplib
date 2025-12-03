@@ -230,10 +230,34 @@ std::optional<router_impl::ws_handler_entry> router_impl::find_ws_handler(reques
 
     return std::nullopt;
 }
-
-bool router_impl::has_handler(http::verb method, std::string_view target) const
+bool router_impl::pre_routing(request& req, response& resp) const
 {
-    return true;
+    switch (req.method()) {
+        case http::verb::get:
+        case http::verb::head:
+        case http::verb::trace:
+        case http::verb::connect: return true; break;
+        default: {
+            std::unordered_map<std::string, std::string> path_params;
+
+            auto segments = util::split(req.decoded_path(), "/");
+            if (auto node = match_node(root_.get(), segments, 0, path_params); node) {
+                auto iter = node->handlers.find(req.method());
+                if (iter == node->handlers.end()) {
+                    resp.keep_alive(false);
+                    resp.set_error_content(node->handlers.empty()
+                                               ? httplib::http::status::not_found
+                                               : httplib::http::status::method_not_allowed);
+                    return false;
+                }
+                return true;
+            }
+
+        } break;
+    }
+    resp.keep_alive(false);
+    resp.set_error_content(httplib::http::status::not_found);
+    return false;
 }
 
 // ---------------- match_node ----------------
@@ -375,5 +399,6 @@ httplib::net::awaitable<bool> router_impl::handle_file_request(request& req, res
 
     co_return false;
 }
+
 
 } // namespace httplib::server

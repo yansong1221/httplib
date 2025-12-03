@@ -217,84 +217,62 @@ session::http_task::http_task(http_variant_stream_type&& stream,
     remote_endpoint_ = stream_.remote_endpoint();
 }
 
-httplib::net::awaitable<boost::system::result<httplib::http::request<httplib::http::empty_body>>>
-session::http_task::async_read_header()
+httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then()
+
 {
     boost::system::error_code ec;
-    http::request_parser<http::empty_body> header_parser;
-    header_parser.header_limit(std::numeric_limits<std::uint32_t>::max());
 
-    while (!header_parser.is_header_done()) {
-        stream_.expires_after(serv_.read_timeout());
-        co_await http::async_read_some(stream_, buffer_, header_parser, net_awaitable[ec]);
-        stream_.expires_never();
-        if (ec)
-            co_return ec;
-    }
-    co_return header_parser.release();
-}
+    for (;;) {
+        http::request_parser<http::empty_body> header_parser;
+        header_parser.header_limit(std::numeric_limits<std::uint32_t>::max());
+        header_parser.body_limit(std::numeric_limits<unsigned long long>::max());
+        while (!header_parser.is_header_done()) {
+            stream_.expires_after(serv_.read_timeout());
+            co_await http::async_read_some(stream_, buffer_, header_parser, net_awaitable[ec]);
+            stream_.expires_never();
+            if (ec) {
+                serv_.get_logger()->trace("read http header failed: {}", ec.message());
+                co_return nullptr;
+            }
+        }
+        const auto& header = header_parser.get();
 
-httplib::net::awaitable<boost::system::result<httplib::http::request<httplib::body::any_body>>>
-session::http_task::async_read_body(http::request<http::empty_body>&& header)
-{
-    switch (header.method()) {
-        case http::verb::get:
-        case http::verb::head:
-        case http::verb::trace:
-        case http::verb::connect: co_return http::request<body::any_body>(std::move(header)); break;
-        default: {
-            boost::system::error_code ec;
+        // http proxy
+        if (header.method() == http::verb::connect) {
+            request req(local_endpoint_, remote_endpoint_, std::move(header_parser.release()));
+            co_return std::make_unique<http_proxy_task>(std::move(stream_), std::move(req), serv_);
+        }
+        // websocket
+        if (websocket::is_upgrade(header.base())) {
+            auto stream = create_websocket_variant_stream(std::move(stream_));
+            request req(local_endpoint_, remote_endpoint_, std::move(header_parser.release()));
+            co_return std::make_unique<websocket_task>(std::move(stream), std::move(req), serv_);
+        }
 
-            http::request_parser<body::any_body> body_parser(std::move(header));
-            body_parser.body_limit(std::numeric_limits<unsigned long long>::max());
+        response resp(header.version(), header.keep_alive());
+        request req(local_endpoint_, remote_endpoint_, http::request<http::empty_body>(header));
+
+        auto start_time = std::chrono::steady_clock::now();
+
+        if (serv_.router().pre_routing(req, resp)) {
+            http::request_parser<body::any_body> body_parser(std::move(header_parser));
             while (!body_parser.is_done()) {
                 stream_.expires_after(serv_.read_timeout());
                 co_await http::async_read_some(stream_, buffer_, body_parser, net_awaitable[ec]);
                 stream_.expires_never();
-                if (ec)
-                    co_return ec;
+                if (ec) {
+                    serv_.get_logger()->trace("read http body failed: {}", ec.message());
+                    co_return nullptr;
+                }
             }
-            co_return http::request<body::any_body>(body_parser.release());
-        } break;
-    }
-}
+            req = request(local_endpoint_,
+                          remote_endpoint_,
+                          http::request<body::any_body>(body_parser.release()));
 
-httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then()
+            start_time = std::chrono::steady_clock::now();
 
-{
-    for (;;) {
-        auto header = co_await async_read_header();
-        if (!header) {
-            serv_.get_logger()->trace("read http header failed: {}", header.error().message());
-            co_return nullptr;
-        }
-
-        // http proxy
-        if (header->method() == http::verb::connect) {
-            request req(local_endpoint_, remote_endpoint_, std::move(header.value()));
-            co_return std::make_unique<http_proxy_task>(std::move(stream_), std::move(req), serv_);
-        }
-        // websocket
-        if (websocket::is_upgrade(header->base())) {
-            auto stream = create_websocket_variant_stream(std::move(stream_));
-            request req(local_endpoint_, remote_endpoint_, std::move(header.value()));
-            co_return std::make_unique<websocket_task>(std::move(stream), std::move(req), serv_);
-        }
-
-        response resp(header->version(), header->keep_alive());
-        std::optional<request> req;
-
-        auto start_time = std::chrono::steady_clock::now();
-
-        if (serv_.router().has_handler(header->method(), header->target())) {
-            auto body = co_await async_read_body(std::move(header.value()));
-            if (!body) {
-                serv_.get_logger()->trace("read http body failed: {}", body.error().message());
-                co_return nullptr;
-            }
-            req = request(local_endpoint_, remote_endpoint_, std::move(body.value()));
             try {
-                co_await serv_.router().proc_routing(req.value(), resp);
+                co_await serv_.router().proc_routing(req, resp);
             }
             catch (const std::exception& e) {
                 serv_.get_logger()->warn("exception in business function, reason: {}", e.what());
@@ -309,16 +287,12 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
                                         http::status::internal_server_error);
             }
         }
-        else {
-            resp.set_error_content(http::status::bad_request);
-        }
-
         auto span_time = std::chrono::steady_clock::now() - start_time;
 
         serv_.get_logger()->debug(
             "{} {} ({}:{} -> {}:{}) {} {}ms",
-            req->method_string(),
-            req->target(),
+            req.method_string(),
+            req.target(),
             remote_endpoint_.address().to_string(),
             remote_endpoint_.port(),
             local_endpoint_.address().to_string(),
@@ -369,7 +343,7 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
             if (!resp.has_content_length())
                 resp.prepare_payload();
 
-            if (auto iter = req->find(http::field::accept_encoding); iter != req->end()) {
+            if (auto iter = req.find(http::field::accept_encoding); iter != req.end()) {
                 auto accept_encodings = util::split(iter->value(), ",");
                 for (const auto& encoding : accept_encodings) {
                     if (httplib::body::compressor_factory::instance().is_supported_encoding(

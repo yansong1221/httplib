@@ -70,11 +70,6 @@ public:
     void abort() override;
 
 private:
-    net::awaitable<boost::system::result<http::request<http::empty_body>>> async_read_header();
-    net::awaitable<boost::system::result<http::request<body::any_body>>>
-    async_read_body(http::request<http::empty_body>&& header);
-
-private:
     http_server_impl& serv_;
 
     http_variant_stream_type stream_;

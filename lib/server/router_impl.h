@@ -34,7 +34,7 @@ public:
     };
     std::optional<ws_handler_entry> find_ws_handler(request& req) const;
 
-    bool has_handler(http::verb method, std::string_view target) const;
+    bool pre_routing(request& req, response& resp) const;
 
 protected:
     void set_http_handler_impl(http::verb method,
