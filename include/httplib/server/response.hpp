@@ -52,7 +52,7 @@ public:
 
 private:
     using coro_stream_handler_type =
-        std::function<net::awaitable<bool>(beast::flat_buffer& buffer)>;
+        std::function<net::awaitable<bool>(beast::flat_buffer& buffer, beast::error_code& ec)>;
 
     void set_stream_content_impl(coro_stream_handler_type&& handler,
                                  std::string_view content_type,

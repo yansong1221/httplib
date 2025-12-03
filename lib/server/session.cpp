@@ -313,7 +313,11 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
             stream_.expires_never();
 
             for (;;) {
-                bool has_more = co_await resp.stream_handler_(buffer_);
+                bool has_more = co_await resp.stream_handler_(buffer_, ec);
+                if (ec) {
+                    serv_.get_logger()->trace("read chunk body failed: {}", ec.message());
+                    co_return nullptr;
+                }
                 if (buffer_.size() != 0) {
                     http::chunk_body chunk_b(buffer_.data());
                     stream_.expires_after(serv_.write_timeout());
