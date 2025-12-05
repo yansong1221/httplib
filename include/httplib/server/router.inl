@@ -67,6 +67,46 @@ net::awaitable<void> do_after(T& aspect, request& req, response& resp, bool& ok)
     co_return;
 }
 
+template<typename Tuple, std::size_t... I>
+net::awaitable<void>
+do_befores_impl(Tuple& t, request& req, response& resp, bool& ok, std::index_sequence<I...>)
+{
+    ((co_await [&]() -> net::awaitable<void> {
+         if (!ok)
+             co_return;
+         co_await do_before(std::get<I>(t), req, resp, ok);
+     }()),
+     ...);
+
+    co_return;
+}
+
+template<typename... Aspects>
+net::awaitable<void> do_befores(std::tuple<Aspects&...>& t, request& req, response& resp, bool& ok)
+{
+    co_await do_befores_impl(t, req, resp, ok, std::index_sequence_for<Aspects...> {});
+}
+
+template<typename Tuple, std::size_t... I>
+net::awaitable<void>
+do_afters_impl(Tuple& t, request& req, response& resp, bool& ok, std::index_sequence<I...>)
+{
+    ((co_await [&]() -> net::awaitable<void> {
+         if (!ok)
+             co_return;
+         co_await do_after(std::get<I>(t), req, resp, ok);
+     }()),
+     ...);
+
+    co_return;
+}
+
+template<typename... Aspects>
+net::awaitable<void> do_afters(std::tuple<Aspects&...>& t, request& req, response& resp, bool& ok)
+{
+    co_await do_afters_impl(t, req, resp, ok, std::index_sequence_for<Aspects...> {});
+}
+
 } // namespace detail
 
 
@@ -78,12 +118,15 @@ router::coro_http_handler_type router::make_coro_http_handler(Func&& handler, As
         return [coro_handler = std::move(coro_handler), ... asps = std::forward<Aspects>(asps)](
                    request& req, response& resp) mutable -> net::awaitable<void> {
             bool ok = true;
-            co_await (detail::do_before(asps, req, resp, ok), ...);
+
+            auto aspects = std::tuple<Aspects...> {asps...};
+            co_await detail::do_befores(aspects, req, resp, ok);
+
             if (ok) {
                 co_await coro_handler(req, resp);
             }
             ok = true;
-            co_await (detail::do_after(asps, req, resp, ok), ...);
+            co_await detail::do_afters(aspects, req, resp, ok);
         };
     }
     else {
