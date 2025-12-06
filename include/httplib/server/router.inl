@@ -74,12 +74,15 @@ template<typename Func, typename... Aspects>
 router::coro_http_handler_type router::make_coro_http_handler(Func&& handler, Aspects&&... asps)
 {
     auto coro_handler = util::make_coro_handler(std::move(handler));
+
+
     if constexpr (sizeof...(Aspects) > 0) {
-        return [coro_handler = std::move(coro_handler), ... asps = std::forward<Aspects>(asps)](
+        //std::tuple<std::decay_t<Aspects>...> aspects(std::move(asps)...);
+        std::tuple<Aspects...> aspects(std::forward<Aspects>(asps)...);
+
+        return [coro_handler = std::move(coro_handler), aspects = std::move(aspects)](
                    request& req, response& resp) mutable -> net::awaitable<void> {
             bool ok = true;
-
-            auto aspects = std::tuple<Aspects...> {asps...};
 
             co_await std::apply(
                 [&](auto&... aspect) -> net::awaitable<void> {
@@ -91,6 +94,7 @@ router::coro_http_handler_type router::make_coro_http_handler(Func&& handler, As
                 co_await coro_handler(req, resp);
             }
             ok = true;
+
             co_await std::apply(
                 [&](auto&... aspect) -> net::awaitable<void> {
                     ((co_await detail::do_after(aspect, req, resp, ok)), ...);
