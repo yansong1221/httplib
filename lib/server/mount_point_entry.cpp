@@ -68,7 +68,7 @@ const httplib::fs::path& mount_point_entry::base_dir() const
 {
     return base_dir_;
 }
-net::awaitable<bool> mount_point_entry::invoke(request& req, response& res)
+net::awaitable<bool> mount_point_entry::invoke(request& req, response& res) const
 {
     std::string_view target(req.decoded_path());
     // Prefix match
@@ -124,11 +124,11 @@ net::awaitable<bool> mount_point_entry::invoke(request& req, response& res)
     }
     co_return false;
 }
-net::awaitable<bool> mount_point_entry::before(request& req, response& res)
+net::awaitable<bool> mount_point_entry::before(request& req, response& res) const
 {
     co_return true;
 }
-net::awaitable<bool> mount_point_entry::after(request& req, response& res)
+net::awaitable<bool> mount_point_entry::after(request& req, response& res) const
 {
     co_return true;
 }

@@ -19,11 +19,11 @@ public:
     const fs::path& base_dir() const;
 
 public:
-    net::awaitable<bool> invoke(request& req, response& res);
+    net::awaitable<bool> invoke(request& req, response& res) const;
 
 protected:
-    virtual net::awaitable<bool> before(request& req, response& res);
-    virtual net::awaitable<bool> after(request& req, response& res);
+    virtual net::awaitable<bool> before(request& req, response& res) const;
+    virtual net::awaitable<bool> after(request& req, response& res) const;
 
 private:
     std::string mount_point_;
@@ -44,7 +44,7 @@ public:
     }
 
 protected:
-    net::awaitable<bool> before(request& req, response& resp) override
+    net::awaitable<bool> before(request& req, response& resp) const override
     {
         bool ok = true;
 
@@ -56,7 +56,7 @@ protected:
 
         co_return ok;
     }
-    net::awaitable<bool> after(request& req, response& resp) override
+    net::awaitable<bool> after(request& req, response& resp) const override
     {
         bool ok = true;
         co_await std::apply(

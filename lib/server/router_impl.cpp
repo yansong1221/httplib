@@ -2,57 +2,6 @@
 #include <iostream>
 namespace httplib::server {
 
-namespace detail {
-inline static bool is_valid_path(std::string_view path)
-{
-    size_t level = 0;
-    size_t i     = 0;
-
-    // Skip slash
-    while (i < path.size() && path[i] == '/') {
-        i++;
-    }
-
-    while (i < path.size()) {
-        // Read component
-        auto beg = i;
-        while (i < path.size() && path[i] != '/') {
-            if (path[i] == '\0') {
-                return false;
-            }
-            else if (path[i] == '\\') {
-                return false;
-            }
-            i++;
-        }
-
-        auto len = i - beg;
-        assert(len > 0);
-
-        if (!path.compare(beg, len, ".")) {
-            ;
-        }
-        else if (!path.compare(beg, len, "..")) {
-            if (level == 0) {
-                return false;
-            }
-            level--;
-        }
-        else {
-            level++;
-        }
-
-        // Skip slash
-        while (i < path.size() && path[i] == '/') {
-            i++;
-        }
-    }
-
-    return true;
-}
-
-} // namespace detail
-
 router_impl::router_impl()
 {
     root_      = std::make_unique<Node>();
