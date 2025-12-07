@@ -2,6 +2,19 @@
 #include <iostream>
 namespace httplib::server {
 
+namespace detail {
+
+static auto split_segments(std::string_view path)
+{
+    auto segments = util::split(path, "/");
+
+    if (path.ends_with("/"))
+        segments.push_back(std::string_view());
+
+    return segments;
+}
+} // namespace detail
+
 router_impl::router_impl()
 {
     root_      = std::make_unique<Node>();
@@ -43,7 +56,7 @@ void router_impl::set_http_handler_impl(http::verb method,
                                         coro_http_handler_type&& handler)
 {
     // std::unique_lock lock(mutex_);
-    auto segments          = util::split(path, "/");
+    auto segments          = detail::split_segments(path);
     auto node              = insert(root_.get(), segments, 0);
     node->handlers[method] = std::move(handler);
 }
@@ -78,15 +91,15 @@ net::awaitable<void> router_impl::proc_routing(request& req, response& resp) con
 {
     // std::shared_lock lock(mutex_);
 
-    if (req.method() == http::verb::get || req.method() == http::verb::head) {
-        for (const auto& entry : static_file_entry_) {
-            if (co_await entry->invoke(req, resp))
-                co_return;
-        }
-    }
+    //if (req.method() == http::verb::get || req.method() == http::verb::head) {
+    //    for (const auto& entry : static_file_entry_) {
+    //        if (std::invoke(*entry, req, resp))
+    //            co_return;
+    //    }
+    //}
     std::unordered_map<std::string, std::string> path_params;
 
-    auto segments = util::split(req.decoded_path(), "/");
+    auto segments = detail::split_segments(req.decoded_path());
     if (auto node = match_node(root_.get(), segments, 0, path_params); node) {
         auto iter = node->handlers.find(req.method());
         if (iter == node->handlers.end()) {
@@ -109,17 +122,6 @@ net::awaitable<void> router_impl::proc_routing(request& req, response& resp) con
     resp.set_error_content(httplib::http::status::not_found);
 }
 
-bool router_impl::remove_mount_point(const std::string& mount_point)
-{
-    for (auto it = static_file_entry_.begin(); it != static_file_entry_.end(); ++it) {
-        if ((*it)->mount_point() == mount_point) {
-            static_file_entry_.erase(it);
-            return true;
-        }
-    }
-    return false;
-}
-
 void router_impl::set_default_handler_impl(coro_http_handler_type&& handler)
 {
     default_handler_ = std::move(handler);
@@ -131,7 +133,7 @@ void router_impl::set_ws_handler_impl(std::string_view path,
                                       websocket_conn::coro_close_handler_type&& close_handler)
 {
     // std::unique_lock lock(mutex_);
-    auto segments = util::split(path, "/");
+    auto segments = detail::split_segments(path);
 
     auto node = insert(root_.get(), segments, 0);
 
@@ -146,7 +148,7 @@ std::optional<router_impl::ws_handler_entry> router_impl::query_ws_handler(reque
 {
     // std::shared_lock lock(mutex_);
     std::unordered_map<std::string, std::string> path_params;
-    auto segments = util::split(req.decoded_path(), "/");
+    auto segments = detail::split_segments(req.decoded_path());
     if (auto node = match_node(root_.get(), segments, 0, path_params); node) {
         req.set_path_param(std::move(path_params));
         return node->ws_handler;
@@ -164,7 +166,7 @@ bool router_impl::pre_routing(request& req, response& resp) const
         default: {
             std::unordered_map<std::string, std::string> path_params;
 
-            auto segments = util::split(req.decoded_path(), "/");
+            auto segments = detail::split_segments(req.decoded_path());
             if (auto node = match_node(root_.get(), segments, 0, path_params); node) {
                 auto iter = node->handlers.find(req.method());
                 if (iter == node->handlers.end()) {
@@ -258,25 +260,6 @@ router_impl::match_node(const Node* node,
         }
     }
     return nullptr;
-}
-
-bool router_impl::set_mount_point_impl(std::unique_ptr<mount_point_entry>&& entry)
-{
-    std::error_code ec;
-    if (fs::is_directory(entry->base_dir(), ec)) {
-        std::string mnt = !entry->mount_point().empty() ? entry->mount_point() : "/";
-        if (!mnt.empty() && mnt[0] == '/') {
-            static_file_entry_.push_back(std::move(entry));
-
-            std::sort(static_file_entry_.begin(),
-                      static_file_entry_.end(),
-                      [](const auto& left, const auto& right) {
-                          return left->mount_point().size() > right->mount_point().size();
-                      });
-            return true;
-        }
-    }
-    return false;
 }
 
 } // namespace httplib::server

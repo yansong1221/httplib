@@ -300,18 +300,36 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
 
         if (resp.stream_handler_) {
             resp.chunked(true);
+        }
+        else {
+            if (!resp.has_content_length())
+                resp.prepare_payload();
 
-            boost::system::error_code ec;
-            http::response_serializer<body::any_body> serializer(resp);
-
-            stream_.expires_after(serv_.write_timeout());
-            co_await http::async_write_header(stream_, serializer, net_awaitable[ec]);
-            if (ec) {
-                serv_.get_logger()->trace("write http header failed: {}", ec.message());
-                co_return nullptr;
+            if (auto iter = req.find(http::field::accept_encoding); iter != req.end()) {
+                auto accept_encodings = util::split(iter->value(), ",");
+                for (const auto& encoding : accept_encodings) {
+                    if (httplib::body::compressor_factory::instance().is_supported_encoding(
+                            encoding))
+                    {
+                        resp.set(http::field::content_encoding, encoding);
+                        resp.chunked(true);
+                        break;
+                    }
+                }
             }
-            stream_.expires_never();
+        }
 
+        boost::system::error_code ec;
+        http::response_serializer<body::any_body> serializer(resp);
+        stream_.expires_after(serv_.write_timeout());
+        co_await http::async_write_header(stream_, serializer, net_awaitable[ec]);
+        if (ec) {
+            serv_.get_logger()->trace("write http header failed: {}", ec.message());
+            co_return nullptr;
+        }
+        stream_.expires_never();
+
+        if (resp.stream_handler_) {
             for (;;) {
                 bool has_more = co_await resp.stream_handler_(buffer_, ec);
                 if (ec) {
@@ -340,24 +358,7 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
                 }
             }
         }
-        else {
-            if (!resp.has_content_length())
-                resp.prepare_payload();
-
-            if (auto iter = req.find(http::field::accept_encoding); iter != req.end()) {
-                auto accept_encodings = util::split(iter->value(), ",");
-                for (const auto& encoding : accept_encodings) {
-                    if (httplib::body::compressor_factory::instance().is_supported_encoding(
-                            encoding))
-                    {
-                        resp.set(http::field::content_encoding, encoding);
-                        resp.chunked(true);
-                        break;
-                    }
-                }
-            }
-            boost::system::error_code ec;
-            http::response_serializer<body::any_body> serializer(resp);
+        else if (req.method() != http::verb::head) {
             while (!serializer.is_done()) {
                 stream_.expires_after(serv_.write_timeout());
                 co_await http::async_write_some(stream_, serializer, net_awaitable[ec]);

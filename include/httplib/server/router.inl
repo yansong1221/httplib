@@ -4,7 +4,6 @@
 
 namespace httplib::server {
 
-
 template<typename Func, typename... Aspects>
 router::coro_http_handler_type router::make_coro_http_handler(Func&& handler, Aspects&&... asps)
 {
@@ -89,14 +88,21 @@ void router::set_ws_handler(std::string_view key,
 }
 
 template<typename... Aspects>
-bool router::set_mount_point(const std::string& mount_point, const fs::path& dir, Aspects&&... asps)
+void router::set_mount_point(const std::string& mount_point, const fs::path& dir, Aspects&&... asps)
 {
-    if constexpr (sizeof...(Aspects) > 0) {
-        return set_mount_point_impl(std::make_unique<aspects_mount_point_entry<Aspects...>>(
-            mount_point, dir, std::forward<Aspects>(asps)...));
-    }
-    else
-        return set_mount_point_impl(std::make_unique<mount_point_entry>(mount_point, dir));
+    mount_point_entry entry(mount_point, dir);
+    std::string key = mount_point;
+    if (!key.ends_with("/"))
+        key += "/";
+    key += "*";
+
+    set_http_handler<http::verb::get, http::verb::head>(
+        key,
+        [entry = std::move(entry)](request& req, response& resp) -> void {
+            entry(req, resp);
+            return;
+        },
+        std::forward<Aspects>(asps)...);
 }
 
 } // namespace httplib::server

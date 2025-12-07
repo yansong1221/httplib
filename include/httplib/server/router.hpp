@@ -48,9 +48,7 @@ public:
                         CloseFunc&& close_handler);
 
     template<typename... Aspects>
-    bool set_mount_point(const std::string& mount_point, const fs::path& dir, Aspects&&... asps);
-
-    virtual bool remove_mount_point(const std::string& mount_point) = 0;
+    void set_mount_point(const std::string& mount_point, const fs::path& dir, Aspects&&... asps);
 
 protected:
     using coro_http_handler_type =
@@ -69,8 +67,6 @@ protected:
                                      websocket_conn::coro_open_handler_type&& open_handler,
                                      websocket_conn::coro_message_handler_type&& message_handler,
                                      websocket_conn::coro_close_handler_type&& close_handler) = 0;
-
-    virtual bool set_mount_point_impl(std::unique_ptr<mount_point_entry>&& entry) = 0;
 };
 
 } // namespace httplib::server

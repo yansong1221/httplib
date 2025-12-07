@@ -68,32 +68,20 @@ const httplib::fs::path& mount_point_entry::base_dir() const
 {
     return base_dir_;
 }
-net::awaitable<bool> mount_point_entry::invoke(request& req, response& res) const
+void mount_point_entry::operator()(request& req, response& res) const
 {
-    std::string_view target(req.decoded_path());
-    // Prefix match
-    if (!target.starts_with(mount_point_))
-        co_return false;
-
-    target.remove_prefix(mount_point_.size());
-    if (target.starts_with("/"))
-        target.remove_prefix(1);
-
-    if (!detail::is_valid_path(target))
-        co_return false;
+    auto relative_path = req.path_param("*");
+    if (!detail::is_valid_path(relative_path)) {
+        res.set_error_content(http::status::bad_request);
+        return;
+    }
 
     std::error_code ec;
-    auto path =
-        base_dir_ / fs::path(std::u8string_view((const char8_t*)target.data(), target.size()));
-    if (!fs::exists(path, ec))
-        co_return false;
-
-    if (!co_await before(req, res))
-        co_return false;
-
-    if (target.empty() && !req.decoded_path().ends_with("/")) {
-        res.set_redirect(std::string(req.decoded_path()) + "/");
-        co_return co_await after(req, res);
+    auto path = base_dir_ / fs::path(std::u8string_view((const char8_t*)relative_path.data(),
+                                                        relative_path.size()));
+    if (!fs::exists(path, ec)) {
+        res.set_error_content(http::status::not_found);
+        return;
     }
 
     if (!path.has_filename()) {
@@ -111,26 +99,19 @@ net::awaitable<bool> mount_point_entry::invoke(request& req, response& res) cons
     if (path.has_filename()) {
         if (fs::is_regular_file(path, ec)) {
             res.set_file_content(path, req.base());
-            co_return co_await after(req, res);
+            return;
         }
     }
     else if (fs::is_directory(path, ec)) {
         beast::error_code ec;
         auto body = html::format_dir_to_html(req.decoded_path(), path, ec);
         if (ec)
-            co_return false;
-        res.set_string_content(body, "text/html; charset=utf-8");
-        co_return co_await after(req, res);
+            res.set_error_content(http::status::internal_server_error);
+        else
+            res.set_string_content(body, "text/html; charset=utf-8");
+        return;
     }
-    co_return false;
-}
-net::awaitable<bool> mount_point_entry::before(request& req, response& res) const
-{
-    co_return true;
-}
-net::awaitable<bool> mount_point_entry::after(request& req, response& res) const
-{
-    co_return true;
+    res.set_error_content(http::status::not_found);
 }
 
 

@@ -18,11 +18,7 @@ class router_impl : public router
 public:
     router_impl();
 
-
     net::awaitable<void> proc_routing(request& req, response& resp) const;
-
-
-    bool remove_mount_point(const std::string& mount_point) override;
 
     struct ws_handler_entry
     {
@@ -43,7 +39,6 @@ protected:
                              websocket_conn::coro_open_handler_type&& open_handler,
                              websocket_conn::coro_message_handler_type&& message_handler,
                              websocket_conn::coro_close_handler_type&& close_handler) override;
-    bool set_mount_point_impl(std::unique_ptr<mount_point_entry>&& entry) override;
 
 private:
     struct Node
@@ -66,8 +61,6 @@ private:
     // mutable std::shared_mutex mutex_;
 
     coro_http_handler_type default_handler_;
-
-    std::vector<std::unique_ptr<mount_point_entry>> static_file_entry_;
 
     // 内部函数
     std::unique_ptr<Node> make_special_node(std::string_view segment);
