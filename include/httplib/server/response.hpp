@@ -2,6 +2,7 @@
 #include "httplib/body/any_body.hpp"
 #include "httplib/config.hpp"
 #include "httplib/form_data.hpp"
+#include "httplib/server/helper.hpp"
 #include <boost/beast/http/fields.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/json/value.hpp>
@@ -46,7 +47,7 @@ public:
                             std::string_view content_type,
                             http::status status = http::status::ok)
     {
-        auto handler = util::make_coro_handler(std::move(func));
+        auto handler = helper::make_coro_handler(std::move(func));
         set_stream_content_impl(std::move(handler), content_type, status);
     }
 

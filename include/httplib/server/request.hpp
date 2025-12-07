@@ -39,7 +39,8 @@ public:
     }
 
     std::string_view path_param(const std::string& key) const;
-    void path_param(const std::string& key, const std::string& val);
+    void add_path_param(const std::string& key, const std::string& val);
+    void set_path_param(std::unordered_map<std::string, std::string>&& params);
 
     std::vector<std::string_view> query_param(const std::string& key) const;
     std::string_view query_param_front(const std::string& key) const;

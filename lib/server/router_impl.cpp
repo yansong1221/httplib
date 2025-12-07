@@ -130,8 +130,10 @@ net::awaitable<void> router_impl::proc_routing(request& req, response& resp) con
     // std::shared_lock lock(mutex_);
 
     if (req.method() == http::verb::get || req.method() == http::verb::head) {
-        if (co_await handle_file_request(req, resp))
-            co_return;
+        for (const auto& entry : static_file_entry_) {
+            if (co_await entry->invoke(req, resp))
+                co_return;
+        }
     }
     std::unordered_map<std::string, std::string> path_params;
 
@@ -144,8 +146,7 @@ net::awaitable<void> router_impl::proc_routing(request& req, response& resp) con
                                        : httplib::http::status::method_not_allowed);
             co_return;
         }
-        for (const auto& [key, value] : path_params)
-            req.path_param(key, value);
+        req.set_path_param(std::move(path_params));
 
         co_await iter->second(req, resp);
         co_return;
@@ -159,30 +160,10 @@ net::awaitable<void> router_impl::proc_routing(request& req, response& resp) con
     resp.set_error_content(httplib::http::status::not_found);
 }
 
-bool router_impl::set_mount_point(const std::string& mount_point,
-                                  const std::filesystem::path& dir,
-                                  const http::fields& headers /*= {}*/)
-{
-    std::error_code ec;
-    if (fs::is_directory(dir, ec)) {
-        std::string mnt = !mount_point.empty() ? mount_point : "/";
-        if (!mnt.empty() && mnt[0] == '/') {
-            static_file_entry_.push_back({mnt, dir, headers});
-            std::sort(static_file_entry_.begin(),
-                      static_file_entry_.end(),
-                      [](const auto& left, const auto& right) {
-                          return left.mount_point.size() > right.mount_point.size();
-                      });
-            return true;
-        }
-    }
-    return false;
-}
-
 bool router_impl::remove_mount_point(const std::string& mount_point)
 {
     for (auto it = static_file_entry_.begin(); it != static_file_entry_.end(); ++it) {
-        if (it->mount_point == mount_point) {
+        if ((*it)->mount_point() == mount_point) {
             static_file_entry_.erase(it);
             return true;
         }
@@ -193,11 +174,6 @@ bool router_impl::remove_mount_point(const std::string& mount_point)
 void router_impl::set_default_handler_impl(coro_http_handler_type&& handler)
 {
     default_handler_ = std::move(handler);
-}
-
-void router_impl::set_file_request_handler_impl(coro_http_handler_type&& handler)
-{
-    file_request_handler_ = std::move(handler);
 }
 
 void router_impl::set_ws_handler_impl(std::string_view path,
@@ -217,14 +193,13 @@ void router_impl::set_ws_handler_impl(std::string_view path,
     node->ws_handler      = std::move(entry);
 }
 
-std::optional<router_impl::ws_handler_entry> router_impl::find_ws_handler(request& req) const
+std::optional<router_impl::ws_handler_entry> router_impl::query_ws_handler(request& req) const
 {
     // std::shared_lock lock(mutex_);
     std::unordered_map<std::string, std::string> path_params;
     auto segments = util::split(req.decoded_path(), "/");
     if (auto node = match_node(root_.get(), segments, 0, path_params); node) {
-        for (const auto& [key, value] : path_params)
-            req.path_param(key, value);
+        req.set_path_param(std::move(path_params));
         return node->ws_handler;
     }
 
@@ -336,69 +311,23 @@ router_impl::match_node(const Node* node,
     return nullptr;
 }
 
-httplib::net::awaitable<bool> router_impl::handle_file_request(request& req, response& res) const
+bool router_impl::set_mount_point_impl(std::unique_ptr<mount_point_entry>&& entry)
 {
-    beast::error_code ec;
+    std::error_code ec;
+    if (fs::is_directory(entry->base_dir(), ec)) {
+        std::string mnt = !entry->mount_point().empty() ? entry->mount_point() : "/";
+        if (!mnt.empty() && mnt[0] == '/') {
+            static_file_entry_.push_back(std::move(entry));
 
-    for (const auto& entry : static_file_entry_) {
-        std::string_view target(req.decoded_path());
-        // Prefix match
-        if (!target.starts_with(entry.mount_point))
-            continue;
-        target.remove_prefix(entry.mount_point.size());
-        if (target.starts_with("/"))
-            target.remove_prefix(1);
-
-        if (!detail::is_valid_path(target))
-            continue;
-
-        auto path = entry.base_dir /
-                    fs::path(std::u8string_view((const char8_t*)target.data(), target.size()));
-        if (!fs::exists(path, ec))
-            continue;
-
-        if (target.empty() && !req.decoded_path().ends_with("/")) {
-            res.set_redirect(std::string(req.decoded_path()) + "/");
-            co_return true;
-        }
-
-        if (!path.has_filename()) {
-            for (const auto& doc_name : default_doc_name_) {
-                auto doc_path = path / doc_name;
-
-                boost::system::error_code ec;
-                if (!fs::is_regular_file(doc_path, ec))
-                    continue;
-
-                path = doc_path;
-                break;
-            }
-        }
-        if (path.has_filename()) {
-            if (fs::is_regular_file(path, ec)) {
-                for (const auto& kv : entry.headers) {
-                    res.set(kv.name_string(), kv.value());
-                }
-                res.set_file_content(path, req.base());
-                if (req.method() != http::verb::head && file_request_handler_) {
-                    co_await file_request_handler_(req, res);
-                }
-
-                co_return true;
-            }
-        }
-        else if (fs::is_directory(path, ec)) {
-            beast::error_code ec;
-            auto body = html::format_dir_to_html(req.decoded_path(), path, ec);
-            if (ec)
-                co_return false;
-            res.set_string_content(body, "text/html; charset=utf-8");
-            co_return true;
+            std::sort(static_file_entry_.begin(),
+                      static_file_entry_.end(),
+                      [](const auto& left, const auto& right) {
+                          return left->mount_point().size() > right->mount_point().size();
+                      });
+            return true;
         }
     }
-
-    co_return false;
+    return false;
 }
-
 
 } // namespace httplib::server

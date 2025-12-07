@@ -1,6 +1,6 @@
 #pragma once
+#include "httplib/server/mount_point_entry.hpp"
 #include "httplib/server/websocket_conn.hpp"
-#include "httplib/util/type_traits.h"
 #include <algorithm>
 #include <boost/asio/detached.hpp>
 #include <boost/beast/http/fields.hpp>
@@ -40,9 +40,6 @@ public:
     template<typename Func, typename... Aspects>
     void set_default_handler(Func&& handler, Aspects&&... asps);
 
-    template<typename Func, typename... Aspects>
-    void set_file_request_handler(Func&& handler, Aspects&&... asps);
-
 
     template<typename OpenFunc, typename MessageFunc, typename CloseFunc>
     void set_ws_handler(std::string_view key,
@@ -50,9 +47,8 @@ public:
                         MessageFunc&& message_handler,
                         CloseFunc&& close_handler);
 
-    virtual bool set_mount_point(const std::string& mount_point,
-                                 const std::filesystem::path& dir,
-                                 const http::fields& headers = {}) = 0;
+    template<typename... Aspects>
+    bool set_mount_point(const std::string& mount_point, const fs::path& dir, Aspects&&... asps);
 
     virtual bool remove_mount_point(const std::string& mount_point) = 0;
 
@@ -69,11 +65,12 @@ protected:
                                        std::string_view key,
                                        coro_http_handler_type&& handler)                      = 0;
     virtual void set_default_handler_impl(coro_http_handler_type&& handler)                   = 0;
-    virtual void set_file_request_handler_impl(coro_http_handler_type&& handler)              = 0;
     virtual void set_ws_handler_impl(std::string_view key,
                                      websocket_conn::coro_open_handler_type&& open_handler,
                                      websocket_conn::coro_message_handler_type&& message_handler,
                                      websocket_conn::coro_close_handler_type&& close_handler) = 0;
+
+    virtual bool set_mount_point_impl(std::unique_ptr<mount_point_entry>&& entry) = 0;
 };
 
 } // namespace httplib::server

@@ -98,9 +98,13 @@ std::string_view request::path_param(const std::string& key) const
     return path_params_.at(key);
 }
 
-void request::path_param(const std::string& key, const std::string& val)
+void request::add_path_param(const std::string& key, const std::string& val)
 {
     path_params_[key] = val;
+}
+void request::set_path_param(std::unordered_map<std::string, std::string>&& params)
+{
+    path_params_ = std::move(params);
 }
 
 std::vector<std::string_view> request::query_param(const std::string& key) const
@@ -126,5 +130,6 @@ bool request::has_query_param(const std::string& key) const
 {
     return query_params_.find(key) != query_params_.end();
 }
+
 
 } // namespace httplib::server
