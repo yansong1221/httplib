@@ -69,7 +69,7 @@ void router::set_http_handler(std::string_view key,
 }
 
 template<typename Func, typename... Aspects>
-void router::set_default_handler(Func&& handler, Aspects&&... asps)
+void router::set_http_default_handler(Func&& handler, Aspects&&... asps)
 {
     set_default_handler_impl(
         make_coro_http_handler(std::move(handler), std::forward<Aspects>(asps)...));
@@ -88,10 +88,16 @@ void router::set_ws_handler(std::string_view key,
 }
 
 template<typename... Aspects>
-void router::set_mount_point(const std::string& mount_point, const fs::path& dir, Aspects&&... asps)
+void router::set_static_mount_point(const std::string& mount_point,
+                                    const fs::path& dir,
+                                    Aspects&&... asps)
 {
-    mount_point_entry entry(mount_point, dir);
-    std::string key = mount_point;
+    set_static_mount_point(mount_point_entry(mount_point, dir), std::forward<Aspects>(asps)...);
+}
+template<typename... Aspects>
+void router::set_static_mount_point(mount_point_entry&& entry, Aspects&&... asps)
+{
+    std::string key = entry.mount_point();
     if (!key.ends_with("/"))
         key += "/";
     key += "*";
@@ -103,6 +109,12 @@ void router::set_mount_point(const std::string& mount_point, const fs::path& dir
             return;
         },
         std::forward<Aspects>(asps)...);
+}
+template<typename Func>
+void router::set_http_post_handler(Func&& handler)
+{
+    auto coro_handler = helper::make_coro_handler(std::move(handler));
+    set_http_post_handler_impl(std::move(coro_handler));
 }
 
 } // namespace httplib::server

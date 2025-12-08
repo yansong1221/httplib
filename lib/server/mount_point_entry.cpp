@@ -103,16 +103,43 @@ void mount_point_entry::operator()(request& req, response& res) const
         }
     }
     else if (fs::is_directory(path, ec)) {
-        beast::error_code ec;
-        auto body = html::format_dir_to_html(req.decoded_path(), path, ec);
-        if (ec)
-            res.set_error_content(http::status::internal_server_error);
-        else
-            res.set_string_content(body, "text/html; charset=utf-8");
+        if (enabled_dir_) {
+            beast::error_code ec;
+            switch (dir_type_) {
+                case mount_point_entry::dir_format_type::json: {
+                    auto doc = html::format_dir_to_json(path, ec);
+                    res.set_json_content(std::move(doc));
+                } break;
+                case mount_point_entry::dir_format_type::html: {
+                    auto body = html::format_dir_to_html(req.decoded_path(), path, ec);
+                    res.set_string_content(body, "text/html; charset=utf-8");
+                } break;
+                default: break;
+            }
+            if (ec)
+                res.set_error_content(http::status::internal_server_error);
+        }
+        else {
+            res.set_error_content(http::status::forbidden);
+        }
         return;
     }
-    res.set_error_content(http::status::not_found);
+    res.set_error_content(http::status::forbidden);
 }
 
+void mount_point_entry::set_enabled_dir(bool enabled)
+{
+    enabled_dir_ = enabled;
+}
+
+void mount_point_entry::set_dir_format(dir_format_type type)
+{
+    dir_type_ = type;
+}
+
+void mount_point_entry::set_default_doc_name(const std::vector<std::string>& default_doc_name)
+{
+    default_doc_name_ = default_doc_name;
+}
 
 } // namespace httplib::server

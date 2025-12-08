@@ -179,7 +179,7 @@ net::awaitable<std::unique_ptr<session::task>> session::detect_ssl_task::then()
         boost::system::error_code ec;
         bool is_ssl = co_await beast::async_detect_ssl(stream_, buffer, net_awaitable[ec]);
         if (ec) {
-            sevr_.get_logger()->debug("async_detect_ssl failed: {}", ec.message());
+            sevr_.get_logger()->trace("async_detect_ssl failed: {}", ec.message());
             co_return nullptr;
         }
         if (is_ssl) {
@@ -221,6 +221,7 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
 
 {
     boost::system::error_code ec;
+    auto& _router = serv_.router();
 
     for (;;) {
         http::request_parser<http::empty_body> header_parser;
@@ -254,36 +255,39 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
 
         auto start_time = std::chrono::steady_clock::now();
 
-        if (serv_.router().pre_routing(req, resp)) {
-            http::request_parser<body::any_body> body_parser(std::move(header_parser));
-            while (!body_parser.is_done()) {
-                stream_.expires_after(serv_.read_timeout());
-                co_await http::async_read_some(stream_, buffer_, body_parser, net_awaitable[ec]);
-                stream_.expires_never();
-                if (ec) {
-                    serv_.get_logger()->trace("read http body failed: {}", ec.message());
-                    co_return nullptr;
+        try {
+            if (co_await _router.pre_routing(req, resp)) {
+                http::request_parser<body::any_body> body_parser(std::move(header_parser));
+                while (!body_parser.is_done()) {
+                    stream_.expires_after(serv_.read_timeout());
+                    co_await http::async_read_some(
+                        stream_, buffer_, body_parser, net_awaitable[ec]);
+                    stream_.expires_never();
+                    if (ec) {
+                        serv_.get_logger()->trace("read http body failed: {}", ec.message());
+                        co_return nullptr;
+                    }
                 }
-            }
-            req.body() = std::move(body_parser.release().body());
-            start_time = std::chrono::steady_clock::now();
+                req.body() = std::move(body_parser.release().body());
+                start_time = std::chrono::steady_clock::now();
 
-            try {
-                co_await serv_.router().proc_routing(req, resp);
+                co_await _router.proc_routing(req, resp);
             }
-            catch (const std::exception& e) {
-                serv_.get_logger()->warn("exception in business function, reason: {}", e.what());
-                resp.set_string_content(
-                    std::string(e.what()), "text/plain", http::status::internal_server_error);
-            }
-            catch (...) {
-                using namespace std::string_view_literals;
-                serv_.get_logger()->warn("unknown exception in business function");
-                resp.set_string_content(std::string("unknown exception"),
-                                        "text/plain",
-                                        http::status::internal_server_error);
-            }
+            co_await _router.post_routing(req, resp);
         }
+        catch (const std::exception& e) {
+            serv_.get_logger()->warn("exception in business function, reason: {}", e.what());
+            resp.set_string_content(
+                std::string(e.what()), "text/plain", http::status::internal_server_error);
+        }
+        catch (...) {
+            using namespace std::string_view_literals;
+            serv_.get_logger()->warn("unknown exception in business function");
+            resp.set_string_content(std::string("unknown exception"),
+                                    "text/plain",
+                                    http::status::internal_server_error);
+        }
+
         auto span_time = std::chrono::steady_clock::now() - start_time;
 
         serv_.get_logger()->debug(

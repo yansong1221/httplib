@@ -91,26 +91,28 @@ net::awaitable<void> router_impl::proc_routing(request& req, response& resp) con
 {
     // std::shared_lock lock(mutex_);
 
-    //if (req.method() == http::verb::get || req.method() == http::verb::head) {
-    //    for (const auto& entry : static_file_entry_) {
-    //        if (std::invoke(*entry, req, resp))
-    //            co_return;
-    //    }
-    //}
-    std::unordered_map<std::string, std::string> path_params;
+    // if (req.method() == http::verb::get || req.method() == http::verb::head) {
+    //     for (const auto& entry : static_file_entry_) {
+    //         if (std::invoke(*entry, req, resp))
+    //             co_return;
+    //     }
+    // }
 
     auto segments = detail::split_segments(req.decoded_path());
-    if (auto node = match_node(root_.get(), segments, 0, path_params); node) {
-        auto iter = node->handlers.find(req.method());
-        if (iter == node->handlers.end()) {
-            resp.set_error_content(node->handlers.empty()
-                                       ? httplib::http::status::not_found
-                                       : httplib::http::status::method_not_allowed);
+
+    std::vector<MatchResult> results;
+    match_nodes(root_.get(), segments, 0, results);
+    if (!results.empty()) {
+        for (auto& item : results) {
+            auto iter = item.node->handlers.find(req.method());
+            if (iter == item.node->handlers.end())
+                continue;
+
+            req.set_path_param(std::move(item.params));
+            co_await iter->second(req, resp);
             co_return;
         }
-        req.set_path_param(std::move(path_params));
-
-        co_await iter->second(req, resp);
+        resp.set_error_content(httplib::http::status::method_not_allowed);
         co_return;
     }
 
@@ -118,7 +120,6 @@ net::awaitable<void> router_impl::proc_routing(request& req, response& resp) con
         co_await default_handler_(req, resp);
         co_return;
     }
-
     resp.set_error_content(httplib::http::status::not_found);
 }
 
@@ -147,119 +148,149 @@ void router_impl::set_ws_handler_impl(std::string_view path,
 std::optional<router_impl::ws_handler_entry> router_impl::query_ws_handler(request& req) const
 {
     // std::shared_lock lock(mutex_);
-    std::unordered_map<std::string, std::string> path_params;
     auto segments = detail::split_segments(req.decoded_path());
-    if (auto node = match_node(root_.get(), segments, 0, path_params); node) {
-        req.set_path_param(std::move(path_params));
-        return node->ws_handler;
-    }
 
+    std::vector<MatchResult> results;
+    match_nodes(root_.get(), segments, 0, results);
+
+    for (auto& item : results) {
+        if (item.node->ws_handler) {
+            req.set_path_param(std::move(item.params));
+            return item.node->ws_handler;
+        }
+    }
     return std::nullopt;
 }
-bool router_impl::pre_routing(request& req, response& resp) const
+net::awaitable<bool> router_impl::pre_routing(request& req, response& resp) const
 {
     switch (req.method()) {
         case http::verb::get:
         case http::verb::head:
         case http::verb::trace:
-        case http::verb::connect: return true; break;
+        case http::verb::connect:
+        case http::verb::options: co_return true; break;
         default: {
-            std::unordered_map<std::string, std::string> path_params;
-
             auto segments = detail::split_segments(req.decoded_path());
-            if (auto node = match_node(root_.get(), segments, 0, path_params); node) {
-                auto iter = node->handlers.find(req.method());
-                if (iter == node->handlers.end()) {
-                    resp.keep_alive(false);
-                    resp.set_error_content(node->handlers.empty()
-                                               ? httplib::http::status::not_found
-                                               : httplib::http::status::method_not_allowed);
-                    return false;
+
+            std::vector<MatchResult> results;
+            match_nodes(root_.get(), segments, 0, results);
+            if (!results.empty()) {
+                for (auto& item : results) {
+                    auto iter = item.node->handlers.find(req.method());
+                    if (iter == item.node->handlers.end())
+                        continue;
+
+                    co_return true;
                 }
-                return true;
+                resp.keep_alive(false);
+                resp.set_error_content(httplib::http::status::method_not_allowed);
+                co_return false;
             }
 
         } break;
     }
     resp.keep_alive(false);
     resp.set_error_content(httplib::http::status::not_found);
-    return false;
+    co_return false;
 }
 
-// ---------------- match_node ----------------
-const router_impl::Node*
-router_impl::match_node(const Node* node,
-                        const std::vector<std::string_view>& segments,
-                        size_t index,
-                        std::unordered_map<std::string, std::string>& path_params) const
+void router_impl::match_nodes(const Node* node,
+                              const std::vector<std::string_view>& segments,
+                              size_t index,
+                              std::vector<MatchResult>& results,
+                              std::unordered_map<std::string, std::string> params) const
 {
     if (!node)
-        return nullptr;
+        return;
 
-    if (index == segments.size())
-        return node;
+    if (index == segments.size()) {
+        results.push_back({node, std::move(params)});
+        return;
+    }
 
     const auto& seg = segments[index];
 
-    // 1️⃣ 静态匹配
+    // 1) static
     for (auto& child : node->children) {
         if (!child->is_param && !child->is_regex && !child->is_wildcard) {
             if (child->key == seg) {
-                if (auto node = match_node(child.get(), segments, index + 1, path_params); node)
-                    return node;
+                match_nodes(child.get(), segments, index + 1, results, params);
             }
         }
     }
 
-    // 2️⃣ 正则匹配
+    // 2) regex
     for (auto& child : node->children) {
         if (child->is_regex) {
-            if (std::regex_match(seg.begin(), seg.end(), child->regex)) {
-                path_params[child->param_name] = seg;
-                if (auto node = match_node(child.get(), segments, index + 1, path_params); node)
-                    return node;
-                path_params.erase(child->param_name);
+            if (std::regex_match(seg.data(), seg.data() + seg.length(), child->regex)) {
+                auto p2               = params;
+                p2[child->param_name] = std::string(seg);
+                match_nodes(child.get(), segments, index + 1, results, std::move(p2));
             }
         }
     }
 
-    // 3️⃣ 动态参数匹配
+    // 3) param
     for (auto& child : node->children) {
         if (child->is_param) {
-            path_params[child->param_name] = seg;
-            if (auto node = match_node(child.get(), segments, index + 1, path_params); node)
-                return node;
-            path_params.erase(child->param_name);
+            auto p2               = params;
+            p2[child->param_name] = std::string(seg);
+            match_nodes(child.get(), segments, index + 1, results, std::move(p2));
         }
     }
 
-    // 4️⃣ wildcard 匹配
+    // 4) wildcard
     for (auto& child : node->children) {
-        if (child->is_wildcard) {
-            // 贪心 + 回溯匹配
-            for (size_t len = 1; index + len <= segments.size(); ++len) {
-                std::string captured;
-                for (size_t i = 0; i < len; ++i) {
-                    if (!captured.empty())
-                        captured += "/";
-                    captured += segments[index + i];
-                }
-                path_params["*"] = captured;
-                if (auto node = match_node(child.get(), segments, index + len, path_params); node)
-                    return node;
-                path_params.erase("*");
-            }
-            /*std::string rest;
+        if (!child->is_wildcard)
+            continue;
+
+        // 终节点：吃全部剩余
+        if (child->children.empty()) {
+            auto p2 = params;
+            std::string rest;
             for (size_t i = index; i < segments.size(); ++i) {
                 if (!rest.empty())
                     rest += "/";
                 rest += segments[i];
             }
-            path_params["*"] = rest;
-            return child.get();*/
+            p2["*"] = std::move(rest);
+            results.push_back({child.get(), std::move(p2)});
+            continue;
+        }
+
+        // 吃一个
+        {
+            auto p2 = params;
+            p2["*"] = std::string(seg);
+            match_nodes(child.get(), segments, index + 1, results, std::move(p2));
+        }
+
+        // 吃全部剩余
+        {
+            auto p2 = params;
+            std::string rest;
+            for (size_t i = index; i < segments.size(); ++i) {
+                if (!rest.empty())
+                    rest += "/";
+                rest += segments[i];
+            }
+            p2["*"] = std::move(rest);
+            match_nodes(child.get(), segments, segments.size(), results, std::move(p2));
         }
     }
-    return nullptr;
+}
+
+net::awaitable<void> router_impl::post_routing(request& req, response& resp) const
+{
+    if (post_handler_)
+        co_await post_handler_(req, resp);
+
+    co_return;
+}
+
+void router_impl::set_http_post_handler_impl(coro_http_handler_type&& handler)
+{
+    post_handler_ = std::move(handler);
 }
 
 } // namespace httplib::server

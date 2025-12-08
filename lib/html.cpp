@@ -204,7 +204,7 @@ inline static std::vector<std::string> format_path_list(const fs::path& path,
 
 std::string format_dir_to_html(std::string_view target,
                                const fs::path& path,
-                               boost::system::error_code ec)
+                               boost::system::error_code& ec)
 {
     auto path_list = detail::format_path_list(path, ec);
     if (ec)
@@ -220,6 +220,19 @@ std::string format_dir_to_html(std::string_view target,
     body = head + body + (const char*)detail::tail_fmt;
 
     return body;
+}
+boost::json::value format_dir_to_json(const fs::path& path, boost::system::error_code& ec)
+{
+    boost::json::array path_list;
+    for (const auto& file_entry : fs::directory_iterator(path, ec)) {
+        boost::json::object obj;
+        obj["last_write_time"] = file_last_write_time(path, ec);
+        obj["is_dir"]          = file_entry.is_directory(ec);
+        obj["filename"] = std::string((const char*)file_entry.path().filename().u8string().c_str());
+        obj["filesize"] = fs::file_size(file_entry.path(), ec);
+        path_list.push_back(obj);
+    }
+    return path_list;
 }
 std::time_t file_last_write_time(const fs::path& path, std::error_code& ec)
 {
@@ -244,7 +257,7 @@ std::string format_http_current_gmt_date()
         // double check
         if (last_time != now) {
             last_time_format = format_http_gmt_date(now);
-            last_time = now;
+            last_time        = now;
         }
     }
 
@@ -425,5 +438,6 @@ std::string make_http_query_params(const query_params& params)
     }
     return boost::join(tokens, "&");
 }
+
 
 } // namespace httplib::html

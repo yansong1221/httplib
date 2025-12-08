@@ -28,7 +28,8 @@ public:
     };
     std::optional<ws_handler_entry> query_ws_handler(request& req) const;
 
-    bool pre_routing(request& req, response& resp) const;
+    net::awaitable<bool> pre_routing(request& req, response& resp) const;
+    net::awaitable<void> post_routing(request& req, response& resp) const;
 
 protected:
     void set_http_handler_impl(http::verb method,
@@ -39,6 +40,7 @@ protected:
                              websocket_conn::coro_open_handler_type&& open_handler,
                              websocket_conn::coro_message_handler_type&& message_handler,
                              websocket_conn::coro_close_handler_type&& close_handler) override;
+    void set_http_post_handler_impl(coro_http_handler_type&& handler) override;
 
 private:
     struct Node
@@ -61,15 +63,22 @@ private:
     // mutable std::shared_mutex mutex_;
 
     coro_http_handler_type default_handler_;
+    coro_http_handler_type post_handler_;
 
     // 内部函数
     std::unique_ptr<Node> make_special_node(std::string_view segment);
 
     Node* insert(Node* node, const std::vector<std::string_view>& segments, size_t index);
 
-    const Node* match_node(const Node* node,
-                           const std::vector<std::string_view>& segments,
-                           size_t index,
-                           std::unordered_map<std::string, std::string>& path_params) const;
+    struct MatchResult
+    {
+        const Node* node;
+        std::unordered_map<std::string, std::string> params;
+    };
+    void match_nodes(const Node* node,
+                     const std::vector<std::string_view>& segments,
+                     size_t index,
+                     std::vector<MatchResult>& results,
+                     std::unordered_map<std::string, std::string> params = {}) const;
 };
 } // namespace httplib::server
