@@ -38,7 +38,7 @@ public:
                           Aspects&&... asps);
 
     template<typename Func, typename... Aspects>
-    void set_http_default_handler(Func&& handler, Aspects&&... asps);
+    void set_http_not_found_handler(Func&& handler, Aspects&&... asps);
 
 
     template<typename OpenFunc, typename MessageFunc, typename CloseFunc>
@@ -69,7 +69,7 @@ protected:
     virtual void set_http_handler_impl(http::verb method,
                                        std::string_view key,
                                        coro_http_handler_type&& handler)                      = 0;
-    virtual void set_default_handler_impl(coro_http_handler_type&& handler)                   = 0;
+    virtual void set_not_found_handler_impl(coro_http_handler_type&& handler)                 = 0;
     virtual void set_ws_handler_impl(std::string_view key,
                                      websocket_conn::coro_open_handler_type&& open_handler,
                                      websocket_conn::coro_message_handler_type&& message_handler,

@@ -69,9 +69,9 @@ void router::set_http_handler(std::string_view key,
 }
 
 template<typename Func, typename... Aspects>
-void router::set_http_default_handler(Func&& handler, Aspects&&... asps)
+void router::set_http_not_found_handler(Func&& handler, Aspects&&... asps)
 {
-    set_default_handler_impl(
+    set_not_found_handler_impl(
         make_coro_http_handler(std::move(handler), std::forward<Aspects>(asps)...));
 }
 

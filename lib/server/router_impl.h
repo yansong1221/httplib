@@ -35,7 +35,7 @@ protected:
     void set_http_handler_impl(http::verb method,
                                std::string_view path,
                                coro_http_handler_type&& handler) override;
-    void set_default_handler_impl(coro_http_handler_type&& handler) override;
+    void set_not_found_handler_impl(coro_http_handler_type&& handler) override;
     void set_ws_handler_impl(std::string_view path,
                              websocket_conn::coro_open_handler_type&& open_handler,
                              websocket_conn::coro_message_handler_type&& message_handler,
@@ -45,40 +45,43 @@ protected:
 private:
     struct Node
     {
-        std::string key; // Radix key (静态路径段)
-        bool is_param    = false;
-        bool is_regex    = false;
-        bool is_wildcard = false;
+        enum class node_type
+        {
+            static_node,
+            param_node,
+            regex_node,
+            wildcard_node,
+        };
 
+        std::string key; // Radix key (静态路径段)
         std::string param_name;
         std::regex regex;
+        node_type type = node_type::static_node;
 
         std::unordered_map<http::verb, coro_http_handler_type> handlers;
         std::optional<ws_handler_entry> ws_handler;
 
-        std::vector<std::unique_ptr<Node>> children;
+        std::unordered_map<std::string, std::unique_ptr<Node>> static_children;
+        std::vector<std::unique_ptr<Node>> param_children;
+        std::vector<std::unique_ptr<Node>> regex_children;
+        std::unique_ptr<Node> wildcard_children;
     };
 
     std::unique_ptr<Node> root_;
     // mutable std::shared_mutex mutex_;
 
-    coro_http_handler_type default_handler_;
     coro_http_handler_type post_handler_;
+    coro_http_handler_type not_found_handler_;
 
     // 内部函数
-    std::unique_ptr<Node> make_special_node(std::string_view segment);
+    static Node* insert(Node* node, const std::vector<std::string_view>& segments, size_t index);
 
-    Node* insert(Node* node, const std::vector<std::string_view>& segments, size_t index);
+    using MatchHandlerType = std::function<bool(const Node* node)>;
 
-    struct MatchResult
-    {
-        const Node* node;
-        std::unordered_map<std::string, std::string> params;
-    };
-    void match_nodes(const Node* node,
-                     const std::vector<std::string_view>& segments,
-                     size_t index,
-                     std::vector<MatchResult>& results,
-                     std::unordered_map<std::string, std::string> params = {}) const;
+    const Node* match_nodes(const Node* node,
+                            const std::vector<std::string_view>& segments,
+                            size_t index,
+                            std::unordered_map<std::string, std::string>& params,
+                            const MatchHandlerType& handler) const;
 };
 } // namespace httplib::server

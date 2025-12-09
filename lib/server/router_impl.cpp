@@ -1,5 +1,8 @@
 #include "router_impl.h"
+#include <boost/algorithm/string/join.hpp>
 #include <iostream>
+#include <set>
+
 namespace httplib::server {
 
 namespace detail {
@@ -13,42 +16,12 @@ static auto split_segments(std::string_view path)
 
     return segments;
 }
+
 } // namespace detail
 
 router_impl::router_impl()
+    : root_(std::make_unique<Node>())
 {
-    root_      = std::make_unique<Node>();
-    root_->key = "";
-}
-
-std::unique_ptr<router_impl::Node> router_impl::make_special_node(std::string_view seg)
-{
-    auto node = std::make_unique<Node>();
-    node->key = seg;
-
-    if (seg == "*") {
-        node->is_wildcard = true;
-        return node;
-    }
-
-    if (!seg.empty() && seg[0] == ':') {
-        node->is_param   = true;
-        node->param_name = seg.substr(1);
-        return node;
-    }
-
-    if (!seg.empty() && seg.front() == '{' && seg.back() == '}') {
-        node->is_regex          = true;
-        std::string_view inside = seg.substr(1, seg.size() - 2);
-        size_t pos              = inside.find(':');
-        node->param_name        = inside.substr(0, pos);
-
-        auto key = inside.substr(pos + 1);
-        node->regex.assign(key.begin(), key.end());
-        return node;
-    }
-
-    return node;
 }
 
 void router_impl::set_http_handler_impl(http::verb method,
@@ -62,27 +35,68 @@ void router_impl::set_http_handler_impl(http::verb method,
 }
 
 
-router_impl::Node* router_impl::insert(Node* node,
+router_impl::Node* router_impl::insert(Node* parent,
                                        const std::vector<std::string_view>& segments,
                                        size_t index)
 {
     if (index >= segments.size())
-        return node;
+        return parent;
 
-    const auto& seg = segments[index];
-    Node* found     = nullptr;
+    const auto& seg = segments.at(index);
 
-    for (auto& child : node->children) {
-        if (child->key == seg)
-            found = child.get();
+    if (segments.size() - 1 == index && seg == "*") {
+        if (!parent->wildcard_children) {
+            auto node                 = std::make_unique<Node>();
+            node->key                 = seg;
+            node->type                = Node::node_type::wildcard_node;
+            parent->wildcard_children = std::move(node);
+        }
+        return insert(parent->wildcard_children.get(), segments, index + 1);
     }
 
-    if (!found) {
-        auto new_node = make_special_node(seg);
-        found         = new_node.get();
-        node->children.push_back(std::move(new_node));
+    if (!seg.empty() && seg.starts_with(":")) {
+        auto iter = std::ranges::find_if(parent->param_children,
+                                         [&](const auto& node) { return node->key == seg; });
+
+        if (iter != parent->param_children.end())
+            return insert(iter->get(), segments, index + 1);
+
+        auto node        = std::make_unique<Node>();
+        node->key        = seg;
+        node->type       = Node::node_type::param_node;
+        node->param_name = seg.substr(1);
+
+        parent->param_children.push_back(std::move(node));
+        return insert(parent->param_children.back().get(), segments, index + 1);
     }
-    return insert(found, segments, index + 1);
+
+    if (!seg.empty() && seg.front() == '{' && seg.back() == '}') {
+        auto iter = std::ranges::find_if(parent->regex_children,
+                                         [&](const auto& node) { return node->key == seg; });
+
+        if (iter != parent->regex_children.end())
+            return insert(iter->get(), segments, index + 1);
+
+        std::string_view inside = seg.substr(1, seg.size() - 2);
+        size_t pos              = inside.find(':');
+        auto key                = inside.substr(pos + 1);
+
+        auto node        = std::make_unique<Node>();
+        node->key        = seg;
+        node->type       = Node::node_type::regex_node;
+        node->param_name = inside.substr(0, pos);
+        node->regex      = std::regex(key.begin(), key.end());
+
+        parent->regex_children.push_back(std::move(node));
+        return insert(parent->regex_children.back().get(), segments, index + 1);
+    }
+    auto [iter, inserted] =
+        parent->static_children.try_emplace(std::string(seg), std::make_unique<Node>());
+    if (inserted) {
+        iter->second->key  = seg;
+        iter->second->type = Node::node_type::static_node;
+    }
+    return insert(iter->second.get(), segments, index + 1);
 }
 
 
@@ -91,41 +105,37 @@ net::awaitable<void> router_impl::proc_routing(request& req, response& resp) con
 {
     // std::shared_lock lock(mutex_);
 
-    // if (req.method() == http::verb::get || req.method() == http::verb::head) {
-    //     for (const auto& entry : static_file_entry_) {
-    //         if (std::invoke(*entry, req, resp))
-    //             co_return;
-    //     }
-    // }
-
     auto segments = detail::split_segments(req.decoded_path());
 
-    std::vector<MatchResult> results;
-    match_nodes(root_.get(), segments, 0, results);
-    if (!results.empty()) {
-        for (auto& item : results) {
-            auto iter = item.node->handlers.find(req.method());
-            if (iter == item.node->handlers.end())
-                continue;
+    std::unordered_map<std::string, std::string> params;
+    std::set<std::string> allows;
 
-            req.set_path_param(std::move(item.params));
+    auto node = match_nodes(root_.get(), segments, 0, params, [&](const Node* node) {
+        for (const auto& v : node->handlers)
+            allows.insert(to_string(v.first));
+
+        return node->handlers.find(req.method()) != node->handlers.end();
+    });
+
+    if (node) {
+        req.set_path_param(std::move(params));
+        auto iter = node->handlers.find(req.method());
+        if (iter != node->handlers.end()) {
             co_await iter->second(req, resp);
             co_return;
         }
-        resp.set_error_content(httplib::http::status::method_not_allowed);
-        co_return;
     }
-
-    if (default_handler_) {
-        co_await default_handler_(req, resp);
+    if (!allows.empty()) {
+        resp.set(http::field::allow, boost::join(allows, ","));
+        resp.set_error_content(httplib::http::status::method_not_allowed);
         co_return;
     }
     resp.set_error_content(httplib::http::status::not_found);
 }
 
-void router_impl::set_default_handler_impl(coro_http_handler_type&& handler)
+void router_impl::set_not_found_handler_impl(coro_http_handler_type&& handler)
 {
-    default_handler_ = std::move(handler);
+    not_found_handler_ = std::move(handler);
 }
 
 void router_impl::set_ws_handler_impl(std::string_view path,
@@ -150,16 +160,15 @@ std::optional<router_impl::ws_handler_entry> router_impl::query_ws_handler(reque
     // std::shared_lock lock(mutex_);
     auto segments = detail::split_segments(req.decoded_path());
 
-    std::vector<MatchResult> results;
-    match_nodes(root_.get(), segments, 0, results);
+    std::unordered_map<std::string, std::string> params;
+    auto node = match_nodes(root_.get(), segments, 0, params, [&](const Node* node) {
+        return node->ws_handler.has_value();
+    });
 
-    for (auto& item : results) {
-        if (item.node->ws_handler) {
-            req.set_path_param(std::move(item.params));
-            return item.node->ws_handler;
-        }
-    }
-    return std::nullopt;
+    if (!node)
+        return std::nullopt;
+
+    return node->ws_handler;
 }
 net::awaitable<bool> router_impl::pre_routing(request& req, response& resp) const
 {
@@ -172,17 +181,25 @@ net::awaitable<bool> router_impl::pre_routing(request& req, response& resp) cons
         default: {
             auto segments = detail::split_segments(req.decoded_path());
 
-            std::vector<MatchResult> results;
-            match_nodes(root_.get(), segments, 0, results);
-            if (!results.empty()) {
-                for (auto& item : results) {
-                    auto iter = item.node->handlers.find(req.method());
-                    if (iter == item.node->handlers.end())
-                        continue;
+            std::unordered_map<std::string, std::string> params;
+            std::set<std::string> allows;
 
+            auto node = match_nodes(root_.get(), segments, 0, params, [&](const Node* node) {
+                for (const auto& v : node->handlers)
+                    allows.insert(to_string(v.first));
+
+                return node->handlers.find(req.method()) != node->handlers.end();
+            });
+
+            if (node) {
+                auto iter = node->handlers.find(req.method());
+                if (iter != node->handlers.end()) {
                     co_return true;
                 }
+            }
+            if (!allows.empty()) {
                 resp.keep_alive(false);
+                resp.set(http::field::allow, boost::join(allows, ","));
                 resp.set_error_content(httplib::http::status::method_not_allowed);
                 co_return false;
             }
@@ -194,94 +211,76 @@ net::awaitable<bool> router_impl::pre_routing(request& req, response& resp) cons
     co_return false;
 }
 
-void router_impl::match_nodes(const Node* node,
-                              const std::vector<std::string_view>& segments,
-                              size_t index,
-                              std::vector<MatchResult>& results,
-                              std::unordered_map<std::string, std::string> params) const
+const router_impl::Node*
+router_impl::match_nodes(const Node* parent,
+                         const std::vector<std::string_view>& segments,
+                         size_t index,
+                         std::unordered_map<std::string, std::string>& params,
+                         const MatchHandlerType& handler) const
 {
-    if (!node)
-        return;
+    if (!parent)
+        return nullptr;
 
     if (index == segments.size()) {
-        results.push_back({node, std::move(params)});
-        return;
+        if (!handler(parent))
+            return nullptr;
+        return parent;
     }
 
     const auto& seg = segments[index];
 
     // 1) static
-    for (auto& child : node->children) {
-        if (!child->is_param && !child->is_regex && !child->is_wildcard) {
-            if (child->key == seg) {
-                match_nodes(child.get(), segments, index + 1, results, params);
-            }
+    {
+        auto iter = parent->static_children.find(std::string(seg));
+        if (iter != parent->static_children.end()) {
+            if (auto node = match_nodes(iter->second.get(), segments, index + 1, params, handler);
+                node)
+                return node;
         }
     }
 
     // 2) regex
-    for (auto& child : node->children) {
-        if (child->is_regex) {
-            if (std::regex_match(seg.data(), seg.data() + seg.length(), child->regex)) {
-                auto p2               = params;
-                p2[child->param_name] = std::string(seg);
-                match_nodes(child.get(), segments, index + 1, results, std::move(p2));
-            }
+    for (auto& child : parent->regex_children) {
+        if (std::regex_match(seg.data(), seg.data() + seg.length(), child->regex)) {
+            params[child->param_name] = std::string(seg);
+            if (auto node = match_nodes(child.get(), segments, index + 1, params, handler); node)
+                return node;
+
+            params.erase(child->param_name);
         }
     }
 
     // 3) param
-    for (auto& child : node->children) {
-        if (child->is_param) {
-            auto p2               = params;
-            p2[child->param_name] = std::string(seg);
-            match_nodes(child.get(), segments, index + 1, results, std::move(p2));
-        }
+    for (auto& child : parent->param_children) {
+        params[child->param_name] = std::string(seg);
+        if (auto node = match_nodes(child.get(), segments, index + 1, params, handler); node)
+            return node;
+        params.erase(child->param_name);
     }
 
     // 4) wildcard
-    for (auto& child : node->children) {
-        if (!child->is_wildcard)
-            continue;
-
-        // 终节点：吃全部剩余
-        if (child->children.empty()) {
-            auto p2 = params;
-            std::string rest;
-            for (size_t i = index; i < segments.size(); ++i) {
-                if (!rest.empty())
-                    rest += "/";
-                rest += segments[i];
-            }
-            p2["*"] = std::move(rest);
-            results.push_back({child.get(), std::move(p2)});
-            continue;
+    if (parent->wildcard_children) {
+        std::string rest;
+        for (size_t i = index; i < segments.size(); ++i) {
+            if (!rest.empty())
+                rest += "/";
+            rest += segments[i];
         }
-
-        // 吃一个
-        {
-            auto p2 = params;
-            p2["*"] = std::string(seg);
-            match_nodes(child.get(), segments, index + 1, results, std::move(p2));
-        }
-
-        // 吃全部剩余
-        {
-            auto p2 = params;
-            std::string rest;
-            for (size_t i = index; i < segments.size(); ++i) {
-                if (!rest.empty())
-                    rest += "/";
-                rest += segments[i];
-            }
-            p2["*"] = std::move(rest);
-            match_nodes(child.get(), segments, segments.size(), results, std::move(p2));
-        }
+        params["*"] = std::move(rest);
+        if (auto node = match_nodes(
+                parent->wildcard_children.get(), segments, segments.size(), params, handler);
+            node)
+            return node;
+        params.erase("*");
     }
+    return nullptr;
 }
 
 net::awaitable<void> router_impl::post_routing(request& req, response& resp) const
 {
+    if (not_found_handler_ && resp.result() == http::status::not_found)
+        co_await not_found_handler_(req, resp);
+
     if (post_handler_)
         co_await post_handler_(req, resp);
 
@@ -292,5 +291,6 @@ void router_impl::set_http_post_handler_impl(coro_http_handler_type&& handler)
 {
     post_handler_ = std::move(handler);
 }
+
 
 } // namespace httplib::server

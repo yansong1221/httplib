@@ -97,10 +97,11 @@ void mount_point_entry::operator()(request& req, response& res) const
         }
     }
     if (path.has_filename()) {
-        if (fs::is_regular_file(path, ec)) {
+        if (fs::is_regular_file(path, ec))
             res.set_file_content(path, req.base());
-            return;
-        }
+        else
+            res.set_error_content(http::status::not_found);
+        return;
     }
     else if (fs::is_directory(path, ec)) {
         if (enabled_dir_) {
