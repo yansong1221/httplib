@@ -20,11 +20,6 @@ public:
 
     using weak_ptr = std::weak_ptr<websocket_conn>;
 
-    using open_handler_type  = std::function<void(websocket_conn::weak_ptr)>;
-    using close_handler_type = std::function<void(websocket_conn::weak_ptr)>;
-    using message_handler_type =
-        std::function<void(websocket_conn::weak_ptr, std::string_view, data_type)>;
-
     using coro_open_handler_type  = std::function<net::awaitable<void>(websocket_conn::weak_ptr)>;
     using coro_close_handler_type = coro_open_handler_type;
     using coro_message_handler_type =
