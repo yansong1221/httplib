@@ -1,6 +1,7 @@
 #pragma once
 #include "httplib/config.hpp"
 #include "httplib/server/request.hpp"
+#include "httplib/server/response.hpp"
 #include "stream/http_stream.hpp"
 #include "stream/websocket_stream.hpp"
 #include <boost/asio/awaitable.hpp>
@@ -68,6 +69,9 @@ public:
 
     net::awaitable<std::unique_ptr<task>> then() override;
     void abort() override;
+
+private:
+    net::awaitable<bool> async_write(request& req, response& resp);
 
 private:
     http_server_impl& serv_;

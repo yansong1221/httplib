@@ -257,6 +257,14 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
 
         try {
             if (co_await _router.pre_routing(req, resp)) {
+                if (beast::iequals(header[http::field::expect], "100-continue")) {
+                    // send 100 response
+                    response resp(header.version(), true);
+                    resp.set_empty_content(http::status::continue_);
+                    if (!co_await async_write(req, resp))
+                        co_return nullptr;
+                }
+
                 http::request_parser<body::any_body> body_parser(std::move(header_parser));
                 while (!body_parser.is_done()) {
                     stream_.expires_after(serv_.read_timeout());
@@ -302,77 +310,8 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
             std::chrono::duration_cast<std::chrono::milliseconds>(span_time).count());
 
 
-        if (resp.stream_handler_) {
-            resp.chunked(true);
-        }
-        else {
-            if (!resp.has_content_length())
-                resp.prepare_payload();
-
-            if (auto iter = req.find(http::field::accept_encoding); iter != req.end()) {
-                auto accept_encodings = util::split(iter->value(), ",");
-                for (const auto& encoding : accept_encodings) {
-                    if (httplib::body::compressor_factory::instance().is_supported_encoding(
-                            encoding))
-                    {
-                        resp.set(http::field::content_encoding, encoding);
-                        resp.chunked(true);
-                        break;
-                    }
-                }
-            }
-        }
-
-        boost::system::error_code ec;
-        http::response_serializer<body::any_body> serializer(resp);
-        stream_.expires_after(serv_.write_timeout());
-        co_await http::async_write_header(stream_, serializer, net_awaitable[ec]);
-        if (ec) {
-            serv_.get_logger()->trace("write http header failed: {}", ec.message());
+        if (!co_await async_write(req, resp))
             co_return nullptr;
-        }
-        stream_.expires_never();
-
-        if (resp.stream_handler_) {
-            for (;;) {
-                bool has_more = co_await resp.stream_handler_(buffer_, ec);
-                if (ec) {
-                    serv_.get_logger()->trace("read chunk body failed: {}", ec.message());
-                    co_return nullptr;
-                }
-                if (buffer_.size() != 0) {
-                    http::chunk_body chunk_b(buffer_.data());
-                    stream_.expires_after(serv_.write_timeout());
-                    co_await net::async_write(stream_, chunk_b, net_awaitable[ec]);
-                    if (ec) {
-                        serv_.get_logger()->trace("write chunk body failed: {}", ec.message());
-                        co_return nullptr;
-                    }
-                    stream_.expires_never();
-                    buffer_.consume(buffer_.size());
-                }
-                if (!has_more) {
-                    http::chunk_last chunk_last;
-                    co_await net::async_write(stream_, chunk_last, net_awaitable[ec]);
-                    if (ec) {
-                        serv_.get_logger()->trace("write chunk last failed: {}", ec.message());
-                        co_return nullptr;
-                    }
-                    break;
-                }
-            }
-        }
-        else if (req.method() != http::verb::head) {
-            while (!serializer.is_done()) {
-                stream_.expires_after(serv_.write_timeout());
-                co_await http::async_write_some(stream_, serializer, net_awaitable[ec]);
-                stream_.expires_never();
-                if (ec) {
-                    serv_.get_logger()->trace("write http body failed: {}", ec.message());
-                    co_return nullptr;
-                }
-            }
-        }
 
         if (!resp.keep_alive()) {
             boost::system::error_code ec;
@@ -390,6 +329,80 @@ void session::http_task::abort()
 {
     boost::system::error_code ec;
     stream_.close(ec);
+}
+
+net::awaitable<bool> session::http_task::async_write(request& req, response& resp)
+{
+    if (resp.stream_handler_) {
+        resp.chunked(true);
+    }
+    else {
+        if (!resp.has_content_length())
+            resp.prepare_payload();
+
+        if (auto iter = req.find(http::field::accept_encoding); iter != req.end()) {
+            auto accept_encodings = util::split(iter->value(), ",");
+            for (const auto& encoding : accept_encodings) {
+                if (httplib::body::compressor_factory::instance().is_supported_encoding(encoding)) {
+                    resp.set(http::field::content_encoding, encoding);
+                    resp.chunked(true);
+                    break;
+                }
+            }
+        }
+    }
+
+    boost::system::error_code ec;
+    http::response_serializer<body::any_body> serializer(resp);
+    stream_.expires_after(serv_.write_timeout());
+    co_await http::async_write_header(stream_, serializer, net_awaitable[ec]);
+    if (ec) {
+        serv_.get_logger()->trace("write http header failed: {}", ec.message());
+        co_return false;
+    }
+    stream_.expires_never();
+
+    if (resp.stream_handler_) {
+        for (;;) {
+            bool has_more = co_await resp.stream_handler_(buffer_, ec);
+            if (ec) {
+                serv_.get_logger()->trace("read chunk body failed: {}", ec.message());
+                co_return false;
+            }
+            if (buffer_.size() != 0) {
+                http::chunk_body chunk_b(buffer_.data());
+                stream_.expires_after(serv_.write_timeout());
+                co_await net::async_write(stream_, chunk_b, net_awaitable[ec]);
+                if (ec) {
+                    serv_.get_logger()->trace("write chunk body failed: {}", ec.message());
+                    co_return false;
+                }
+                stream_.expires_never();
+                buffer_.consume(buffer_.size());
+            }
+            if (!has_more) {
+                http::chunk_last chunk_last;
+                co_await net::async_write(stream_, chunk_last, net_awaitable[ec]);
+                if (ec) {
+                    serv_.get_logger()->trace("write chunk last failed: {}", ec.message());
+                    co_return false;
+                }
+                break;
+            }
+        }
+    }
+    else if (req.method() != http::verb::head) {
+        while (!serializer.is_done()) {
+            stream_.expires_after(serv_.write_timeout());
+            co_await http::async_write_some(stream_, serializer, net_awaitable[ec]);
+            stream_.expires_never();
+            if (ec) {
+                serv_.get_logger()->trace("write http body failed: {}", ec.message());
+                co_return false;
+            }
+        }
+    }
+    co_return true;
 }
 
 session::websocket_task::websocket_task(websocket_variant_stream_type&& stream,
