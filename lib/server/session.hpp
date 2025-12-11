@@ -86,7 +86,7 @@ private:
 class session::websocket_task : public session::task
 {
 public:
-    explicit websocket_task(websocket_variant_stream_type&& stream,
+    explicit websocket_task(std::unique_ptr<ws_stream>&& stream,
                             request&& req,
                             http_server_impl& serv);
 

@@ -1,4 +1,5 @@
 #pragma once
+#include "action_queue.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/websocket_conn.hpp"
 #include "httplib/use_awaitable.hpp"
@@ -11,34 +12,32 @@
 #include <queue>
 #include <span>
 
-
 namespace httplib::server {
 
 class websocket_conn_impl : public websocket_conn
 {
 public:
-    websocket_conn_impl(http_server_impl& serv,
-                        websocket_variant_stream_type&& stream,
-                        request&& req);
+    websocket_conn_impl(http_server_impl& serv, std::unique_ptr<ws_stream>&& stream, request&& req);
+    ~websocket_conn_impl();
 
 public:
-    void send_message(std::string&& msg, data_type type) override;
+    void send_message(std::string&& msg, bool binary) override;
+    void send_ping(std::string&& msg) override;
+
     void close() override;
     const request& http_request() const override { return req_; }
 
 public:
-    net::awaitable<void> process_write_data();
     net::awaitable<void> run();
 
 private:
     http_server_impl& serv_;
 
     request req_;
-    net::strand<net::any_io_executor> strand_;
-    websocket_variant_stream_type ws_;
+    std::unique_ptr<ws_stream> ws_;
+    beast::flat_buffer buffer_;
 
-    using message_type = std::pair<std::string, data_type>;
-    std::queue<message_type> send_que_;
+    action_queue ac_que_;
 };
 
 } // namespace httplib::server

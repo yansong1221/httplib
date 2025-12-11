@@ -245,7 +245,7 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
         }
         // websocket
         if (websocket::is_upgrade(header.base())) {
-            auto stream = create_websocket_variant_stream(std::move(stream_));
+            auto stream = ws_stream::create(std::move(stream_));
             request req(local_endpoint_, remote_endpoint_, std::move(header_parser.release()));
             co_return std::make_unique<websocket_task>(std::move(stream), std::move(req), serv_);
         }
@@ -405,7 +405,7 @@ net::awaitable<bool> session::http_task::async_write(request& req, response& res
     co_return true;
 }
 
-session::websocket_task::websocket_task(websocket_variant_stream_type&& stream,
+session::websocket_task::websocket_task(std::unique_ptr<ws_stream>&& stream,
                                         request&& req,
                                         http_server_impl& serv)
     : conn_(std::make_shared<websocket_conn_impl>(serv, std::move(stream), std::move(req)))
