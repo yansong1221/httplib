@@ -10,29 +10,29 @@ namespace httplib {
 class ws_stream
 {
 public:
-    using plain_stream = websocket::stream<http_stream>;
+    using plain_stream = websocket::stream<http_stream::plain_stream>;
 #ifdef HTTPLIB_ENABLED_SSL
-    using tls_stream = websocket::stream<ssl_http_stream>;
+    using tls_stream = websocket::stream<http_stream::tls_stream>;
     using stream_t   = std::variant<plain_stream, tls_stream>;
 #else
     using stream_t = std::variant<plain_stream>;
 #endif
-    static std::unique_ptr<ws_stream> create(http_variant_stream_type&& stream)
+    static std::unique_ptr<ws_stream> create(http_stream&& stream)
     {
         return std::visit(
             [](auto&& t) {
                 using value_type = std::decay_t<decltype(t)>;
 
-                if constexpr (std::same_as<http_stream, value_type>) {
-                    return std::make_unique<ws_stream>(plain_stream(std::move(t)));
+                if constexpr (std::same_as<http_stream::plain_stream, value_type>) {
+                    return std::make_unique<ws_stream>(ws_stream::plain_stream(std::move(t)));
                 }
 #ifdef HTTPLIB_ENABLED_SSL
-                else if constexpr (std::same_as<ssl_http_stream, value_type>) {
-                    return std::make_unique<ws_stream>(tls_stream(std::move(t)));
+                else if constexpr (std::same_as<http_stream::tls_stream, value_type>) {
+                    return std::make_unique<ws_stream>(ws_stream::tls_stream(std::move(t)));
                 }
 #endif
             },
-            std::move(stream));
+            stream.release());
     }
 
 public:
@@ -60,6 +60,22 @@ public:
             },
             stream_);
     }
+    template<class HandshakeHandler>
+    auto async_handshake(std::string_view host, std::string_view target, HandshakeHandler&& handler)
+    {
+        return std::visit(
+            [&, handler = std::move(handler)](auto& t) mutable {
+                return t.async_handshake(host, target, std::forward<HandshakeHandler>(handler));
+            },
+            stream_);
+    }
+    void set_option(auto&& opt)
+    {
+        std::visit([opt = std::forward<decltype(opt)>(opt)](
+                       auto& s) mutable { s.set_option(std::forward<decltype(opt)>(opt)); },
+                   stream_);
+    }
+
     template<class DynamicBuffer, class ReadHandler>
     auto async_read(DynamicBuffer& buffer, ReadHandler&& handler)
     {

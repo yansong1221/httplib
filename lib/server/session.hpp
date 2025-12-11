@@ -56,14 +56,14 @@ public:
 
 private:
     http_server_impl& sevr_;
-    http_stream stream_;
+    http_stream::plain_stream stream_;
 };
 
 
 class session::http_task : public session::task
 {
 public:
-    explicit http_task(http_variant_stream_type&& stream,
+    explicit http_task(http_stream&& stream,
                        beast::flat_buffer&& buffer,
                        http_server_impl& serv);
 
@@ -76,7 +76,7 @@ private:
 private:
     http_server_impl& serv_;
 
-    http_variant_stream_type stream_;
+    http_stream stream_;
     beast::flat_buffer buffer_;
 
     tcp::endpoint local_endpoint_;
@@ -101,7 +101,7 @@ private:
 class session::http_proxy_task : public session::task
 {
 public:
-    explicit http_proxy_task(http_variant_stream_type&& stream,
+    explicit http_proxy_task(http_stream&& stream,
                              request&& req,
                              http_server_impl& serv);
 
@@ -110,7 +110,7 @@ public:
     void abort() override;
 
 private:
-    http_variant_stream_type stream_;
+    http_stream stream_;
     tcp::resolver resolver_;
     tcp::socket proxy_socket_;
 

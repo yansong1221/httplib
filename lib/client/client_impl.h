@@ -40,7 +40,7 @@ public:
     uint16_t port_ = 0;
     bool use_ssl_  = false;
 
-    std::unique_ptr<http_variant_stream_type> variant_stream_;
+    std::unique_ptr<http_stream> stream_;
     mutable std::recursive_mutex stream_mutex_;
     beast::flat_buffer buffer_;
 

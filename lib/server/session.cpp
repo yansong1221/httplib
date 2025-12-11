@@ -96,7 +96,7 @@ net::awaitable<void> transfer(S1& from, S2& to, size_t& bytes_transferred)
 class session::ssl_handshake_task : public session::task
 {
 public:
-    explicit ssl_handshake_task(ssl_http_stream&& stream,
+    explicit ssl_handshake_task(http_stream::tls_stream&& stream,
                                 beast::flat_buffer&& buffer,
                                 http_server_impl& serv)
         : serv_(serv)
@@ -117,7 +117,7 @@ public:
         }
         buffer_.consume(bytes_used);
 
-        http_variant_stream_type variant_stream(std::move(stream_));
+        http_stream variant_stream(std::move(stream_));
         co_return std::make_unique<http_task>(std::move(variant_stream), std::move(buffer_), serv_);
     }
 
@@ -126,7 +126,7 @@ public:
 
 private:
     http_server_impl& serv_;
-    ssl_http_stream stream_;
+    http_stream::tls_stream stream_;
     beast::flat_buffer buffer_;
 };
 #endif
@@ -191,13 +191,13 @@ net::awaitable<std::unique_ptr<session::task>> session::detect_ssl_task::then()
                 sevr_.get_logger()->error("create_ssl_context failed: {}", ec.message());
                 co_return nullptr;
             }
-            ssl_http_stream use_ssl_stream(std::move(stream_), ssl_ctx);
+            http_stream::tls_stream use_ssl_stream(std::move(stream_), ssl_ctx);
             co_return std::make_unique<session::ssl_handshake_task>(
                 std::move(use_ssl_stream), std::move(buffer), sevr_);
         }
     }
 #endif
-    http_variant_stream_type variant_stream(std::move(stream_));
+    http_stream variant_stream(std::move(stream_));
     co_return std::make_unique<session::http_task>(
         std::move(variant_stream), std::move(buffer), sevr_);
 }
@@ -206,7 +206,7 @@ void session::detect_ssl_task::abort()
     stream_.close();
 }
 
-session::http_task::http_task(http_variant_stream_type&& stream,
+session::http_task::http_task(http_stream&& stream,
                               beast::flat_buffer&& buffer,
                               http_server_impl& serv)
     : serv_(serv)
@@ -423,7 +423,7 @@ void session::websocket_task::abort()
     conn_->close();
 }
 
-session::http_proxy_task::http_proxy_task(http_variant_stream_type&& stream,
+session::http_proxy_task::http_proxy_task(http_stream&& stream,
                                           request&& req,
                                           http_server_impl& serv)
     : stream_(std::move(stream))

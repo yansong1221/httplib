@@ -6,6 +6,7 @@
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
 #include <boost/asio/thread_pool.hpp>
+#include <boost/json.hpp>
 #include <filesystem>
 #include <format>
 #include <iostream>
@@ -30,20 +31,12 @@ struct test
     httplib::net::awaitable<void> get(httplib::server::request& req,
                                       httplib::server::response& resp)
     {
-        httplib::client::http_client cli(
-            co_await httplib::net::this_coro::executor, "127.0.0.1", 18808);
+        const auto& req_json = req.body().as<httplib::body::json_body>();
 
-        resp.set_stream_content([](httplib::beast::flat_buffer& buffer) -> bool { return true; },
-                                "text/html");
-
-        auto respones = co_await cli.async_get("/hello");
-        if (!respones) {
-            resp.set_error_content(httplib::http::status::internal_server_error);
-            co_return;
-        }
+        spdlog::info(boost::json::serialize(req_json));
 
         using namespace std::string_view_literals;
-        resp.set_string_content(respones->body().as<httplib::body::string_body>(), "text/html");
+        resp.set_empty_content(httplib::http::status::ok);
         co_return;
     }
 };
@@ -72,7 +65,7 @@ int main()
         },
         [](httplib::server::websocket_conn::weak_ptr conn,
            std::string_view msg,
-           httplib::server::websocket_conn::data_type type) { spdlog::info("msg: {}", msg); },
+           bool binary) -> void { spdlog::info("msg: {}", msg); },
         [](httplib::server::websocket_conn::weak_ptr conn) {
 
         });
@@ -83,11 +76,11 @@ int main()
         },
         [](httplib::server::websocket_conn::weak_ptr conn,
            std::string_view msg,
-           httplib::server::websocket_conn::data_type type) -> boost::asio::awaitable<void> {
+           bool binary) -> boost::asio::awaitable<void> {
             spdlog::info("msg hello: {}", msg);
             auto hdl = conn.lock();
             hdl->send_message(msg);
-            hdl->close();
+            // hdl->close();
             co_return;
         },
         [](httplib::server::websocket_conn::weak_ptr conn) -> boost::asio::awaitable<void> {
@@ -100,8 +93,9 @@ int main()
         [&](httplib::server::request& req,
             httplib::server::response& resp) -> boost::asio::awaitable<void> {
             resp.set_stream_content(
-                [](httplib::beast::flat_buffer& buffer) -> boost::asio::awaitable<bool> {
-                    static int count = 0;
+                [](httplib::beast::flat_buffer& buffer,
+                   boost::system::error_code& ec) -> boost::asio::awaitable<bool> {
+                    static std::atomic_int32_t count = 0;
                     std::string data = std::format("hello stream content {}\n", count++);
                     buffer.commit(boost::asio::buffer_copy(buffer.prepare(data.size()),
                                                            boost::asio::buffer(data)));
@@ -115,7 +109,7 @@ int main()
         log_t {});
 
     test tt;
-    router.set_http_handler<httplib::http::verb::get>("/test", &test::get, tt, log_t {});
+    router.set_http_handler<httplib::http::verb::post>("/test", &test::get, tt, log_t {});
     // router.set_http_handler<httplib::http::verb::get>(
     //     "/close", [&](httplib::request& req, httplib::response& resp) { svr.stop(); });
     // router.set_http_handler<httplib::http::verb::post>(
