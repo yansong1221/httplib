@@ -28,7 +28,7 @@ ws_client::impl::async_connect(std::string_view path, const http::fields& header
 
             co_await stream->async_connect(endpoints);
 
-            stream_ = ws_stream::create(std::move(*stream));
+            stream_ = websocket_stream::create(std::move(*stream));
         }
         stream_->set_option(websocket::stream_base::decorator([&](websocket::request_type& req) {
             req.set(http::field::user_agent,

@@ -5,6 +5,7 @@
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
+#include <boost/asio/dispatch.hpp>
 #include <boost/asio/strand.hpp>
 #include <functional>
 #include <queue>
@@ -21,7 +22,7 @@ public:
     }
     void push(act_t&& handler)
     {
-        net::post(strand_, [this, handler = std::move(handler)]() mutable {
+        net::dispatch(strand_, [this, handler = std::move(handler)]() mutable {
             bool in_process = !que_.empty();
             que_.push(std::move(handler));
             if (in_process)
@@ -34,12 +35,12 @@ private:
     net::awaitable<void> perform()
     {
         for (;;) {
-            co_await net::post(strand_);
+            //co_await net::dispatch(strand_);
             if (que_.empty())
                 co_return;
             auto&& handler = std::move(que_.front());
             co_await handler();
-            co_await net::post(strand_);
+            //co_await net::dispatch(strand_);
             que_.pop();
         }
     }

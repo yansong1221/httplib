@@ -7,7 +7,7 @@
 
 namespace httplib {
 
-class ws_stream
+class websocket_stream
 {
 public:
     using plain_stream = websocket::stream<http_stream::plain_stream>;
@@ -17,18 +17,20 @@ public:
 #else
     using stream_t = std::variant<plain_stream>;
 #endif
-    static std::unique_ptr<ws_stream> create(http_stream&& stream)
+    static std::unique_ptr<websocket_stream> create(http_stream&& stream)
     {
         return std::visit(
             [](auto&& t) {
                 using value_type = std::decay_t<decltype(t)>;
 
                 if constexpr (std::same_as<http_stream::plain_stream, value_type>) {
-                    return std::make_unique<ws_stream>(ws_stream::plain_stream(std::move(t)));
+                    return std::make_unique<websocket_stream>(
+                        websocket_stream::plain_stream(std::move(t)));
                 }
 #ifdef HTTPLIB_ENABLED_SSL
                 else if constexpr (std::same_as<http_stream::tls_stream, value_type>) {
-                    return std::make_unique<ws_stream>(ws_stream::tls_stream(std::move(t)));
+                    return std::make_unique<websocket_stream>(
+                        websocket_stream::tls_stream(std::move(t)));
                 }
 #endif
             },
@@ -129,7 +131,7 @@ public:
         std::visit([&](auto& t) mutable { return t.binary(value); }, stream_);
     }
 
-    ws_stream(stream_t&& stream)
+    websocket_stream(stream_t&& stream)
         : stream_(std::move(stream))
     {
     }

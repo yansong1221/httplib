@@ -26,6 +26,6 @@ private:
     bool use_ssl_  = false;
 
     mutable std::recursive_mutex stream_mutex_;
-    std::unique_ptr<ws_stream> stream_;
+    std::unique_ptr<websocket_stream> stream_;
 };
 } // namespace httplib::client

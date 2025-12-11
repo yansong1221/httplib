@@ -6,7 +6,7 @@
 namespace httplib::server {
 
 websocket_conn_impl::websocket_conn_impl(http_server_impl& serv,
-                                         std::unique_ptr<ws_stream>&& stream,
+                                         std::unique_ptr<websocket_stream>&& stream,
                                          request&& req)
 
     : serv_(serv)

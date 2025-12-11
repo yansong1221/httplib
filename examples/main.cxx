@@ -50,7 +50,8 @@ int main()
     auto& router = svr.router();
 
     svr.get_logger()->set_level(spdlog::level::info);
-    svr.use_ssl_file(R"(D:\code\httplib\lib\server.crt)", R"(D:\code\httplib\lib\server.key)", "test");
+    svr.use_ssl_file(
+        R"(D:\code\httplib\lib\server.crt)", R"(D:\code\httplib\lib\server.key)", "test");
 
     svr.listen("0.0.0.0", 18808);
 
@@ -78,7 +79,13 @@ int main()
            bool binary) -> boost::asio::awaitable<void> {
             spdlog::info("msg hello: {}", msg);
             auto hdl = conn.lock();
-            hdl->send_message(msg);
+
+            for (int i = 0; i < 100000; ++i) {
+                boost::asio::post(co_await boost::asio::this_coro::executor, [hdl]() {
+                    static std::atomic_int32_t index = 0;
+                    hdl->send_message(std::to_string(index++), false);
+                });
+            }
             // hdl->close();
             co_return;
         },

@@ -17,7 +17,7 @@ namespace httplib::server {
 class websocket_conn_impl : public websocket_conn
 {
 public:
-    websocket_conn_impl(http_server_impl& serv, std::unique_ptr<ws_stream>&& stream, request&& req);
+    websocket_conn_impl(http_server_impl& serv, std::unique_ptr<websocket_stream>&& stream, request&& req);
     ~websocket_conn_impl();
 
 public:
@@ -34,7 +34,7 @@ private:
     http_server_impl& serv_;
 
     request req_;
-    std::unique_ptr<ws_stream> ws_;
+    std::unique_ptr<websocket_stream> ws_;
     beast::flat_buffer buffer_;
 
     action_queue ac_que_;
