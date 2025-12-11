@@ -1,23 +1,12 @@
 #pragma once
-
-#pragma once
 #ifdef HTTPLIB_ENABLED_SSL
 #include "ssl_stream.hpp"
 #endif
 #include "boost/asio/use_awaitable.hpp"
-#include "http_variant_stream.hpp"
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/beast/core/basic_stream.hpp>
 
 namespace httplib {
-
-// using http_stream =
-//     beast::basic_stream<net::ip::tcp, net::any_io_executor, beast::simple_rate_policy>;
-// #ifdef HTTPLIB_ENABLED_SSL
-// using ssl_http_stream = ssl_stream<http_stream>;
-//
-// using http_variant_stream_type = http_variant_stream<http_stream, ssl_http_stream>;
-// #else
-// using http_variant_stream_type = http_variant_stream<http_stream>;
-// #endif
 
 class http_stream
 {
@@ -63,39 +52,21 @@ public:
     }
 
 public:
-    using executor_type     = net::any_io_executor;
-    using lowest_layer_type = tcp::socket::lowest_layer_type;
+    using executor_type = plain_stream::executor_type;
 
     executor_type get_executor()
     {
         return std::visit([&](auto& t) mutable { return t.get_executor(); }, stream_);
     }
-    lowest_layer_type& lowest_layer()
+    auto& socket()
     {
         return std::visit(
-            [&](auto& t) mutable -> lowest_layer_type& {
-                using stream_type = std::decay_t<decltype(beast::get_lowest_layer(t))>;
-                if constexpr (is_basic_stream_v<stream_type>) {
-                    return beast::get_lowest_layer(t).socket().lowest_layer();
-                }
-                else {
-                    return t.lowest_layer();
-                }
-            },
-            stream_);
+            [&](auto& t) mutable -> auto& { return beast::get_lowest_layer(t).socket(); }, stream_);
     }
-    const lowest_layer_type& lowest_layer() const
+    const auto& socket() const
     {
         return std::visit(
-            [&](auto& t) mutable -> const lowest_layer_type& {
-                using stream_type = std::decay_t<decltype(beast::get_lowest_layer(t))>;
-                if constexpr (is_basic_stream_v<stream_type>) {
-                    return beast::get_lowest_layer(t).socket().lowest_layer();
-                }
-                else {
-                    return t.lowest_layer();
-                }
-            },
+            [&](auto& t) mutable -> const auto& { return beast::get_lowest_layer(t).socket(); },
             stream_);
     }
     template<typename MutableBufferSequence, typename ReadHandler>
@@ -117,26 +88,7 @@ public:
             stream_);
     }
 
-    tcp::endpoint remote_endpoint() { return lowest_layer().remote_endpoint(); }
-    tcp::endpoint remote_endpoint(boost::system::error_code& ec)
-    {
-        return lowest_layer().remote_endpoint(ec);
-    }
-
-    tcp::endpoint local_endpoint() { return lowest_layer().local_endpoint(); }
-    tcp::endpoint local_endpoint(boost::system::error_code& ec)
-    {
-        return lowest_layer().local_endpoint(ec);
-    }
-
-    void shutdown(net::socket_base::shutdown_type what, boost::system::error_code& ec)
-    {
-        lowest_layer().shutdown(what, ec);
-    }
-
-    bool is_open() const { return lowest_layer().is_open(); }
-
-    void close(boost::system::error_code& ec) { lowest_layer().close(ec); }
+    bool is_open() const { return socket().is_open(); }
 
     auto expires_after(const net::steady_timer::duration& expiry_time)
     {
@@ -162,6 +114,10 @@ public:
             [&](auto& t) -> auto& { return beast::get_lowest_layer(t).rate_policy(); }, stream_);
     }
 
+    void shutdown(net::socket_base::shutdown_type what, boost::system::error_code& ec)
+    {
+        socket().shutdown(what, ec);
+    }
     void close()
     {
         std::visit(
@@ -176,30 +132,30 @@ public:
             },
             stream_);
         boost::system::error_code ec;
-        shutdown(net::socket_base::shutdown_type::shutdown_both, ec);
-        close(ec);
+        socket().shutdown(net::socket_base::shutdown_type::shutdown_both, ec);
+        socket().close(ec);
     }
 
     template<typename EndPoints>
     net::awaitable<void> async_connect(EndPoints&& endpoints)
     {
         co_await std::visit(
-            [&](auto& stream) -> net::awaitable<void> {
-                using stream_type = std::decay_t<decltype(stream)>;
+            [&](auto& t) -> net::awaitable<void> {
+                using stream_type = std::decay_t<decltype(t)>;
 #ifdef HTTPLIB_ENABLED_SSL
                 if constexpr (std::is_same_v<stream_type, http_stream::tls_stream>) {
-                    co_await stream.next_layer().async_connect(endpoints, net::use_awaitable);
-                    co_await stream.async_handshake(ssl::stream_base::client, net::use_awaitable);
+                    co_await t.next_layer().async_connect(endpoints, net::use_awaitable);
+                    co_await t.async_handshake(ssl::stream_base::client, net::use_awaitable);
                 }
 #endif
                 if constexpr (std::is_same_v<stream_type, http_stream::plain_stream>) {
-                    co_await stream.async_connect(endpoints, net::use_awaitable);
+                    co_await t.async_connect(endpoints, net::use_awaitable);
                 }
             },
             stream_);
 
         net::socket_base::reuse_address option(true);
-        lowest_layer().set_option(option);
+        socket().set_option(option);
         co_return;
     }
 

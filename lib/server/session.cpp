@@ -191,15 +191,13 @@ net::awaitable<std::unique_ptr<session::task>> session::detect_ssl_task::then()
                 sevr_.get_logger()->error("create_ssl_context failed: {}", ec.message());
                 co_return nullptr;
             }
-            http_stream::tls_stream use_ssl_stream(std::move(stream_), ssl_ctx);
             co_return std::make_unique<session::ssl_handshake_task>(
-                std::move(use_ssl_stream), std::move(buffer), sevr_);
+                http_stream::tls_stream(std::move(stream_), ssl_ctx), std::move(buffer), sevr_);
         }
     }
 #endif
-    http_stream variant_stream(std::move(stream_));
     co_return std::make_unique<session::http_task>(
-        std::move(variant_stream), std::move(buffer), sevr_);
+        http_stream(std::move(stream_)), std::move(buffer), sevr_);
 }
 void session::detect_ssl_task::abort()
 {
@@ -213,8 +211,8 @@ session::http_task::http_task(http_stream&& stream,
     , buffer_(std::move(buffer))
     , stream_(std::move(stream))
 {
-    local_endpoint_  = stream_.local_endpoint();
-    remote_endpoint_ = stream_.remote_endpoint();
+    local_endpoint_  = stream_.socket().local_endpoint();
+    remote_endpoint_ = stream_.socket().remote_endpoint();
 }
 
 httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then()
@@ -318,7 +316,7 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
             // This means we should close the connection, usually
             // because the response indicated the "Connection: close"
             // semantic.
-            stream_.shutdown(net::socket_base::shutdown_both, ec);
+            stream_.close();
             co_return nullptr;
         }
     }
@@ -327,8 +325,7 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
 
 void session::http_task::abort()
 {
-    boost::system::error_code ec;
-    stream_.close(ec);
+    stream_.close();
 }
 
 net::awaitable<bool> session::http_task::async_write(request& req, response& resp)
@@ -472,7 +469,7 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_proxy_task
 void session::http_proxy_task::abort()
 {
     boost::system::error_code ec;
-    stream_.close(ec);
+    stream_.close();
     resolver_.cancel();
     proxy_socket_.close(ec);
 }
