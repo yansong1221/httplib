@@ -15,6 +15,12 @@
 #include <spdlog/spdlog.h>
 #include <unordered_set>
 
+
+#include <boost/cobalt/generator.hpp>
+#include <boost/cobalt/promise.hpp>
+#include <boost/cobalt/spawn.hpp>
+#include <boost/cobalt/task.hpp>
+
 namespace httplib::server {
 class http_server_impl
 {
@@ -30,7 +36,7 @@ public:
                 int backlog = net::socket_base::max_listen_connections);
 
     void async_run();
-    net::awaitable<boost::system::error_code> co_run();
+    cobalt::task<boost::system::error_code> co_run();
 
     void stop();
     router_impl& router();

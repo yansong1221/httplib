@@ -17,6 +17,10 @@ namespace websocket {
 }
 } // namespace beast
 
+namespace cobalt {
+
+}
+
 } // namespace boost
 
 namespace spdlog {
@@ -26,6 +30,7 @@ class logger;
 namespace httplib {
 
 
+namespace cobalt    = boost::cobalt;
 namespace net       = boost::asio;
 namespace ssl       = boost::asio::ssl;
 using tcp           = net::ip::tcp;

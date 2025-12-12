@@ -7,6 +7,8 @@
 #include <filesystem>
 
 
+#include <boost/cobalt/task.hpp>
+
 namespace httplib::server {
 
 class router;
@@ -30,7 +32,9 @@ public:
                         uint16_t port,
                         int backlog = net::socket_base::max_listen_connections);
     http_server& listen(uint16_t port, int backlog = net::socket_base::max_listen_connections);
-    net::awaitable<boost::system::error_code> co_run();
+
+    cobalt::task<boost::system::error_code> co_run();
+
     void async_run();
     void stop();
 

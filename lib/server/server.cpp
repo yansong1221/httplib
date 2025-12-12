@@ -55,7 +55,7 @@ http_server& http_server::listen(uint16_t port,
     return listen("0.0.0.0", port, backlog);
 }
 
-net::awaitable<boost::system::error_code> http_server::co_run()
+cobalt::task<boost::system::error_code> http_server::co_run()
 {
     co_return co_await impl_->co_run();
 }

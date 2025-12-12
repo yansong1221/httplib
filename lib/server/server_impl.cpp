@@ -41,7 +41,7 @@ net::any_io_executor http_server_impl::get_executor() noexcept
 void http_server_impl::async_run()
 {
     for (int i = 0; i < 32; ++i)
-        net::co_spawn(ex_, co_run(), net::detached);
+        cobalt::spawn(ex_, co_run(), net::detached);
 }
 
 void http_server_impl::stop()
@@ -55,12 +55,12 @@ router_impl& http_server_impl::router()
     return router_;
 }
 
-net::awaitable<boost::system::error_code> http_server_impl::co_run()
+cobalt::task<boost::system::error_code> http_server_impl::co_run()
 {
     boost::system::error_code ec;
     for (;;) {
         tcp::socket sock(ex_);
-        co_await acceptor_.async_accept(sock, net_awaitable[ec]);
+        co_await acceptor_.async_accept(sock, boost::asio::redirect_error(cobalt::use_op, ec));
         if (ec) {
             get_logger()->trace("async_accept: {}", ec.message());
             break;
@@ -69,6 +69,7 @@ net::awaitable<boost::system::error_code> http_server_impl::co_run()
     }
 
     co_await net::post(session_strand_);
+
     for (const auto& v : session_map_)
         v->abort();
 
@@ -155,5 +156,4 @@ void http_server_impl::use_ssl(const net::const_buffer& cert_file,
 
     ssl_conf_ = conf;
 }
-
 } // namespace httplib::server

@@ -6,14 +6,14 @@ source_group(TREE ${HTTPLIB_INCLUDE_DIR} PREFIX "include" FILES ${HTTPLIB_HEADER
 file(GLOB_RECURSE HTTPLIB_SOURCE_FILES  ${HTTPLIB_LIB_DIR}/*.h ${HTTPLIB_LIB_DIR}/*.c ${HTTPLIB_LIB_DIR}/*.cxx ${HTTPLIB_LIB_DIR}/*.cpp ${HTTPLIB_LIB_DIR}/*.hpp)
 source_group(TREE ${HTTPLIB_LIB_DIR} PREFIX "lib" FILES ${HTTPLIB_SOURCE_FILES})
 
-find_package(Boost REQUIRED COMPONENTS beast json CONFIG)
+find_package(Boost REQUIRED COMPONENTS beast json cobalt CONFIG)
 find_package(fmt CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 
 add_library(${MOUDLE} STATIC ${HTTPLIB_HEADER_FILES} ${HTTPLIB_SOURCE_FILES})
 
 target_link_libraries(${MOUDLE} 
-PUBLIC  Boost::beast Boost::json
+PUBLIC  Boost::beast Boost::json Boost::cobalt
 PUBLIC  spdlog::spdlog fmt::fmt
 )
 
