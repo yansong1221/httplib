@@ -20,33 +20,55 @@ public:
         : strand_(executor)
     {
     }
+    ~action_queue() { shutdown(); }
+
     void push(act_t&& handler)
     {
         net::dispatch(strand_, [this, handler = std::move(handler)]() mutable {
-            bool in_process = !que_.empty();
-            que_.push(std::move(handler));
-            if (in_process)
+            if (abort_)
                 return;
-            net::co_spawn(strand_, perform(), net::detached);
+
+            que_.push(std::move(handler));
+            if (!running_) {
+                running_ = true;
+                net::co_spawn(strand_.get_inner_executor(), perform(), [](std::exception_ptr e) {
+                    if (e)
+                        std::rethrow_exception(e);
+                });
+            }
+        });
+    }
+    void shutdown()
+    {
+        net::dispatch(strand_, [this]() mutable {
+            if (abort_)
+                return;
+            abort_ = true;
         });
     }
 
 private:
     net::awaitable<void> perform()
     {
-        for (;;) {
-            //co_await net::dispatch(strand_);
-            if (que_.empty())
+        for (; !abort_;) {
+            co_await net::dispatch(strand_);
+            if (que_.empty()) {
+                running_ = false;
                 co_return;
-            auto&& handler = std::move(que_.front());
-            co_await handler();
-            //co_await net::dispatch(strand_);
+            }
+
+            auto handler = std::move(que_.front());
             que_.pop();
+
+            co_await net::dispatch(strand_.get_inner_executor());
+            co_await handler();
         }
     }
 
 private:
     net::strand<net::any_io_executor> strand_;
     std::queue<act_t> que_;
+    bool running_ = false;
+    bool abort_   = false;
 };
 } // namespace httplib

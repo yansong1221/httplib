@@ -50,8 +50,8 @@ int main()
     auto& router = svr.router();
 
     svr.get_logger()->set_level(spdlog::level::info);
-    svr.use_ssl_file(
-        R"(D:\code\httplib\lib\server.crt)", R"(D:\code\httplib\lib\server.key)", "test");
+    //svr.use_ssl_file(
+    //    R"(D:\code\httplib\lib\server.crt)", R"(D:\code\httplib\lib\server.key)", "test");
 
     svr.listen("0.0.0.0", 18808);
 
