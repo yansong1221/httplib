@@ -3,12 +3,14 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
+
+#include <boost/cobalt/io/sleep.hpp>
+
 namespace httplib::server {
 
 http_server_impl::http_server_impl(const net::any_io_executor& ex)
     : ex_(ex)
     , acceptor_(ex)
-    , session_strand_(ex)
 {
     auto console_sink                 = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
     spdlog::sinks_init_list sink_list = {console_sink};
@@ -40,8 +42,8 @@ net::any_io_executor http_server_impl::get_executor() noexcept
 
 void http_server_impl::async_run()
 {
-    for (int i = 0; i < 32; ++i)
-        cobalt::spawn(ex_, co_run(), net::detached);
+    // for (int i = 0; i < 32; ++i)
+    cobalt::spawn(net::make_strand(ex_), co_run(), net::detached);
 }
 
 void http_server_impl::stop()
@@ -62,21 +64,30 @@ cobalt::task<boost::system::error_code> http_server_impl::co_run()
         tcp::socket sock(ex_);
         co_await acceptor_.async_accept(sock, boost::asio::redirect_error(cobalt::use_op, ec));
         if (ec) {
+            if (ec == boost::system::errc::too_many_files_open ||
+                ec == boost::system::errc::too_many_files_open_in_system)
+            {
+                using namespace std::chrono_literals;
+                co_await cobalt::io::sleep(100ms);
+                continue; // retry accept
+            }
+
             get_logger()->trace("async_accept: {}", ec.message());
             break;
         }
-        net::co_spawn(ex_, handle_accept(std::move(sock)), net::detached);
+        cobalt::spawn(ex_, handle_accept(std::move(sock)), net::detached);
     }
 
-    co_await net::post(session_strand_);
-
-    for (const auto& v : session_map_)
-        v->abort();
+    {
+        std::lock_guard<std::mutex> lck(session_mutex_);
+        for (const auto& v : session_map_)
+            v->abort();
+    }
 
     co_return ec;
 }
 
-net::awaitable<void> http_server_impl::handle_accept(tcp::socket sock)
+cobalt::task<void> http_server_impl::handle_accept(tcp::socket sock)
 {
     auto remote_endp = sock.remote_endpoint();
     auto local_endp  = sock.local_endpoint();
@@ -85,11 +96,12 @@ net::awaitable<void> http_server_impl::handle_accept(tcp::socket sock)
 
     auto conn = std::make_shared<session>(std::move(sock), *this);
     {
-        co_await net::post(session_strand_);
+        std::lock_guard<std::mutex> lck(session_mutex_);
         session_map_.insert(conn);
     }
     try {
-        co_await conn->run();
+        co_await boost::asio::co_spawn(
+            co_await cobalt::this_coro::executor, conn->run(), cobalt::use_op);
     }
     catch (const std::exception& e) {
         get_logger()->error("session::run() exception: {}", e.what());
@@ -98,7 +110,7 @@ net::awaitable<void> http_server_impl::handle_accept(tcp::socket sock)
         get_logger()->error("session::run() unknown exception");
     }
     {
-        co_await net::post(session_strand_);
+        std::lock_guard<std::mutex> lck(session_mutex_);
         session_map_.erase(conn);
     }
     get_logger()->trace(
