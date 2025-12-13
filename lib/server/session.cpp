@@ -106,11 +106,11 @@ public:
     }
 
 
-    net::awaitable<std::unique_ptr<task>> then() override
+    cobalt::task<std::unique_ptr<task>> then() override
     {
         boost::system::error_code ec;
         auto bytes_used = co_await stream_.async_handshake(
-            ssl::stream_base::server, buffer_.data(), net_awaitable[ec]);
+            ssl::stream_base::server, buffer_.data(), boost::asio::redirect_error(ec));
         if (ec) {
             serv_.get_logger()->trace("ssl handshake failed: {}", ec.message());
             co_return nullptr;
@@ -151,7 +151,7 @@ void session::abort()
         task_->abort();
 }
 
-httplib::net::awaitable<void> session::run()
+cobalt::task<void> session::run()
 {
     for (; !abort_ && task_;) {
         auto&& next_task = co_await task_->then();
@@ -171,13 +171,13 @@ session::detect_ssl_task::~detect_ssl_task()
 {
     stream_.expires_never();
 }
-net::awaitable<std::unique_ptr<session::task>> session::detect_ssl_task::then()
+cobalt::task<std::unique_ptr<session::task>> session::detect_ssl_task::then()
 {
     beast::flat_buffer buffer;
 #ifdef HTTPLIB_ENABLED_SSL
     if (sevr_.ssl_conf_) {
         boost::system::error_code ec;
-        bool is_ssl = co_await beast::async_detect_ssl(stream_, buffer, net_awaitable[ec]);
+        bool is_ssl = co_await beast::async_detect_ssl(stream_, buffer, net::redirect_error(ec));
         if (ec) {
             sevr_.get_logger()->trace("async_detect_ssl failed: {}", ec.message());
             co_return nullptr;
@@ -215,7 +215,7 @@ session::http_task::http_task(http_stream&& stream,
     remote_endpoint_ = stream_.socket().remote_endpoint();
 }
 
-httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then()
+cobalt::task<std::unique_ptr<session::task>> session::http_task::then()
 
 {
     boost::system::error_code ec;
@@ -227,7 +227,8 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
         header_parser.body_limit(std::numeric_limits<unsigned long long>::max());
         while (!header_parser.is_header_done()) {
             stream_.expires_after(serv_.read_timeout());
-            co_await http::async_read_some(stream_, buffer_, header_parser, net_awaitable[ec]);
+            co_await http::async_read_some(
+                stream_, buffer_, header_parser, net::redirect_error(ec));
             stream_.expires_never();
             if (ec) {
                 serv_.get_logger()->trace("read http header failed: {}", ec.message());
@@ -254,7 +255,10 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
         auto start_time = std::chrono::steady_clock::now();
 
         try {
-            if (co_await _router.pre_routing(req, resp)) {
+            if (co_await boost::asio::co_spawn(co_await cobalt::this_coro::executor,
+                                               _router.pre_routing(req, resp),
+                                               cobalt::use_op))
+            {
                 if (beast::iequals(header[http::field::expect], "100-continue")) {
                     // send 100 response
                     response resp(header.version(), true);
@@ -267,7 +271,7 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
                 while (!body_parser.is_done()) {
                     stream_.expires_after(serv_.read_timeout());
                     co_await http::async_read_some(
-                        stream_, buffer_, body_parser, net_awaitable[ec]);
+                        stream_, buffer_, body_parser, net::redirect_error(ec));
                     stream_.expires_never();
                     if (ec) {
                         serv_.get_logger()->trace("read http body failed: {}", ec.message());
@@ -277,9 +281,13 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
                 req.body() = std::move(body_parser.release().body());
                 start_time = std::chrono::steady_clock::now();
 
-                co_await _router.proc_routing(req, resp);
+                co_await boost::asio::co_spawn(co_await cobalt::this_coro::executor,
+                                               _router.proc_routing(req, resp),
+                                               cobalt::use_op);
             }
-            co_await _router.post_routing(req, resp);
+            co_await boost::asio::co_spawn(co_await cobalt::this_coro::executor,
+                                           _router.post_routing(req, resp),
+                                           cobalt::use_op);
         }
         catch (const std::exception& e) {
             serv_.get_logger()->warn("exception in business function, reason: {}", e.what());
@@ -328,7 +336,7 @@ void session::http_task::abort()
     stream_.close();
 }
 
-net::awaitable<bool> session::http_task::async_write(request& req, response& resp)
+cobalt::task<bool> session::http_task::async_write(request& req, response& resp)
 {
     if (resp.stream_handler_) {
         resp.chunked(true);
@@ -352,7 +360,7 @@ net::awaitable<bool> session::http_task::async_write(request& req, response& res
     boost::system::error_code ec;
     http::response_serializer<body::any_body> serializer(resp);
     stream_.expires_after(serv_.write_timeout());
-    co_await http::async_write_header(stream_, serializer, net_awaitable[ec]);
+    co_await http::async_write_header(stream_, serializer, net::redirect_error(ec));
     if (ec) {
         serv_.get_logger()->trace("write http header failed: {}", ec.message());
         co_return false;
@@ -361,7 +369,9 @@ net::awaitable<bool> session::http_task::async_write(request& req, response& res
 
     if (resp.stream_handler_) {
         for (;;) {
-            bool has_more = co_await resp.stream_handler_(buffer_, ec);
+            bool has_more = co_await boost::asio::co_spawn(co_await cobalt::this_coro::executor,
+                                                           resp.stream_handler_(buffer_, ec),
+                                                           cobalt::use_op);
             if (ec) {
                 serv_.get_logger()->trace("read chunk body failed: {}", ec.message());
                 co_return false;
@@ -369,7 +379,7 @@ net::awaitable<bool> session::http_task::async_write(request& req, response& res
             if (buffer_.size() != 0) {
                 http::chunk_body chunk_b(buffer_.data());
                 stream_.expires_after(serv_.write_timeout());
-                co_await net::async_write(stream_, chunk_b, net_awaitable[ec]);
+                co_await net::async_write(stream_, chunk_b, net::redirect_error(ec));
                 if (ec) {
                     serv_.get_logger()->trace("write chunk body failed: {}", ec.message());
                     co_return false;
@@ -379,7 +389,7 @@ net::awaitable<bool> session::http_task::async_write(request& req, response& res
             }
             if (!has_more) {
                 http::chunk_last chunk_last;
-                co_await net::async_write(stream_, chunk_last, net_awaitable[ec]);
+                co_await net::async_write(stream_, chunk_last, net::redirect_error(ec));
                 if (ec) {
                     serv_.get_logger()->trace("write chunk last failed: {}", ec.message());
                     co_return false;
@@ -391,7 +401,7 @@ net::awaitable<bool> session::http_task::async_write(request& req, response& res
     else if (req.method() != http::verb::head) {
         while (!serializer.is_done()) {
             stream_.expires_after(serv_.write_timeout());
-            co_await http::async_write_some(stream_, serializer, net_awaitable[ec]);
+            co_await http::async_write_some(stream_, serializer, net::redirect_error(ec));
             stream_.expires_never();
             if (ec) {
                 serv_.get_logger()->trace("write http body failed: {}", ec.message());
@@ -409,9 +419,10 @@ session::websocket_task::websocket_task(std::unique_ptr<websocket_stream>&& stre
 {
 }
 
-httplib::net::awaitable<std::unique_ptr<session::task>> session::websocket_task::then()
+cobalt::task<std::unique_ptr<session::task>> session::websocket_task::then()
 {
-    co_await conn_->run();
+    co_await boost::asio::co_spawn(
+        co_await cobalt::this_coro::executor, conn_->run(), cobalt::use_op);
     co_return nullptr;
 }
 
@@ -431,7 +442,7 @@ session::http_proxy_task::http_proxy_task(http_stream&& stream,
 {
 }
 
-httplib::net::awaitable<std::unique_ptr<session::task>> session::http_proxy_task::then()
+cobalt::task<std::unique_ptr<session::task>> session::http_proxy_task::then()
 {
     auto target = req_.target();
     auto pos    = target.find(":");
@@ -442,18 +453,18 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_proxy_task
     auto port = target.substr(pos + 1);
 
     boost::system::error_code ec;
-    auto results = co_await resolver_.async_resolve(host, port, net_awaitable[ec]);
+    auto results = co_await resolver_.async_resolve(host, port, net::redirect_error(ec));
     if (ec)
         co_return nullptr;
 
-    co_await net::async_connect(proxy_socket_, results, net_awaitable[ec]);
+    co_await net::async_connect(proxy_socket_, results, net::redirect_error(ec));
     if (ec)
         co_return nullptr;
 
     response resp(req_.version(), req_.keep_alive());
     resp.reason("Connection Established");
     resp.result(http::status::ok);
-    co_await http::async_write(stream_, resp, net_awaitable[ec]);
+    co_await http::async_write(stream_, resp, net::redirect_error(ec));
     if (ec)
         co_return nullptr;
 
@@ -461,8 +472,10 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_proxy_task
     using namespace net::experimental::awaitable_operators;
     size_t l2r_transferred = 0;
     size_t r2l_transferred = 0;
-    co_await (detail::transfer(stream_, proxy_socket_, l2r_transferred) &&
-              detail::transfer(proxy_socket_, stream_, r2l_transferred));
+    co_await boost::asio::co_spawn(co_await cobalt::this_coro::executor,
+                                   (detail::transfer(stream_, proxy_socket_, l2r_transferred) &&
+                                    detail::transfer(proxy_socket_, stream_, r2l_transferred)),
+                                   cobalt::use_op);
     co_return nullptr;
 }
 

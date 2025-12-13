@@ -80,7 +80,7 @@ cobalt::promise<void> http_server_impl::accept_socket(boost::asio::executor_arg_
     auto executor = co_await cobalt::this_coro::executor;
     for (;;) {
         tcp::socket sock(executor);
-        co_await acceptor_.async_accept(sock, boost::asio::redirect_error(cobalt::use_op, ec));
+        co_await acceptor_.async_accept(sock, net::redirect_error(ec));
         if (ec) {
             if (ec == boost::system::errc::too_many_files_open ||
                 ec == boost::system::errc::too_many_files_open_in_system)
@@ -88,7 +88,7 @@ cobalt::promise<void> http_server_impl::accept_socket(boost::asio::executor_arg_
                 using namespace std::chrono_literals;
                 net::steady_timer retry_timer(executor);
                 retry_timer.expires_after(100ms);
-                co_await retry_timer.async_wait(boost::asio::redirect_error(cobalt::use_op, ec));
+                co_await retry_timer.async_wait(net::redirect_error(ec));
                 if (ec)
                     break;
 
@@ -117,8 +117,7 @@ cobalt::detached http_server_impl::handle_accept(tcp::socket sock,
         session_map_.insert(conn);
     }
     try {
-        co_await boost::asio::co_spawn(
-            co_await cobalt::this_coro::executor, conn->run(), cobalt::use_op);
+        co_await conn->run();
     }
     catch (const std::exception& e) {
         get_logger()->error("session::run() exception: {}", e.what());

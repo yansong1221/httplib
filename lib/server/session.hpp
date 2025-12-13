@@ -9,6 +9,7 @@
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <memory>
+#include <boost/cobalt/task.hpp>
 
 namespace httplib::server {
 class http_server_impl;
@@ -21,7 +22,7 @@ public:
     {
     public:
         virtual ~task()                                      = default;
-        virtual net::awaitable<std::unique_ptr<task>> then() = 0;
+        virtual cobalt::task<std::unique_ptr<task>> then() = 0;
         virtual void abort()                                 = 0;
     };
     class detect_ssl_task;
@@ -35,7 +36,7 @@ public:
 
 public:
     void abort();
-    net::awaitable<void> run();
+    cobalt::task<void> run();
 
 private:
     std::unique_ptr<task> task_;
@@ -52,7 +53,7 @@ public:
 
 public:
     void abort() override;
-    net::awaitable<std::unique_ptr<task>> then() override;
+    cobalt::task<std::unique_ptr<task>> then() override;
 
 private:
     http_server_impl& sevr_;
@@ -67,11 +68,11 @@ public:
                        beast::flat_buffer&& buffer,
                        http_server_impl& serv);
 
-    net::awaitable<std::unique_ptr<task>> then() override;
+    cobalt::task<std::unique_ptr<task>> then() override;
     void abort() override;
 
 private:
-    net::awaitable<bool> async_write(request& req, response& resp);
+    cobalt::task<bool> async_write(request& req, response& resp);
 
 private:
     http_server_impl& serv_;
@@ -91,7 +92,7 @@ public:
                             http_server_impl& serv);
 
 public:
-    net::awaitable<std::unique_ptr<task>> then() override;
+    cobalt::task<std::unique_ptr<task>> then() override;
     void abort() override;
 
 private:
@@ -106,7 +107,7 @@ public:
                              http_server_impl& serv);
 
 public:
-    net::awaitable<std::unique_ptr<task>> then() override;
+    cobalt::task<std::unique_ptr<task>> then() override;
     void abort() override;
 
 private:
