@@ -16,10 +16,12 @@
 #include <unordered_set>
 
 
+#include <boost/cobalt/detached.hpp>
 #include <boost/cobalt/generator.hpp>
 #include <boost/cobalt/promise.hpp>
 #include <boost/cobalt/spawn.hpp>
 #include <boost/cobalt/task.hpp>
+#include <boost/cobalt/wait_group.hpp>
 
 namespace httplib::server {
 class http_server_impl
@@ -57,7 +59,11 @@ public:
                  std::string passwd = {});
 
 private:
-    cobalt::task<void> handle_accept(tcp::socket sock);
+    cobalt::detached handle_accept(tcp::socket sock,
+                                        boost::asio::executor_arg_t = {},
+                                        cobalt::executor = cobalt::this_thread::get_executor());
+    cobalt::promise<void> accept_socket(boost::asio::executor_arg_t = {},
+                                        cobalt::executor = cobalt::this_thread::get_executor());
 
 private:
     net::any_io_executor ex_;

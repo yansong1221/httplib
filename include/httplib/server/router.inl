@@ -7,7 +7,7 @@ namespace httplib::server {
 template<typename Func, typename... Aspects>
 router::coro_http_handler_type router::make_coro_http_handler(Func&& handler, Aspects&&... asps)
 {
-    auto coro_handler = helper::make_coro_handler(std::move(handler));
+    auto coro_handler = helper::make_coro_handler(std::forward<Func>(handler));
 
 
     if constexpr (sizeof...(Aspects) > 0) {
@@ -37,7 +37,7 @@ router::coro_http_handler_type router::make_coro_http_handler(Func&& handler, As
         };
     }
     else {
-        return coro_handler;
+        return std::move(coro_handler);
     }
 }
 
@@ -82,9 +82,9 @@ void router::set_ws_handler(std::string_view key,
                             CloseFunc&& close_handler)
 {
     set_ws_handler_impl(key,
-                        helper::make_coro_handler(std::move(open_handler)),
-                        helper::make_coro_handler(std::move(message_handler)),
-                        helper::make_coro_handler(std::move(close_handler)));
+                        helper::make_coro_handler(std::forward<OpenFunc>(open_handler)),
+                        helper::make_coro_handler(std::forward<MessageFunc>(message_handler)),
+                        helper::make_coro_handler(std::forward<CloseFunc>(close_handler)));
 }
 
 template<typename... Aspects>
@@ -113,7 +113,7 @@ void router::set_static_mount_point(mount_point_entry&& entry, Aspects&&... asps
 template<typename Func>
 void router::set_http_post_handler(Func&& handler)
 {
-    auto coro_handler = helper::make_coro_handler(std::move(handler));
+    auto coro_handler = helper::make_coro_handler(std::forward<Func>(handler));
     set_http_post_handler_impl(std::move(coro_handler));
 }
 

@@ -4,6 +4,7 @@
 #include <spdlog/spdlog.h>
 
 
+#include <boost/asio.hpp>
 #include <boost/cobalt/io/sleep.hpp>
 
 namespace httplib::server {
@@ -42,7 +43,6 @@ net::any_io_executor http_server_impl::get_executor() noexcept
 
 void http_server_impl::async_run()
 {
-    // for (int i = 0; i < 32; ++i)
     cobalt::spawn(net::make_strand(ex_), co_run(), net::detached);
 }
 
@@ -59,35 +59,52 @@ router_impl& http_server_impl::router()
 
 cobalt::task<boost::system::error_code> http_server_impl::co_run()
 {
+    cobalt::wait_group task_group;
+
     boost::system::error_code ec;
+    for (int i = 0; i < 32; i++) {
+        task_group.push_back(accept_socket(boost::asio::executor_arg, ex_));
+    }
+    co_await task_group.wait();
+
+    {
+        std::lock_guard<std::mutex> lck(session_mutex_);
+        for (const auto& conn : session_map_)
+            conn->abort();
+    }
+    co_return ec;
+}
+cobalt::promise<void> http_server_impl::accept_socket(boost::asio::executor_arg_t, cobalt::executor)
+{
+    boost::system::error_code ec;
+    auto executor = co_await cobalt::this_coro::executor;
     for (;;) {
-        tcp::socket sock(ex_);
+        tcp::socket sock(executor);
         co_await acceptor_.async_accept(sock, boost::asio::redirect_error(cobalt::use_op, ec));
         if (ec) {
             if (ec == boost::system::errc::too_many_files_open ||
                 ec == boost::system::errc::too_many_files_open_in_system)
             {
                 using namespace std::chrono_literals;
-                co_await cobalt::io::sleep(100ms);
+                net::steady_timer retry_timer(executor);
+                retry_timer.expires_after(100ms);
+                co_await retry_timer.async_wait(boost::asio::redirect_error(cobalt::use_op, ec));
+                if (ec)
+                    break;
+
+                ec = {};
                 continue; // retry accept
             }
-
-            get_logger()->trace("async_accept: {}", ec.message());
             break;
         }
-        cobalt::spawn(ex_, handle_accept(std::move(sock)), net::detached);
+        handle_accept(std::move(sock), net::executor_arg, ex_);
     }
-
-    {
-        std::lock_guard<std::mutex> lck(session_mutex_);
-        for (const auto& v : session_map_)
-            v->abort();
-    }
-
-    co_return ec;
+    get_logger()->trace("async_accept: {}", ec.message());
 }
 
-cobalt::task<void> http_server_impl::handle_accept(tcp::socket sock)
+cobalt::detached http_server_impl::handle_accept(tcp::socket sock,
+                                                 boost::asio::executor_arg_t,
+                                                 cobalt::executor)
 {
     auto remote_endp = sock.remote_endpoint();
     auto local_endp  = sock.local_endpoint();
@@ -168,4 +185,6 @@ void http_server_impl::use_ssl(const net::const_buffer& cert_file,
 
     ssl_conf_ = conf;
 }
+
+
 } // namespace httplib::server

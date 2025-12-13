@@ -47,7 +47,7 @@ public:
                             std::string_view content_type,
                             http::status status = http::status::ok)
     {
-        auto handler = helper::make_coro_handler(std::move(func));
+        auto handler = helper::make_coro_handler(std::forward<Func>(func));
         set_stream_content_impl(std::move(handler), content_type, status);
     }
 

@@ -49,9 +49,9 @@ int main()
 
     auto& router = svr.router();
 
-    svr.get_logger()->set_level(spdlog::level::info);
-    //svr.use_ssl_file(
-    //    R"(D:\code\httplib\lib\server.crt)", R"(D:\code\httplib\lib\server.key)", "test");
+    svr.get_logger()->set_level(spdlog::level::trace);
+    // svr.use_ssl_file(
+    //     R"(D:\code\httplib\lib\server.crt)", R"(D:\code\httplib\lib\server.key)", "test");
 
     svr.listen("0.0.0.0", 18808);
 
@@ -116,8 +116,11 @@ int main()
 
     test tt;
     router.set_http_handler<httplib::http::verb::post>("/test", &test::get, tt, log_t {});
-    // router.set_http_handler<httplib::http::verb::get>(
-    //     "/close", [&](httplib::request& req, httplib::response& resp) { svr.stop(); });
+    router.set_http_handler<httplib::http::verb::get>(
+        "/close", [&](httplib::server::request& req, httplib::server::response& resp) -> void {
+            svr.stop();
+            return;
+        },log_t {});
     // router.set_http_handler<httplib::http::verb::post>(
     //     "/json",
     //     [](httplib::request& req, httplib::response& resp) -> httplib::net::awaitable<void> {
@@ -203,4 +206,3 @@ int main()
 
     pool.wait();
 }
-
