@@ -17,7 +17,6 @@ ws_client::impl::impl(const net::any_io_executor& ex,
 net::awaitable<boost::system::error_code>
 ws_client::impl::async_connect(std::string_view path, const http::fields& headers)
 {
-    boost::system::error_code ec;
     try {
         // Set up an HTTP GET request message
         if (!is_open()) {
@@ -38,11 +37,12 @@ ws_client::impl::async_connect(std::string_view path, const http::fields& header
         }));
 
         co_await stream_->async_handshake(host_, path, net::use_awaitable);
+
+        co_return boost::system::error_code {};
     }
     catch (const boost::system::system_error& e) {
         co_return e.code();
     }
-    co_return ec;
 }
 
 bool ws_client::impl::is_open() const
