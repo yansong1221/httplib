@@ -1,5 +1,6 @@
 #include "httplib/client/client.hpp"
 #include "client_impl.h"
+#include "html_impl.h"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/use_future.hpp>
 
@@ -14,7 +15,7 @@ http_client::http_client(const net::any_io_executor& ex,
                          std::string_view host,
                          uint16_t port,
                          bool ssl)
-    : impl_(new http_client::impl(ex, host, port, ssl))
+    : impl_(std::make_unique<http_client::impl>(ex, host, port, ssl))
 {
 }
 

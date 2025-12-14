@@ -1,5 +1,6 @@
 
 #include "httplib/body/query_params_body.hpp"
+#include "html_impl.h"
 namespace httplib::body {
 
 query_params_body::writer::writer(const http::fields&, value_type const& body)
