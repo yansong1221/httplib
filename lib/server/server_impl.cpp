@@ -1,5 +1,5 @@
 #include "server_impl.h"
-
+#include "httplib/when_all.hpp"
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
@@ -8,7 +8,6 @@ namespace httplib::server {
 http_server_impl::http_server_impl(const net::any_io_executor& ex)
     : ex_(ex)
     , acceptor_(ex)
-    , session_strand_(ex)
 {
     auto console_sink                 = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
     spdlog::sinks_init_list sink_list = {console_sink};
@@ -40,8 +39,7 @@ net::any_io_executor http_server_impl::get_executor() noexcept
 
 void http_server_impl::async_run()
 {
-    for (int i = 0; i < 32; ++i)
-        net::co_spawn(ex_, co_run(), net::detached);
+    net::co_spawn(net::make_strand(ex_), co_run(), net::detached);
 }
 
 void http_server_impl::stop()
@@ -57,22 +55,50 @@ router_impl& http_server_impl::router()
 
 net::awaitable<boost::system::error_code> http_server_impl::co_run()
 {
-    boost::system::error_code ec;
-    for (;;) {
-        tcp::socket sock(ex_);
-        co_await acceptor_.async_accept(sock, net_awaitable[ec]);
-        if (ec) {
+    std::vector<net::awaitable<boost::system::error_code>> ops;
+
+    for (int i = 0; i < 32; ++i) {
+        ops.push_back([this]() -> net::awaitable<boost::system::error_code> {
+            boost::system::error_code ec;
+            for (;;) {
+                tcp::socket sock(co_await net::this_coro::executor);
+                co_await acceptor_.async_accept(sock, net_awaitable[ec]);
+                if (ec) {
+                    if (ec == boost::system::errc::too_many_files_open ||
+                        ec == boost::system::errc::too_many_files_open_in_system)
+                    {
+                        ec = {};
+                        using namespace std::chrono_literals;
+                        net::steady_timer retry_timer(co_await net::this_coro::executor);
+                        retry_timer.expires_after(100ms);
+                        co_await retry_timer.async_wait(net_awaitable[ec]);
+                        if (!ec)
+                            continue;
+                    }
+                    break;
+                }
+                net::co_spawn(co_await net::this_coro::executor,
+                              handle_accept(std::move(sock)),
+                              net::detached);
+            }
             get_logger()->trace("async_accept: {}", ec.message());
-            break;
-        }
-        net::co_spawn(ex_, handle_accept(std::move(sock)), net::detached);
+            co_return ec;
+        }());
     }
 
-    co_await net::post(session_strand_);
-    for (const auto& v : session_map_)
-        v->abort();
+    auto&& results = co_await when_all(std::move(ops));
 
-    co_return ec;
+    {
+        std::lock_guard lck(session_mutex_);
+        for (const auto& v : session_map_)
+            v->abort();
+    }
+
+    for (const auto& ec : results)
+        if (ec)
+            co_return ec;
+
+    co_return boost::system::error_code {};
 }
 
 net::awaitable<void> http_server_impl::handle_accept(tcp::socket sock)
@@ -84,7 +110,7 @@ net::awaitable<void> http_server_impl::handle_accept(tcp::socket sock)
 
     auto conn = std::make_shared<session>(std::move(sock), *this);
     {
-        co_await net::post(session_strand_);
+        std::lock_guard lck(session_mutex_);
         session_map_.insert(conn);
     }
     try {
@@ -97,7 +123,7 @@ net::awaitable<void> http_server_impl::handle_accept(tcp::socket sock)
         get_logger()->error("session::run() unknown exception");
     }
     {
-        co_await net::post(session_strand_);
+        std::lock_guard lck(session_mutex_);
         session_map_.erase(conn);
     }
     get_logger()->trace(

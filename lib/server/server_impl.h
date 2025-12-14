@@ -59,7 +59,7 @@ private:
     router_impl router_;
     tcp::acceptor acceptor_;
 
-    net::strand<net::any_io_executor> session_strand_;
+    std::mutex session_mutex_;
     std::unordered_set<std::shared_ptr<session>> session_map_;
 
     std::chrono::steady_clock::duration read_timeout_  = std::chrono::seconds(30);

@@ -53,8 +53,8 @@ static inline auto make_coro_handler(Func&& handler)
         return handler;
     }
     else {
-        return [handler = std::move(handler)](auto... args) -> net::awaitable<return_type> {
-            co_return std::invoke(handler, std::forward<decltype(args)>(args)...);
+        return [handler = std::move(handler)](auto&&... args) -> net::awaitable<return_type> {
+            co_return std::invoke(handler, args...);
         };
     }
 }
