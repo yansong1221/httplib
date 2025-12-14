@@ -16,8 +16,8 @@
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/type_traits.hpp>
-
-namespace asio_util {
+namespace httplib::util {
+namespace detail {
 template<typename Executor = boost::asio::any_io_executor>
 struct asio_use_awaitable_t : public boost::asio::use_awaitable_t<Executor>
 {
@@ -38,7 +38,7 @@ struct asio_use_awaitable_t : public boost::asio::use_awaitable_t<Executor>
         return boost::asio::redirect_error(boost::asio::use_awaitable_t<Executor>(), ec);
     }
 };
-} // namespace asio_util
+} // namespace detail
 
 //
 // net_awaitable usage:
@@ -50,10 +50,12 @@ struct asio_use_awaitable_t : public boost::asio::use_awaitable_t<Executor>
 //
 
 // Executor is any_io_executor
-[[maybe_unused]] inline constexpr asio_util::asio_use_awaitable_t<> net_awaitable;
+[[maybe_unused]] inline constexpr detail::asio_use_awaitable_t<> net_awaitable;
 
 // Executor is boost::asio::io_context::executor_type
-[[maybe_unused]] inline constexpr asio_util::asio_use_awaitable_t<
+[[maybe_unused]] inline constexpr detail::asio_use_awaitable_t<
     boost::asio::io_context::executor_type> ioc_awaitable;
+
+} // namespace httplib::util
 
 #endif // INCLUDE__2023_10_18__USE_AWAITABLE_HPP

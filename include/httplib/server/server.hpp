@@ -1,11 +1,11 @@
 #pragma once
 #include "httplib/config.hpp"
-#include "httplib/server/websocket_conn.hpp"
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/socket_base.hpp>
+#include <boost/asio/ip/tcp.hpp>
 #include <filesystem>
-
+#include <span>
 
 namespace httplib::server {
 

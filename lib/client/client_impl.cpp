@@ -1,7 +1,7 @@
 #include "client_impl.h"
 #include "body/compressor.hpp"
 #include "helper.hpp"
-#include "httplib/use_awaitable.hpp"
+#include "httplib/util/use_awaitable.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/beast/http/empty_body.hpp>

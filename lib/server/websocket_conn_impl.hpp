@@ -1,9 +1,9 @@
 #pragma once
-#include "httplib/action_queue.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/websocket_conn.hpp"
-#include "httplib/use_awaitable.hpp"
+#include "httplib/util/action_queue.hpp"
 #include "httplib/util/misc.hpp"
+#include "httplib/util/use_awaitable.hpp"
 #include "server_impl.h"
 #include "stream/websocket_stream.hpp"
 #include <boost/asio/awaitable.hpp>
@@ -39,7 +39,7 @@ private:
     std::unique_ptr<websocket_stream> ws_;
     beast::flat_buffer buffer_;
 
-    action_queue ac_que_;
+    util::action_queue ac_que_;
 };
 
 } // namespace httplib::server

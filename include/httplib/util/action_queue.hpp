@@ -1,6 +1,6 @@
 #pragma once
 #include "httplib/config.hpp"
-#include "httplib/use_awaitable.hpp"
+#include "httplib/util/use_awaitable.hpp"
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
@@ -10,7 +10,7 @@
 #include <functional>
 #include <queue>
 
-namespace httplib {
+namespace httplib::util {
 class action_queue
 {
     using act_t = std::function<net::awaitable<void>()>;
@@ -71,4 +71,4 @@ private:
     bool running_ = false;
     bool abort_   = false;
 };
-} // namespace httplib
+} // namespace httplib::util

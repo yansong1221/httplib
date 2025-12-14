@@ -32,7 +32,7 @@ void websocket_conn_impl::send_message(std::string&& msg, bool binary)
                 ws_->text(true);
 
             boost::system::error_code ec;
-            co_await ws_->async_write(net::buffer(msg), net_awaitable[ec]);
+            co_await ws_->async_write(net::buffer(msg), util::net_awaitable[ec]);
         });
 };
 void websocket_conn_impl::send_ping(std::string&& msg)
@@ -43,7 +43,7 @@ void websocket_conn_impl::send_ping(std::string&& msg)
     ac_que_.push([this, msg = std::move(msg), self = shared_from_this()]() -> net::awaitable<void> {
         boost::system::error_code ec;
         co_await ws_->async_ping(beast::websocket::ping_data(std::string_view(msg)),
-                                 net_awaitable[ec]);
+                                 util::net_awaitable[ec]);
     });
 }
 
@@ -55,7 +55,7 @@ void websocket_conn_impl::close()
     ac_que_.push([this, self = shared_from_this()]() -> net::awaitable<void> {
         boost::system::error_code ec;
         websocket::close_reason reason("normal");
-        co_await ws_->async_close(reason, net_awaitable[ec]);
+        co_await ws_->async_close(reason, util::net_awaitable[ec]);
     });
 }
 httplib::net::awaitable<void> websocket_conn_impl::run()
@@ -67,7 +67,7 @@ httplib::net::awaitable<void> websocket_conn_impl::run()
     boost::system::error_code ec;
     auto remote_endp = ws_->socket().remote_endpoint(ec);
 
-    co_await ws_->async_accept(req_, net_awaitable[ec]);
+    co_await ws_->async_accept(req_, util::net_awaitable[ec]);
     if (ec) {
         serv_.get_logger()->error("websocket handshake failed: {}", ec.message());
         co_return;
@@ -80,7 +80,7 @@ httplib::net::awaitable<void> websocket_conn_impl::run()
 
 
     for (;;) {
-        auto bytes = co_await ws_->async_read(buffer_, net_awaitable[ec]);
+        auto bytes = co_await ws_->async_read(buffer_, util::net_awaitable[ec]);
         if (ec) {
             serv_.get_logger()->debug("websocket disconnect: [{}:{}] what: {}",
                                       remote_endp.address().to_string(),

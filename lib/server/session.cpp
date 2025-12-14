@@ -71,15 +71,15 @@ net::awaitable<void> transfer(S1& from, S2& to, size_t& bytes_transferred)
     boost::system::error_code ec;
 
     for (;;) {
-        auto bytes = co_await from.async_read_some(net::buffer(buffer), net_awaitable[ec]);
+        auto bytes = co_await from.async_read_some(net::buffer(buffer), util::net_awaitable[ec]);
         if (ec) {
             if (bytes > 0)
-                co_await net::async_write(to, net::buffer(buffer, bytes), net_awaitable[ec]);
+                co_await net::async_write(to, net::buffer(buffer, bytes), util::net_awaitable[ec]);
 
             to.shutdown(net::socket_base::shutdown_send, ec);
             co_return;
         }
-        co_await net::async_write(to, net::buffer(buffer, bytes), net_awaitable[ec]);
+        co_await net::async_write(to, net::buffer(buffer, bytes), util::net_awaitable[ec]);
         if (ec) {
             from.shutdown(net::socket_base::shutdown_receive, ec);
             co_return;
@@ -110,7 +110,7 @@ public:
     {
         boost::system::error_code ec;
         auto bytes_used = co_await stream_.async_handshake(
-            ssl::stream_base::server, buffer_.data(), net_awaitable[ec]);
+            ssl::stream_base::server, buffer_.data(), util::net_awaitable[ec]);
         if (ec) {
             serv_.get_logger()->trace("ssl handshake failed: {}", ec.message());
             co_return nullptr;
@@ -177,7 +177,7 @@ net::awaitable<std::unique_ptr<session::task>> session::detect_ssl_task::then()
 #ifdef HTTPLIB_ENABLED_SSL
     if (sevr_.ssl_conf_) {
         boost::system::error_code ec;
-        bool is_ssl = co_await beast::async_detect_ssl(stream_, buffer, net_awaitable[ec]);
+        bool is_ssl = co_await beast::async_detect_ssl(stream_, buffer, util::net_awaitable[ec]);
         if (ec) {
             sevr_.get_logger()->trace("async_detect_ssl failed: {}", ec.message());
             co_return nullptr;
@@ -227,7 +227,7 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
         header_parser.body_limit(std::numeric_limits<unsigned long long>::max());
         while (!header_parser.is_header_done()) {
             stream_.expires_after(serv_.read_timeout());
-            co_await http::async_read_some(stream_, buffer_, header_parser, net_awaitable[ec]);
+            co_await http::async_read_some(stream_, buffer_, header_parser, util::net_awaitable[ec]);
             stream_.expires_never();
             if (ec) {
                 serv_.get_logger()->trace("read http header failed: {}", ec.message());
@@ -267,7 +267,7 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
                 while (!body_parser.is_done()) {
                     stream_.expires_after(serv_.read_timeout());
                     co_await http::async_read_some(
-                        stream_, buffer_, body_parser, net_awaitable[ec]);
+                        stream_, buffer_, body_parser, util::net_awaitable[ec]);
                     stream_.expires_never();
                     if (ec) {
                         serv_.get_logger()->trace("read http body failed: {}", ec.message());
@@ -352,7 +352,7 @@ net::awaitable<bool> session::http_task::async_write(request& req, response& res
     boost::system::error_code ec;
     http::response_serializer<body::any_body> serializer(resp);
     stream_.expires_after(serv_.write_timeout());
-    co_await http::async_write_header(stream_, serializer, net_awaitable[ec]);
+    co_await http::async_write_header(stream_, serializer, util::net_awaitable[ec]);
     if (ec) {
         serv_.get_logger()->trace("write http header failed: {}", ec.message());
         co_return false;
@@ -369,7 +369,7 @@ net::awaitable<bool> session::http_task::async_write(request& req, response& res
             if (buffer_.size() != 0) {
                 http::chunk_body chunk_b(buffer_.data());
                 stream_.expires_after(serv_.write_timeout());
-                co_await net::async_write(stream_, chunk_b, net_awaitable[ec]);
+                co_await net::async_write(stream_, chunk_b, util::net_awaitable[ec]);
                 if (ec) {
                     serv_.get_logger()->trace("write chunk body failed: {}", ec.message());
                     co_return false;
@@ -379,7 +379,7 @@ net::awaitable<bool> session::http_task::async_write(request& req, response& res
             }
             if (!has_more) {
                 http::chunk_last chunk_last;
-                co_await net::async_write(stream_, chunk_last, net_awaitable[ec]);
+                co_await net::async_write(stream_, chunk_last, util::net_awaitable[ec]);
                 if (ec) {
                     serv_.get_logger()->trace("write chunk last failed: {}", ec.message());
                     co_return false;
@@ -391,7 +391,7 @@ net::awaitable<bool> session::http_task::async_write(request& req, response& res
     else if (req.method() != http::verb::head) {
         while (!serializer.is_done()) {
             stream_.expires_after(serv_.write_timeout());
-            co_await http::async_write_some(stream_, serializer, net_awaitable[ec]);
+            co_await http::async_write_some(stream_, serializer, util::net_awaitable[ec]);
             stream_.expires_never();
             if (ec) {
                 serv_.get_logger()->trace("write http body failed: {}", ec.message());
@@ -442,18 +442,18 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_proxy_task
     auto port = target.substr(pos + 1);
 
     boost::system::error_code ec;
-    auto results = co_await resolver_.async_resolve(host, port, net_awaitable[ec]);
+    auto results = co_await resolver_.async_resolve(host, port, util::net_awaitable[ec]);
     if (ec)
         co_return nullptr;
 
-    co_await net::async_connect(proxy_socket_, results, net_awaitable[ec]);
+    co_await net::async_connect(proxy_socket_, results, util::net_awaitable[ec]);
     if (ec)
         co_return nullptr;
 
     response resp(req_.version(), req_.keep_alive());
     resp.reason("Connection Established");
     resp.result(http::status::ok);
-    co_await http::async_write(stream_, resp, net_awaitable[ec]);
+    co_await http::async_write(stream_, resp, util::net_awaitable[ec]);
     if (ec)
         co_return nullptr;
 

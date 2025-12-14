@@ -5,7 +5,7 @@
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/experimental/parallel_group.hpp>
 
-namespace httplib {
+namespace httplib::util {
 namespace detail {
 
 template<typename ExecutorType,
@@ -94,4 +94,4 @@ static net::awaitable<void> when_all(std::vector<net::awaitable<void>>&& ops)
     co_return;
 }
 
-} // namespace httplib
+} // namespace httplib::util

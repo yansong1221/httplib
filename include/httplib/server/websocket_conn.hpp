@@ -1,14 +1,10 @@
 #pragma once
-#include "httplib/server/request.hpp"
-#include "httplib/use_awaitable.hpp"
-#include "httplib/util/misc.hpp"
+#include "httplib/config.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <memory>
-#include <queue>
-#include <span>
-#include <spdlog/spdlog.h>
 
 namespace httplib::server {
+class request;
 class websocket_conn : public std::enable_shared_from_this<websocket_conn>
 {
 public:

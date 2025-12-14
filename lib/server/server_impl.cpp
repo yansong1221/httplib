@@ -1,5 +1,6 @@
 #include "server_impl.h"
-#include "httplib/when_all.hpp"
+#include "httplib/util/use_awaitable.hpp"
+#include "httplib/util/when_all.hpp"
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
@@ -62,7 +63,7 @@ net::awaitable<boost::system::error_code> http_server_impl::co_run()
             boost::system::error_code ec;
             for (;;) {
                 tcp::socket sock(co_await net::this_coro::executor);
-                co_await acceptor_.async_accept(sock, net_awaitable[ec]);
+                co_await acceptor_.async_accept(sock, util::net_awaitable[ec]);
                 if (ec) {
                     if (ec == boost::system::errc::too_many_files_open ||
                         ec == boost::system::errc::too_many_files_open_in_system)
@@ -71,7 +72,7 @@ net::awaitable<boost::system::error_code> http_server_impl::co_run()
                         using namespace std::chrono_literals;
                         net::steady_timer retry_timer(co_await net::this_coro::executor);
                         retry_timer.expires_after(100ms);
-                        co_await retry_timer.async_wait(net_awaitable[ec]);
+                        co_await retry_timer.async_wait(util::net_awaitable[ec]);
                         if (!ec)
                             continue;
                     }
@@ -86,7 +87,7 @@ net::awaitable<boost::system::error_code> http_server_impl::co_run()
         }());
     }
 
-    auto&& results = co_await when_all(std::move(ops));
+    auto&& results = co_await util::when_all(std::move(ops));
 
     {
         std::lock_guard lck(session_mutex_);

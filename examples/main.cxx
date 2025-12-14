@@ -10,6 +10,8 @@
 #include <filesystem>
 #include <format>
 #include <iostream>
+#include <spdlog/spdlog.h>
+
 // 日志切面
 struct log_t
 {
