@@ -40,7 +40,18 @@ net::any_io_executor http_server_impl::get_executor() noexcept
 
 void http_server_impl::async_run()
 {
-    net::co_spawn(net::make_strand(ex_), co_run(), net::detached);
+    net::co_spawn(
+        ex_,
+        [this]() -> net::awaitable<void> { co_await co_run(); },
+        [](std::exception_ptr ex) {
+            // if an exception occurred in the coroutine,
+            // it's something critical, e.g. out of memory
+            // we capture normal errors in the ec
+            // so we just rethrow the exception here,
+            // which will cause `ioc.run()` to throw
+            if (ex)
+                std::rethrow_exception(ex);
+        });
 }
 
 void http_server_impl::stop()
@@ -62,8 +73,7 @@ net::awaitable<boost::system::error_code> http_server_impl::co_run()
         ops.push_back([this]() -> net::awaitable<boost::system::error_code> {
             boost::system::error_code ec;
             for (;;) {
-                tcp::socket sock(co_await net::this_coro::executor);
-                co_await acceptor_.async_accept(sock, util::net_awaitable[ec]);
+                auto sock = co_await acceptor_.async_accept(util::net_awaitable[ec]);
                 if (ec) {
                     if (ec == boost::system::errc::too_many_files_open ||
                         ec == boost::system::errc::too_many_files_open_in_system)

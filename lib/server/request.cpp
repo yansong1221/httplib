@@ -4,12 +4,12 @@
 
 namespace httplib::server {
 
-request::request(tcp::endpoint local_endpoint,
-                 tcp::endpoint remote_endpoint,
+request::request(const tcp::endpoint& local_endpoint,
+                 const tcp::endpoint& remote_endpoint,
                  http::request<body::any_body>&& other)
     : http::request<body::any_body>(std::move(other))
-    , local_endpoint_(std::move(local_endpoint))
-    , remote_endpoint_(std::move(remote_endpoint))
+    , local_endpoint_(local_endpoint)
+    , remote_endpoint_(remote_endpoint)
 {
     if (auto pos = this->target().find("?"); pos == std::string_view::npos) {
         this->decoded_path_ = util::url_decode(this->target());
@@ -19,12 +19,10 @@ request::request(tcp::endpoint local_endpoint,
         this->query_params_.decode(this->target().substr(pos + 1));
     }
 }
-request::request(tcp::endpoint local_endpoint,
-                 tcp::endpoint remote_endpoint,
+request::request(const tcp::endpoint& local_endpoint,
+                 const tcp::endpoint& remote_endpoint,
                  http::request<http::empty_body>&& other)
-    : request(std::move(local_endpoint),
-              std::move(remote_endpoint),
-              http::request<body::any_body>(other))
+    : request(local_endpoint, remote_endpoint, http::request<body::any_body>(other))
 {
 }
 request& request::operator=(request&& other) noexcept

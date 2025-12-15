@@ -222,18 +222,19 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
     auto& _router = serv_.router();
 
     for (;;) {
+        // using namespace std::chrono_;
         http::request_parser<http::empty_body> header_parser;
         header_parser.header_limit(std::numeric_limits<std::uint32_t>::max());
         header_parser.body_limit(std::numeric_limits<unsigned long long>::max());
-        while (!header_parser.is_header_done()) {
-            stream_.expires_after(serv_.read_timeout());
-            co_await http::async_read_some(stream_, buffer_, header_parser, util::net_awaitable[ec]);
-            stream_.expires_never();
-            if (ec) {
-                serv_.get_logger()->trace("read http header failed: {}", ec.message());
-                co_return nullptr;
-            }
+
+        stream_.expires_after(serv_.read_timeout());
+        co_await http::async_read_header(stream_, buffer_, header_parser, util::net_awaitable[ec]);
+        stream_.expires_never();
+        if (ec) {
+            serv_.get_logger()->trace("read http header failed: {}", ec.message());
+            co_return nullptr;
         }
+
         const auto& header = header_parser.get();
 
         // http proxy
@@ -353,11 +354,14 @@ net::awaitable<bool> session::http_task::async_write(request& req, response& res
     http::response_serializer<body::any_body> serializer(resp);
     stream_.expires_after(serv_.write_timeout());
     co_await http::async_write_header(stream_, serializer, util::net_awaitable[ec]);
+    stream_.expires_never();
     if (ec) {
         serv_.get_logger()->trace("write http header failed: {}", ec.message());
         co_return false;
     }
-    stream_.expires_never();
+
+    if (req.method() == http::verb::head)
+        co_return true;
 
     if (resp.stream_handler_) {
         for (;;) {
@@ -370,16 +374,18 @@ net::awaitable<bool> session::http_task::async_write(request& req, response& res
                 http::chunk_body chunk_b(buffer_.data());
                 stream_.expires_after(serv_.write_timeout());
                 co_await net::async_write(stream_, chunk_b, util::net_awaitable[ec]);
+                stream_.expires_never();
                 if (ec) {
                     serv_.get_logger()->trace("write chunk body failed: {}", ec.message());
                     co_return false;
                 }
-                stream_.expires_never();
                 buffer_.consume(buffer_.size());
             }
             if (!has_more) {
                 http::chunk_last chunk_last;
+                stream_.expires_after(serv_.write_timeout());
                 co_await net::async_write(stream_, chunk_last, util::net_awaitable[ec]);
+                stream_.expires_never();
                 if (ec) {
                     serv_.get_logger()->trace("write chunk last failed: {}", ec.message());
                     co_return false;
@@ -388,7 +394,7 @@ net::awaitable<bool> session::http_task::async_write(request& req, response& res
             }
         }
     }
-    else if (req.method() != http::verb::head) {
+    else {
         while (!serializer.is_done()) {
             stream_.expires_after(serv_.write_timeout());
             co_await http::async_write_some(stream_, serializer, util::net_awaitable[ec]);

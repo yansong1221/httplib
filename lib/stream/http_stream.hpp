@@ -90,11 +90,15 @@ public:
 
     bool is_open() const { return socket().is_open(); }
 
-    auto expires_after(const net::steady_timer::duration& expiry_time)
+    void expires_after(const net::steady_timer::duration& expiry_time)
     {
-        return std::visit(
-            [&](auto& t) mutable { return beast::get_lowest_layer(t).expires_after(expiry_time); },
-            stream_);
+        return std::visit([&](auto& t) { beast::get_lowest_layer(t).expires_after(expiry_time); },
+                          stream_);
+    }
+    void expires_at(const net::steady_timer::time_point& expiry_time)
+    {
+        return std::visit([&](auto& t) { beast::get_lowest_layer(t).expires_at(expiry_time); },
+                          stream_);
     }
     auto expires_never()
     {

@@ -10,12 +10,12 @@ namespace httplib::server {
 struct request : public http::request<body::any_body>
 {
 public:
-    request(tcp::endpoint local_endpoint,
-            tcp::endpoint remote_endpoint,
+    request(const tcp::endpoint& local_endpoint,
+            const tcp::endpoint& remote_endpoint,
             http::request<body::any_body>&& other);
 
-    request(tcp::endpoint local_endpoint,
-            tcp::endpoint remote_endpoint,
+    request(const tcp::endpoint& local_endpoint,
+            const tcp::endpoint& remote_endpoint,
             http::request<http::empty_body>&& other);
 
     request& operator=(request&& other) noexcept;
