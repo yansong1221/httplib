@@ -11,6 +11,7 @@
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/write.hpp>
 #include <boost/beast/version.hpp>
+#include <fmt/format.h>
 
 namespace httplib::client {
 

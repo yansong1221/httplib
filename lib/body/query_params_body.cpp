@@ -1,6 +1,6 @@
 
 #include "httplib/body/query_params_body.hpp"
-#include "html_impl.h"
+#include "html/html.h"
 namespace httplib::body {
 
 query_params_body::writer::writer(const http::fields&, value_type const& body)
@@ -11,7 +11,7 @@ query_params_body::writer::writer(const http::fields&, value_type const& body)
 void query_params_body::writer::init(boost::system::error_code& ec)
 {
     ec      = {};
-    buffer_ = html::make_http_query_params(body_);
+    buffer_ = body_.encoded();
 }
 
 boost::optional<std::pair<query_params_body::writer::const_buffers_type, bool>>
@@ -44,11 +44,8 @@ std::size_t query_params_body::reader::put(net::const_buffer const& buffers,
 
 void query_params_body::reader::finish(boost::system::error_code& ec)
 {
-    ec            = {};
-    bool is_valid = true;
-    body_         = html::parse_http_query_params(buffer_, is_valid);
-
-    if (!is_valid) {
+    ec = {};
+    if (!body_.decode(buffer_)) {
         ec = http::error::unexpected_body;
     }
 }

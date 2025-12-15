@@ -1,7 +1,7 @@
 #pragma once
 #include "httplib/body/any_body.hpp"
 #include "httplib/config.hpp"
-#include "httplib/form_data.hpp"
+#include "httplib/html/form_data.hpp"
 #include "httplib/server/helper.hpp"
 #include <boost/beast/http/fields.hpp>
 #include <boost/beast/http/message.hpp>
@@ -38,7 +38,7 @@ public:
     }
     void set_json_content(boost::json::value&& data, http::status status = http::status::ok);
     void set_file_content(const fs::path& path, const http::fields& req_header = {});
-    void set_form_data_content(std::vector<form_data::field>&& data);
+    void set_form_data_content(std::vector<html::form_data::field>&& data);
 
     void set_redirect(std::string_view url, http::status status = http::status::moved_permanently);
 

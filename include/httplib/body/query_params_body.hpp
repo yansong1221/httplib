@@ -1,6 +1,6 @@
 #pragma once
 #include "httplib/config.hpp"
-#include "httplib/html.hpp"
+#include "httplib/html/query_params.hpp"
 #include <boost/beast/http/fields.hpp>
 #include <string>
 #include <unordered_map>

@@ -1,5 +1,6 @@
 
 #include "httplib/server/request.hpp"
+#include "httplib/util/misc.hpp"
 
 namespace httplib::server {
 
@@ -15,9 +16,7 @@ request::request(tcp::endpoint local_endpoint,
     }
     else {
         this->decoded_path_ = util::url_decode(this->target().substr(0, pos));
-        bool is_valid       = true;
-        this->query_params_ =
-            html::parse_http_query_params(this->target().substr(pos + 1), is_valid);
+        this->query_params_.decode(this->target().substr(pos + 1));
     }
 }
 request::request(tcp::endpoint local_endpoint,
@@ -107,29 +106,9 @@ void request::set_path_param(std::unordered_map<std::string, std::string>&& para
     path_params_ = std::move(params);
 }
 
-std::vector<std::string_view> request::query_param(const std::string& key) const
+const html::query_params& request::query_params() const
 {
-    std::vector<std::string_view> values;
-    auto range = query_params_.equal_range(key);
-    for (auto it = range.first; it != range.second; ++it) {
-        values.push_back(it->second);
-    }
-    return values;
+    return query_params_;
 }
-
-std::string_view request::query_param_front(const std::string& key) const
-{
-    auto iter = query_params_.find(key);
-    if (iter == query_params_.end()) {
-        throw std::runtime_error("Key not found: " + key);
-    }
-    return iter->second;
-}
-
-bool request::has_query_param(const std::string& key) const
-{
-    return query_params_.find(key) != query_params_.end();
-}
-
 
 } // namespace httplib::server

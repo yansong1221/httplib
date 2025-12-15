@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-namespace httplib {
+namespace httplib::html {
 /**
  * Type to represent the data held by an HTML form.
  *
@@ -71,4 +71,4 @@ public:
     std::string dump() const;
 };
 
-} // namespace httplib
+} // namespace httplib::html

@@ -1,11 +1,9 @@
 #pragma once
 #include "httplib/config.hpp"
-#include "httplib/html.hpp"
-#include "httplib/util/misc.hpp"
+#include "httplib/html/http_ranges.hpp"
 #include <boost/beast/core/file.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/message.hpp>
-#include <fmt/format.h>
 #include <fstream>
 
 namespace httplib::body {

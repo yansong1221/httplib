@@ -1,14 +1,39 @@
 #include "httplib/server/response.hpp"
+#include "html/html.h"
 #include "mime_types.hpp"
 #include <boost/beast/version.hpp>
+#include <fmt/format.h>
 
 namespace httplib::server {
+
+namespace detail {
+static std::string get_current_gmt_date()
+{
+    static std::atomic<std::time_t> last_time {0};
+    static std::string last_time_format;
+    static std::mutex mtx;
+
+    auto now = time(nullptr);
+
+    if (last_time != now) {
+        std::lock_guard<std::mutex> lock(mtx);
+        // double check
+        if (last_time != now) {
+            last_time_format = html::format_http_gmt_date(now);
+            last_time        = now;
+        }
+    }
+
+    return last_time_format;
+}
+} // namespace detail
+
 response::response(unsigned int version, bool keep_alive)
 {
     this->result(http::status::not_found);
     this->version(version);
     this->set(http::field::server, BOOST_BEAST_VERSION_STRING);
-    this->set(http::field::date, html::format_http_current_gmt_date());
+    this->set(http::field::date, detail::get_current_gmt_date());
     this->keep_alive(keep_alive);
 }
 void response::set_empty_content(http::status status)
@@ -70,9 +95,8 @@ void response::set_file_content(const fs::path& path, const http::fields& req_he
     if (ec)
         return;
 
-    bool is_valid = true;
-    auto ranges   = html::parser_http_ranges(req_header[http::field::range], file_size, is_valid);
-    if (!is_valid) {
+    html::http_ranges ranges;
+    if (!ranges.parse(req_header[http::field::range], file_size)) {
         this->set(http::field::content_range, fmt::format("bytes */{}", file_size));
         set_empty_content(http::status::range_not_satisfiable);
         return;
@@ -96,7 +120,7 @@ void response::set_file_content(const fs::path& path, const http::fields& req_he
         return;
 
     file.content_type = mime::get_mime_type(path.extension().string());
-    file.ranges       = ranges;
+    file.ranges       = std::move(ranges);
 
     this->set(http::field::etag, file_etag_str);
     this->set(http::field::last_modified, file_gmt_date_str);
@@ -130,7 +154,7 @@ void response::set_file_content(const fs::path& path, const http::fields& req_he
     stream_handler_ = nullptr;
 }
 
-void response::set_form_data_content(std::vector<form_data::field>&& data)
+void response::set_form_data_content(std::vector<html::form_data::field>&& data)
 {
     body::form_data_body::value_type value;
     value.boundary = html::generate_boundary();

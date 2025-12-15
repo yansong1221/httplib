@@ -1,10 +1,9 @@
-#pragma once
-#include "httplib/form_data.hpp"
 
+#include "httplib/html/form_data.hpp"
 #include <sstream>
-namespace httplib {
+namespace httplib::html {
 
-std::optional<httplib::form_data::field> form_data::field_by_name(std::string_view field_name) const
+std::optional<form_data::field> form_data::field_by_name(std::string_view field_name) const
 {
     const auto& it = std::find_if(std::cbegin(fields),
                                   std::cend(fields),
@@ -63,4 +62,4 @@ std::string form_data::dump() const
     return ss.str();
 }
 
-} // namespace httplib
+} // namespace httplib::html

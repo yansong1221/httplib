@@ -1,6 +1,6 @@
 #pragma once
 #include "httplib/config.hpp"
-#include "httplib/form_data.hpp"
+#include "httplib/html/form_data.hpp"
 #include <boost/algorithm/string/trim.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/fields.hpp>
@@ -10,7 +10,7 @@ namespace httplib::body {
 class form_data_body
 {
 public:
-    using value_type = form_data;
+    using value_type = html::form_data;
 
     class writer
     {
@@ -67,7 +67,7 @@ public:
             eof
         };
         step step_ = step::boundary_line;
-        form_data::field field_data_;
+        html::form_data::field field_data_;
     };
 };
 } // namespace httplib::body

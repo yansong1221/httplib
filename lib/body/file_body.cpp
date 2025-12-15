@@ -1,4 +1,6 @@
 #include "httplib/body/file_body.hpp"
+#include <fmt/format.h>
+
 namespace httplib::body {
 
 file_body::writer::writer(const http::fields&, value_type& b)
@@ -15,11 +17,11 @@ boost::optional<std::pair<file_body::writer::const_buffers_type, bool>>
 file_body::writer::get(boost::system::error_code& ec)
 {
     if (body_.ranges.size() == 1 || body_.ranges.empty()) {
-        html::range_type range;
+        html::http_ranges::range_type range;
         if (body_.ranges.empty())
             range = {0, body_.file_size()};
         else {
-            range        = body_.ranges.front();
+            range        = body_.ranges.ranges().front();
             range.second = range.second + 1;
         }
 
@@ -54,7 +56,7 @@ file_body::writer::get(boost::system::error_code& ec)
         ec = {};
         return boost::none;
     }
-    auto& range = body_.ranges[*range_index_];
+    const auto& range = body_.ranges.at(*range_index_);
     switch (step_) {
         case step::header: {
             std::string header = fmt::format("--{}\r\n", body_.boundary);

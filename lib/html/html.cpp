@@ -1,4 +1,4 @@
-#include "html_impl.h"
+#include "html.h"
 #include "httplib/util/misc.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/replace.hpp>
@@ -243,26 +243,6 @@ std::time_t file_last_write_time(const fs::path& path, std::error_code& ec)
     return std::chrono::system_clock::to_time_t(sctp);
 }
 
-std::string format_http_current_gmt_date()
-{
-    static std::atomic<std::time_t> last_time {0};
-    static std::string last_time_format;
-    static std::mutex mtx;
-
-    auto now = time(nullptr);
-
-    if (last_time != now) {
-        std::lock_guard<std::mutex> lock(mtx);
-        // double check
-        if (last_time != now) {
-            last_time_format = format_http_gmt_date(now);
-            last_time        = now;
-        }
-    }
-
-    return last_time_format;
-}
-
 std::string format_http_gmt_date(const std::time_t& time)
 {
     using namespace std::chrono;
@@ -310,87 +290,6 @@ std::time_t parse_http_gmt_date(const std::string& http_date)
     return tt;
 }
 
-http_ranges parser_http_ranges(std::string_view range_str,
-                               size_t file_size,
-                               bool& is_valid) noexcept
-{
-    is_valid  = true;
-    range_str = boost::trim_copy(range_str);
-    if (range_str.empty())
-        return {};
-    if (!range_str.starts_with("bytes=")) {
-        is_valid = false;
-        return {};
-    }
-    range_str.remove_prefix(6);
-
-    if (range_str.find("--") != std::string_view::npos) {
-        is_valid = false;
-        return {};
-    }
-
-    if (range_str == "-") {
-        return {{0, file_size - 1}};
-    }
-
-    http_ranges vec;
-    auto ranges = util::split(range_str, ",");
-    for (const auto& range : ranges) {
-        auto sub_range  = util::split(range, "-");
-        auto fist_range = boost::trim_copy(sub_range[0]);
-
-        int start = 0;
-        if (fist_range.empty()) {
-            start = -1;
-        }
-        else {
-            auto [ptr, ec] =
-                std::from_chars(fist_range.data(), fist_range.data() + fist_range.size(), start);
-            if (ec != std::errc {}) {
-                is_valid = false;
-                return {};
-            }
-        }
-
-        int end = 0;
-        if (sub_range.size() == 1) {
-            end = file_size - 1;
-        }
-        else {
-            auto second_range = boost::trim_copy(sub_range[1]);
-            if (second_range.empty()) {
-                end = file_size - 1;
-            }
-            else {
-                auto [ptr, ec] = std::from_chars(
-                    second_range.data(), second_range.data() + second_range.size(), end);
-                if (ec != std::errc {}) {
-                    is_valid = false;
-                    return {};
-                }
-            }
-        }
-
-        if (start > 0 && (start >= file_size || start == end)) {
-            // out of range
-            is_valid = false;
-            return {};
-        }
-
-        if (end > 0 && end >= file_size) {
-            end = file_size - 1;
-        }
-
-        if (start == -1) {
-            start = file_size - end;
-            end   = file_size - 1;
-        }
-
-        vec.push_back({start, end});
-    }
-    return vec;
-}
-
 std::string generate_boundary()
 {
     auto now    = std::chrono::system_clock::now().time_since_epoch();
@@ -401,41 +300,6 @@ std::string generate_boundary()
     std::uniform_int_distribution<int> dist(100000, 999999);
 
     return "----------------" + std::to_string(millis) + std::to_string(dist(gen));
-}
-
-query_params parse_http_query_params(std::string_view content, bool& is_valid)
-{
-    is_valid = true;
-    if (content.empty())
-        return {};
-
-    query_params result;
-    for (const auto& item : util::split(content, "&")) {
-        auto key_val = util::split(item, "=");
-
-        if (key_val.size() != 2) {
-            is_valid = false;
-            return {};
-        }
-        auto key = util::url_decode(key_val[0]);
-        auto val = util::url_decode(key_val[1]);
-
-        result.emplace(key, val);
-    }
-    return result;
-}
-
-std::string make_http_query_params(const query_params& params)
-{
-    std::vector<std::string> tokens;
-    for (const auto& item : params) {
-        auto token = util::url_encode(item.first);
-        token += "=";
-        token += util::url_encode(item.second);
-
-        tokens.push_back(token);
-    }
-    return boost::join(tokens, "&");
 }
 
 

@@ -1,6 +1,5 @@
 #include "httplib/client/client.hpp"
 #include "client_impl.h"
-#include "html_impl.h"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/use_future.hpp>
 
@@ -53,11 +52,10 @@ http_client::async_get(std::string_view path,
                        const html::query_params& params,
                        const http::fields& headers /*= http::fields()*/)
 {
-    auto query = html::make_http_query_params(params);
     std::string target(path);
-    if (!query.empty()) {
+    if (!params.empty()) {
         target += "?";
-        target += query;
+        target += params.encoded();
     }
     auto req = impl_->make_http_request(http::verb::get, target, headers);
     co_return co_await impl_->async_send_request(req);

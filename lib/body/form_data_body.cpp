@@ -1,6 +1,5 @@
 #include "httplib/body/form_data_body.hpp"
-
-#include "httplib/html.hpp"
+#include "html/html.h"
 #include "httplib/util/misc.hpp"
 #include <fmt/format.h>
 #include <random>
@@ -144,7 +143,7 @@ std::size_t form_data_body::reader::put(const_buffers_type const& buffers,
             if (ec)
                 return 0;
 
-            form_data::field field_data;
+            html::form_data::field field_data;
             for (const auto& item : results) {
                 if (item.first == "Content-Disposition"sv) {
                     auto value = item.second;
