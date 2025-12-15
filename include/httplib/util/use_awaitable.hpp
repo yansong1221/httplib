@@ -8,8 +8,7 @@
 // file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
 //
 
-#ifndef INCLUDE__2023_10_18__USE_AWAITABLE_HPP
-#define INCLUDE__2023_10_18__USE_AWAITABLE_HPP
+#pragma once
 
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/io_context.hpp>
@@ -58,4 +57,3 @@ struct asio_use_awaitable_t : public boost::asio::use_awaitable_t<Executor>
 
 } // namespace httplib::util
 
-#endif // INCLUDE__2023_10_18__USE_AWAITABLE_HPP
