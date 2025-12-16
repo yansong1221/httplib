@@ -1,6 +1,7 @@
 #pragma once
 #include <string_view>
 #include <vector>
+#include <cstdint>
 
 namespace httplib::html {
 class http_ranges

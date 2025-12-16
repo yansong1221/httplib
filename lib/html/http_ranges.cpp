@@ -1,6 +1,7 @@
 #include "httplib/html/http_ranges.hpp"
 #include "httplib/util/misc.hpp"
 #include <boost/algorithm/string/trim.hpp>
+#include <charconv>
 
 namespace httplib::html {
 bool http_ranges::parse(std::string_view range_str, size_t file_size)
