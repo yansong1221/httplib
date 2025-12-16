@@ -20,37 +20,6 @@ public:
     using stream_t = std::variant<plain_stream>;
 #endif
 
-    static std::unique_ptr<http_stream> create(const net::any_io_executor& executor,
-                                               const std::string& host,
-                                               bool use_ssl)
-    {
-        if (use_ssl) {
-#ifdef HTTPLIB_ENABLED_SSL
-            unsigned long ssl_options = ssl::context::default_workarounds | ssl::context::no_sslv2 |
-                                        ssl::context::single_dh_use;
-
-            auto ssl_ctx = std::make_shared<ssl::context>(ssl::context::sslv23);
-            ssl_ctx->set_options(ssl_options);
-            ssl_ctx->set_default_verify_paths();
-            ssl_ctx->set_verify_mode(ssl::verify_none);
-
-            tls_stream stream(executor, ssl_ctx);
-            if (!SSL_set_tlsext_host_name(stream.native_handle(), host.c_str())) {
-                beast::error_code ec {static_cast<int>(::ERR_get_error()),
-                                      net::error::get_ssl_category()};
-                throw boost::system::system_error(ec);
-            }
-            return std::make_unique<http_stream>(std::move(stream));
-#else
-            throw boost::system::system_error(
-                boost::system::errc::make_error_code(boost::system::errc::protocol_not_supported));
-#endif
-        }
-        else {
-            return std::make_unique<http_stream>(plain_stream(executor));
-        }
-    }
-
 public:
     using executor_type = plain_stream::executor_type;
 
@@ -168,9 +137,44 @@ public:
         : stream_(std::move(stream))
     {
     }
+    http_stream(const net::any_io_executor& executor, const std::string& host, bool use_ssl)
+        : http_stream(create_stream(executor, host, use_ssl))
+    {
+    }
 
 private:
     stream_t stream_;
+
+    static stream_t create_stream(const net::any_io_executor& executor,
+                                  const std::string& host,
+                                  bool use_ssl)
+    {
+        if (use_ssl) {
+#ifdef HTTPLIB_ENABLED_SSL
+            unsigned long ssl_options = ssl::context::default_workarounds | ssl::context::no_sslv2 |
+                                        ssl::context::single_dh_use;
+
+            auto ssl_ctx = std::make_shared<ssl::context>(ssl::context::sslv23);
+            ssl_ctx->set_options(ssl_options);
+            ssl_ctx->set_default_verify_paths();
+            ssl_ctx->set_verify_mode(ssl::verify_none);
+
+            tls_stream stream(executor, ssl_ctx);
+            if (!SSL_set_tlsext_host_name(stream.native_handle(), host.c_str())) {
+                beast::error_code ec {static_cast<int>(::ERR_get_error()),
+                                      net::error::get_ssl_category()};
+                throw boost::system::system_error(ec);
+            }
+            return stream_t(std::move(stream));
+#else
+            throw boost::system::system_error(
+                boost::system::errc::make_error_code(boost::system::errc::protocol_not_supported));
+#endif
+        }
+        else {
+            return stream_t(plain_stream(executor));
+        }
+    }
 };
 
 } // namespace httplib

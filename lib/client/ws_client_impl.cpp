@@ -21,13 +21,12 @@ ws_client::impl::async_connect(std::string_view path, const http::fields& header
         // Set up an HTTP GET request message
         if (!is_open()) {
             std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
-            auto stream = http_stream::create(executor_, host_, use_ssl_);
+            http_stream stream(executor_, host_, use_ssl_);
             auto endpoints =
                 co_await resolver_.async_resolve(host_, std::to_string(port_), net::use_awaitable);
 
-            co_await stream->async_connect(endpoints);
-
-            stream_ = websocket_stream::create(std::move(*stream));
+            co_await stream.async_connect(endpoints);
+            stream_ = std::make_unique<websocket_stream>(std::move(stream));
         }
         stream_->set_option(websocket::stream_base::decorator([&](websocket::request_type& req) {
             req.set(http::field::user_agent,

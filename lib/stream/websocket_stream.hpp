@@ -17,10 +17,6 @@ public:
 #else
     using stream_t = std::variant<plain_stream>;
 #endif
-    static std::unique_ptr<websocket_stream> create(http_stream&& stream)
-    {
-        return std::make_unique<websocket_stream>(std::move(stream));
-    }
 
 public:
     bool is_open() const

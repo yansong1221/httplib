@@ -125,7 +125,7 @@ http_client::impl::async_send_request_impl(http_client::request& req)
     if (!is_open()) {
         {
             std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
-            stream_ = http_stream::create(executor_, host_, use_ssl_);
+            stream_ = std::make_unique<http_stream>(executor_, host_, use_ssl_);
         }
         auto endpoints =
             co_await resolver_.async_resolve(host_, std::to_string(port_), net::use_awaitable);
