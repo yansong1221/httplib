@@ -75,7 +75,7 @@ net::awaitable<boost::system::error_code> http_server_impl::co_run()
     std::vector<net::awaitable<boost::system::error_code>> ops;
 
     for (int i = 0; i < 32; ++i) {
-        ops.push_back([this]() -> net::awaitable<boost::system::error_code> {
+        auto handler = [this]() -> net::awaitable<boost::system::error_code> {
             boost::system::error_code ec;
             for (;;) {
                 auto sock = co_await acceptor_.async_accept(util::net_awaitable[ec]);
@@ -93,13 +93,14 @@ net::awaitable<boost::system::error_code> http_server_impl::co_run()
                     }
                     break;
                 }
-                net::co_spawn(co_await net::this_coro::executor,
+                net::co_spawn(net::make_strand(co_await net::this_coro::executor),
                               handle_accept(std::move(sock)),
                               net::detached);
             }
             get_logger()->trace("async_accept: {}", ec.message());
             co_return ec;
-        }());
+        };
+        ops.push_back(std::move(handler()));
     }
 
     auto&& results = co_await util::when_all(std::move(ops));
