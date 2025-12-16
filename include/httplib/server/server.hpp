@@ -34,7 +34,7 @@ public:
     void async_run();
     void stop();
 
-    router& router();
+    httplib::server::router& router();
 
     tcp::endpoint local_endpoint() const;
 

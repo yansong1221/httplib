@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 namespace httplib::html {
 class query_params

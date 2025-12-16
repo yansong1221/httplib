@@ -1,12 +1,12 @@
 #pragma once
 
 #include <boost/pool/object_pool.hpp>
-#include <boost/serialization/singleton.hpp>
+#include <boost/noncopyable.hpp>
 
 namespace httplib::util {
 
 template<typename T>
-class object_pool : public boost::serialization::singleton<object_pool<T>>
+class object_pool : public boost::noncopyable
 {
 public:
     template<typename... Args>
@@ -41,6 +41,13 @@ public:
     {
         T* raw = construct(std::forward<Args>(args)...);
         return {raw, [this](T* ptr) { destroy(ptr); }};
+    }
+
+public:
+    static object_pool<T>& instance()
+    {
+        static object_pool<T> g_instance;
+        return g_instance;
     }
 
 private:

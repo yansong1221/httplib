@@ -51,10 +51,10 @@ template<typename T, typename... Args>
 static session::task_ptr make_task_ptr(Args&&... args)
 {
     session::task_ptr ptr(
-        util::object_pool<T>::get_mutable_instance().construct(std::forward<Args>(args)...),
+        util::object_pool<T>::instance().construct(std::forward<Args>(args)...),
         [](session::task* p) {
             if (p) {
-                util::object_pool<T>::get_mutable_instance().destroy(static_cast<T*>(p));
+                util::object_pool<T>::instance().destroy(static_cast<T*>(p));
             }
         });
     return ptr;
