@@ -7,6 +7,7 @@
 #include <boost/asio/detached.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/thread_pool.hpp>
+#include <boost/pool/pool_alloc.hpp>
 #include <functional>
 #include <iostream>
 #include <map>
@@ -49,6 +50,9 @@ public:
     void use_ssl(const net::const_buffer& cert_file,
                  const net::const_buffer& key_file,
                  std::string passwd = {});
+#ifdef HTTPLIB_ENABLED_SSL
+    const std::shared_ptr<ssl::context>& ssl_context() const { return ssl_context_; }
+#endif
 
 private:
     net::awaitable<void> handle_accept(tcp::socket sock);
@@ -60,6 +64,7 @@ private:
     tcp::acceptor acceptor_;
 
     std::mutex session_mutex_;
+    boost::fast_pool_allocator<session> session_allocator_;
     std::unordered_set<std::shared_ptr<session>> session_map_;
 
     std::chrono::steady_clock::duration read_timeout_  = std::chrono::seconds(30);
@@ -68,14 +73,9 @@ private:
     std::shared_ptr<spdlog::logger> default_logger_;
     std::shared_ptr<spdlog::logger> custom_logger_;
 
-    struct SSLConfig
-    {
-        std::vector<uint8_t> cert_file;
-        std::vector<uint8_t> key_file;
-        std::string passwd;
-    };
-
-    std::optional<SSLConfig> ssl_conf_;
+#ifdef HTTPLIB_ENABLED_SSL
+    std::shared_ptr<ssl::context> ssl_context_;
+#endif
 
     friend class websocket_conn_impl;
     friend class session;

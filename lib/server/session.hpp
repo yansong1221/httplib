@@ -17,12 +17,15 @@ class websocket_conn_impl;
 class session : public std::enable_shared_from_this<session>
 {
 public:
+    class task;
+    using task_ptr = std::unique_ptr<task, std::function<void(task*)>>;
+
     class task
     {
     public:
-        virtual ~task()                                      = default;
-        virtual net::awaitable<std::unique_ptr<task>> then() = 0;
-        virtual void abort()                                 = 0;
+        virtual ~task()                         = default;
+        virtual net::awaitable<task_ptr> then() = 0;
+        virtual void abort()                    = 0;
     };
     class detect_ssl_task;
     class ssl_handshake_task;
@@ -38,7 +41,7 @@ public:
     net::awaitable<void> run();
 
 private:
-    std::unique_ptr<task> task_;
+    task_ptr task_;
 
     std::atomic_bool abort_ = false;
     std::mutex task_mtx_;
@@ -52,7 +55,7 @@ public:
 
 public:
     void abort() override;
-    net::awaitable<std::unique_ptr<task>> then() override;
+    net::awaitable<task_ptr> then() override;
 
 private:
     http_server_impl& serv_;
@@ -63,11 +66,9 @@ private:
 class session::http_task : public session::task
 {
 public:
-    explicit http_task(http_stream&& stream,
-                       beast::flat_buffer&& buffer,
-                       http_server_impl& serv);
+    explicit http_task(http_stream&& stream, beast::flat_buffer&& buffer, http_server_impl& serv);
 
-    net::awaitable<std::unique_ptr<task>> then() override;
+    net::awaitable<task_ptr> then() override;
     void abort() override;
 
 private:
@@ -86,12 +87,12 @@ private:
 class session::websocket_task : public session::task
 {
 public:
-    explicit websocket_task(std::unique_ptr<websocket_stream>&& stream,
+    explicit websocket_task(websocket_stream&& stream,
                             request&& req,
                             http_server_impl& serv);
 
 public:
-    net::awaitable<std::unique_ptr<task>> then() override;
+    net::awaitable<task_ptr> then() override;
     void abort() override;
 
 private:
@@ -101,12 +102,10 @@ private:
 class session::http_proxy_task : public session::task
 {
 public:
-    explicit http_proxy_task(http_stream&& stream,
-                             request&& req,
-                             http_server_impl& serv);
+    explicit http_proxy_task(http_stream&& stream, request&& req, http_server_impl& serv);
 
 public:
-    net::awaitable<std::unique_ptr<task>> then() override;
+    net::awaitable<task_ptr> then() override;
     void abort() override;
 
 private:

@@ -18,7 +18,7 @@ class websocket_conn_impl : public websocket_conn
 {
 public:
     websocket_conn_impl(http_server_impl& serv,
-                        std::unique_ptr<websocket_stream>&& stream,
+                        websocket_stream&& stream,
                         request&& req);
     ~websocket_conn_impl();
 
@@ -36,7 +36,7 @@ private:
     http_server_impl& serv_;
 
     request req_;
-    std::unique_ptr<websocket_stream> ws_;
+    websocket_stream ws_;
     beast::flat_buffer buffer_;
 
     util::action_queue ac_que_;

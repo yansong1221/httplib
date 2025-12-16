@@ -19,22 +19,7 @@ public:
 #endif
     static std::unique_ptr<websocket_stream> create(http_stream&& stream)
     {
-        return std::visit(
-            [](auto&& t) {
-                using value_type = std::decay_t<decltype(t)>;
-
-                if constexpr (std::same_as<http_stream::plain_stream, value_type>) {
-                    return std::make_unique<websocket_stream>(
-                        websocket_stream::plain_stream(std::move(t)));
-                }
-#ifdef HTTPLIB_ENABLED_SSL
-                else if constexpr (std::same_as<http_stream::tls_stream, value_type>) {
-                    return std::make_unique<websocket_stream>(
-                        websocket_stream::tls_stream(std::move(t)));
-                }
-#endif
-            },
-            stream.release());
+        return std::make_unique<websocket_stream>(std::move(stream));
     }
 
 public:
@@ -133,6 +118,24 @@ public:
 
     websocket_stream(stream_t&& stream)
         : stream_(std::move(stream))
+    {
+    }
+
+    websocket_stream(http_stream&& stream)
+        : stream_(std::visit(
+              [](auto&& t) {
+                  using value_type = std::decay_t<decltype(t)>;
+
+                  if constexpr (std::same_as<http_stream::plain_stream, value_type>) {
+                      return stream_t(plain_stream(std::move(t)));
+                  }
+#ifdef HTTPLIB_ENABLED_SSL
+                  else if constexpr (std::same_as<http_stream::tls_stream, value_type>) {
+                      return stream_t(tls_stream(std::move(t)));
+                  }
+#endif
+              },
+              stream.release()))
     {
     }
 

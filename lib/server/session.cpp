@@ -3,6 +3,7 @@
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
+#include "httplib/util/object_pool.hpp"
 #include "websocket_conn_impl.hpp"
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/write.hpp>
@@ -13,53 +14,11 @@
 #include <boost/beast/http/read.hpp>
 #include <boost/beast/http/serializer.hpp>
 #include <boost/beast/websocket/rfc6455.hpp>
-#ifdef HTTPLIB_ENABLED_SSL
-#include <openssl/err.h>
-#include <openssl/ssl.h>
-#endif
 
 
 namespace httplib::server {
 
 namespace detail {
-
-#ifdef HTTPLIB_ENABLED_SSL
-
-static std::shared_ptr<ssl::context> create_ssl_context(const net::const_buffer& cert_file,
-                                                        const net::const_buffer& key_file,
-                                                        std::string passwd,
-                                                        boost::system::error_code& ec)
-{
-    unsigned long ssl_options =
-        ssl::context::default_workarounds | ssl::context::no_sslv2 | ssl::context::single_dh_use;
-
-    auto ssl_ctx = std::make_shared<ssl::context>(ssl::context::sslv23);
-    ssl_ctx->set_options(ssl_options, ec);
-    if (ec)
-        return nullptr;
-
-    if (!passwd.empty()) {
-        ssl_ctx->set_password_callback(
-            [pass = std::move(passwd)](auto, auto) {
-                if (pass.empty())
-                    throw std::runtime_error("ssl password is empty!");
-                return pass;
-            },
-            ec);
-        if (ec)
-            return nullptr;
-    }
-    ssl_ctx->use_certificate(cert_file, ssl::context_base::pem, ec);
-    if (ec)
-        return nullptr;
-
-    ssl_ctx->use_rsa_private_key(key_file, ssl::context::pem, ec);
-    if (ec)
-        return nullptr;
-
-    return ssl_ctx;
-}
-#endif
 
 template<typename S1, typename S2>
 net::awaitable<void> transfer(S1& from, S2& to, size_t& bytes_transferred)
@@ -88,6 +47,18 @@ net::awaitable<void> transfer(S1& from, S2& to, size_t& bytes_transferred)
     }
 }
 
+template<typename T, typename... Args>
+static session::task_ptr make_task_ptr(Args&&... args)
+{
+    session::task_ptr ptr(
+        util::object_pool<T>::get_mutable_instance().construct(std::forward<Args>(args)...),
+        [](session::task* p) {
+            if (p) {
+                util::object_pool<T>::get_mutable_instance().destroy(static_cast<T*>(p));
+            }
+        });
+    return ptr;
+}
 
 } // namespace detail
 
@@ -108,7 +79,7 @@ public:
     ~ssl_handshake_task() { beast::get_lowest_layer(stream_).expires_never(); }
 
 
-    net::awaitable<std::unique_ptr<task>> then() override
+    net::awaitable<task_ptr> then() override
     {
         boost::system::error_code ec;
         auto bytes_used = co_await stream_.async_handshake(
@@ -120,7 +91,8 @@ public:
         buffer_.consume(bytes_used);
 
         http_stream variant_stream(std::move(stream_));
-        co_return std::make_unique<http_task>(std::move(variant_stream), std::move(buffer_), serv_);
+        co_return detail::make_task_ptr<http_task>(
+            std::move(variant_stream), std::move(buffer_), serv_);
     }
 
 
@@ -134,7 +106,7 @@ private:
 #endif
 
 session::session(tcp::socket&& stream, http_server_impl& serv)
-    : task_(std::make_unique<detect_ssl_task>(std::move(stream), serv))
+    : task_(detail::make_task_ptr<detect_ssl_task>(std::move(stream), serv))
 {
 }
 
@@ -173,11 +145,11 @@ session::detect_ssl_task::~detect_ssl_task()
 {
     stream_.expires_never();
 }
-net::awaitable<std::unique_ptr<session::task>> session::detect_ssl_task::then()
+net::awaitable<session::task_ptr> session::detect_ssl_task::then()
 {
     beast::flat_buffer buffer;
 #ifdef HTTPLIB_ENABLED_SSL
-    if (serv_.ssl_conf_) {
+    if (auto ssl_ctx = serv_.ssl_context(); ssl_ctx) {
         boost::system::error_code ec;
         bool is_ssl = co_await beast::async_detect_ssl(stream_, buffer, util::net_awaitable[ec]);
         if (ec) {
@@ -185,20 +157,12 @@ net::awaitable<std::unique_ptr<session::task>> session::detect_ssl_task::then()
             co_return nullptr;
         }
         if (is_ssl) {
-            auto ssl_ctx = detail::create_ssl_context(net::buffer(serv_.ssl_conf_->cert_file),
-                                                      net::buffer(serv_.ssl_conf_->key_file),
-                                                      serv_.ssl_conf_->passwd,
-                                                      ec);
-            if (!ssl_ctx) {
-                serv_.get_logger()->error("create_ssl_context failed: {}", ec.message());
-                co_return nullptr;
-            }
-            co_return std::make_unique<session::ssl_handshake_task>(
+            co_return detail::make_task_ptr<session::ssl_handshake_task>(
                 http_stream::tls_stream(std::move(stream_), ssl_ctx), std::move(buffer), serv_);
         }
     }
 #endif
-    co_return std::make_unique<session::http_task>(
+    co_return detail::make_task_ptr<session::http_task>(
         http_stream(std::move(stream_)), std::move(buffer), serv_);
 }
 void session::detect_ssl_task::abort()
@@ -217,7 +181,7 @@ session::http_task::http_task(http_stream&& stream,
     remote_endpoint_ = stream_.socket().remote_endpoint();
 }
 
-httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then()
+net::awaitable<session::task_ptr> session::http_task::then()
 
 {
     boost::system::error_code ec;
@@ -241,13 +205,14 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
         // http proxy
         if (header.method() == http::verb::connect) {
             request req(local_endpoint_, remote_endpoint_, std::move(header_parser.release()));
-            co_return std::make_unique<http_proxy_task>(std::move(stream_), std::move(req), serv_);
+            co_return detail::make_task_ptr<http_proxy_task>(
+                std::move(stream_), std::move(req), serv_);
         }
         // websocket
         if (websocket::is_upgrade(header.base())) {
-            auto stream = websocket_stream::create(std::move(stream_));
             request req(local_endpoint_, remote_endpoint_, std::move(header_parser.release()));
-            co_return std::make_unique<websocket_task>(std::move(stream), std::move(req), serv_);
+            co_return detail::make_task_ptr<websocket_task>(
+                websocket_stream(std::move(stream_)), std::move(req), serv_);
         }
 
         response resp(header.version(), header.keep_alive());
@@ -409,14 +374,14 @@ net::awaitable<bool> session::http_task::async_write(request& req, response& res
     co_return true;
 }
 
-session::websocket_task::websocket_task(std::unique_ptr<websocket_stream>&& stream,
+session::websocket_task::websocket_task(websocket_stream&& stream,
                                         request&& req,
                                         http_server_impl& serv)
     : conn_(std::make_shared<websocket_conn_impl>(serv, std::move(stream), std::move(req)))
 {
 }
 
-httplib::net::awaitable<std::unique_ptr<session::task>> session::websocket_task::then()
+httplib::net::awaitable<session::task_ptr> session::websocket_task::then()
 {
     co_await conn_->run();
     co_return nullptr;
@@ -438,7 +403,7 @@ session::http_proxy_task::http_proxy_task(http_stream&& stream,
 {
 }
 
-httplib::net::awaitable<std::unique_ptr<session::task>> session::http_proxy_task::then()
+net::awaitable<session::task_ptr> session::http_proxy_task::then()
 {
     auto target = req_.target();
     auto pos    = target.find(":");

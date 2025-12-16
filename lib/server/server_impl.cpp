@@ -4,6 +4,11 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
+#ifdef HTTPLIB_ENABLED_SSL
+#include <openssl/err.h>
+#include <openssl/ssl.h>
+#endif
+
 namespace httplib::server {
 
 http_server_impl::http_server_impl(const net::any_io_executor& ex)
@@ -119,7 +124,7 @@ net::awaitable<void> http_server_impl::handle_accept(tcp::socket sock)
     get_logger()->trace(
         "accept new connection [{}:{}]", remote_endp.address().to_string(), remote_endp.port());
 
-    auto conn = std::make_shared<session>(std::move(sock), *this);
+    auto conn = std::allocate_shared<session>(session_allocator_, std::move(sock), *this);
     {
         std::lock_guard lck(session_mutex_);
         session_map_.insert(conn);
@@ -183,14 +188,28 @@ void http_server_impl::use_ssl(const net::const_buffer& cert_file,
                                const net::const_buffer& key_file,
                                std::string passwd /*= {}*/)
 {
-    SSLConfig conf;
-    conf.cert_file.assign(static_cast<const uint8_t*>(cert_file.data()),
-                          static_cast<const uint8_t*>(cert_file.data()) + cert_file.size());
-    conf.key_file.assign(static_cast<const uint8_t*>(key_file.data()),
-                         static_cast<const uint8_t*>(key_file.data()) + key_file.size());
-    conf.passwd = passwd;
+#ifdef HTTPLIB_ENABLED_SSL
+    unsigned long ssl_options =
+        ssl::context::default_workarounds | ssl::context::no_sslv2 | ssl::context::single_dh_use;
 
-    ssl_conf_ = conf;
+    auto ssl_ctx = std::make_shared<ssl::context>(ssl::context::sslv23);
+    ssl_ctx->set_options(ssl_options);
+
+    if (!passwd.empty()) {
+        ssl_ctx->set_password_callback([pass = std::move(passwd)](auto, auto) {
+            if (pass.empty())
+                throw std::runtime_error("ssl password is empty!");
+            return pass;
+        });
+    }
+    ssl_ctx->use_certificate(cert_file, ssl::context_base::pem);
+    ssl_ctx->use_rsa_private_key(key_file, ssl::context::pem);
+
+    ssl_context_ = ssl_ctx;
+#else
+    throw boost::system::system_error(
+        boost::system::errc::make_error_code(boost::system::errc::protocol_not_supported));
+#endif
 }
 
 } // namespace httplib::server

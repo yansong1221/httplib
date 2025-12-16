@@ -4,7 +4,7 @@
 #include "server_impl.h"
 
 namespace httplib::server {
-
+namespace detail {
 static std::string read_file_fast(const fs::path& path)
 {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
@@ -20,6 +20,8 @@ static std::string read_file_fast(const fs::path& path)
 
     return buffer;
 }
+} // namespace detail
+
 
 http_server::http_server(net::io_context& ioc)
     : http_server(ioc.get_executor())
@@ -118,7 +120,7 @@ void http_server::use_ssl_file(const fs::path& cert_file,
                                const fs::path& key_file,
                                std::string passwd /*= {}*/)
 {
-    use_ssl(read_file_fast(cert_file), read_file_fast(key_file), passwd);
+    use_ssl(detail::read_file_fast(cert_file), detail::read_file_fast(key_file), passwd);
 }
 
 } // namespace httplib::server
