@@ -103,7 +103,9 @@ public:
         , stream_(std::move(stream))
         , buffer_(std::move(buffer))
     {
+        beast::get_lowest_layer(stream_).expires_after(serv_.read_timeout());
     }
+    ~ssl_handshake_task() { beast::get_lowest_layer(stream_).expires_never(); }
 
 
     net::awaitable<std::unique_ptr<task>> then() override
@@ -146,7 +148,7 @@ void session::abort()
         return;
     abort_ = true;
 
-    std::unique_lock<std::mutex> lck(task_mtx_);
+    std::lock_guard<std::mutex> lck(task_mtx_);
     if (task_)
         task_->abort();
 }
@@ -155,17 +157,17 @@ httplib::net::awaitable<void> session::run()
 {
     for (; !abort_ && task_;) {
         auto&& next_task = co_await task_->then();
-        std::unique_lock<std::mutex> lck(task_mtx_);
+        std::lock_guard<std::mutex> lck(task_mtx_);
         task_ = std::move(next_task);
     }
     co_return;
 }
 
-session::detect_ssl_task::detect_ssl_task(tcp::socket&& stream, http_server_impl& sevr)
-    : sevr_(sevr)
+session::detect_ssl_task::detect_ssl_task(tcp::socket&& stream, http_server_impl& serv)
+    : serv_(serv)
     , stream_(std::move(stream))
 {
-    stream_.expires_after(sevr_.read_timeout());
+    stream_.expires_after(serv_.read_timeout());
 }
 session::detect_ssl_task::~detect_ssl_task()
 {
@@ -175,29 +177,29 @@ net::awaitable<std::unique_ptr<session::task>> session::detect_ssl_task::then()
 {
     beast::flat_buffer buffer;
 #ifdef HTTPLIB_ENABLED_SSL
-    if (sevr_.ssl_conf_) {
+    if (serv_.ssl_conf_) {
         boost::system::error_code ec;
         bool is_ssl = co_await beast::async_detect_ssl(stream_, buffer, util::net_awaitable[ec]);
         if (ec) {
-            sevr_.get_logger()->trace("async_detect_ssl failed: {}", ec.message());
+            serv_.get_logger()->trace("async_detect_ssl failed: {}", ec.message());
             co_return nullptr;
         }
         if (is_ssl) {
-            auto ssl_ctx = detail::create_ssl_context(net::buffer(sevr_.ssl_conf_->cert_file),
-                                                      net::buffer(sevr_.ssl_conf_->key_file),
-                                                      sevr_.ssl_conf_->passwd,
+            auto ssl_ctx = detail::create_ssl_context(net::buffer(serv_.ssl_conf_->cert_file),
+                                                      net::buffer(serv_.ssl_conf_->key_file),
+                                                      serv_.ssl_conf_->passwd,
                                                       ec);
             if (!ssl_ctx) {
-                sevr_.get_logger()->error("create_ssl_context failed: {}", ec.message());
+                serv_.get_logger()->error("create_ssl_context failed: {}", ec.message());
                 co_return nullptr;
             }
             co_return std::make_unique<session::ssl_handshake_task>(
-                http_stream::tls_stream(std::move(stream_), ssl_ctx), std::move(buffer), sevr_);
+                http_stream::tls_stream(std::move(stream_), ssl_ctx), std::move(buffer), serv_);
         }
     }
 #endif
     co_return std::make_unique<session::http_task>(
-        http_stream(std::move(stream_)), std::move(buffer), sevr_);
+        http_stream(std::move(stream_)), std::move(buffer), serv_);
 }
 void session::detect_ssl_task::abort()
 {
@@ -222,7 +224,6 @@ httplib::net::awaitable<std::unique_ptr<session::task>> session::http_task::then
     auto& _router = serv_.router();
 
     for (;;) {
-        // using namespace std::chrono_;
         http::request_parser<http::empty_body> header_parser;
         header_parser.header_limit(std::numeric_limits<std::uint32_t>::max());
         header_parser.body_limit(std::numeric_limits<unsigned long long>::max());

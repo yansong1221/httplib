@@ -47,7 +47,7 @@ private:
 class session::detect_ssl_task : public session::task
 {
 public:
-    explicit detect_ssl_task(tcp::socket&& stream, http_server_impl& sevr);
+    explicit detect_ssl_task(tcp::socket&& stream, http_server_impl& serv);
     ~detect_ssl_task();
 
 public:
@@ -55,7 +55,7 @@ public:
     net::awaitable<std::unique_ptr<task>> then() override;
 
 private:
-    http_server_impl& sevr_;
+    http_server_impl& serv_;
     http_stream::plain_stream stream_;
 };
 

@@ -100,10 +100,9 @@ public:
         return std::visit([&](auto& t) { beast::get_lowest_layer(t).expires_at(expiry_time); },
                           stream_);
     }
-    auto expires_never()
+    void expires_never()
     {
-        return std::visit(
-            [&](auto& t) mutable { return beast::get_lowest_layer(t).expires_never(); }, stream_);
+        return std::visit([&](auto& t) { beast::get_lowest_layer(t).expires_never(); }, stream_);
     }
 
     auto& rate_policy() & noexcept
