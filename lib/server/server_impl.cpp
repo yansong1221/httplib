@@ -73,38 +73,10 @@ router_impl& http_server_impl::router()
 net::awaitable<boost::system::error_code> http_server_impl::co_run()
 {
     std::vector<net::awaitable<boost::system::error_code>> ops;
-
-    for (int i = 0; i < 32; ++i) {
-        auto handler = [this]() -> net::awaitable<boost::system::error_code> {
-            boost::system::error_code ec;
-            for (;;) {
-                auto sock = co_await acceptor_.async_accept(util::net_awaitable[ec]);
-                if (ec) {
-                    if (ec == boost::system::errc::too_many_files_open ||
-                        ec == boost::system::errc::too_many_files_open_in_system)
-                    {
-                        ec = {};
-                        using namespace std::chrono_literals;
-                        net::steady_timer retry_timer(co_await net::this_coro::executor);
-                        retry_timer.expires_after(100ms);
-                        co_await retry_timer.async_wait(util::net_awaitable[ec]);
-                        if (!ec)
-                            continue;
-                    }
-                    break;
-                }
-                net::co_spawn(net::make_strand(co_await net::this_coro::executor),
-                              handle_accept(std::move(sock)),
-                              net::detached);
-            }
-            get_logger()->trace("async_accept: {}", ec.message());
-            co_return ec;
-        };
-        ops.push_back(std::move(handler()));
-    }
+    for (int i = 0; i < 32; ++i) 
+        ops.push_back(co_accept());
 
     auto&& results = co_await util::when_all(std::move(ops));
-
     {
         std::lock_guard lck(session_mutex_);
         for (const auto& v : session_map_)
@@ -117,7 +89,33 @@ net::awaitable<boost::system::error_code> http_server_impl::co_run()
 
     co_return boost::system::error_code {};
 }
-
+net::awaitable<boost::system::error_code> http_server_impl::co_accept()
+{
+    boost::system::error_code ec;
+    for (;;) {
+        tcp::socket sock(co_await net::this_coro::executor);
+        co_await acceptor_.async_accept(sock, util::net_awaitable[ec]);
+        if (ec) {
+            if (ec == boost::system::errc::too_many_files_open ||
+                ec == boost::system::errc::too_many_files_open_in_system)
+            {
+                ec = {};
+                using namespace std::chrono_literals;
+                net::steady_timer retry_timer(co_await net::this_coro::executor);
+                retry_timer.expires_after(100ms);
+                co_await retry_timer.async_wait(util::net_awaitable[ec]);
+                if (!ec)
+                    continue;
+            }
+            break;
+        }
+        net::co_spawn(net::make_strand(co_await net::this_coro::executor),
+                      handle_accept(std::move(sock)),
+                      net::detached);
+    }
+    get_logger()->trace("async_accept: {}", ec.message());
+    co_return ec;
+}
 net::awaitable<void> http_server_impl::handle_accept(tcp::socket sock)
 {
     auto remote_endp = sock.remote_endpoint();
@@ -212,5 +210,6 @@ void http_server_impl::use_ssl(const net::const_buffer& cert_file,
         boost::system::errc::make_error_code(boost::system::errc::protocol_not_supported));
 #endif
 }
+
 
 } // namespace httplib::server

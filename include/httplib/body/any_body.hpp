@@ -9,7 +9,6 @@
 namespace httplib::body {
 struct any_body
 {
-    // 辅助模板：匹配 body_value_type 对应的 Body 类型
     template<typename T, typename... Bodies>
     struct match_body;
 
@@ -24,7 +23,7 @@ struct any_body
     template<typename T>
     struct match_body<T>
     {
-        using type = void; // 无匹配时返回 void
+        using type = void;
     };
 
     template<typename... Bodies>

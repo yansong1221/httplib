@@ -55,6 +55,7 @@ public:
 #endif
 
 private:
+    net::awaitable<boost::system::error_code> co_accept();
     net::awaitable<void> handle_accept(tcp::socket sock);
 
 private:
