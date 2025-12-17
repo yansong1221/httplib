@@ -9,22 +9,15 @@ namespace httplib::server {
 namespace detail {
 static std::string get_current_gmt_date()
 {
-    static std::atomic<std::time_t> last_time {0};
-    static std::string last_time_format;
-    static std::mutex mtx;
+    static thread_local std::time_t last_time = 0;
+    static thread_local std::string cache;
 
     auto now = time(nullptr);
-
     if (last_time != now) {
-        std::lock_guard<std::mutex> lock(mtx);
-        // double check
-        if (last_time != now) {
-            last_time_format = html::format_http_gmt_date(now);
-            last_time        = now;
-        }
+        cache     = html::format_http_gmt_date(now);
+        last_time = now;
     }
-
-    return last_time_format;
+    return cache;
 }
 } // namespace detail
 
