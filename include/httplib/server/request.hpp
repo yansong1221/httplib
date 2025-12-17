@@ -24,8 +24,8 @@ public:
     ~request();
 
 public:
-    std::string_view decoded_path() const;
-    const html::query_params& decoded_query_params() const;
+    std::string_view path() const;
+    const html::query_params& query_params() const;
 
     net::ip::address get_client_ip() const;
     const tcp::endpoint& local_endpoint() const;
@@ -42,7 +42,6 @@ public:
     void add_path_param(const std::string& key, const std::string& val);
     void set_path_param(std::unordered_map<std::string, std::string>&& params);
 
-    const html::query_params& query_params() const;
 
 private:
     std::string decoded_path_;

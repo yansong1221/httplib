@@ -48,8 +48,11 @@ request::~request()
 {
 }
 
-std::string_view request::decoded_path() const
+std::string_view request::path() const
 {
+    if (this->decoded_path_.empty())
+        return this->target();
+
     return this->decoded_path_;
 }
 
@@ -83,11 +86,6 @@ const httplib::tcp::endpoint& request::remote_endpoint() const
 void request::set_custom_data(std::any&& data)
 {
     this->custom_data_ = std::move(data);
-}
-
-const httplib::html::query_params& request::decoded_query_params() const
-{
-    return this->query_params_;
 }
 
 std::string_view request::path_param(const std::string& key) const

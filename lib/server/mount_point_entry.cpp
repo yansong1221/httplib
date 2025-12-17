@@ -113,7 +113,7 @@ void mount_point_entry::operator()(request& req, response& res) const
                     res.set_json_content(std::move(doc));
                 } break;
                 case mount_point_entry::dir_format_type::html: {
-                    auto body = html::format_dir_to_html(req.decoded_path(), path, ec);
+                    auto body = html::format_dir_to_html(req.path(), path, ec);
                     res.set_string_content(body, "text/html; charset=utf-8");
                 } break;
                 default: break;

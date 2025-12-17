@@ -105,7 +105,7 @@ net::awaitable<void> router_impl::proc_routing(request& req, response& resp) con
 {
     // std::shared_lock lock(mutex_);
 
-    auto segments = detail::split_segments(req.decoded_path());
+    auto segments = detail::split_segments(req.path());
 
     std::unordered_map<std::string, std::string> params;
     std::set<std::string> allows;
@@ -158,7 +158,7 @@ void router_impl::set_ws_handler_impl(std::string_view path,
 std::optional<router_impl::ws_handler_entry> router_impl::query_ws_handler(request& req) const
 {
     // std::shared_lock lock(mutex_);
-    auto segments = detail::split_segments(req.decoded_path());
+    auto segments = detail::split_segments(req.path());
 
     std::unordered_map<std::string, std::string> params;
     auto node = match_nodes(root_.get(), segments, 0, params, [&](const Node* node) {
@@ -179,7 +179,7 @@ net::awaitable<bool> router_impl::pre_routing(request& req, response& resp) cons
         case http::verb::connect:
         case http::verb::options: co_return true; break;
         default: {
-            auto segments = detail::split_segments(req.decoded_path());
+            auto segments = detail::split_segments(req.path());
 
             std::unordered_map<std::string, std::string> params;
             std::set<std::string> allows;
