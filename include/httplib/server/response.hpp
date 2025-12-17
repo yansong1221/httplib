@@ -58,6 +58,7 @@ private:
     void set_stream_content_impl(coro_stream_handler_type&& handler,
                                  std::string_view content_type,
                                  http::status status = http::status::ok);
+    void reset_content();
 
     coro_stream_handler_type stream_handler_;
 

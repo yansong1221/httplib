@@ -38,11 +38,10 @@ response::response(unsigned int version, bool keep_alive)
 }
 void response::set_empty_content(http::status status)
 {
+    reset_content();
     this->result(status);
     this->body() = body::empty_body::value_type {};
     this->content_length(0);
-
-    stream_handler_ = nullptr;
 }
 
 void response::set_error_content(http::status status)
@@ -66,27 +65,26 @@ void response::set_string_content(std::string&& data,
                                   std::string_view content_type,
                                   http::status status /*= http::status::ok*/)
 {
+    reset_content();
     this->content_length(data.size());
     this->set(http::field::content_type, content_type);
     this->result(status);
     this->body() = std::move(data);
-
-    stream_handler_ = nullptr;
 }
 
 void response::set_json_content(boost::json::value&& data,
                                 http::status status /*= http::status::ok*/)
 {
+    reset_content();
     this->result(status);
     this->set(http::field::content_type, "application/json; charset=utf-8");
     this->set(http::field::cache_control, "no-store");
     this->body() = std::move(data);
-
-    stream_handler_ = nullptr;
 }
 
 void response::set_file_content(const fs::path& path, const http::fields& req_header /*= {}*/)
 {
+    reset_content();
     std::error_code ec;
     auto file_size = fs::file_size(path, ec);
     if (ec)
@@ -150,12 +148,11 @@ void response::set_file_content(const fs::path& path, const http::fields& req_he
         this->result(http::status::partial_content);
     }
     body() = std::move(file);
-
-    stream_handler_ = nullptr;
 }
 
 void response::set_form_data_content(std::vector<html::form_data::field>&& data)
 {
+    reset_content();
     body::form_data_body::value_type value;
     value.boundary = html::generate_boundary();
     value.fields   = std::move(data);
@@ -177,9 +174,17 @@ void response::set_stream_content_impl(coro_stream_handler_type&& handler,
                                        std::string_view content_type,
                                        http::status status /*= http::status::ok*/)
 {
+    reset_content();
     stream_handler_ = std::move(handler);
     this->set(http::field::content_type, content_type);
     this->result(status);
+    this->body() = body::empty_body::value_type {};
+}
+
+void response::reset_content()
+{
+    stream_handler_ = nullptr;
+    this->result(http::status::not_found);
     this->body() = body::empty_body::value_type {};
 }
 
