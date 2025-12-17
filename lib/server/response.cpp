@@ -115,7 +115,7 @@ void response::set_file_content(const fs::path& path, const http::fields& req_he
     }
 
     body::file_body::value_type file;
-    file.open(path.string().c_str(), std::ios::in | std::ios::binary);
+    file.open(path, std::ios::in | std::ios::binary);
     if (!file.is_open())
         return;
 

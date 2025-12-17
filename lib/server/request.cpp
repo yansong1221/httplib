@@ -51,7 +51,7 @@ request::~request()
 std::string_view request::path() const
 {
     if (this->decoded_path_.empty())
-        return this->target();
+        return std::string_view(this->target());
 
     return this->decoded_path_;
 }
