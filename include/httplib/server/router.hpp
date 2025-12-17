@@ -27,8 +27,9 @@ public:
     template<http::verb... method, typename Func, typename... Aspects>
     void set_http_handler(std::string_view key, Func&& handler, Aspects&&... asps)
     {
-        static_assert(sizeof...(method) >= 1, "must set http_method");
-        (set_http_handler(method, key, handler, std::forward<Aspects>(asps)...), ...);
+        static_assert(sizeof...(method) >= 1, "must set method");
+        (set_http_handler(method, key, std::forward<Func>(handler), std::forward<Aspects>(asps)...),
+         ...);
     }
     template<http::verb... method, typename Func, typename... Aspects>
         requires std::is_member_function_pointer_v<Func>

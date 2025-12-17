@@ -67,4 +67,9 @@ bool query_params::empty() const
     return params_.empty();
 }
 
+const query_params::container_type& query_params::params() const
+{
+    return params_;
+}
+
 } // namespace httplib::html
