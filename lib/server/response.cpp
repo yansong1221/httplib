@@ -184,8 +184,7 @@ void response::set_stream_content_impl(coro_stream_handler_type&& handler,
 void response::reset_content()
 {
     stream_handler_ = nullptr;
-    this->result(http::status::not_found);
-    this->body() = body::empty_body::value_type {};
+    this->body()    = body::empty_body::value_type {};
 }
 
 } // namespace httplib::server
