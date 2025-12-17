@@ -69,20 +69,15 @@ d6jDUgydraEmQvIPiKMpTE18rW+jierv2FlB8AGcwxm2VWxuM25wQ40J2YuZLY7k
 -----END RSA PRIVATE KEY-----
 )"sv;
 
-// 日志切面
 struct log_t
 {
     httplib::net::awaitable<bool> before(httplib::server::request& req,
                                          httplib::server::response& res)
     {
-        // start_ = std::chrono::steady_clock::now();
         co_return true;
     }
 
     bool after(httplib::server::request& req, httplib::server::response& res) { return true; }
-
-private:
-    std::chrono::steady_clock::time_point start_;
 };
 
 struct test
