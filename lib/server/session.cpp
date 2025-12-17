@@ -48,16 +48,15 @@ net::awaitable<void> transfer(S1& from, S2& to, size_t& bytes_transferred)
 }
 
 template<typename T, typename... Args>
-static session::task_ptr make_task_ptr(Args&&... args)
+static session::task::ptr make_task_ptr(Args&&... args)
 {
-    session::task_ptr ptr(
+    return session::task::ptr(
         util::object_pool<T>::instance().construct(std::forward<Args>(args)...),
         [](session::task* p) {
             if (p) {
                 util::object_pool<T>::instance().destroy(static_cast<T*>(p));
             }
         });
-    return ptr;
 }
 
 } // namespace detail
@@ -79,7 +78,7 @@ public:
     ~ssl_handshake_task() { beast::get_lowest_layer(stream_).expires_never(); }
 
 
-    net::awaitable<task_ptr> then() override
+    net::awaitable<task::ptr> then() override
     {
         boost::system::error_code ec;
         auto bytes_used = co_await stream_.async_handshake(
@@ -145,7 +144,7 @@ session::detect_ssl_task::~detect_ssl_task()
 {
     stream_.expires_never();
 }
-net::awaitable<session::task_ptr> session::detect_ssl_task::then()
+net::awaitable<session::task::ptr> session::detect_ssl_task::then()
 {
     beast::flat_buffer buffer;
 #ifdef HTTPLIB_ENABLED_SSL
@@ -181,7 +180,7 @@ session::http_task::http_task(http_stream&& stream,
     remote_endpoint_ = stream_.socket().remote_endpoint();
 }
 
-net::awaitable<session::task_ptr> session::http_task::then()
+net::awaitable<session::task::ptr> session::http_task::then()
 
 {
     boost::system::error_code ec;
@@ -381,7 +380,7 @@ session::websocket_task::websocket_task(websocket_stream&& stream,
 {
 }
 
-httplib::net::awaitable<session::task_ptr> session::websocket_task::then()
+httplib::net::awaitable<session::task::ptr> session::websocket_task::then()
 {
     co_await conn_->run();
     co_return nullptr;
@@ -403,7 +402,7 @@ session::http_proxy_task::http_proxy_task(http_stream&& stream,
 {
 }
 
-net::awaitable<session::task_ptr> session::http_proxy_task::then()
+net::awaitable<session::task::ptr> session::http_proxy_task::then()
 {
     auto target = req_.target();
     auto pos    = target.find(":");

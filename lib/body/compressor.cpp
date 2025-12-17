@@ -9,6 +9,8 @@
 #include <boost/iostreams/filtering_stream.hpp>
 #endif
 
+#include "httplib/util/object_pool.hpp"
+
 namespace httplib::body {
 #ifdef HTTPLIB_ENABLED_COMPRESS
 namespace io = boost::iostreams;
@@ -95,13 +97,25 @@ protected:
 
 #endif
 
+
+template<typename T, typename... Args>
+static compressor::ptr make_compressor_ptr(Args&&... args)
+{
+    return compressor::ptr(util::object_pool<T>::instance().construct(std::forward<Args>(args)...),
+                           [](compressor* p) {
+                               if (p) {
+                                   util::object_pool<T>::instance().destroy(static_cast<T*>(p));
+                               }
+                           });
+}
+
 compressor_factory::compressor_factory()
 {
 #ifdef HTTPLIB_ENABLED_COMPRESS
-    register_compressor("gzip", []() { return std::make_unique<gzip_compressor_adapter>(); });
-    register_compressor("deflate", []() { return std::make_unique<zlib_compressor_adapter>(); });
-    register_compressor("zstd", []() { return std::make_unique<zstd_compressor_adapter>(); });
-    register_compressor("br", []() { return std::make_unique<brotli_compressor_adapter>(); });
+    register_compressor("gzip", []() { return make_compressor_ptr<gzip_compressor_adapter>(); });
+    register_compressor("deflate", []() { return make_compressor_ptr<zlib_compressor_adapter>(); });
+    register_compressor("zstd", []() { return make_compressor_ptr<zstd_compressor_adapter>(); });
+    register_compressor("br", []() { return make_compressor_ptr<brotli_compressor_adapter>(); });
 #endif
 }
 compressor_factory& compressor_factory::instance()
@@ -126,7 +140,7 @@ void compressor_factory::register_compressor(const std::string& encoding, create
     creators_[encoding] = std::move(func);
 }
 
-std::unique_ptr<httplib::body::compressor> compressor_factory::create(const std::string& encoding)
+compressor::ptr compressor_factory::create(const std::string& encoding)
 {
     auto iter = creators_.find(encoding);
     if (iter == creators_.end())

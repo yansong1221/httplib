@@ -17,14 +17,13 @@ class websocket_conn_impl;
 class session : public std::enable_shared_from_this<session>
 {
 public:
-    class task;
-    using task_ptr = std::unique_ptr<task, std::function<void(task*)>>;
-
     class task
     {
     public:
+        using ptr = std::unique_ptr<task, std::function<void(task*)>>;
+
         virtual ~task()                         = default;
-        virtual net::awaitable<task_ptr> then() = 0;
+        virtual net::awaitable<task::ptr> then() = 0;
         virtual void abort()                    = 0;
     };
     class detect_ssl_task;
@@ -41,7 +40,7 @@ public:
     net::awaitable<void> run();
 
 private:
-    task_ptr task_;
+    task::ptr task_;
 
     std::atomic_bool abort_ = false;
     std::mutex task_mtx_;
@@ -55,7 +54,7 @@ public:
 
 public:
     void abort() override;
-    net::awaitable<task_ptr> then() override;
+    net::awaitable<task::ptr> then() override;
 
 private:
     http_server_impl& serv_;
@@ -68,7 +67,7 @@ class session::http_task : public session::task
 public:
     explicit http_task(http_stream&& stream, beast::flat_buffer&& buffer, http_server_impl& serv);
 
-    net::awaitable<task_ptr> then() override;
+    net::awaitable<task::ptr> then() override;
     void abort() override;
 
 private:
@@ -87,12 +86,10 @@ private:
 class session::websocket_task : public session::task
 {
 public:
-    explicit websocket_task(websocket_stream&& stream,
-                            request&& req,
-                            http_server_impl& serv);
+    explicit websocket_task(websocket_stream&& stream, request&& req, http_server_impl& serv);
 
 public:
-    net::awaitable<task_ptr> then() override;
+    net::awaitable<task::ptr> then() override;
     void abort() override;
 
 private:
@@ -105,7 +102,7 @@ public:
     explicit http_proxy_task(http_stream&& stream, request&& req, http_server_impl& serv);
 
 public:
-    net::awaitable<task_ptr> then() override;
+    net::awaitable<task::ptr> then() override;
     void abort() override;
 
 private:

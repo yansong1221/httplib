@@ -8,6 +8,8 @@ namespace httplib::body {
 class compressor
 {
 public:
+    using ptr = std::unique_ptr<compressor, std::function<void(compressor*)>>;
+
     enum class mode
     {
         encode,
@@ -26,11 +28,11 @@ public:
 class compressor_factory
 {
 public:
-    using create_function = std::function<std::unique_ptr<compressor>()>;
+    using create_function = std::function<compressor::ptr()>;
 
     const std::vector<std::string>& supported_encoding() const;
 
-    std::unique_ptr<compressor> create(const std::string& encoding);
+    compressor::ptr create(const std::string& encoding);
 
     bool is_supported_encoding(std::string_view encoding) const;
 

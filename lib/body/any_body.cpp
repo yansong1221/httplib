@@ -1,6 +1,6 @@
 #include "httplib/body/any_body.hpp"
-
 #include "compressor.hpp"
+#include "httplib/util/object_pool.hpp"
 
 namespace httplib::body {
 namespace detail {
@@ -8,6 +8,8 @@ namespace detail {
 class proxy_writer
 {
 public:
+    using ptr = std::unique_ptr<proxy_writer, std::function<void(proxy_writer*)>>;
+
     virtual ~proxy_writer()                          = default;
     virtual void init(boost::system::error_code& ec) = 0;
     virtual inline boost::optional<std::pair<any_body::writer::const_buffers_type, bool>>
@@ -16,6 +18,8 @@ public:
 class proxy_reader
 {
 public:
+    using ptr = std::unique_ptr<proxy_reader, std::function<void(proxy_reader*)>>;
+
     virtual ~proxy_reader()                                = default;
     virtual void init(boost::optional<std::uint64_t> const& content_length,
                       boost::system::error_code& ec)       = 0;
@@ -114,24 +118,31 @@ public:
 
 private:
     template<typename... Bodies>
-    std::unique_ptr<detail::proxy_writer>
-    create_proxy_writer(http::fields& h, any_body::variant_value<Bodies...>& body)
+    detail::proxy_writer::ptr create_proxy_writer(http::fields& h,
+                                                  any_body::variant_value<Bodies...>& body)
     {
         return std::visit(
-            [&](auto& t) -> std::unique_ptr<detail::proxy_writer> {
+            [&](auto& t) -> detail::proxy_writer::ptr {
                 using value_type = std::decay_t<decltype(t)>;
                 // 提取匹配的 Body 类型
                 using body_type = typename any_body::match_body<value_type, Bodies...>::type;
                 static_assert(!std::is_void_v<body_type>, "No matching Body type found");
 
-                return std::make_unique<detail::proxy_writer_impl<body_type>>(h, t);
+                using T = detail::proxy_writer_impl<body_type>;
+
+                return detail::proxy_writer::ptr(
+                    util::object_pool<T>::instance().construct(h, t), [](detail::proxy_writer* p) {
+                        if (p) {
+                            util::object_pool<T>::instance().destroy(static_cast<T*>(p));
+                        }
+                    });
             },
             body);
     }
 
 private:
-    std::unique_ptr<detail::proxy_writer> proxy_;
-    std::unique_ptr<compressor> compressor_;
+    detail::proxy_writer::ptr proxy_;
+    compressor::ptr compressor_;
 };
 
 class any_body::reader::impl
@@ -189,26 +200,33 @@ public:
 
 private:
     template<class Body>
-    std::unique_ptr<detail::proxy_reader> create_proxy_reader(http::fields& h,
-                                                              any_body::value_type& body)
+    detail::proxy_reader::ptr create_proxy_reader(http::fields& h, any_body::value_type& b)
     {
         return std::visit(
-            [&](auto& t) mutable -> std::unique_ptr<detail::proxy_reader> {
+            [&](auto& t) mutable -> detail::proxy_reader::ptr {
                 using value_type = std::decay_t<decltype(t)>;
                 if constexpr (!std::same_as<value_type, typename Body::value_type>) {
-                    body = typename Body::value_type {};
-                    return create_proxy_reader<Body>(h, body);
+                    b = typename Body::value_type {};
+                    return create_proxy_reader<Body>(h, b);
                 }
                 else {
-                    return std::make_unique<detail::proxy_reader_impl<Body>>(h, t);
+                    using T = detail::proxy_reader_impl<Body>;
+
+                    return detail::proxy_reader::ptr(
+                        util::object_pool<T>::instance().construct(h, t),
+                        [](detail::proxy_reader* p) {
+                            if (p) {
+                                util::object_pool<T>::instance().destroy(static_cast<T*>(p));
+                            }
+                        });
                 }
             },
-            body);
+            b);
     }
 
 private:
-    std::unique_ptr<detail::proxy_reader> proxy_;
-    std::unique_ptr<compressor> compressor_;
+    detail::proxy_reader::ptr proxy_;
+    compressor::ptr compressor_;
 };
 
 any_body::writer::writer(http::fields& h, value_type& b)
