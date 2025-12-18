@@ -1,9 +1,9 @@
 #include "session.hpp"
 #include "body/compressor.hpp"
+#include "httplib/html/accept_content.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
-#include "httplib/util/object_pool.hpp"
 #include "websocket_conn_impl.hpp"
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/write.hpp>
@@ -78,8 +78,7 @@ public:
         buffer_.consume(bytes_used);
 
         http_stream variant_stream(std::move(stream_));
-        co_return util::make_pool_unique<http_task>(
-            std::move(variant_stream), std::move(buffer_), serv_);
+        co_return std::make_unique<http_task>(std::move(variant_stream), std::move(buffer_), serv_);
     }
 
 
@@ -93,7 +92,7 @@ private:
 #endif
 
 session::session(tcp::socket&& stream, http_server_impl& serv)
-    : task_(util::make_pool_unique<detect_ssl_task>(std::move(stream), serv))
+    : task_(std::make_unique<detect_ssl_task>(std::move(stream), serv))
 {
 }
 
@@ -144,12 +143,12 @@ net::awaitable<session::task::ptr> session::detect_ssl_task::then()
             co_return nullptr;
         }
         if (is_ssl) {
-            co_return util::make_pool_unique<session::ssl_handshake_task>(
+            co_return std::make_unique<session::ssl_handshake_task>(
                 http_stream::tls_stream(std::move(stream_), ssl_ctx), std::move(buffer), serv_);
         }
     }
 #endif
-    co_return util::make_pool_unique<session::http_task>(
+    co_return std::make_unique<session::http_task>(
         http_stream(std::move(stream_)), std::move(buffer), serv_);
 }
 void session::detect_ssl_task::abort()
@@ -199,13 +198,12 @@ net::awaitable<session::task::ptr> session::http_task::then()
         // http proxy
         if (header.method() == http::verb::connect) {
             request req(local_endp, remote_endp, std::move(header_parser.release()));
-            co_return util::make_pool_unique<http_proxy_task>(
-                std::move(stream_), std::move(req), serv_);
+            co_return std::make_unique<http_proxy_task>(std::move(stream_), std::move(req), serv_);
         }
         // websocket
         if (websocket::is_upgrade(header.base())) {
             request req(local_endp, remote_endp, std::move(header_parser.release()));
-            co_return util::make_pool_unique<websocket_task>(
+            co_return std::make_unique<websocket_task>(
                 websocket_stream(std::move(stream_)), std::move(req), serv_);
         }
 
@@ -297,12 +295,11 @@ net::awaitable<bool> session::http_task::async_write(const request& req, respons
             resp.prepare_payload();
 
         if (auto iter = req.find(http::field::accept_encoding); iter != req.end()) {
-            auto accept_encodings = util::split(iter->value(), ",");
-            for (const auto& encoding : accept_encodings) {
-                if (httplib::body::compressor_factory::instance().is_supported_encoding(encoding)) {
+            html::accept_encoding_content encoding_content;
+            if (encoding_content.parse(iter->value())) {
+                if (auto encoding = encoding_content.server_apply_encoding(); !encoding.empty()) {
                     resp.set(http::field::content_encoding, encoding);
                     resp.chunked(true);
-                    break;
                 }
             }
         }

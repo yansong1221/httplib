@@ -7,7 +7,6 @@
 #include <boost/asio/detached.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/thread_pool.hpp>
-#include <boost/pool/pool_alloc.hpp>
 #include <functional>
 #include <iostream>
 #include <map>
@@ -65,7 +64,6 @@ private:
     tcp::acceptor acceptor_;
 
     std::mutex session_mutex_;
-    boost::fast_pool_allocator<session> session_allocator_;
     std::unordered_set<std::shared_ptr<session>> session_map_;
 
     std::chrono::steady_clock::duration read_timeout_  = std::chrono::seconds(30);

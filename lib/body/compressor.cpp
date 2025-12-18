@@ -9,8 +9,6 @@
 #include <boost/iostreams/filtering_stream.hpp>
 #endif
 
-#include "httplib/util/object_pool.hpp"
-
 namespace httplib::body {
 #ifdef HTTPLIB_ENABLED_COMPRESS
 namespace io = boost::iostreams;
@@ -100,11 +98,10 @@ protected:
 compressor_factory::compressor_factory()
 {
 #ifdef HTTPLIB_ENABLED_COMPRESS
-    register_compressor("gzip", []() { return util::make_pool_unique<gzip_compressor_adapter>(); });
-    register_compressor("deflate",
-                        []() { return util::make_pool_unique<zlib_compressor_adapter>(); });
-    register_compressor("zstd", []() { return util::make_pool_unique<zstd_compressor_adapter>(); });
-    register_compressor("br", []() { return util::make_pool_unique<brotli_compressor_adapter>(); });
+    register_compressor("gzip", []() { return std::make_unique<gzip_compressor_adapter>(); });
+    register_compressor("deflate", []() { return std::make_unique<zlib_compressor_adapter>(); });
+    register_compressor("zstd", []() { return std::make_unique<zstd_compressor_adapter>(); });
+    register_compressor("br", []() { return std::make_unique<brotli_compressor_adapter>(); });
 #endif
 }
 compressor_factory& compressor_factory::instance()

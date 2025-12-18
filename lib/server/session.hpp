@@ -2,7 +2,6 @@
 #include "httplib/config.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
-#include "httplib/util/object_pool.hpp"
 #include "stream/http_stream.hpp"
 #include "stream/websocket_stream.hpp"
 #include <boost/asio/awaitable.hpp>
@@ -21,7 +20,7 @@ public:
     class task
     {
     public:
-        using ptr = util::pool_unique_ptr<task>;
+        using ptr = std::unique_ptr<task>;
 
         virtual ~task()                          = default;
         virtual net::awaitable<task::ptr> then() = 0;

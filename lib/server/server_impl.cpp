@@ -73,7 +73,7 @@ router_impl& http_server_impl::router()
 net::awaitable<boost::system::error_code> http_server_impl::co_run()
 {
     std::vector<net::awaitable<boost::system::error_code>> ops;
-    for (int i = 0; i < 32; ++i) 
+    for (int i = 0; i < 32; ++i)
         ops.push_back(co_accept());
 
     auto&& results = co_await util::when_all(std::move(ops));
@@ -93,7 +93,7 @@ net::awaitable<boost::system::error_code> http_server_impl::co_accept()
 {
     boost::system::error_code ec;
     for (;;) {
-        tcp::socket sock(co_await net::this_coro::executor);
+        tcp::socket sock(ex_);
         co_await acceptor_.async_accept(sock, util::net_awaitable[ec]);
         if (ec) {
             if (ec == boost::system::errc::too_many_files_open ||
@@ -101,7 +101,7 @@ net::awaitable<boost::system::error_code> http_server_impl::co_accept()
             {
                 ec = {};
                 using namespace std::chrono_literals;
-                net::steady_timer retry_timer(co_await net::this_coro::executor);
+                net::steady_timer retry_timer(ex_);
                 retry_timer.expires_after(100ms);
                 co_await retry_timer.async_wait(util::net_awaitable[ec]);
                 if (!ec)
@@ -109,9 +109,7 @@ net::awaitable<boost::system::error_code> http_server_impl::co_accept()
             }
             break;
         }
-        net::co_spawn(net::make_strand(co_await net::this_coro::executor),
-                      handle_accept(std::move(sock)),
-                      net::detached);
+        net::co_spawn(ex_, handle_accept(std::move(sock)), net::detached);
     }
     get_logger()->trace("async_accept: {}", ec.message());
     co_return ec;
@@ -123,7 +121,7 @@ net::awaitable<void> http_server_impl::handle_accept(tcp::socket sock)
     get_logger()->trace(
         "accept new connection [{}:{}]", remote_endp.address().to_string(), remote_endp.port());
 
-    auto conn = std::allocate_shared<session>(session_allocator_, std::move(sock), *this);
+    auto conn = std::make_shared<session>(std::move(sock), *this);
     {
         std::lock_guard lck(session_mutex_);
         session_map_.insert(conn);

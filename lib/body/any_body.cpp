@@ -1,6 +1,5 @@
 #include "httplib/body/any_body.hpp"
 #include "compressor.hpp"
-#include "httplib/util/object_pool.hpp"
 
 namespace httplib::body {
 namespace detail {
@@ -8,7 +7,7 @@ namespace detail {
 class proxy_writer
 {
 public:
-    using ptr = util::pool_unique_ptr<proxy_writer>;
+    using ptr = std::unique_ptr<proxy_writer>;
 
     virtual ~proxy_writer()                          = default;
     virtual void init(boost::system::error_code& ec) = 0;
@@ -18,7 +17,7 @@ public:
 class proxy_reader
 {
 public:
-    using ptr = util::pool_unique_ptr<proxy_reader>;
+    using ptr = std::unique_ptr<proxy_reader>;
 
     virtual ~proxy_reader()                                = default;
     virtual void init(boost::optional<std::uint64_t> const& content_length,
@@ -134,7 +133,7 @@ private:
 
                 using T = detail::proxy_writer_impl<body_type>;
 
-                return util::make_pool_unique<T>(h, t);
+                return std::make_unique<T>(h, t);
             },
             body);
     }
@@ -217,7 +216,7 @@ private:
                 }
                 else {
                     using T = detail::proxy_reader_impl<Body>;
-                    return util::make_pool_unique<T>(h, t);
+                    return  std::make_unique<T>(h, t);
                 }
             },
             b);
@@ -232,7 +231,7 @@ private:
 };
 
 any_body::writer::writer(http::fields& h, value_type& b)
-    : impl_(util::make_pool_unique<any_body::writer::impl>(h, b))
+    : impl_( std::make_unique<any_body::writer::impl>(h, b))
 {
 }
 
@@ -251,7 +250,7 @@ any_body::writer::get(boost::system::error_code& ec)
 }
 
 any_body::reader::reader(http::fields& h, value_type& b)
-    : impl_(util::make_pool_unique<any_body::reader::impl>(h, b))
+    : impl_( std::make_unique<any_body::reader::impl>(h, b))
 {
 }
 any_body::reader::~reader()

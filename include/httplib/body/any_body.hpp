@@ -5,7 +5,6 @@
 #include "httplib/body/json_body.hpp"
 #include "httplib/body/query_params_body.hpp"
 #include "httplib/body/string_body.hpp"
-#include "httplib/util/object_pool.hpp"
 
 namespace httplib::body {
 struct any_body
@@ -90,7 +89,7 @@ struct any_body
 
     private:
         class impl;
-        util::pool_unique_ptr<impl> impl_;
+        std::unique_ptr<impl> impl_;
     };
     //--------------------------------------------------------------------------
 
@@ -116,7 +115,7 @@ struct any_body
 
     private:
         class impl;
-        util::pool_unique_ptr<impl> impl_;
+        std::unique_ptr<impl> impl_;
     };
 };
 

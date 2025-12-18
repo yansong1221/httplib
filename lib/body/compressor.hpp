@@ -1,6 +1,5 @@
 #pragma once
 #include "httplib/config.hpp"
-#include "httplib/util/object_pool.hpp"
 #include <boost/asio/buffer.hpp>
 #include <functional>
 #include <unordered_map>
@@ -9,7 +8,7 @@ namespace httplib::body {
 class compressor
 {
 public:
-    using ptr = util::pool_unique_ptr<compressor>;
+    using ptr = std::unique_ptr<compressor>;
 
     enum class mode
     {
