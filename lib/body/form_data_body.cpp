@@ -8,6 +8,86 @@
 namespace httplib::body {
 using namespace std::string_view_literals;
 
+namespace detail {
+static auto parse_content_disposition(std::string_view header)
+{
+    std::vector<std::pair<std::string_view, std::string_view>> results;
+
+    size_t pos = 0;
+    while (pos < header.size()) {
+        size_t eq = header.find('=', pos);
+        if (eq == std::string_view::npos)
+            break;
+
+        std::string_view key = header.substr(pos, eq - pos);
+        key                  = boost::trim_copy(key);
+        pos                  = eq + 1;
+
+        std::string_view value;
+        if (pos < header.size() && header[pos] == '"') {
+            pos++;
+            size_t end  = pos;
+            bool escape = false;
+            while (end < header.size()) {
+                if (header[end] == '\\' && !escape) {
+                    escape = true;
+                }
+                else if (header[end] == '"' && !escape) {
+                    break;
+                }
+                else {
+                    escape = false;
+                }
+                end++;
+            }
+            value = header.substr(pos, end - pos);
+            pos   = (end < header.size()) ? end + 1 : end;
+        }
+        else {
+            size_t end = header.find(';', pos);
+            if (end == std::string_view::npos)
+                end = header.size();
+            value = header.substr(pos, end - pos);
+            value = boost::trim_copy(value);
+            pos   = end;
+        }
+
+        results.emplace_back(key, value);
+
+        if (pos < header.size() && header[pos] == ';')
+            pos++;
+        while (pos < header.size() && std::isspace(header[pos]))
+            pos++;
+    }
+    return results;
+}
+static auto split_header_field_value(std::string_view header, boost::system::error_code& ec)
+{
+    using namespace std::string_view_literals;
+
+    std::vector<std::pair<std::string_view, std::string_view>> results;
+    auto lines = util::split(header, "\r\n"sv);
+
+    for (const auto& line : lines) {
+        if (line.empty())
+            continue;
+
+        auto pos = line.find(":");
+        if (pos == std::string_view::npos) {
+            ec = boost::beast::http::error::unexpected_body;
+            return decltype(results) {};
+        }
+
+        auto key   = boost::trim_copy(line.substr(0, pos));
+        auto value = boost::trim_copy(line.substr(pos + 1));
+        results.emplace_back(key, value);
+    }
+
+    return results;
+}
+
+} // namespace detail
+
 form_data_body::writer::writer(http::fields const&, value_type& b)
     : body_(b)
 {
@@ -139,7 +219,7 @@ std::size_t form_data_body::reader::put(const_buffers_type const& buffers,
                 return 0;
             }
             auto header  = data.substr(0, pos + 4);
-            auto results = util::split_header_field_value(header, ec);
+            auto results = detail::split_header_field_value(header, ec);
             if (ec)
                 return 0;
 
@@ -159,7 +239,7 @@ std::size_t form_data_body::reader::put(const_buffers_type const& buffers,
                     }
                     value.remove_prefix(pos + 1);
 
-                    auto result = util::parse_content_disposition(value);
+                    auto result = detail::parse_content_disposition(value);
                     for (const auto& pair : result) {
                         if (pair.first == "name") {
                             field_data.name = pair.second;
