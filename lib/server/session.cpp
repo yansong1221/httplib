@@ -47,18 +47,6 @@ net::awaitable<void> transfer(S1& from, S2& to, size_t& bytes_transferred)
     }
 }
 
-template<typename T, typename... Args>
-static session::task::ptr make_task_ptr(Args&&... args)
-{
-    return session::task::ptr(
-        util::object_pool<T>::instance().construct(std::forward<Args>(args)...),
-        [](session::task* p) {
-            if (p) {
-                util::object_pool<T>::instance().destroy(static_cast<T*>(p));
-            }
-        });
-}
-
 } // namespace detail
 
 
@@ -90,7 +78,7 @@ public:
         buffer_.consume(bytes_used);
 
         http_stream variant_stream(std::move(stream_));
-        co_return detail::make_task_ptr<http_task>(
+        co_return util::object_pool<http_task>::instance().make_unique<task>(
             std::move(variant_stream), std::move(buffer_), serv_);
     }
 
@@ -105,7 +93,8 @@ private:
 #endif
 
 session::session(tcp::socket&& stream, http_server_impl& serv)
-    : task_(detail::make_task_ptr<detect_ssl_task>(std::move(stream), serv))
+    : task_(
+          util::object_pool<detect_ssl_task>::instance().make_unique<task>(std::move(stream), serv))
 {
 }
 
@@ -156,12 +145,12 @@ net::awaitable<session::task::ptr> session::detect_ssl_task::then()
             co_return nullptr;
         }
         if (is_ssl) {
-            co_return detail::make_task_ptr<session::ssl_handshake_task>(
+            co_return util::object_pool<session::ssl_handshake_task>::instance().make_unique<task>(
                 http_stream::tls_stream(std::move(stream_), ssl_ctx), std::move(buffer), serv_);
         }
     }
 #endif
-    co_return detail::make_task_ptr<session::http_task>(
+    co_return util::object_pool<session::http_task>::instance().make_unique<task>(
         http_stream(std::move(stream_)), std::move(buffer), serv_);
 }
 void session::detect_ssl_task::abort()
@@ -176,8 +165,6 @@ session::http_task::http_task(http_stream&& stream,
     , buffer_(std::move(buffer))
     , stream_(std::move(stream))
 {
-    local_endpoint_  = stream_.socket().local_endpoint();
-    remote_endpoint_ = stream_.socket().remote_endpoint();
 }
 
 net::awaitable<session::task::ptr> session::http_task::then()
@@ -185,6 +172,15 @@ net::awaitable<session::task::ptr> session::http_task::then()
 {
     boost::system::error_code ec;
     auto& _router = serv_.router();
+
+    auto local_endp  = stream_.socket().local_endpoint();
+    auto remote_endp = stream_.socket().remote_endpoint();
+
+    auto log_endp_format = fmt::format("{}:{} -> {}:{}",
+                                       local_endp.address().to_string(),
+                                       remote_endp.port(),
+                                       local_endp.address().to_string(),
+                                       remote_endp.port());
 
     for (;;) {
         http::request_parser<http::empty_body> header_parser;
@@ -203,19 +199,19 @@ net::awaitable<session::task::ptr> session::http_task::then()
 
         // http proxy
         if (header.method() == http::verb::connect) {
-            request req(local_endpoint_, remote_endpoint_, std::move(header_parser.release()));
-            co_return detail::make_task_ptr<http_proxy_task>(
+            request req(local_endp, remote_endp, std::move(header_parser.release()));
+            co_return util::object_pool<http_proxy_task>::instance().make_unique<task>(
                 std::move(stream_), std::move(req), serv_);
         }
         // websocket
         if (websocket::is_upgrade(header.base())) {
-            request req(local_endpoint_, remote_endpoint_, std::move(header_parser.release()));
-            co_return detail::make_task_ptr<websocket_task>(
+            request req(local_endp, remote_endp, std::move(header_parser.release()));
+            co_return util::object_pool<websocket_task>::instance().make_unique<task>(
                 websocket_stream(std::move(stream_)), std::move(req), serv_);
         }
 
         response resp(header.version(), header.keep_alive());
-        request req(local_endpoint_, remote_endpoint_, http::request<http::empty_body>(header));
+        request req(local_endp, remote_endp, http::request<http::empty_body>(header));
 
         auto start_time = std::chrono::steady_clock::now();
 
@@ -234,12 +230,13 @@ net::awaitable<session::task::ptr> session::http_task::then()
                     stream_.expires_after(serv_.read_timeout());
                     co_await http::async_read_some(
                         stream_, buffer_, body_parser, util::net_awaitable[ec]);
-                    stream_.expires_never();
                     if (ec) {
+                        stream_.expires_never();
                         serv_.get_logger()->trace("read http body failed: {}", ec.message());
                         co_return nullptr;
                     }
                 }
+                stream_.expires_never();
                 req.body() = std::move(body_parser.release().body());
                 start_time = std::chrono::steady_clock::now();
 
@@ -263,13 +260,10 @@ net::awaitable<session::task::ptr> session::http_task::then()
         auto span_time = std::chrono::steady_clock::now() - start_time;
 
         serv_.get_logger()->debug(
-            "{} {} ({}:{} -> {}:{}) {} {}ms",
+            "{} {} ({}) {} {}ms",
             req.method_string(),
             req.target(),
-            remote_endpoint_.address().to_string(),
-            remote_endpoint_.port(),
-            local_endpoint_.address().to_string(),
-            local_endpoint_.port(),
+            log_endp_format,
             resp.result_int(),
             std::chrono::duration_cast<std::chrono::milliseconds>(span_time).count());
 
@@ -294,7 +288,7 @@ void session::http_task::abort()
     stream_.close();
 }
 
-net::awaitable<bool> session::http_task::async_write(request& req, response& resp)
+net::awaitable<bool> session::http_task::async_write(const request& req, response& resp)
 {
     if (resp.stream_handler_) {
         resp.chunked(true);
@@ -314,19 +308,23 @@ net::awaitable<bool> session::http_task::async_write(request& req, response& res
             }
         }
     }
+    if (req.method() == http::verb::head)
+        resp.reset_content();
 
     boost::system::error_code ec;
     http::response_serializer<body::any_body> serializer(resp);
-    stream_.expires_after(serv_.write_timeout());
-    co_await http::async_write_header(stream_, serializer, util::net_awaitable[ec]);
-    stream_.expires_never();
-    if (ec) {
-        serv_.get_logger()->trace("write http header failed: {}", ec.message());
-        co_return false;
+    {
+        while (!serializer.is_done()) {
+            stream_.expires_after(serv_.write_timeout());
+            co_await http::async_write_some(stream_, serializer, util::net_awaitable[ec]);
+            if (ec) {
+                stream_.expires_never();
+                serv_.get_logger()->trace("write http body failed: {}", ec.message());
+                co_return false;
+            }
+        }
+        stream_.expires_never();
     }
-
-    if (req.method() == http::verb::head)
-        co_return true;
 
     if (resp.stream_handler_) {
         for (;;) {
@@ -356,17 +354,6 @@ net::awaitable<bool> session::http_task::async_write(request& req, response& res
                     co_return false;
                 }
                 break;
-            }
-        }
-    }
-    else {
-        while (!serializer.is_done()) {
-            stream_.expires_after(serv_.write_timeout());
-            co_await http::async_write_some(stream_, serializer, util::net_awaitable[ec]);
-            stream_.expires_never();
-            if (ec) {
-                serv_.get_logger()->trace("write http body failed: {}", ec.message());
-                co_return false;
             }
         }
     }

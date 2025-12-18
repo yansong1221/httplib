@@ -1,7 +1,7 @@
 #pragma once
 
-#include <boost/pool/object_pool.hpp>
 #include <boost/noncopyable.hpp>
+#include <boost/pool/object_pool.hpp>
 
 namespace httplib::util {
 
@@ -36,11 +36,11 @@ public:
         pool_.free(chunk);
     }
 
-    template<typename... Args>
-    std::unique_ptr<T, std::function<void(T*)>> make_unique(Args&&... args)
+    template<typename U = T, typename... Args>
+    std::unique_ptr<U, std::function<void(U*)>> make_unique(Args&&... args)
     {
         T* raw = construct(std::forward<Args>(args)...);
-        return {raw, [this](T* ptr) { destroy(ptr); }};
+        return {raw, [this](U* ptr) { destroy(static_cast<T*>(ptr)); }};
     }
 
 public:

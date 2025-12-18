@@ -22,9 +22,9 @@ public:
     public:
         using ptr = std::unique_ptr<task, std::function<void(task*)>>;
 
-        virtual ~task()                         = default;
+        virtual ~task()                          = default;
         virtual net::awaitable<task::ptr> then() = 0;
-        virtual void abort()                    = 0;
+        virtual void abort()                     = 0;
     };
     class detect_ssl_task;
     class ssl_handshake_task;
@@ -71,16 +71,13 @@ public:
     void abort() override;
 
 private:
-    net::awaitable<bool> async_write(request& req, response& resp);
+    net::awaitable<bool> async_write(const request& req, response& resp);
 
 private:
     http_server_impl& serv_;
 
     http_stream stream_;
     beast::flat_buffer buffer_;
-
-    tcp::endpoint local_endpoint_;
-    tcp::endpoint remote_endpoint_;
 };
 
 class session::websocket_task : public session::task

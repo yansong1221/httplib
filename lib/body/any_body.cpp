@@ -118,8 +118,7 @@ public:
 
 private:
     template<typename... Bodies>
-    detail::proxy_writer::ptr create_proxy_writer(http::fields& h,
-                                                  any_body::variant_value<Bodies...>& body)
+    auto create_proxy_writer(http::fields& h, any_body::variant_value<Bodies...>& body)
     {
         return std::visit(
             [&](auto& t) -> detail::proxy_writer::ptr {
@@ -130,12 +129,7 @@ private:
 
                 using T = detail::proxy_writer_impl<body_type>;
 
-                return detail::proxy_writer::ptr(
-                    util::object_pool<T>::instance().construct(h, t), [](detail::proxy_writer* p) {
-                        if (p) {
-                            util::object_pool<T>::instance().destroy(static_cast<T*>(p));
-                        }
-                    });
+                return util::object_pool<T>::instance().make_unique<detail::proxy_writer>(h, t);
             },
             body);
     }
@@ -200,7 +194,7 @@ public:
 
 private:
     template<class Body>
-    detail::proxy_reader::ptr create_proxy_reader(http::fields& h, any_body::value_type& b)
+    auto create_proxy_reader(http::fields& h, any_body::value_type& b)
     {
         return std::visit(
             [&](auto& t) mutable -> detail::proxy_reader::ptr {
@@ -211,14 +205,7 @@ private:
                 }
                 else {
                     using T = detail::proxy_reader_impl<Body>;
-
-                    return detail::proxy_reader::ptr(
-                        util::object_pool<T>::instance().construct(h, t),
-                        [](detail::proxy_reader* p) {
-                            if (p) {
-                                util::object_pool<T>::instance().destroy(static_cast<T*>(p));
-                            }
-                        });
+                    return util::object_pool<T>::instance().make_unique<detail::proxy_reader>(h, t);
                 }
             },
             b);

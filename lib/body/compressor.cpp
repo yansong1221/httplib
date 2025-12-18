@@ -97,25 +97,21 @@ protected:
 
 #endif
 
-
-template<typename T, typename... Args>
-static compressor::ptr make_compressor_ptr(Args&&... args)
-{
-    return compressor::ptr(util::object_pool<T>::instance().construct(std::forward<Args>(args)...),
-                           [](compressor* p) {
-                               if (p) {
-                                   util::object_pool<T>::instance().destroy(static_cast<T*>(p));
-                               }
-                           });
-}
-
 compressor_factory::compressor_factory()
 {
 #ifdef HTTPLIB_ENABLED_COMPRESS
-    register_compressor("gzip", []() { return make_compressor_ptr<gzip_compressor_adapter>(); });
-    register_compressor("deflate", []() { return make_compressor_ptr<zlib_compressor_adapter>(); });
-    register_compressor("zstd", []() { return make_compressor_ptr<zstd_compressor_adapter>(); });
-    register_compressor("br", []() { return make_compressor_ptr<brotli_compressor_adapter>(); });
+    register_compressor("gzip", []() {
+        return util::object_pool<gzip_compressor_adapter>::instance().make_unique<compressor>();
+    });
+    register_compressor("deflate", []() {
+        return util::object_pool<zlib_compressor_adapter>::instance().make_unique<compressor>();
+    });
+    register_compressor("zstd", []() {
+        return util::object_pool<zstd_compressor_adapter>::instance().make_unique<compressor>();
+    });
+    register_compressor("br", []() {
+        return util::object_pool<brotli_compressor_adapter>::instance().make_unique<compressor>();
+    });
 #endif
 }
 compressor_factory& compressor_factory::instance()
