@@ -101,6 +101,14 @@ int main(int argc, char** argv)
 
     auto& router = svr.router();
 
+    router.set_http_handler<httplib::http::verb::get>(
+        "/plaintext",
+        [](httplib::server::request& req, httplib::server::response& resp) {
+            resp.set_string_content("hello world"sv, "text/plain");
+            return;
+        },
+        log_t {});
+
     // http://127.0.0.1:18808/regex/10000
     router.set_http_handler<httplib::http::verb::get>(
         "/regex/{id:^\\d+$}",

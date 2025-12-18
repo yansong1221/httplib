@@ -1,5 +1,4 @@
 #pragma once
-
 #include <boost/noncopyable.hpp>
 #include <boost/pool/object_pool.hpp>
 
@@ -17,8 +16,9 @@ public:
             std::lock_guard lck(mutex_);
             ret = pool_.malloc();
         }
-        if (ret == 0)
-            return ret;
+        if (!ret)
+            throw std::bad_alloc();
+
         try {
             new (ret) T(std::forward<Args>(args)...);
         }
@@ -31,16 +31,11 @@ public:
     }
     void destroy(T* const chunk)
     {
-        chunk->~T();
-        std::lock_guard lck(mutex_);
-        pool_.free(chunk);
-    }
-
-    template<typename U = T, typename... Args>
-    std::unique_ptr<U, std::function<void(U*)>> make_unique(Args&&... args)
-    {
-        T* raw = construct(std::forward<Args>(args)...);
-        return {raw, [this](U* ptr) { destroy(static_cast<T*>(ptr)); }};
+        if (chunk) {
+            chunk->~T();
+            std::lock_guard lck(mutex_);
+            pool_.free(chunk);
+        }
     }
 
 public:
@@ -54,4 +49,26 @@ private:
     boost::object_pool<T> pool_;
     std::mutex mutex_;
 };
+
+template<typename T>
+static void pool_unique_ptr_deleter(void* p)
+{
+    util::object_pool<T>::instance().destroy(static_cast<T*>(p));
+}
+
+template<typename T>
+using pool_unique_ptr = std::unique_ptr<T, std::function<void(void*)>>;
+
+// template<typename T>
+// using pool_unique_ptr = std::unique_ptr<T>;
+
+template<typename T, typename... Args>
+inline static pool_unique_ptr<T> make_pool_unique(Args&&... args)
+{
+    T* p = util::object_pool<T>::instance().construct(std::forward<Args>(args)...);
+    return pool_unique_ptr<T>(p, &pool_unique_ptr_deleter<T>);
+
+    /*return std::make_unique<T>(std::forward<Args>(args)...);*/
+}
+
 } // namespace httplib::util

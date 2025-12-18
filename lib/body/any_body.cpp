@@ -8,7 +8,7 @@ namespace detail {
 class proxy_writer
 {
 public:
-    using ptr = std::unique_ptr<proxy_writer, std::function<void(proxy_writer*)>>;
+    using ptr = util::pool_unique_ptr<proxy_writer>;
 
     virtual ~proxy_writer()                          = default;
     virtual void init(boost::system::error_code& ec) = 0;
@@ -18,7 +18,7 @@ public:
 class proxy_reader
 {
 public:
-    using ptr = std::unique_ptr<proxy_reader, std::function<void(proxy_reader*)>>;
+    using ptr = util::pool_unique_ptr<proxy_reader>;
 
     virtual ~proxy_reader()                                = default;
     virtual void init(boost::optional<std::uint64_t> const& content_length,
@@ -81,12 +81,17 @@ class any_body::writer::impl
 {
 public:
     explicit impl(http::fields& header, any_body::value_type& body)
-        : proxy_(create_proxy_writer(header, body))
+        : header_(header)
+        , body_(body)
     {
-        compressor_ = compressor_factory::instance().create(header[http::field::content_encoding]);
     }
     void init(boost::system::error_code& ec)
     {
+        auto content_encoding = header_[http::field::content_encoding];
+
+        proxy_      = create_proxy_writer(header_, body_);
+        compressor_ = compressor_factory::instance().create(content_encoding);
+
         if (compressor_)
             compressor_->init(compressor::mode::encode);
         proxy_->init(ec);
@@ -129,12 +134,15 @@ private:
 
                 using T = detail::proxy_writer_impl<body_type>;
 
-                return util::object_pool<T>::instance().make_unique<detail::proxy_writer>(h, t);
+                return util::make_pool_unique<T>(h, t);
             },
             body);
     }
 
 private:
+    http::fields& header_;
+    any_body::value_type& body_;
+
     detail::proxy_writer::ptr proxy_;
     compressor::ptr compressor_;
 };
@@ -143,24 +151,28 @@ class any_body::reader::impl
 {
 public:
     impl(http::fields& header, any_body::value_type& body)
+        : header_(header)
+        , body_(body)
     {
-        auto content_type = header[http::field::content_type];
-        if (content_type.starts_with("multipart/form-data")) {
-            proxy_ = create_proxy_reader<form_data_body>(header, body);
-        }
-        else if (content_type.starts_with("application/json")) {
-            proxy_ = create_proxy_reader<json_body>(header, body);
-        }
-        else if (content_type.starts_with("application/x-www-form-urlencoded")) {
-            proxy_ = create_proxy_reader<query_params_body>(header, body);
-        }
-        else {
-            proxy_ = create_proxy_reader<string_body>(header, body);
-        }
-        compressor_ = compressor_factory::instance().create(header[http::field::content_encoding]);
     }
     void init(boost::optional<std::uint64_t> const& content_length, boost::system::error_code& ec)
     {
+        auto content_type     = header_[http::field::content_type];
+        auto content_encoding = header_[http::field::content_encoding];
+
+        if (content_type.starts_with("multipart/form-data")) {
+            proxy_ = create_proxy_reader<form_data_body>(header_, body_);
+        }
+        else if (content_type.starts_with("application/json")) {
+            proxy_ = create_proxy_reader<json_body>(header_, body_);
+        }
+        else if (content_type.starts_with("application/x-www-form-urlencoded")) {
+            proxy_ = create_proxy_reader<query_params_body>(header_, body_);
+        }
+        else {
+            proxy_ = create_proxy_reader<string_body>(header_, body_);
+        }
+        compressor_ = compressor_factory::instance().create(content_encoding);
         if (compressor_)
             compressor_->init(compressor::mode::decode);
         proxy_->init(content_length, ec);
@@ -205,19 +217,22 @@ private:
                 }
                 else {
                     using T = detail::proxy_reader_impl<Body>;
-                    return util::object_pool<T>::instance().make_unique<detail::proxy_reader>(h, t);
+                    return util::make_pool_unique<T>(h, t);
                 }
             },
             b);
     }
 
 private:
+    http::fields& header_;
+    any_body::value_type& body_;
+
     detail::proxy_reader::ptr proxy_;
     compressor::ptr compressor_;
 };
 
 any_body::writer::writer(http::fields& h, value_type& b)
-    : impl_(std::make_unique<any_body::writer::impl>(h, b))
+    : impl_(util::make_pool_unique<any_body::writer::impl>(h, b))
 {
 }
 
@@ -236,7 +251,7 @@ any_body::writer::get(boost::system::error_code& ec)
 }
 
 any_body::reader::reader(http::fields& h, value_type& b)
-    : impl_(std::make_unique<any_body::reader::impl>(h, b))
+    : impl_(util::make_pool_unique<any_body::reader::impl>(h, b))
 {
 }
 any_body::reader::~reader()

@@ -78,7 +78,7 @@ public:
         buffer_.consume(bytes_used);
 
         http_stream variant_stream(std::move(stream_));
-        co_return util::object_pool<http_task>::instance().make_unique<task>(
+        co_return util::make_pool_unique<http_task>(
             std::move(variant_stream), std::move(buffer_), serv_);
     }
 
@@ -93,8 +93,7 @@ private:
 #endif
 
 session::session(tcp::socket&& stream, http_server_impl& serv)
-    : task_(
-          util::object_pool<detect_ssl_task>::instance().make_unique<task>(std::move(stream), serv))
+    : task_(util::make_pool_unique<detect_ssl_task>(std::move(stream), serv))
 {
 }
 
@@ -145,12 +144,12 @@ net::awaitable<session::task::ptr> session::detect_ssl_task::then()
             co_return nullptr;
         }
         if (is_ssl) {
-            co_return util::object_pool<session::ssl_handshake_task>::instance().make_unique<task>(
+            co_return util::make_pool_unique<session::ssl_handshake_task>(
                 http_stream::tls_stream(std::move(stream_), ssl_ctx), std::move(buffer), serv_);
         }
     }
 #endif
-    co_return util::object_pool<session::http_task>::instance().make_unique<task>(
+    co_return util::make_pool_unique<session::http_task>(
         http_stream(std::move(stream_)), std::move(buffer), serv_);
 }
 void session::detect_ssl_task::abort()
@@ -200,13 +199,13 @@ net::awaitable<session::task::ptr> session::http_task::then()
         // http proxy
         if (header.method() == http::verb::connect) {
             request req(local_endp, remote_endp, std::move(header_parser.release()));
-            co_return util::object_pool<http_proxy_task>::instance().make_unique<task>(
+            co_return util::make_pool_unique<http_proxy_task>(
                 std::move(stream_), std::move(req), serv_);
         }
         // websocket
         if (websocket::is_upgrade(header.base())) {
             request req(local_endp, remote_endp, std::move(header_parser.release()));
-            co_return util::object_pool<websocket_task>::instance().make_unique<task>(
+            co_return util::make_pool_unique<websocket_task>(
                 websocket_stream(std::move(stream_)), std::move(req), serv_);
         }
 

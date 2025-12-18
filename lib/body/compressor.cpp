@@ -100,18 +100,11 @@ protected:
 compressor_factory::compressor_factory()
 {
 #ifdef HTTPLIB_ENABLED_COMPRESS
-    register_compressor("gzip", []() {
-        return util::object_pool<gzip_compressor_adapter>::instance().make_unique<compressor>();
-    });
-    register_compressor("deflate", []() {
-        return util::object_pool<zlib_compressor_adapter>::instance().make_unique<compressor>();
-    });
-    register_compressor("zstd", []() {
-        return util::object_pool<zstd_compressor_adapter>::instance().make_unique<compressor>();
-    });
-    register_compressor("br", []() {
-        return util::object_pool<brotli_compressor_adapter>::instance().make_unique<compressor>();
-    });
+    register_compressor("gzip", []() { return util::make_pool_unique<gzip_compressor_adapter>(); });
+    register_compressor("deflate",
+                        []() { return util::make_pool_unique<zlib_compressor_adapter>(); });
+    register_compressor("zstd", []() { return util::make_pool_unique<zstd_compressor_adapter>(); });
+    register_compressor("br", []() { return util::make_pool_unique<brotli_compressor_adapter>(); });
 #endif
 }
 compressor_factory& compressor_factory::instance()
