@@ -13,7 +13,7 @@ public:
 
     std::string_view at(const std::string& key) const;
 
-    template<typename T>
+    template<typename T = int64_t>
     T at_number(const std::string& key) const
     {
         auto v = at(key);
@@ -28,7 +28,7 @@ public:
 
     std::vector<std::string_view> all(const std::string& key) const;
 
-    template<typename T>
+    template<typename T = int64_t>
     std::vector<T> all_number(const std::string& key) const
     {
         std::vector<T> result {};
