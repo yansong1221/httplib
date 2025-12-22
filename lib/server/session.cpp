@@ -171,14 +171,14 @@ net::awaitable<session::task::ptr> session::http_task::then()
     boost::system::error_code ec;
     auto& _router = serv_.router();
 
-    auto local_endp  = stream_.socket().local_endpoint();
-    auto remote_endp = stream_.socket().remote_endpoint();
+    auto local_endp  = stream_.socket().local_endpoint(ec);
+    auto remote_endp = stream_.socket().remote_endpoint(ec);
 
     auto log_endp_format = fmt::format("{}:{} -> {}:{}",
-                                       local_endp.address().to_string(),
+                                       remote_endp.address().to_string(),
                                        remote_endp.port(),
                                        local_endp.address().to_string(),
-                                       remote_endp.port());
+                                       local_endp.port());
 
     for (;;) {
         http::request_parser<http::empty_body> header_parser;

@@ -72,4 +72,9 @@ const query_params::container_type& query_params::params() const
     return params_;
 }
 
+void query_params::add(const std::string& key, const std::string& val)
+{
+    params_.emplace(key, val);
+}
+
 } // namespace httplib::html
