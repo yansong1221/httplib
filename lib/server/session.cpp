@@ -61,16 +61,16 @@ public:
         , stream_(std::move(stream))
         , buffer_(std::move(buffer))
     {
-        beast::get_lowest_layer(stream_).expires_after(serv_.read_timeout());
     }
-    ~ssl_handshake_task() { beast::get_lowest_layer(stream_).expires_never(); }
-
+    ~ssl_handshake_task() { }
 
     net::awaitable<task::ptr> then() override
     {
         boost::system::error_code ec;
+        beast::get_lowest_layer(stream_).expires_after(serv_.read_timeout());
         auto bytes_used = co_await stream_.async_handshake(
             ssl::stream_base::server, buffer_.data(), util::net_awaitable[ec]);
+        beast::get_lowest_layer(stream_).expires_never();
         if (ec) {
             serv_.get_logger()->trace("ssl handshake failed: {}", ec.message());
             co_return nullptr;
@@ -125,11 +125,9 @@ session::detect_ssl_task::detect_ssl_task(tcp::socket&& stream, http_server_impl
     : serv_(serv)
     , stream_(std::move(stream))
 {
-    stream_.expires_after(serv_.read_timeout());
 }
 session::detect_ssl_task::~detect_ssl_task()
 {
-    stream_.expires_never();
 }
 net::awaitable<session::task::ptr> session::detect_ssl_task::then()
 {
@@ -137,7 +135,9 @@ net::awaitable<session::task::ptr> session::detect_ssl_task::then()
 #ifdef HTTPLIB_ENABLED_SSL
     if (auto ssl_ctx = serv_.ssl_context(); ssl_ctx) {
         boost::system::error_code ec;
+        stream_.expires_after(serv_.read_timeout());
         bool is_ssl = co_await beast::async_detect_ssl(stream_, buffer, util::net_awaitable[ec]);
+        stream_.expires_never();
         if (ec) {
             serv_.get_logger()->trace("async_detect_ssl failed: {}", ec.message());
             co_return nullptr;
