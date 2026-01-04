@@ -128,7 +128,6 @@ http_client::impl::async_send_request_impl(http_client::request& req)
             stream_ = std::make_unique<http_stream>(executor_, host_, use_ssl_);
         }
 
-        tcp::resolver::results_type results;
         boost::system::error_code ec;
         auto addr = net::ip::make_address(host_, ec);
         if (!ec) {
