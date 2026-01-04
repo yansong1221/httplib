@@ -37,16 +37,13 @@ bool query_params::decode(std::string_view content)
     for (const auto& item : util::split(content, "&")) {
         auto key_val = util::split(item, "=");
 
-        std::string key;
-        std::string val;
-
         if (key_val.size() == 1) {
-            key = util::url_decode(key_val[0]);
-            params_.emplace(key, val);
+            auto key = util::url_decode(key_val[0]);
+            params_.emplace(key, std::string {});
         }
         else if (key_val.size() == 2) {
-            key = util::url_decode(key_val[0]);
-            val = util::url_decode(key_val[1]);
+            auto key = util::url_decode(key_val[0]);
+            auto val = util::url_decode(key_val[1]);
             params_.emplace(key, val);
         }
     }

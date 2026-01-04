@@ -127,11 +127,20 @@ http_client::impl::async_send_request_impl(http_client::request& req)
             std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
             stream_ = std::make_unique<http_stream>(executor_, host_, use_ssl_);
         }
-        auto endpoints =
-            co_await resolver_.async_resolve(host_, std::to_string(port_), net::use_awaitable);
 
-        expires_after(true);
-        co_await stream_->async_connect(endpoints);
+        tcp::resolver::results_type results;
+        boost::system::error_code ec;
+        auto addr = net::ip::make_address(host_, ec);
+        if (!ec) {
+            expires_after(true);
+            co_await stream_->async_connect(tcp::endpoint(addr, port_));
+        }
+        else {
+            auto endpoints =
+                co_await resolver_.async_resolve(host_, std::to_string(port_), net::use_awaitable);
+            expires_after(true);
+            co_await stream_->async_connect(endpoints);
+        }
     }
 
     http::request_serializer<body::any_body> serializer(req);
