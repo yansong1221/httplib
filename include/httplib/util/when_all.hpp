@@ -62,6 +62,9 @@ auto wrap_awaitable(
 template<typename ReturnType>
 net::awaitable<std::vector<ReturnType>> when_all(std::vector<net::awaitable<ReturnType>>&& ops)
 {
+    if (ops.empty())
+        co_return std::vector<ReturnType> {};
+
     auto executor = co_await net::this_coro::executor;
 
     using op_type = decltype(detail::wrap_awaitable(executor, std::move(ops.front())));
@@ -79,6 +82,9 @@ net::awaitable<std::vector<ReturnType>> when_all(std::vector<net::awaitable<Retu
 
 static net::awaitable<void> when_all(std::vector<net::awaitable<void>>&& ops)
 {
+    if (ops.empty())
+        co_return;
+
     auto executor = co_await net::this_coro::executor;
 
     using op_type = decltype(detail::wrap_awaitable(executor, std::move(ops.front())));
