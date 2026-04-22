@@ -26,6 +26,9 @@ public:
         return out;
     }
 
+    bool at_bool(const std::string& key) const;
+
+
     std::vector<std::string_view> all(const std::string& key) const;
 
     template<typename T = int64_t>
@@ -49,6 +52,7 @@ public:
     {
         add(key, std::to_string(val));
     }
+    void add(const std::string& key, bool val);
 
     bool exists(const std::string& key) const;
     bool empty() const;

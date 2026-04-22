@@ -78,4 +78,19 @@ void query_params::add(const std::string& key, const std::string& val)
     params_.emplace(key, val);
 }
 
+void query_params::add(const std::string& key, bool val)
+{
+    add(key, val ? "true" : "false");
+}
+
+bool query_params::at_bool(const std::string& key) const
+{
+    auto v = at(key);
+    if (v == "true" || v == "1")
+        return true;
+    if (v == "false" || v == "0")
+        return false;
+    throw std::runtime_error("invalid param: " + key);
+}
+
 } // namespace httplib::html
