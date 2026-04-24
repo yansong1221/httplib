@@ -73,7 +73,13 @@ httplib::net::awaitable<void> websocket_conn_impl::run()
         co_return;
     }
 
-    co_await entry->open_handler(weak_from_this());
+    try {
+        co_await entry->open_handler(weak_from_this());
+    }
+    catch (const std::exception& e) {
+        serv_.get_logger()->error("websocket open handler failed: {}", e.what());
+        co_return;
+    }
 
     serv_.get_logger()->debug(
         "websocket new connection: [{}:{}]", remote_endp.address().to_string(), remote_endp.port());
@@ -87,13 +93,21 @@ httplib::net::awaitable<void> websocket_conn_impl::run()
                                       remote_endp.port(),
                                       ec.message());
             ac_que_.shutdown();
-
-            co_await entry->close_handler(weak_from_this());
+            try {
+                co_await entry->close_handler(weak_from_this());
+            }
+            catch (const std::exception& e) {
+                serv_.get_logger()->error("websocket close handler failed: {}", e.what());
+            }
             co_return;
         }
-        co_await entry->message_handler(
-            weak_from_this(), util::buffer_to_string_view(buffer_.data()), ws_.got_binary());
-
+        try {
+            co_await entry->message_handler(
+                weak_from_this(), util::buffer_to_string_view(buffer_.data()), ws_.got_binary());
+        }
+        catch (const std::exception& e) {
+            serv_.get_logger()->error("websocket message handler failed: {}", e.what());
+        }
         buffer_.consume(bytes);
     }
 }
