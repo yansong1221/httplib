@@ -63,6 +63,11 @@ void http_server_impl::stop()
 {
     boost::system::error_code ec;
     acceptor_.close(ec);
+    {
+        std::lock_guard lck(session_mutex_);
+        for (const auto& v : session_map_)
+            v->abort();
+    }
 }
 
 router_impl& http_server_impl::router()

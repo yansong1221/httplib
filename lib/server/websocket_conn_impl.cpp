@@ -56,6 +56,9 @@ void websocket_conn_impl::close()
         boost::system::error_code ec;
         websocket::close_reason reason("normal");
         co_await ws_.async_close(reason, util::net_awaitable[ec]);
+
+        ws_.socket().shutdown(net::socket_base::shutdown_both,ec);
+        ws_.socket().close(ec);
     });
 }
 httplib::net::awaitable<void> websocket_conn_impl::run()

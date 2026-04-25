@@ -24,7 +24,7 @@ public:
 
     void push(act_t&& handler)
     {
-        net::dispatch(strand_, [this, handler = std::move(handler)]() mutable {
+        net::post(strand_, [this, handler = std::move(handler)]() mutable {
             if (abort_)
                 return;
 
@@ -40,7 +40,7 @@ public:
     }
     void clear()
     {
-        net::dispatch(strand_, [this]() mutable {
+        net::post(strand_, [this]() mutable {
             if (abort_)
                 return;
             std::queue<act_t> empty;
@@ -49,7 +49,7 @@ public:
     }
     void shutdown()
     {
-        net::dispatch(strand_, [this]() mutable {
+        net::post(strand_, [this]() mutable {
             if (abort_)
                 return;
             abort_ = true;
