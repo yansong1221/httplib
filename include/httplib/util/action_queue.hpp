@@ -38,6 +38,15 @@ public:
             }
         });
     }
+    void clear()
+    {
+        net::dispatch(strand_, [this]() mutable {
+            if (abort_)
+                return;
+            std::queue<act_t> empty;
+            std::swap(que_, empty);
+        });
+    }
     void shutdown()
     {
         net::dispatch(strand_, [this]() mutable {

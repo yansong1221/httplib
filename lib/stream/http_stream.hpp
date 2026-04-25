@@ -42,7 +42,7 @@ public:
     auto async_read_some(const MutableBufferSequence& buffers, ReadHandler&& handler)
     {
         return std::visit(
-            [&, handler = std::move(handler)](auto& t) mutable {
+            [&, handler = std::forward<ReadHandler>(handler)](auto& t) mutable {
                 return t.async_read_some(buffers, std::forward<ReadHandler>(handler));
             },
             stream_);
@@ -51,7 +51,7 @@ public:
     auto async_write_some(const ConstBufferSequence& buffers, WriteHandler&& handler)
     {
         return std::visit(
-            [&, handler = std::move(handler)](auto& t) mutable {
+            [&, handler = std::forward<WriteHandler>(handler)](auto& t) mutable {
                 return t.async_write_some(buffers, std::forward<WriteHandler>(handler));
             },
             stream_);

@@ -38,7 +38,7 @@ public:
     auto async_accept(Header const& req, AcceptHandler&& handler)
     {
         return std::visit(
-            [&, handler = std::move(handler)](auto& t) mutable {
+            [&, handler = std::forward<AcceptHandler>(handler)](auto& t) mutable {
                 return t.async_accept(req, std::forward<AcceptHandler>(handler));
             },
             stream_);
@@ -47,7 +47,7 @@ public:
     auto async_handshake(std::string_view host, std::string_view target, HandshakeHandler&& handler)
     {
         return std::visit(
-            [&, handler = std::move(handler)](auto& t) mutable {
+            [&, handler = std::forward<HandshakeHandler>(handler)](auto& t) mutable {
                 return t.async_handshake(host, target, std::forward<HandshakeHandler>(handler));
             },
             stream_);
@@ -63,7 +63,7 @@ public:
     auto async_read(DynamicBuffer& buffer, ReadHandler&& handler)
     {
         return std::visit(
-            [&, handler = std::move(handler)](auto& t) mutable {
+            [&, handler = std::forward<ReadHandler>(handler)](auto& t) mutable {
                 return t.async_read(buffer, std::forward<ReadHandler>(handler));
             },
             stream_);
@@ -72,7 +72,7 @@ public:
     auto async_write(ConstBufferSequence const& bs, WriteHandler&& handler)
     {
         return std::visit(
-            [&, handler = std::move(handler)](auto& t) mutable {
+            [&, handler = std::forward<WriteHandler>(handler)](auto& t) mutable {
                 return t.async_write(bs, std::forward<WriteHandler>(handler));
             },
             stream_);
@@ -81,7 +81,7 @@ public:
     auto async_close(beast::websocket::close_reason const& cr, CloseHandler&& handler)
     {
         return std::visit(
-            [&, handler = std::move(handler)](auto& t) mutable {
+            [&, handler = std::forward<CloseHandler>(handler)](auto& t) mutable {
                 return t.async_close(cr, std::forward<CloseHandler>(handler));
             },
             stream_);
@@ -90,11 +90,21 @@ public:
     auto async_ping(beast::websocket::ping_data const& payload, PingHandler&& handler)
     {
         return std::visit(
-            [&, handler = std::move(handler)](auto& t) mutable {
+            [&, handler = std::forward<PingHandler>(handler)](auto& t) mutable {
                 return t.async_ping(payload, std::forward<PingHandler>(handler));
             },
             stream_);
     }
+    template<class PongHandler>
+    auto async_pong(beast::websocket::ping_data const& payload, PongHandler&& handler)
+    {
+        return std::visit(
+            [&, handler = std::forward<PongHandler>(handler)](auto& t) mutable {
+                return t.async_pong(payload, std::forward<PongHandler>(handler));
+            },
+            stream_);
+    }
+
     bool got_binary() const noexcept
     {
         return std::visit([&](auto& t) mutable { return t.got_binary(); }, stream_);

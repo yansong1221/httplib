@@ -1,6 +1,7 @@
 
 #include "httplib/client/client.hpp"
 #include "httplib/client/multi_client_pool.hpp"
+#include "httplib/client/ws_client.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
@@ -11,7 +12,6 @@
 #include <format>
 #include <iostream>
 #include <spdlog/spdlog.h>
-
 
 using namespace std::string_view_literals;
 
@@ -216,6 +216,17 @@ int main(int argc, char** argv)
     router.set_static_mount_point("/files", "./", log_t {});
     svr.async_run();
 
+    httplib::client::ws_client ws(pool.get_executor(), "127.0.0.1", 18808);
+
+    ws.set_handler(
+        [&](const boost::system::error_code& ec) {
+            spdlog::info("ws open: {}", ec.message());
+            if (!ec)
+                ws.send("hello ws server");
+        },
+        [](std::string_view msg, bool binary) { spdlog::info("msg: {}", msg); },
+        []() { spdlog::info("ws close"); });
+    ws.async_run("/ws");
     // Run the I/O service on the requested number of threads
     pool.wait();
 }
