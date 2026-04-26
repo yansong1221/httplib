@@ -1,6 +1,7 @@
 #include "ws_client_impl.h"
 #include "helper.hpp"
 #include "httplib/util/misc.hpp"
+#include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/beast/core/buffers_to_string.hpp>
 #include <spdlog/spdlog.h>
 
@@ -165,9 +166,16 @@ httplib::net::awaitable<boost::system::error_code> ws_client::impl::async_close(
         co_return boost::system::errc::make_error_code(boost::system::errc::not_connected);
     }
 
+    using namespace boost::asio::experimental::awaitable_operators;
+    using namespace std::chrono_literals;
+
+    boost::asio::steady_timer timer(co_await boost::asio::this_coro::executor);
+    timer.expires_after(5s);
+
     boost::system::error_code ec;
     websocket::close_reason reason("normal");
-    co_await stream_->async_close(reason, util::net_awaitable[ec]);
+    co_await (stream_->async_close(reason, util::net_awaitable[ec]) ||
+              timer.async_wait(util::net_awaitable[ec]));
     if (!ec)
         co_return ec;
 

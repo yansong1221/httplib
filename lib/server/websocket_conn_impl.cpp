@@ -1,6 +1,7 @@
 #include "websocket_conn_impl.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
+#include <boost/asio/experimental/awaitable_operators.hpp>
 #include <spdlog/spdlog.h>
 
 namespace httplib::server {
@@ -52,12 +53,21 @@ void websocket_conn_impl::close()
     if (!ws_.is_open())
         return;
 
+
+    ac_que_.clear();
     ac_que_.push([this, self = shared_from_this()]() -> net::awaitable<void> {
+        using namespace boost::asio::experimental::awaitable_operators;
+        using namespace std::chrono_literals;
+
+        boost::asio::steady_timer timer(co_await boost::asio::this_coro::executor);
+        timer.expires_after(5s);
+
         boost::system::error_code ec;
         websocket::close_reason reason("normal");
-        co_await ws_.async_close(reason, util::net_awaitable[ec]);
+        co_await (ws_.async_close(reason, util::net_awaitable[ec]) ||
+                  timer.async_wait(util::net_awaitable[ec]));
 
-        ws_.socket().shutdown(net::socket_base::shutdown_both,ec);
+        ws_.socket().shutdown(net::socket_base::shutdown_both, ec);
         ws_.socket().close(ec);
     });
 }
