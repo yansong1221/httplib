@@ -52,7 +52,7 @@ public:
     {
         add(key, std::to_string(val));
     }
-    void add(const std::string& key, bool val);
+    void add_bool(const std::string& key, bool val);
 
     bool exists(const std::string& key) const;
     bool empty() const;

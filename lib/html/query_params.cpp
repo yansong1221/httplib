@@ -78,7 +78,7 @@ void query_params::add(const std::string& key, const std::string& val)
     params_.emplace(key, val);
 }
 
-void query_params::add(const std::string& key, bool val)
+void query_params::add_bool(const std::string& key, bool val)
 {
     params_.emplace(key, val ? "true" : "false");
 }

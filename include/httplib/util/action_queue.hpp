@@ -12,6 +12,7 @@
 #include <functional>
 #include <memory>
 #include <queue>
+#include <spdlog/spdlog.h>
 
 namespace httplib::util {
 class action_queue : public std::enable_shared_from_this<action_queue>
@@ -21,52 +22,50 @@ class action_queue : public std::enable_shared_from_this<action_queue>
 public:
     void push(act_t&& handler)
     {
-        net::dispatch(
-            strand_, [this, self = shared_from_this(), handler = std::move(handler)]() mutable {
-                if (shutdowning_)
-                    return;
+        if (shutdowning_)
+            return;
 
-                que_.push(std::move(handler));
-                if (!running_) {
-                    running_ = true;
-                    net::co_spawn(
-                        strand_.get_inner_executor(),
-                        perform(),
-                        boost::asio::bind_cancellation_slot(cs_.slot(), [](std::exception_ptr e) {
-                            if (e) {
-                                std::rethrow_exception(e);
-                            }
-                        }));
-                }
-            });
+        std::unique_lock<std::mutex> lck(que_mutex_);
+        que_.push(std::move(handler));
+
+        if (!running_) {
+            running_ = true;
+            lck.unlock();
+
+            net::co_spawn(executor_,
+                          perform(),
+                          boost::asio::bind_cancellation_slot(cs_.slot(), [](std::exception_ptr e) {
+                              if (e) {
+                                  std::rethrow_exception(e);
+                              }
+                          }));
+        }
     }
     void clear()
     {
-        net::dispatch(strand_, [this, self = shared_from_this()]() mutable {
-            std::queue<act_t> empty;
-            std::swap(que_, empty);
-        });
+        std::unique_lock<std::mutex> lck(que_mutex_);
+        std::queue<act_t> empty;
+        std::swap(que_, empty);
     }
-    void shutdown()
+    void shutdown(bool cancel_signal = true)
     {
-        clear();
-        net::dispatch(strand_, [this, self = shared_from_this()]() mutable {
-            if (shutdowning_)
-                return;
-            shutdowning_ = true;
+        if (shutdowning_)
+            return;
+
+        shutdowning_ = true;
+        if (cancel_signal)
             cs_.emit(boost::asio::cancellation_type::all);
-        });
     }
 
 protected:
     action_queue(const net::any_io_executor& executor)
-        : strand_(executor)
+        : executor_(executor)
     {
     }
     ~action_queue() { }
 
 public:
-    static std::shared_ptr<httplib::util::action_queue> create(const net::any_io_executor& executor)
+    static std::shared_ptr<action_queue> create(const net::any_io_executor& executor)
     {
         struct make_shared_enabler : public action_queue
         {
@@ -75,7 +74,7 @@ public:
             {
             }
         };
-       return std::make_shared<make_shared_enabler>(executor);
+        return std::make_shared<make_shared_enabler>(executor);
     }
 
 private:
@@ -84,7 +83,7 @@ private:
         auto self = shared_from_this();
 
         for (;;) {
-            co_await net::dispatch(strand_);
+            std::unique_lock<std::mutex> lck(que_mutex_);
             if (que_.empty()) {
                 running_ = false;
                 co_return;
@@ -92,17 +91,20 @@ private:
 
             auto handler = std::move(que_.front());
             que_.pop();
+            lck.unlock();
 
-            co_await net::dispatch(strand_.get_inner_executor());
             co_await handler();
         }
     }
 
 private:
-    net::strand<net::any_io_executor> strand_;
+    net::any_io_executor executor_;
+
+    mutable std::mutex que_mutex_;
     std::queue<act_t> que_;
-    bool running_     = false;
-    bool shutdowning_ = false;
+
+    bool running_                 = false;
+    std::atomic_bool shutdowning_ = false;
     boost::asio::cancellation_signal cs_;
 };
 } // namespace httplib::util
