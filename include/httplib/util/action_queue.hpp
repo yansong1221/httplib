@@ -12,7 +12,6 @@
 #include <functional>
 #include <memory>
 #include <queue>
-#include <spdlog/spdlog.h>
 
 namespace httplib::util {
 class action_queue : public std::enable_shared_from_this<action_queue>
