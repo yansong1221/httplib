@@ -56,7 +56,7 @@ class session::ssl_handshake_task : public session::task
 public:
     explicit ssl_handshake_task(http_stream::tls_stream&& stream,
                                 beast::flat_buffer&& buffer,
-                                http_server_impl& serv)
+                                http_server::impl& serv)
         : serv_(serv)
         , stream_(std::move(stream))
         , buffer_(std::move(buffer))
@@ -85,13 +85,13 @@ public:
     void abort() override { stream_.shutdown(); }
 
 private:
-    http_server_impl& serv_;
+    http_server::impl& serv_;
     http_stream::tls_stream stream_;
     beast::flat_buffer buffer_;
 };
 #endif
 
-session::session(tcp::socket&& stream, http_server_impl& serv)
+session::session(tcp::socket&& stream, http_server::impl& serv)
     : task_(std::make_unique<detect_ssl_task>(std::move(stream), serv))
 {
 }
@@ -121,7 +121,7 @@ httplib::net::awaitable<void> session::run()
     co_return;
 }
 
-session::detect_ssl_task::detect_ssl_task(tcp::socket&& stream, http_server_impl& serv)
+session::detect_ssl_task::detect_ssl_task(tcp::socket&& stream, http_server::impl& serv)
     : serv_(serv)
     , stream_(std::move(stream))
 {
@@ -158,7 +158,7 @@ void session::detect_ssl_task::abort()
 
 session::http_task::http_task(http_stream&& stream,
                               beast::flat_buffer&& buffer,
-                              http_server_impl& serv)
+                              http_server::impl& serv)
     : serv_(serv)
     , buffer_(std::move(buffer))
     , stream_(std::move(stream))
@@ -358,7 +358,7 @@ net::awaitable<bool> session::http_task::async_write(const request& req, respons
 
 session::websocket_task::websocket_task(websocket_stream&& stream,
                                         request&& req,
-                                        http_server_impl& serv)
+                                        http_server::impl& serv)
     : conn_(std::make_shared<websocket_conn_impl>(serv, std::move(stream), std::move(req)))
 {
 }
@@ -376,7 +376,7 @@ void session::websocket_task::abort()
 
 session::http_proxy_task::http_proxy_task(http_stream&& stream,
                                           request&& req,
-                                          http_server_impl& serv)
+                                          http_server::impl& serv)
     : stream_(std::move(stream))
     , req_(std::move(req))
     , serv_(serv)

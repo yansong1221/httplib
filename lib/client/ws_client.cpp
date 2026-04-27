@@ -15,7 +15,7 @@ ws_client::ws_client(const net::any_io_executor& ex,
                      std::string_view host,
                      uint16_t port,
                      bool ssl /*= false*/)
-    : impl_(std::make_unique<ws_client::impl>(ex, host, port, ssl))
+    : impl_(std::make_shared<ws_client::impl>(ex, host, port, ssl))
 {
 }
 ws_client::~ws_client()

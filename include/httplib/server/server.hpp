@@ -2,8 +2,8 @@
 #include "httplib/config.hpp"
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
-#include <boost/asio/socket_base.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/socket_base.hpp>
 #include <filesystem>
 #include <span>
 
@@ -11,13 +11,12 @@ namespace httplib::server {
 
 class router;
 class session;
-class http_server_impl;
 
 
 class http_server
 {
 public:
-    struct setting;
+    class impl;
 
 public:
     explicit http_server(net::io_context& ioc);
@@ -53,6 +52,9 @@ public:
     void use_ssl_file(const fs::path& cert_file, const fs::path& key_file, std::string passwd = {});
 
 private:
-    std::unique_ptr<http_server_impl> impl_;
+    http_server(const http_server&)            = delete;
+    http_server& operator=(const http_server&) = delete;
+
+    std::shared_ptr<impl> impl_;
 };
 } // namespace httplib::server

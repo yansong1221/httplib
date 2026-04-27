@@ -1,6 +1,7 @@
 #pragma once
 #include "httplib/config.hpp"
 #include "httplib/server/helper.hpp"
+#include "httplib/util/misc.hpp"
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/io_context.hpp>
@@ -45,9 +46,9 @@ public:
                      CloseFunc&& close_handler)
     {
         set_handler_impl(
-            httplib::server::helper::make_coro_handler(std::forward<OpenFunc>(open_handler)),
-            httplib::server::helper::make_coro_handler(std::forward<MessageFunc>(message_handler)),
-            httplib::server::helper::make_coro_handler(std::forward<CloseFunc>(close_handler)));
+            httplib::util::make_coro_handler(std::forward<OpenFunc>(open_handler)),
+            httplib::util::make_coro_handler(std::forward<MessageFunc>(message_handler)),
+            httplib::util::make_coro_handler(std::forward<CloseFunc>(close_handler)));
     }
 
 private:
@@ -62,7 +63,10 @@ private:
                           coro_close_handler_type&& close_handler);
 
 private:
+    ws_client(const ws_client&)            = delete;
+    ws_client& operator=(const ws_client&) = delete;
+
     class impl;
-    std::unique_ptr<impl> impl_;
+    std::shared_ptr<impl> impl_;
 };
 } // namespace httplib::client

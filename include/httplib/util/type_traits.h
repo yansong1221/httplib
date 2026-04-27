@@ -1,4 +1,5 @@
 #pragma once
+#include <boost/asio/awaitable.hpp>
 #include <functional>
 #include <memory>
 
@@ -225,4 +226,9 @@ struct is_specialization<Ref<Args...>, Ref> : std::true_type
 template<typename Test, template<typename...> class Ref>
 inline constexpr bool is_specialization_v = is_specialization<Test, Ref>::value;
 
-} // namespace util
+
+template<typename T>
+constexpr inline bool is_awaitable_v =
+    is_specialization_v<std::remove_cvref_t<T>, boost::asio::awaitable>;
+
+} // namespace httplib::util

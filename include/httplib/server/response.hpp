@@ -3,6 +3,7 @@
 #include "httplib/config.hpp"
 #include "httplib/html/form_data.hpp"
 #include "httplib/server/helper.hpp"
+#include "httplib/util/misc.hpp"
 #include <boost/beast/http/fields.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/json/value.hpp>
@@ -11,7 +12,7 @@
 
 namespace httplib::server {
 
-struct response : public http::response<body::any_body>
+class response : public http::response<body::any_body>
 {
 public:
     using http::response<body::any_body>::message;
@@ -47,7 +48,7 @@ public:
                             std::string_view content_type,
                             http::status status = http::status::ok)
     {
-        auto handler = helper::make_coro_handler(std::move(func));
+        auto handler = util::make_coro_handler(std::move(func));
         set_stream_content_impl(std::move(handler), content_type, status);
     }
 

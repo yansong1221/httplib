@@ -29,7 +29,7 @@ http_server::http_server(net::io_context& ioc)
 }
 
 http_server::http_server(const net::any_io_executor& ex)
-    : impl_(std::make_unique<http_server_impl>(ex))
+    : impl_(std::make_shared<impl>(ex))
 {
 }
 

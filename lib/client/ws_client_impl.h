@@ -6,7 +6,7 @@
 #include <boost/system/result.hpp>
 
 namespace httplib::client {
-class ws_client::impl
+class ws_client::impl : public std::enable_shared_from_this<impl>
 {
 public:
     impl(const net::any_io_executor& ex, std::string_view host, uint16_t port, bool ssl);
@@ -49,7 +49,7 @@ private:
     std::shared_ptr<websocket_stream> stream_;
 
     beast::flat_buffer buffer_;
-    std::shared_ptr<util::action_queue> ac_que_;
+    util::action_queue ac_que_;
 
     ws_client::coro_open_handler_type open_handler_;
     ws_client::coro_message_handler_type message_handler_;

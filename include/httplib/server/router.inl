@@ -7,7 +7,7 @@ namespace httplib::server {
 template<typename Func, typename... Aspects>
 router::coro_http_handler_type router::make_coro_http_handler(Func&& handler, Aspects&&... asps)
 {
-    auto coro_handler = helper::make_coro_handler(std::forward<Func>(handler));
+    auto coro_handler = util::make_coro_handler(std::forward<Func>(handler));
 
 
     if constexpr (sizeof...(Aspects) > 0) {
@@ -63,9 +63,8 @@ void router::set_http_handler(std::string_view key,
 {
     using return_type = typename util::function_traits<Func>::return_type;
 
-    using handler_type = std::conditional_t<helper::is_awaitable_v<return_type>,
-                                            coro_http_handler_type,
-                                            http_handler_type>;
+    using handler_type = std::
+        conditional_t<util::is_awaitable_v<return_type>, coro_http_handler_type, http_handler_type>;
 
     handler_type f = std::bind(handler, &owner, std::placeholders::_1, std::placeholders::_2);
     set_http_handler<method...>(key, std::move(f), std::forward<Aspects>(asps)...);
@@ -85,9 +84,9 @@ void router::set_ws_handler(std::string_view key,
                             CloseFunc&& close_handler)
 {
     set_ws_handler_impl(key,
-                        helper::make_coro_handler(std::forward<OpenFunc>(open_handler)),
-                        helper::make_coro_handler(std::forward<MessageFunc>(message_handler)),
-                        helper::make_coro_handler(std::forward<CloseFunc>(close_handler)));
+                        util::make_coro_handler(std::forward<OpenFunc>(open_handler)),
+                        util::make_coro_handler(std::forward<MessageFunc>(message_handler)),
+                        util::make_coro_handler(std::forward<CloseFunc>(close_handler)));
 }
 
 template<typename... Aspects>
@@ -116,7 +115,7 @@ void router::set_static_mount_point(mount_point_entry&& entry, Aspects&&... asps
 template<typename Func>
 void router::set_http_post_handler(Func&& handler)
 {
-    auto coro_handler = helper::make_coro_handler(std::forward<Func>(handler));
+    auto coro_handler = util::make_coro_handler(std::forward<Func>(handler));
     set_http_post_handler_impl(std::move(coro_handler));
 }
 

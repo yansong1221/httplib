@@ -11,7 +11,7 @@
 
 namespace httplib::server {
 
-http_server_impl::http_server_impl(const net::any_io_executor& ex)
+http_server::impl::impl(const net::any_io_executor& ex)
     : ex_(ex)
     , acceptor_(ex)
 {
@@ -21,9 +21,9 @@ http_server_impl::http_server_impl(const net::any_io_executor& ex)
     default_logger_->set_level(spdlog::level::info);
 }
 
-void http_server_impl::listen(std::string_view host,
-                              uint16_t port,
-                              int backlog /*= net::socket_base::max_listen_connections*/)
+void http_server::impl::listen(std::string_view host,
+                               uint16_t port,
+                               int backlog /*= net::socket_base::max_listen_connections*/)
 {
     tcp::resolver resolver(ex_);
     auto results = resolver.resolve(host, std::to_string(port));
@@ -38,16 +38,16 @@ void http_server_impl::listen(std::string_view host,
         "Http Server Listen on: [{}:{}]", listen_endp.address().to_string(), listen_endp.port());
 }
 
-net::any_io_executor http_server_impl::get_executor() noexcept
+net::any_io_executor http_server::impl::get_executor() noexcept
 {
     return ex_;
 }
 
-void http_server_impl::async_run()
+void http_server::impl::async_run()
 {
     net::co_spawn(
         ex_,
-        [this]() -> net::awaitable<void> { co_await co_run(); },
+        [this, self = shared_from_this()]() -> net::awaitable<void> { co_await co_run(); },
         [](std::exception_ptr ex) {
             // if an exception occurred in the coroutine,
             // it's something critical, e.g. out of memory
@@ -59,7 +59,7 @@ void http_server_impl::async_run()
         });
 }
 
-void http_server_impl::stop()
+void http_server::impl::stop()
 {
     boost::system::error_code ec;
     acceptor_.close(ec);
@@ -70,12 +70,12 @@ void http_server_impl::stop()
     }
 }
 
-router_impl& http_server_impl::router()
+router_impl& http_server::impl::router()
 {
     return router_;
 }
 
-net::awaitable<boost::system::error_code> http_server_impl::co_run()
+net::awaitable<boost::system::error_code> http_server::impl::co_run()
 {
     std::vector<net::awaitable<boost::system::error_code>> ops;
     for (int i = 0; i < 32; ++i)
@@ -94,7 +94,7 @@ net::awaitable<boost::system::error_code> http_server_impl::co_run()
 
     co_return boost::system::error_code {};
 }
-net::awaitable<boost::system::error_code> http_server_impl::co_accept()
+net::awaitable<boost::system::error_code> http_server::impl::co_accept()
 {
     boost::system::error_code ec;
     for (;;) {
@@ -119,7 +119,7 @@ net::awaitable<boost::system::error_code> http_server_impl::co_accept()
     get_logger()->trace("async_accept: {}", ec.message());
     co_return ec;
 }
-net::awaitable<void> http_server_impl::handle_accept(tcp::socket sock)
+net::awaitable<void> http_server::impl::handle_accept(tcp::socket sock)
 {
     auto remote_endp = sock.remote_endpoint();
     auto local_endp  = sock.local_endpoint();
@@ -148,47 +148,47 @@ net::awaitable<void> http_server_impl::handle_accept(tcp::socket sock)
         "close connection [{}:{}]", remote_endp.address().to_string(), remote_endp.port());
 }
 
-void http_server_impl::set_read_timeout(const std::chrono::steady_clock::duration& dur)
+void http_server::impl::set_read_timeout(const std::chrono::steady_clock::duration& dur)
 {
     read_timeout_ = dur;
 }
 
-void http_server_impl::set_write_timeout(const std::chrono::steady_clock::duration& dur)
+void http_server::impl::set_write_timeout(const std::chrono::steady_clock::duration& dur)
 {
     write_timeout_ = dur;
 }
 
-const std::chrono::steady_clock::duration& http_server_impl::read_timeout() const
+const std::chrono::steady_clock::duration& http_server::impl::read_timeout() const
 {
     return read_timeout_;
 }
 
-const std::chrono::steady_clock::duration& http_server_impl::write_timeout() const
+const std::chrono::steady_clock::duration& http_server::impl::write_timeout() const
 {
     return write_timeout_;
 }
 
-tcp::endpoint http_server_impl::local_endpoint() const
+tcp::endpoint http_server::impl::local_endpoint() const
 {
     boost::system::error_code ec;
     return acceptor_.local_endpoint(ec);
 }
 
-std::shared_ptr<spdlog::logger> http_server_impl::get_logger() const
+std::shared_ptr<spdlog::logger> http_server::impl::get_logger() const
 {
     if (custom_logger_)
         return custom_logger_;
     return default_logger_;
 }
 
-void http_server_impl::set_logger(std::shared_ptr<spdlog::logger> logger)
+void http_server::impl::set_logger(std::shared_ptr<spdlog::logger> logger)
 {
     custom_logger_ = logger;
 }
 
-void http_server_impl::use_ssl(const net::const_buffer& cert_file,
-                               const net::const_buffer& key_file,
-                               std::string passwd /*= {}*/)
+void http_server::impl::use_ssl(const net::const_buffer& cert_file,
+                                const net::const_buffer& key_file,
+                                std::string passwd /*= {}*/)
 {
 #ifdef HTTPLIB_ENABLED_SSL
     unsigned long ssl_options =

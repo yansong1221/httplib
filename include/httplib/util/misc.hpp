@@ -1,5 +1,6 @@
 #pragma once
 #include "httplib/config.hpp"
+#include "httplib/util/type_traits.h"
 #include <boost/algorithm/string/trim.hpp>
 #include <boost/asio/buffer.hpp>
 #include <boost/beast/http/error.hpp>
@@ -9,6 +10,22 @@
 #include <sstream>
 
 namespace httplib::util {
+
+template<typename Func>
+static inline auto make_coro_handler(Func&& handler)
+{
+    using return_type =
+        typename util::function_traits<std::decay_t<decltype(handler)>>::return_type;
+    if constexpr (is_awaitable_v<return_type>) {
+        return std::forward<Func>(handler);
+    }
+    else {
+        return
+            [handler = std::forward<Func>(handler)](auto&&... args) -> net::awaitable<return_type> {
+                co_return std::invoke(handler, args...);
+            };
+    }
+}
 /**
  * Convert a hex value to a decimal value.
  *

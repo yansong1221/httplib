@@ -16,11 +16,11 @@
 #include <unordered_set>
 
 namespace httplib::server {
-class http_server_impl
+class http_server::impl : public std::enable_shared_from_this<impl>
 {
 public:
-    explicit http_server_impl(const net::any_io_executor& ex);
-    ~http_server_impl() = default;
+    explicit impl(const net::any_io_executor& ex);
+    ~impl() = default;
 
 public:
     net::any_io_executor get_executor() noexcept;

@@ -7,7 +7,7 @@
 
 namespace httplib::server {
 
-struct request : public http::request<body::any_body>
+class request : public http::request<body::any_body>
 {
 public:
     request(const tcp::endpoint& local_endpoint,
