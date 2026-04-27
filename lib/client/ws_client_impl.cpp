@@ -15,7 +15,7 @@ ws_client::impl::impl(const net::any_io_executor& ex,
     , host_(host)
     , port_(port)
     , use_ssl_(ssl)
-    , ac_que_(ex)
+    , ac_que_(util::action_queue::create(ex))
 {
 }
 
@@ -94,7 +94,7 @@ ws_client::impl::async_send(std::string&& data, bool binary /*= false*/)
 
 void ws_client::impl::send(std::string&& data, bool binary /*= false*/)
 {
-    ac_que_.push([this, data = std::move(data), binary]() mutable -> net::awaitable<void> {
+    ac_que_->push([this, data = std::move(data), binary]() mutable -> net::awaitable<void> {
         auto ec = co_await async_send(std::move(data), binary);
         if (ec) {
             spdlog::error("Failed to send message: {}", ec.message());
@@ -103,8 +103,8 @@ void ws_client::impl::send(std::string&& data, bool binary /*= false*/)
 }
 void ws_client::impl::close()
 {
-    ac_que_.clear();
-    ac_que_.push([this]() mutable -> net::awaitable<void> {
+    ac_que_->clear();
+    ac_que_->push([this]() mutable -> net::awaitable<void> {
         auto ec = co_await async_close();
         if (ec) {
             spdlog::error("Failed to close: {}", ec.message());

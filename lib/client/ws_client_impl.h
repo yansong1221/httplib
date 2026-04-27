@@ -49,7 +49,7 @@ private:
     std::shared_ptr<websocket_stream> stream_;
 
     beast::flat_buffer buffer_;
-    util::action_queue ac_que_;
+    std::shared_ptr<util::action_queue> ac_que_;
 
     ws_client::coro_open_handler_type open_handler_;
     ws_client::coro_message_handler_type message_handler_;

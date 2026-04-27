@@ -13,7 +13,7 @@ websocket_conn_impl::websocket_conn_impl(http_server_impl& serv,
     : serv_(serv)
     , req_(std::move(req))
     , ws_(std::move(stream))
-    , ac_que_(serv.get_executor())
+    , ac_que_(util::action_queue::create(serv.get_executor()))
 {
 }
 websocket_conn_impl::~websocket_conn_impl()
@@ -25,7 +25,7 @@ void websocket_conn_impl::send_message(std::string&& msg, bool binary)
     if (!ws_.is_open())
         return;
 
-    ac_que_.push(
+    ac_que_->push(
         [this, msg = std::move(msg), binary, self = shared_from_this()]() -> net::awaitable<void> {
             if (binary)
                 ws_.binary(true);
@@ -41,7 +41,7 @@ void websocket_conn_impl::send_ping(std::string&& msg)
     if (!ws_.is_open())
         return;
 
-    ac_que_.push([this, msg = std::move(msg), self = shared_from_this()]() -> net::awaitable<void> {
+    ac_que_->push([this, msg = std::move(msg), self = shared_from_this()]() -> net::awaitable<void> {
         boost::system::error_code ec;
         co_await ws_.async_ping(beast::websocket::ping_data(std::string_view(msg)),
                                 util::net_awaitable[ec]);
@@ -54,8 +54,8 @@ void websocket_conn_impl::close()
         return;
 
 
-    ac_que_.clear();
-    ac_que_.push([this, self = shared_from_this()]() -> net::awaitable<void> {
+    ac_que_->clear();
+    ac_que_->push([this, self = shared_from_this()]() -> net::awaitable<void> {
         using namespace boost::asio::experimental::awaitable_operators;
         using namespace std::chrono_literals;
 
@@ -105,7 +105,7 @@ httplib::net::awaitable<void> websocket_conn_impl::run()
                                       remote_endp.address().to_string(),
                                       remote_endp.port(),
                                       ec.message());
-            ac_que_.shutdown();
+            ac_que_->shutdown();
             try {
                 co_await entry->close_handler(weak_from_this());
             }

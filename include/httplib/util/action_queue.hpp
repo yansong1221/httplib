@@ -3,63 +3,87 @@
 #include "httplib/util/use_awaitable.hpp"
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/strand.hpp>
 #include <functional>
+#include <memory>
 #include <queue>
 
 namespace httplib::util {
-class action_queue
+class action_queue : public std::enable_shared_from_this<action_queue>
 {
     using act_t = std::function<net::awaitable<void>()>;
 
 public:
-    action_queue(const net::any_io_executor& executor)
-        : strand_(executor)
-    {
-    }
-    ~action_queue() { shutdown(); }
-
     void push(act_t&& handler)
     {
-        net::post(strand_, [this, handler = std::move(handler)]() mutable {
-            if (abort_)
-                return;
+        net::dispatch(
+            strand_, [this, self = shared_from_this(), handler = std::move(handler)]() mutable {
+                if (shutdowning_)
+                    return;
 
-            que_.push(std::move(handler));
-            if (!running_) {
-                running_ = true;
-                net::co_spawn(strand_.get_inner_executor(), perform(), [](std::exception_ptr e) {
-                    if (e)
-                        std::rethrow_exception(e);
-                });
-            }
-        });
+                que_.push(std::move(handler));
+                if (!running_) {
+                    running_ = true;
+                    net::co_spawn(
+                        strand_.get_inner_executor(),
+                        perform(),
+                        boost::asio::bind_cancellation_slot(cs_.slot(), [](std::exception_ptr e) {
+                            if (e) {
+                                std::rethrow_exception(e);
+                            }
+                        }));
+                }
+            });
     }
     void clear()
     {
-        net::post(strand_, [this]() mutable {
-            if (abort_)
-                return;
+        net::dispatch(strand_, [this, self = shared_from_this()]() mutable {
             std::queue<act_t> empty;
             std::swap(que_, empty);
         });
     }
     void shutdown()
     {
-        net::post(strand_, [this]() mutable {
-            if (abort_)
+        clear();
+        net::dispatch(strand_, [this, self = shared_from_this()]() mutable {
+            if (shutdowning_)
                 return;
-            abort_ = true;
+            shutdowning_ = true;
+            cs_.emit(boost::asio::cancellation_type::all);
         });
+    }
+
+protected:
+    action_queue(const net::any_io_executor& executor)
+        : strand_(executor)
+    {
+    }
+    ~action_queue() { }
+
+public:
+    static std::shared_ptr<httplib::util::action_queue> create(const net::any_io_executor& executor)
+    {
+        struct make_shared_enabler : public action_queue
+        {
+            make_shared_enabler(const net::any_io_executor& ex)
+                : action_queue(ex)
+            {
+            }
+        };
+       return std::make_shared<make_shared_enabler>(executor);
     }
 
 private:
     net::awaitable<void> perform()
     {
-        for (; !abort_;) {
+        auto self = shared_from_this();
+
+        for (;;) {
             co_await net::dispatch(strand_);
             if (que_.empty()) {
                 running_ = false;
@@ -77,7 +101,8 @@ private:
 private:
     net::strand<net::any_io_executor> strand_;
     std::queue<act_t> que_;
-    bool running_ = false;
-    bool abort_   = false;
+    bool running_     = false;
+    bool shutdowning_ = false;
+    boost::asio::cancellation_signal cs_;
 };
 } // namespace httplib::util

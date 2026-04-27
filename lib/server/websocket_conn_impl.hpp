@@ -39,7 +39,7 @@ private:
     websocket_stream ws_;
     beast::flat_buffer buffer_;
 
-    util::action_queue ac_que_;
+    std::shared_ptr<util::action_queue> ac_que_;
 };
 
 } // namespace httplib::server
