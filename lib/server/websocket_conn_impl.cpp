@@ -105,7 +105,7 @@ httplib::net::awaitable<void> websocket_conn_impl::run()
                                       remote_endp.address().to_string(),
                                       remote_endp.port(),
                                       ec.message());
-            ac_que_->shutdown();
+            co_await ac_que_->async_shutdown();
             try {
                 co_await entry->close_handler(weak_from_this());
             }

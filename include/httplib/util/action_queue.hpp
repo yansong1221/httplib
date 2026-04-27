@@ -8,6 +8,7 @@
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/dispatch.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <functional>
 #include <memory>
 #include <queue>
@@ -45,19 +46,40 @@ public:
         std::queue<act_t> empty;
         std::swap(que_, empty);
     }
-    void shutdown(bool cancel_signal = true)
+    //void shutdown(bool cancel_signal = true)
+    //{
+    //    if (!running_) {
+    //        emit_shutdown_timer();
+    //        return;
+    //    }
+
+    //    shutdowning_ = true;
+    //    if (cancel_signal)
+    //        cs_.emit(boost::asio::cancellation_type::all);
+
+    //    std::unique_lock<std::mutex> lck(que_mutex_);
+    //    if (!running_ && que_.empty()) {
+    //        emit_shutdown_timer();
+    //    }
+    //}
+    net::awaitable<void> async_shutdown(bool cancel_signal = true)
     {
-        if (shutdowning_)
-            return;
+        if (!running_ && shutdowning_) {
+            co_return;
+        }
 
         shutdowning_ = true;
         if (cancel_signal)
             cs_.emit(boost::asio::cancellation_type::all);
+
+        boost::system::error_code ec;
+        co_await shutdown_timer_.async_wait(net::redirect_error(net::use_awaitable, ec));
     }
 
 protected:
     action_queue(const net::any_io_executor& executor)
         : executor_(executor)
+        , shutdown_timer_(executor)
     {
     }
     ~action_queue() { }
@@ -80,10 +102,12 @@ private:
     {
         auto self = shared_from_this();
 
-        for (;;) {
+        for (auto cs = co_await net::this_coro::cancellation_state;;) {
             std::unique_lock<std::mutex> lck(que_mutex_);
-            if (que_.empty()) {
+            if (que_.empty() || (bool)cs.cancelled()) {
                 running_ = false;
+                if (shutdowning_)
+                    emit_shutdown_timer();
                 co_return;
             }
 
@@ -94,6 +118,11 @@ private:
             co_await handler();
         }
     }
+    void emit_shutdown_timer()
+    {
+        shutdown_timer_.expires_after(std::chrono::steady_clock::duration::max());
+        shutdown_timer_.cancel();
+    }
 
 private:
     net::any_io_executor executor_;
@@ -103,6 +132,8 @@ private:
 
     bool running_                 = false;
     std::atomic_bool shutdowning_ = false;
+
     boost::asio::cancellation_signal cs_;
+    net::steady_timer shutdown_timer_;
 };
 } // namespace httplib::util
