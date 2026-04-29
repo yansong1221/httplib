@@ -53,8 +53,6 @@ void websocket_conn_impl::close()
     if (!ws_.is_open())
         return;
 
-
-    ac_que_.clear();
     ac_que_.push([this, self = shared_from_this()]() -> net::awaitable<void> {
         using namespace boost::asio::experimental::awaitable_operators;
         using namespace std::chrono_literals;
@@ -66,6 +64,8 @@ void websocket_conn_impl::close()
         websocket::close_reason reason("normal");
         co_await (ws_.async_close(reason, util::net_awaitable[ec]) ||
                   timer.async_wait(util::net_awaitable[ec]));
+
+        serv_.get_logger()->debug("websocket async_close failed: {}", ec.message());
 
         ws_.socket().shutdown(net::socket_base::shutdown_both, ec);
         ws_.socket().close(ec);
@@ -105,6 +105,7 @@ httplib::net::awaitable<void> websocket_conn_impl::run()
                                       remote_endp.address().to_string(),
                                       remote_endp.port(),
                                       ec.message());
+            ac_que_.clear();
             co_await ac_que_.async_shutdown();
             try {
                 co_await entry->close_handler(weak_from_this());
