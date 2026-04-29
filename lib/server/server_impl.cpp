@@ -30,7 +30,9 @@ void http_server::impl::listen(std::string_view host,
 
     tcp::endpoint endp(*results.begin());
     acceptor_.open(endp.protocol());
+#ifndef _WIN32
     acceptor_.set_option(tcp::acceptor::reuse_address(true));
+#endif
     acceptor_.bind(endp);
     acceptor_.listen(backlog);
 
