@@ -30,8 +30,10 @@ void http_server::impl::listen(std::string_view host,
 
     tcp::endpoint endp(*results.begin());
     acceptor_.open(endp.protocol());
+    acceptor_.set_option(tcp::acceptor::reuse_address(true));
     acceptor_.bind(endp);
     acceptor_.listen(backlog);
+
 
     auto listen_endp = local_endpoint();
     get_logger()->info(
