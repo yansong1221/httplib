@@ -66,6 +66,7 @@ void http_server::impl::async_run()
 void http_server::impl::stop()
 {
     boost::system::error_code ec;
+    acceptor_.cancel(ec);
     acceptor_.close(ec);
     {
         std::lock_guard lck(session_mutex_);
