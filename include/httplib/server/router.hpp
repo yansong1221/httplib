@@ -14,7 +14,7 @@ namespace httplib::server {
 class request;
 class response;
 
-class router
+class HTTPLIB_API router
 {
 public:
     virtual ~router() = default;

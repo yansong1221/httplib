@@ -10,7 +10,12 @@ find_package(Boost REQUIRED COMPONENTS beast json CONFIG)
 find_package(spdlog CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 
-add_library(${MOUDLE} STATIC ${HTTPLIB_HEADER_FILES} ${HTTPLIB_SOURCE_FILES})
+if(HTTPLIB_SHARED_LIBRARY)
+    add_library(${MOUDLE} SHARED ${HTTPLIB_HEADER_FILES} ${HTTPLIB_SOURCE_FILES})
+    target_compile_definitions(${MOUDLE} PUBLIC HTTPLIB_SHARED_LIBRARY PRIVATE HTTPLIB_EXPORTS)
+else()
+    add_library(${MOUDLE} STATIC ${HTTPLIB_HEADER_FILES} ${HTTPLIB_SOURCE_FILES})
+endif()
 
 target_link_libraries(${MOUDLE} 
 PUBLIC  Boost::beast Boost::json

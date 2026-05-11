@@ -1,4 +1,6 @@
 #include "websocket_conn_impl.hpp"
+#include "request_impl.hpp"
+#include "response_impl.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
@@ -80,7 +82,7 @@ httplib::net::awaitable<void> websocket_conn_impl::run()
     boost::system::error_code ec;
     auto remote_endp = ws_.socket().remote_endpoint(ec);
 
-    co_await ws_.async_accept(req_, util::net_awaitable[ec]);
+    co_await ws_.async_accept((*req_.get_impl()), util::net_awaitable[ec]);
     if (ec) {
         serv_.get_logger()->error("websocket handshake failed: {}", ec.message());
         co_return;

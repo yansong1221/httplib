@@ -5,7 +5,7 @@
 
 namespace httplib::server {
 class request;
-class websocket_conn : public std::enable_shared_from_this<websocket_conn>
+class HTTPLIB_API websocket_conn : public std::enable_shared_from_this<websocket_conn>
 {
 public:
     using weak_ptr = std::weak_ptr<websocket_conn>;

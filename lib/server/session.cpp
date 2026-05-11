@@ -4,6 +4,8 @@
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
+#include "request_impl.hpp"
+#include "response_impl.hpp"
 #include "websocket_conn_impl.hpp"
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/write.hpp>
@@ -197,18 +199,21 @@ net::awaitable<session::task::ptr> session::http_task::then()
 
         // http proxy
         if (header.method() == http::verb::connect) {
-            request req(local_endp, remote_endp, std::move(header_parser.release()));
+            auto req = request::impl::make_request(
+                local_endp, remote_endp, std::move(header_parser.release()));
             co_return std::make_unique<http_proxy_task>(std::move(stream_), std::move(req), serv_);
         }
         // websocket
         if (websocket::is_upgrade(header.base())) {
-            request req(local_endp, remote_endp, std::move(header_parser.release()));
+            auto req = request::impl::make_request(
+                local_endp, remote_endp, std::move(header_parser.release()));
             co_return std::make_unique<websocket_task>(
                 websocket_stream(std::move(stream_)), std::move(req), serv_);
         }
 
-        response resp(header.version(), header.keep_alive());
-        request req(local_endp, remote_endp, http::request<http::empty_body>(header));
+        auto resp = response::impl::make_response(header.version(), header.keep_alive());
+        auto req  = request::impl::make_request(
+            local_endp, remote_endp, http::request<http::empty_body>(header));
 
         auto start_time = std::chrono::steady_clock::now();
 
@@ -216,7 +221,7 @@ net::awaitable<session::task::ptr> session::http_task::then()
             if (co_await _router.pre_routing(req, resp)) {
                 if (beast::iequals(header[http::field::expect], "100-continue")) {
                     // send 100 response
-                    response resp(header.version(), true);
+                    auto resp = response::impl::make_response(header.version(), true);
                     resp.set_empty_content(http::status::continue_);
                     if (!co_await async_write(req, resp))
                         co_return nullptr;
@@ -234,8 +239,8 @@ net::awaitable<session::task::ptr> session::http_task::then()
                     }
                 }
                 stream_.expires_never();
-                req.body() = std::move(body_parser.release().body());
-                start_time = std::chrono::steady_clock::now();
+                req.get_impl()->body() = std::move(body_parser.release().body());
+                start_time             = std::chrono::steady_clock::now();
 
                 co_await _router.proc_routing(req, resp);
             }
@@ -268,7 +273,7 @@ net::awaitable<session::task::ptr> session::http_task::then()
         if (!co_await async_write(req, resp))
             co_return nullptr;
 
-        if (!resp.keep_alive()) {
+        if (!resp.get_impl()->keep_alive()) {
             boost::system::error_code ec;
             // This means we should close the connection, usually
             // because the response indicated the "Connection: close"
@@ -287,28 +292,30 @@ void session::http_task::abort()
 
 net::awaitable<bool> session::http_task::async_write(const request& req, response& resp)
 {
-    if (resp.stream_handler_) {
-        resp.chunked(true);
+    if (resp.get_impl()->stream_handler_) {
+        resp.get_impl()->chunked(true);
     }
     else {
-        if (!resp.has_content_length())
-            resp.prepare_payload();
+        if (!resp.get_impl()->has_content_length())
+            resp.get_impl()->prepare_payload();
 
-        if (auto iter = req.find(http::field::accept_encoding); iter != req.end()) {
+        if (auto iter = req.get_impl()->find(http::field::accept_encoding);
+            iter != req.get_impl()->end())
+        {
             html::accept_encoding_content encoding_content;
             if (encoding_content.parse(iter->value())) {
                 if (auto encoding = encoding_content.server_apply_encoding(); !encoding.empty()) {
                     resp.set(http::field::content_encoding, encoding);
-                    resp.chunked(true);
+                    resp.get_impl()->chunked(true);
                 }
             }
         }
     }
     if (req.method() == http::verb::head)
-        resp.reset_content();
+        resp.get_impl()->reset_content();
 
     boost::system::error_code ec;
-    http::response_serializer<body::any_body> serializer(resp);
+    http::response_serializer<body::any_body> serializer((*resp.get_impl()));
     {
         while (!serializer.is_done()) {
             stream_.expires_after(serv_.write_timeout());
@@ -322,9 +329,9 @@ net::awaitable<bool> session::http_task::async_write(const request& req, respons
         stream_.expires_never();
     }
 
-    if (resp.stream_handler_) {
+    if (auto handler = resp.get_impl()->stream_handler_; handler) {
         for (;;) {
-            bool has_more = co_await resp.stream_handler_(buffer_, ec);
+            bool has_more = co_await handler(buffer_, ec);
             if (ec) {
                 serv_.get_logger()->trace("read chunk body failed: {}", ec.message());
                 co_return false;
@@ -404,10 +411,11 @@ net::awaitable<session::task::ptr> session::http_proxy_task::then()
     if (ec)
         co_return nullptr;
 
-    response resp(req_.version(), req_.keep_alive());
-    resp.reason("Connection Established");
-    resp.result(http::status::ok);
-    co_await http::async_write(stream_, resp, util::net_awaitable[ec]);
+    auto resp =
+        response::impl::make_response(req_.get_impl()->version(), req_.get_impl()->keep_alive());
+    resp.get_impl()->reason("Connection Established");
+    resp.get_impl()->result(http::status::ok);
+    co_await http::async_write(stream_, (*resp.get_impl()), util::net_awaitable[ec]);
     if (ec)
         co_return nullptr;
 

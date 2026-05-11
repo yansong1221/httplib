@@ -10,7 +10,7 @@
 #include <string_view>
 
 namespace httplib::client {
-class ws_client
+class HTTPLIB_API ws_client
 {
 public:
     explicit ws_client(net::io_context& ex, std::string_view host, uint16_t port, bool ssl = false);

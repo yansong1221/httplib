@@ -1,10 +1,11 @@
 #pragma once
+#include "httplib/config.hpp"
+#include <cstdint>
 #include <string_view>
 #include <vector>
-#include <cstdint>
 
 namespace httplib::html {
-class http_ranges
+class HTTPLIB_API http_ranges
 {
 public:
     using range_type  = std::pair<int64_t, int64_t>;

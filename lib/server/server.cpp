@@ -123,4 +123,14 @@ void http_server::use_ssl_file(const fs::path& cert_file,
     use_ssl(detail::read_file_fast(cert_file), detail::read_file_fast(key_file), passwd);
 }
 
+httplib::server::http_server::impl* http_server::get_impl()
+{
+    return impl_.get();
+}
+
+const httplib::server::http_server::impl* http_server::get_impl() const
+{
+    return impl_.get();
+}
+
 } // namespace httplib::server

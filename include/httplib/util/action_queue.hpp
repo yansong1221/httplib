@@ -6,7 +6,7 @@
 #include <memory>
 
 namespace httplib::util {
-class action_queue : public std::enable_shared_from_this<action_queue>
+class HTTPLIB_API action_queue : public std::enable_shared_from_this<action_queue>
 {
 public:
     using act_t = std::function<net::awaitable<void>()>;

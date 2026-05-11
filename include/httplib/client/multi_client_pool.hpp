@@ -8,7 +8,7 @@
 
 namespace httplib::client {
 
-class multi_http_client_pool : public std::enable_shared_from_this<multi_http_client_pool>
+class HTTPLIB_API multi_http_client_pool : public std::enable_shared_from_this<multi_http_client_pool>
 {
 private:
     struct ConnectionInfo

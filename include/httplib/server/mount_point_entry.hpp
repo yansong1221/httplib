@@ -8,7 +8,7 @@ namespace httplib::server {
 class request;
 class response;
 
-class mount_point_entry
+class HTTPLIB_API mount_point_entry
 {
 public:
     mount_point_entry(const std::string& _mount_point, const fs::path& _base_dir);

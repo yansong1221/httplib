@@ -3,7 +3,7 @@
 #include <queue>
 namespace httplib::client {
 
-class http_client_pool : public std::enable_shared_from_this<http_client_pool>
+class HTTPLIB_API http_client_pool : public std::enable_shared_from_this<http_client_pool>
 {
 private:
     std::queue<std::unique_ptr<http_client>> pool_;

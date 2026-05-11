@@ -13,7 +13,7 @@ class router;
 class session;
 
 
-class http_server
+class HTTPLIB_API http_server
 {
 public:
     class impl;
@@ -50,6 +50,9 @@ public:
                  const std::span<const char>& key_file,
                  std::string passwd = {});
     void use_ssl_file(const fs::path& cert_file, const fs::path& key_file, std::string passwd = {});
+
+    impl* get_impl();
+    const impl* get_impl() const;
 
 private:
     http_server(const http_server&)            = delete;

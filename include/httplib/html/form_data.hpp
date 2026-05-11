@@ -1,4 +1,5 @@
 #pragma once
+#include "httplib/config.hpp"
 #include <algorithm>
 #include <optional>
 #include <string>
@@ -11,7 +12,7 @@ namespace httplib::html {
  *
  * @sa form
  */
-class form_data
+class HTTPLIB_API form_data
 {
 public:
     struct field

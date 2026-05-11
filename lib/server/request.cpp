@@ -1,110 +1,122 @@
 
 #include "httplib/server/request.hpp"
 #include "httplib/util/misc.hpp"
+#include "request_impl.hpp"
 
 namespace httplib::server {
 
-request::request(const tcp::endpoint& local_endpoint,
-                 const tcp::endpoint& remote_endpoint,
-                 http::request<body::any_body>&& other)
-    : http::request<body::any_body>(std::move(other))
-    , local_endpoint_(local_endpoint)
-    , remote_endpoint_(remote_endpoint)
-{
-    if (auto pos = this->target().find("?"); pos == std::string_view::npos) {
-        this->decoded_path_ = util::url_decode(this->target());
-    }
-    else {
-        this->decoded_path_ = util::url_decode(this->target().substr(0, pos));
-        this->query_params_.decode(this->target().substr(pos + 1));
-    }
-}
-request::request(const tcp::endpoint& local_endpoint,
-                 const tcp::endpoint& remote_endpoint,
-                 http::request<http::empty_body>&& other)
-    : request(local_endpoint, remote_endpoint, http::request<body::any_body>(other))
+request::request(std::unique_ptr<impl>&& _impl)
+    : impl_(std::move(_impl))
 {
 }
-request& request::operator=(request&& other) noexcept
-{
-    if (this == std::addressof(other))
-        return *this;
 
-    http::request<body::any_body>::operator=(std::move(other));
-    decoded_path_    = std::move(other.decoded_path_);
-    query_params_    = std::move(other.query_params_);
-    local_endpoint_  = std::move(other.local_endpoint_);
-    remote_endpoint_ = std::move(other.remote_endpoint_);
-    path_params_     = std::move(other.path_params_);
-    custom_data_     = std::move(other.custom_data_);
-    return *this;
-}
 request::request(request&& other) noexcept
 {
-    request::operator=(std::move(other));
+    impl_ = std::move(other.impl_);
 }
 
+request& request::operator=(request&& other) noexcept
+{
+    impl_ = std::move(other.impl_);
+    return *this;
+}
 request::~request()
 {
+}
+http::verb request::method() const
+{
+    return impl_->method();
+}
+std::string_view request::method_string() const
+{
+    return impl_->method_string();
+}
+std::string_view request::target() const
+{
+    return impl_->target();
+}
+httplib::http::fields& request::base()
+{
+    return impl_->base();
+}
+
+const httplib::http::fields& request::base() const
+{
+    return impl_->base();
 }
 
 std::string_view request::path() const
 {
-    if (this->decoded_path_.empty())
-        return std::string_view(this->target());
-
-    return this->decoded_path_;
+    return impl_->path();
 }
 
 httplib::net::ip::address request::get_client_ip() const
 {
-    auto iter = this->find("X-Forwarded-For");
-    if (iter == this->end())
-        return this->remote_endpoint_.address();
-
-    auto tokens = util::split(iter->value(), ",");
-    if (tokens.empty())
-        return this->remote_endpoint_.address();
-
-    boost::system::error_code ec;
-    auto address = net::ip::make_address(tokens.front(), ec);
-    if (ec)
-        return this->remote_endpoint_.address();
-    return address;
+    return impl_->get_client_ip();
 }
 
 const httplib::tcp::endpoint& request::local_endpoint() const
 {
-    return this->local_endpoint_;
+    return impl_->local_endpoint();
 }
 
 const httplib::tcp::endpoint& request::remote_endpoint() const
 {
-    return this->remote_endpoint_;
+    return impl_->remote_endpoint();
 }
 
 void request::set_custom_data(std::any&& data)
 {
-    this->custom_data_ = std::move(data);
+    impl_->set_custom_data(std::move(data));
 }
 
 std::string_view request::path_param(const std::string& key) const
 {
-    return path_params_.at(key);
+    return impl_->path_param(key);
 }
 
 void request::add_path_param(const std::string& key, const std::string& val)
 {
-    path_params_[key] = val;
+    impl_->add_path_param(key, val);
 }
 void request::set_path_param(std::unordered_map<std::string, std::string>&& params)
 {
-    path_params_ = std::move(params);
+    impl_->set_path_param(std::move(params));
 }
 
 const html::query_params& request::query_params() const
 {
-    return query_params_;
+    return impl_->query_params();
+}
+
+std::any& request::any_custom_data()
+{
+    return impl_->custom_data();
+}
+
+const std::any& request::any_custom_data() const
+{
+    return impl_->custom_data();
+}
+
+request::impl* request::get_impl()
+{
+    return impl_.get();
+}
+
+const request::impl* request::get_impl() const
+{
+    return impl_.get();
+}
+
+httplib::body::any_body::value_type& request::body()
+{
+    return impl_->body();
+}
+
+const httplib::body::any_body::value_type& request::body() const
+{
+    return impl_->body();
 }
 
 } // namespace httplib::server

@@ -12,13 +12,23 @@
 
 namespace httplib::server {
 
-class response : public http::response<body::any_body>
+class HTTPLIB_API response
 {
 public:
-    using http::response<body::any_body>::message;
+    class impl;
+    // using http::response<body::any_body>::message;
 
-    response(unsigned int version, bool keep_alive);
-    ~response() = default;
+
+    ~response();
+
+    http::fields& base();
+    const http::fields& base() const;
+
+    void set(http::field name, std::string_view value);
+    void set(std::string_view name, std::string_view value);
+
+    http::status result() const;
+    unsigned result_int() const;
 
     void set_empty_content(http::status status);
     void set_error_content(http::status status);
@@ -52,6 +62,12 @@ public:
         set_stream_content_impl(std::move(handler), content_type, status);
     }
 
+    impl* get_impl();
+    const impl* get_impl() const;
+
+protected:
+    response(std::unique_ptr<impl>&& _impl);
+
 private:
     using coro_stream_handler_type =
         std::function<net::awaitable<bool>(beast::flat_buffer& buffer, beast::error_code& ec)>;
@@ -59,11 +75,8 @@ private:
     void set_stream_content_impl(coro_stream_handler_type&& handler,
                                  std::string_view content_type,
                                  http::status status = http::status::ok);
-    void reset_content();
 
-    coro_stream_handler_type stream_handler_;
-
-    friend class session;
+    std::unique_ptr<impl> impl_;
 };
 
 } // namespace httplib::server

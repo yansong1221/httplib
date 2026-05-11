@@ -8,7 +8,7 @@
 
 namespace httplib::client {
 
-class http_client
+class HTTPLIB_API http_client
 {
 public:
     enum class timeout_policy

@@ -1,4 +1,5 @@
 #pragma once
+#include "httplib/config.hpp"
 #include <charconv>
 #include <stdexcept>
 #include <string>
@@ -6,7 +7,7 @@
 #include <vector>
 
 namespace httplib::html {
-class query_params
+class HTTPLIB_API query_params
 {
 public:
     using container_type = std::unordered_multimap<std::string, std::string>;

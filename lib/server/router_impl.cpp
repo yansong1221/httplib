@@ -1,4 +1,5 @@
 #include "router_impl.h"
+#include "response_impl.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <iostream>
 #include <set>
@@ -198,7 +199,7 @@ net::awaitable<bool> router_impl::pre_routing(request& req, response& resp) cons
                 }
             }
             if (!allows.empty()) {
-                resp.keep_alive(false);
+                resp.get_impl()->keep_alive(false);
                 resp.set(http::field::allow, boost::join(allows, ","));
                 resp.set_error_content(httplib::http::status::method_not_allowed);
                 co_return false;
@@ -206,7 +207,7 @@ net::awaitable<bool> router_impl::pre_routing(request& req, response& resp) cons
 
         } break;
     }
-    resp.keep_alive(false);
+    resp.get_impl()->keep_alive(false);
     resp.set_error_content(httplib::http::status::not_found);
     co_return false;
 }
@@ -278,7 +279,7 @@ router_impl::match_nodes(const Node* parent,
 
 net::awaitable<void> router_impl::post_routing(request& req, response& resp) const
 {
-    if (not_found_handler_ && resp.result() == http::status::not_found)
+    if (not_found_handler_ && resp.get_impl()->result() == http::status::not_found)
         co_await not_found_handler_(req, resp);
 
     if (post_handler_)

@@ -2,6 +2,7 @@
 #include "html/html.h"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
+#include "request_impl.hpp"
 
 namespace httplib::server {
 
@@ -99,7 +100,7 @@ void mount_point_entry::operator()(request& req, response& res) const
     }
     if (path.has_filename()) {
         if (fs::is_regular_file(path, ec))
-            res.set_file_content(path, req.base());
+            res.set_file_content(path, req.get_impl()->base());
         else
             res.set_error_content(http::status::not_found);
         return;
