@@ -41,10 +41,16 @@ set(HTTPLIB_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lib)
 option(HTTPLIB_ENABLED_SSL "HTTLIB ENABLED SSL" OFF)
 option(HTTPLIB_ENABLED_COMPRESS "HTTLIB ENABLED COMPRESS" OFF)
 option(HTTPLIB_ENABLED_EXAMPLES "HTTLIB Build Examples" ${IS_ROOT_PROJECT})
+option(HTTPLIB_ENABLED_TESTS "HTTLIB Build Tests" ${IS_ROOT_PROJECT})
 option(HTTPLIB_SHARED_LIBRARY "HTTLIB Build Shared Library" OFF)
 
 add_subdirectory(lib)
 
 if(HTTPLIB_ENABLED_EXAMPLES)
     add_subdirectory(examples)
+endif()
+
+if(HTTPLIB_ENABLED_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
 endif()

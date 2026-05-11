@@ -33,7 +33,7 @@ net::awaitable<void> transfer(S1& from, S2& to, size_t& bytes_transferred)
 
     for (;;) {
         auto bytes = co_await from.async_read_some(net::buffer(buffer), util::net_awaitable[ec]);
-        if (ec) {
+        if (ec || bytes == 0) {
             if (bytes > 0)
                 co_await net::async_write(to, net::buffer(buffer, bytes), util::net_awaitable[ec]);
 
@@ -317,7 +317,11 @@ net::awaitable<bool> session::http_task::async_write(const request& req, respons
     boost::system::error_code ec;
     http::response_serializer<body::any_body> serializer((*resp.get_impl()));
     {
-        while (!serializer.is_done()) {
+        if (resp.get_impl()->stream_handler_)
+            serializer.split(true);
+
+        while (resp.get_impl()->stream_handler_ ? !serializer.is_header_done()
+                                                : !serializer.is_done()) {
             stream_.expires_after(serv_.write_timeout());
             co_await http::async_write_some(stream_, serializer, util::net_awaitable[ec]);
             if (ec) {
@@ -396,28 +400,36 @@ net::awaitable<session::task::ptr> session::http_proxy_task::then()
 {
     auto target = req_.target();
     auto pos    = target.find(":");
-    if (pos == std::string_view::npos)
+    if (pos == std::string_view::npos || pos == target.size() - 1) {
+        serv_.get_logger()->trace("http_proxy: invalid target: {}", target);
         co_return nullptr;
+    }
 
     auto host = target.substr(0, pos);
     auto port = target.substr(pos + 1);
 
     boost::system::error_code ec;
     auto results = co_await resolver_.async_resolve(host, port, util::net_awaitable[ec]);
-    if (ec)
+    if (ec) {
+        serv_.get_logger()->trace("http_proxy: resolve failed {}: {}", host, ec.message());
         co_return nullptr;
+    }
 
     co_await net::async_connect(proxy_socket_, results, util::net_awaitable[ec]);
-    if (ec)
+    if (ec) {
+        serv_.get_logger()->trace("http_proxy: connect failed {}: {}", host, ec.message());
         co_return nullptr;
+    }
 
     auto resp =
         response::impl::make_response(req_.get_impl()->version(), req_.get_impl()->keep_alive());
     resp.get_impl()->reason("Connection Established");
     resp.get_impl()->result(http::status::ok);
     co_await http::async_write(stream_, (*resp.get_impl()), util::net_awaitable[ec]);
-    if (ec)
+    if (ec) {
+        serv_.get_logger()->trace("http_proxy: write response failed: {}", ec.message());
         co_return nullptr;
+    }
 
     // proxy
     using namespace net::experimental::awaitable_operators;

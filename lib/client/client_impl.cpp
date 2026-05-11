@@ -149,28 +149,68 @@ http_client::impl::async_send_request_impl(http_client::request& req)
     }
 
 
-    http::response_parser<http::empty_body> header_parser;
-    header_parser.header_limit(std::numeric_limits<std::uint32_t>::max());
-    header_parser.body_limit(std::numeric_limits<std::uint64_t>::max());
-    while (!header_parser.is_header_done()) {
-        expires_after();
-        co_await http::async_read_some(*stream_, buffer_, header_parser);
-    }
+    if (req.method() == http::verb::head) {
+        http::response_parser<http::empty_body> parser;
+        parser.skip(true);
+        parser.header_limit(std::numeric_limits<std::uint32_t>::max());
+        parser.body_limit(std::numeric_limits<std::uint64_t>::max());
 
-    http::response_parser<body::any_body> body_parser(std::move(header_parser));
-    if (chunk_handler_)
-        body_parser.on_chunk_body(chunk_handler_);
-
-    if (req.method() != http::verb::head) {
-        while (!body_parser.is_done()) {
+        while (!parser.is_done()) {
             expires_after();
-            co_await http::async_read_some(*stream_, buffer_, body_parser);
+            co_await http::async_read_some(*stream_, buffer_, parser);
         }
+
+        stream_->expires_never();
+        if (!parser.keep_alive())
+            close();
+
+        auto header_response = parser.release();
+        http_client::response response;
+        response.version(header_response.version());
+        response.result(header_response.result());
+        response.keep_alive(header_response.keep_alive());
+        for (const auto& field : header_response)
+            response.set(field.name_string(), field.value());
+        co_return response;
     }
+
+    http::response_parser<body::any_body> parser;
+    parser.header_limit(std::numeric_limits<std::uint32_t>::max());
+    parser.body_limit(std::numeric_limits<std::uint64_t>::max());
+
+    if (chunk_handler_)
+        parser.on_chunk_body(chunk_handler_);
+
+    while (!parser.is_header_done()) {
+        expires_after();
+        co_await http::async_read_some(*stream_, buffer_, parser);
+    }
+
+    const auto status = parser.get().result();
+    if (status == http::status::no_content || status == http::status::not_modified) {
+        stream_->expires_never();
+        if (!parser.keep_alive())
+            close();
+
+        const auto& header_response = parser.get();
+        http_client::response response;
+        response.version(header_response.version());
+        response.result(header_response.result());
+        response.keep_alive(header_response.keep_alive());
+        for (const auto& field : header_response)
+            response.set(field.name_string(), field.value());
+        co_return response;
+    }
+
+    while (!parser.is_done()) {
+        expires_after();
+        co_await http::async_read_some(*stream_, buffer_, parser);
+    }
+
     stream_->expires_never();
-    if (!body_parser.keep_alive())
+    if (!parser.keep_alive())
         close();
-    co_return body_parser.release();
+    co_return parser.release();
 }
 
 void http_client::impl::set_chunk_handler(chunk_handler_type&& handler)
@@ -183,7 +223,7 @@ void http_client::impl::set_chunk_handler(chunk_handler_type&& handler)
                                                     std::string_view body,
                                                     boost::system::error_code& ec) -> std::size_t {
         handler(body, ec);
-        return remain;
+        return body.size();
     };
 }
 
