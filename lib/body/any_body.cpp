@@ -153,6 +153,7 @@ public:
         : header_(header)
         , body_(body)
     {
+        proxy_ = create_proxy_reader<empty_body>(header_, body_);
     }
     void init(boost::optional<std::uint64_t> const& content_length, boost::system::error_code& ec)
     {
