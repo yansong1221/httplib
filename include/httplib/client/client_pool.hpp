@@ -10,7 +10,7 @@ private:
     class impl;
 
 public:
-    class ClientHandle
+    class HTTPLIB_API ClientHandle
     {
         friend class http_client_pool;
 
