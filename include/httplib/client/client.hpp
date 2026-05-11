@@ -51,16 +51,103 @@ public:
                                               const html::query_params& params = {},
                                               const http::fields& headers      = http::fields());
     net::awaitable<response_result> async_head(std::string_view path,
-                                               const http::fields& headers = http::fields());
+                                               const html::query_params& params = {},
+                                               const http::fields& headers      = http::fields());
     net::awaitable<response_result> async_post(std::string_view path,
                                                std::string_view body,
+                                               const html::query_params& params = {},
                                                const http::fields& headers = http::fields());
     net::awaitable<response_result> async_post(std::string_view path,
                                                boost::json::value&& body,
+                                               const html::query_params& params = {},
                                                const http::fields& headers = http::fields());
+    net::awaitable<response_result> async_put(std::string_view path,
+                                              const html::query_params& params = {},
+                                              const http::fields& headers = http::fields());
+    net::awaitable<response_result> async_put(std::string_view path,
+                                              std::string_view body,
+                                              const html::query_params& params = {},
+                                              const http::fields& headers = http::fields());
+    net::awaitable<response_result> async_put(std::string_view path,
+                                              boost::json::value&& body,
+                                              const html::query_params& params = {},
+                                              const http::fields& headers = http::fields());
+    net::awaitable<response_result> async_patch(std::string_view path,
+                                                std::string_view body,
+                                                const html::query_params& params = {},
+                                                const http::fields& headers = http::fields());
+    net::awaitable<response_result> async_patch(std::string_view path,
+                                                boost::json::value&& body,
+                                                const html::query_params& params = {},
+                                                const http::fields& headers = http::fields());
+    net::awaitable<response_result> async_delete(std::string_view path,
+                                                 const html::query_params& params = {},
+                                                 const http::fields& headers      = http::fields());
+    net::awaitable<response_result> async_options(std::string_view path,
+                                                  const html::query_params& params = {},
+                                                  const http::fields& headers      = http::fields());
+    net::awaitable<response_result> async_request(http::verb method,
+                                                  std::string_view path,
+                                                  const http::fields& headers = http::fields());
+    net::awaitable<response_result> async_request(http::verb method,
+                                                  std::string_view path,
+                                                  std::string_view body,
+                                                  const http::fields& headers = http::fields());
+    net::awaitable<response_result> async_request(http::verb method,
+                                                  std::string_view path,
+                                                  boost::json::value&& body,
+                                                  const http::fields& headers = http::fields());
+
     response_result get(std::string_view path,
                         const html::query_params& params = {},
                         const http::fields& headers      = http::fields());
+    response_result head(std::string_view path,
+                         const html::query_params& params = {},
+                         const http::fields& headers      = http::fields());
+    response_result post(std::string_view path,
+                         std::string_view body,
+                         const html::query_params& params = {},
+                         const http::fields& headers = http::fields());
+    response_result post(std::string_view path,
+                         boost::json::value&& body,
+                         const html::query_params& params = {},
+                         const http::fields& headers = http::fields());
+    response_result put(std::string_view path,
+                        const html::query_params& params = {},
+                        const http::fields& headers = http::fields());
+    response_result put(std::string_view path,
+                        std::string_view body,
+                        const html::query_params& params = {},
+                        const http::fields& headers = http::fields());
+    response_result put(std::string_view path,
+                        boost::json::value&& body,
+                        const html::query_params& params = {},
+                        const http::fields& headers = http::fields());
+    response_result patch(std::string_view path,
+                          std::string_view body,
+                          const html::query_params& params = {},
+                          const http::fields& headers = http::fields());
+    response_result patch(std::string_view path,
+                          boost::json::value&& body,
+                          const html::query_params& params = {},
+                          const http::fields& headers = http::fields());
+    response_result del(std::string_view path,
+                        const html::query_params& params = {},
+                        const http::fields& headers      = http::fields());
+    response_result options(std::string_view path,
+                            const html::query_params& params = {},
+                            const http::fields& headers      = http::fields());
+    response_result send_request(http::verb method,
+                                 std::string_view path,
+                                 const http::fields& headers = http::fields());
+    response_result send_request(http::verb method,
+                                 std::string_view path,
+                                 std::string_view body,
+                                 const http::fields& headers = http::fields());
+    response_result send_request(http::verb method,
+                                 std::string_view path,
+                                 boost::json::value&& body,
+                                 const http::fields& headers = http::fields());
 
     void close();
     bool is_open() const;

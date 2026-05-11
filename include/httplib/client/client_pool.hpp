@@ -1,68 +1,55 @@
 #pragma once
 #include "httplib/client/client.hpp"
-#include <queue>
+#include <memory>
+
 namespace httplib::client {
 
-class HTTPLIB_API http_client_pool : public std::enable_shared_from_this<http_client_pool>
+class HTTPLIB_API http_client_pool
 {
+private:
+    class impl;
+
 public:
     class ClientHandle
     {
-        std::weak_ptr<http_client_pool> pool_;
+        friend class http_client_pool;
+
+        std::weak_ptr<impl> pool_;
         std::unique_ptr<http_client> conn_;
 
-    public:
-        ClientHandle(std::weak_ptr<http_client_pool> pool, std::unique_ptr<http_client> conn)
-            : pool_(pool)
-            , conn_(std::move(conn))
-        {
-        }
+        ClientHandle(std::weak_ptr<impl> pool, std::unique_ptr<http_client> conn);
+        void release();
 
+    public:
         ClientHandle(const ClientHandle&)            = delete;
         ClientHandle& operator=(const ClientHandle&) = delete;
 
-        ClientHandle(ClientHandle&& other) noexcept = default;
-        ClientHandle& operator=(ClientHandle&&)     = default;
+        ClientHandle(ClientHandle&& other) noexcept;
+        ClientHandle& operator=(ClientHandle&& other) noexcept;
 
-        ~ClientHandle()
-        {
-            auto ptr = pool_.lock();
-            if (conn_ && ptr) {
-                ptr->release(std::move(conn_));
-            }
-        }
+        ~ClientHandle();
 
-        http_client* operator->() { return conn_.get(); }
-        const http_client* operator->() const { return conn_.get(); }
+        http_client* get() noexcept;
+        const http_client* get() const noexcept;
 
-        http_client& operator*() { return *conn_; }
-        const http_client& operator*() const { return *conn_; }
+        explicit operator bool() const noexcept;
+        http_client* operator->() noexcept;
+        const http_client* operator->() const noexcept;
+
+        http_client& operator*() noexcept;
+        const http_client& operator*() const noexcept;
     };
 
 public:
-    http_client_pool(const net::any_io_executor& ex,
-                     std::string_view host,
-                     uint16_t port,
-                     bool ssl        = false,
-                     size_t max_size = 10);
+    explicit http_client_pool(const net::any_io_executor& ex, size_t max_size = 10);
     ~http_client_pool();
 
-public:
-    std::string_view host() const { return host_; }
-    uint16_t port() const { return port_; }
+    ClientHandle acquire(std::string_view host, uint16_t port, bool ssl = false);
 
-    ClientHandle acquire();
-    void release(std::unique_ptr<http_client> conn);
-
-    net::any_io_executor get_executor() noexcept { return ex_; }
+    net::any_io_executor get_executor() noexcept;
 
 private:
-    std::queue<std::unique_ptr<http_client>> pool_;
-    std::mutex mutex_;
-    net::any_io_executor ex_;
-    std::string host_;
-    uint16_t port_;
-    size_t max_size_;
-    bool ssl_;
+    std::shared_ptr<impl> impl_;
 };
+
 } // namespace httplib::client
