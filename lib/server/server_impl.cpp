@@ -80,7 +80,7 @@ httplib::net::awaitable<void> http_server::impl::co_stop()
             v->abort();
     }
     boost::system::error_code ec;
-    boost::asio::steady_timer wait_timer(co_await net::this_coro::executor);
+    boost::asio::steady_timer wait_timer(ex_);
 
     while (true) {
         {

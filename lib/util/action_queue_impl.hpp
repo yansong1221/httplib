@@ -65,10 +65,10 @@ public:
             cs_.emit(boost::asio::cancellation_type::all);
 
         boost::system::error_code ec;
-        boost::asio::steady_timer wait_timer(co_await net::this_coro::executor);
+        boost::asio::steady_timer wait_timer(executor_);
         for (; running_;) {
             wait_timer.expires_after(std::chrono::milliseconds(100));
-            wait_timer.async_wait(util::net_awaitable[ec]);
+            co_await wait_timer.async_wait(util::net_awaitable[ec]);
             if (ec)
                 break;
         }
