@@ -29,10 +29,12 @@ public:
                 uint16_t port,
                 int backlog = net::socket_base::max_listen_connections);
 
-    void async_run();
+    std::shared_future<boost::system::error_code> async_run();
     net::awaitable<boost::system::error_code> co_run();
 
-    void stop();
+    std::shared_future<void> async_stop();
+    net::awaitable<void> co_stop();
+
     router_impl& router();
 
     void set_read_timeout(const std::chrono::steady_clock::duration& dur);

@@ -1,6 +1,7 @@
 #include "server_impl.h"
 #include "httplib/util/use_awaitable.hpp"
 #include "httplib/util/when_all.hpp"
+#include <boost/asio/use_future.hpp>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
@@ -47,31 +48,51 @@ net::any_io_executor http_server::impl::get_executor() noexcept
     return ex_;
 }
 
-void http_server::impl::async_run()
+std::shared_future<boost::system::error_code> http_server::impl::async_run()
 {
-    net::co_spawn(
+    return net::co_spawn(
         ex_,
-        [this, self = shared_from_this()]() -> net::awaitable<void> { co_await co_run(); },
-        [](std::exception_ptr ex) {
-            // if an exception occurred in the coroutine,
-            // it's something critical, e.g. out of memory
-            // we capture normal errors in the ec
-            // so we just rethrow the exception here,
-            // which will cause `ioc.run()` to throw
-            if (ex)
-                std::rethrow_exception(ex);
-        });
+        [this, self = shared_from_this()]() -> net::awaitable<boost::system::error_code> {
+            co_return co_await co_run();
+        },
+        boost::asio::use_future);
 }
 
-void http_server::impl::stop()
+std::shared_future<void> http_server::impl::async_stop()
 {
-    boost::system::error_code ec;
-    acceptor_.cancel(ec);
-    acceptor_.close(ec);
+    return net::co_spawn(
+        ex_,
+        [this, self = shared_from_this()]() -> net::awaitable<void> {
+            co_return co_await co_stop();
+        },
+        boost::asio::use_future);
+}
+httplib::net::awaitable<void> http_server::impl::co_stop()
+{
+    if (acceptor_.is_open()) {
+        boost::system::error_code ec;
+        acceptor_.cancel(ec);
+        acceptor_.close(ec);
+    }
     {
         std::lock_guard lck(session_mutex_);
         for (const auto& v : session_map_)
             v->abort();
+    }
+    boost::system::error_code ec;
+    boost::asio::steady_timer wait_timer(co_await net::this_coro::executor);
+
+    while (true) {
+        {
+            std::lock_guard lck(session_mutex_);
+            if (session_map_.empty())
+                break;
+        }
+
+        wait_timer.expires_after(std::chrono::milliseconds(100));
+        co_await wait_timer.async_wait(util::net_awaitable[ec]);
+        if (ec)
+            break;
     }
 }
 
@@ -87,11 +108,8 @@ net::awaitable<boost::system::error_code> http_server::impl::co_run()
         ops.push_back(co_accept());
 
     auto&& results = co_await util::when_all(std::move(ops));
-    {
-        std::lock_guard lck(session_mutex_);
-        for (const auto& v : session_map_)
-            v->abort();
-    }
+
+    co_await co_stop();
 
     for (const auto& ec : results)
         if (ec)

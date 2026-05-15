@@ -5,6 +5,7 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/socket_base.hpp>
 #include <filesystem>
+#include <future>
 #include <span>
 
 namespace httplib::server {
@@ -29,9 +30,12 @@ public:
                         uint16_t port,
                         int backlog = net::socket_base::max_listen_connections);
     http_server& listen(uint16_t port, int backlog = net::socket_base::max_listen_connections);
+
     net::awaitable<boost::system::error_code> co_run();
-    void async_run();
-    void stop();
+    std::shared_future<boost::system::error_code> async_run();
+
+    std::shared_future<void> async_stop();
+    net::awaitable<void> co_stop();
 
     httplib::server::router& router();
 

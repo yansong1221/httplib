@@ -62,14 +62,14 @@ net::awaitable<boost::system::error_code> http_server::co_run()
     co_return co_await impl_->co_run();
 }
 
-void http_server::async_run()
+std::shared_future<boost::system::error_code> http_server::async_run()
 {
-    impl_->async_run();
+    return impl_->async_run();
 }
 
-void http_server::stop()
+std::shared_future<void> http_server::async_stop()
 {
-    impl_->stop();
+    return impl_->async_stop();
 }
 router& http_server::router()
 {
@@ -131,6 +131,11 @@ httplib::server::http_server::impl* http_server::get_impl()
 const httplib::server::http_server::impl* http_server::get_impl() const
 {
     return impl_.get();
+}
+
+httplib::net::awaitable<void> http_server::co_stop()
+{
+    co_return co_await impl_->co_stop();
 }
 
 } // namespace httplib::server
