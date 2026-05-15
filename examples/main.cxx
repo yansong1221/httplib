@@ -209,7 +209,7 @@ int main(int argc, char** argv)
     router.set_http_handler<httplib::http::verb::post>("/json", &test::echo_json, tt, log_t {});
     router.set_http_handler<httplib::http::verb::get>(
         "/close", [&](httplib::server::request& req, httplib::server::response& resp) {
-            svr.stop();
+            svr.async_stop();
             return;
         });
 

@@ -3,10 +3,12 @@
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <functional>
+#include <future>
 #include <memory>
 
 namespace httplib::util {
-class HTTPLIB_API action_queue : public std::enable_shared_from_this<action_queue>
+
+class HTTPLIB_API action_queue
 {
 public:
     using act_t = std::function<net::awaitable<void>()>;
@@ -16,8 +18,8 @@ public:
     void push(act_t&& handler);
     void clear();
 
-    void sync_shutdown(bool cancel_signal = true);
-    net::awaitable<void> async_shutdown(bool cancel_signal = true);
+    std::shared_future<void> async_shutdown(bool cancel_signal = true);
+    net::awaitable<void> co_shutdown(bool cancel_signal = true);
 
 private:
     action_queue(const action_queue&)            = delete;

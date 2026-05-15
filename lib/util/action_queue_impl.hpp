@@ -10,6 +10,7 @@
 #include <boost/asio/detached.hpp>
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <boost/asio/use_future.hpp>
 #include <functional>
 #include <memory>
 #include <queue>
@@ -20,7 +21,6 @@ class action_queue::impl : public std::enable_shared_from_this<action_queue::imp
 public:
     impl(const net::any_io_executor& executor)
         : executor_(executor)
-        , shutdown_timer_(executor)
     {
     }
 
@@ -54,7 +54,7 @@ public:
     }
     net::any_io_executor get_executor() const { return executor_; }
 
-    net::awaitable<void> async_shutdown(bool cancel_signal = true)
+    net::awaitable<void> co_shutdown(bool cancel_signal = true)
     {
         if (!running_ && shutdowning_) {
             co_return;
@@ -65,9 +65,23 @@ public:
             cs_.emit(boost::asio::cancellation_type::all);
 
         boost::system::error_code ec;
-        co_await shutdown_timer_.async_wait(net::redirect_error(net::use_awaitable, ec));
+        boost::asio::steady_timer wait_timer(co_await net::this_coro::executor);
+        for (; running_;) {
+            wait_timer.expires_after(std::chrono::milliseconds(100));
+            wait_timer.async_wait(util::net_awaitable[ec]);
+            if (ec)
+                break;
+        }
     }
-
+    std::shared_future<void> async_shutdown(bool cancel_signal = true)
+    {
+        return boost::asio::co_spawn(
+            executor_,
+            [this, self = shared_from_this()]() -> net::awaitable<void> {
+                co_return co_await co_shutdown();
+            },
+            boost::asio::use_future);
+    }
 
 private:
     net::awaitable<void> perform()
@@ -76,10 +90,8 @@ private:
 
         for (auto cs = co_await net::this_coro::cancellation_state;;) {
             std::unique_lock<std::mutex> lck(que_mutex_);
-            if (que_.empty() || (bool)cs.cancelled()) {
+            if (que_.empty()) {
                 running_ = false;
-                if (shutdowning_)
-                    emit_shutdown_timer();
                 co_return;
             }
 
@@ -87,13 +99,9 @@ private:
             que_.pop();
             lck.unlock();
 
-            co_await handler();
+            if (!shutdowning_ && !cs.cancelled())
+                co_await handler();
         }
-    }
-    void emit_shutdown_timer()
-    {
-        shutdown_timer_.expires_after(std::chrono::steady_clock::duration::max());
-        shutdown_timer_.cancel();
     }
 
 private:
@@ -102,10 +110,9 @@ private:
     mutable std::mutex que_mutex_;
     std::queue<act_t> que_;
 
-    bool running_                 = false;
+    std::atomic_bool running_     = false;
     std::atomic_bool shutdowning_ = false;
 
     boost::asio::cancellation_signal cs_;
-    net::steady_timer shutdown_timer_;
 };
 } // namespace httplib::util
