@@ -1,7 +1,9 @@
 #include "httplib/body/string_body.hpp"
 #include "httplib/client/client.hpp"
-#include "httplib/html/cookie.hpp"
+#include "html/cookie_jar.hpp"
+#include "html/cookie_types.hpp"
 #include "httplib/server/middleware/session.hpp"
+#include "server/middleware/memory_store.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
@@ -133,7 +135,7 @@ TEST_CASE("cookie_jar: to_set_cookie_string with options", "[cookie]")
     ck.max_age   = std::chrono::seconds(3600);
     ck.secure    = true;
     ck.http_only = true;
-    ck.same_site = httplib::html::cookie::same_site_t::strict;
+    ck.same_site = httplib::html::same_site_t::strict;
 
     auto s = ck.to_set_cookie_string();
     REQUIRE(s.find("Max-Age=3600") != std::string::npos);
@@ -277,10 +279,8 @@ TEST_CASE("Session: custom store can be injected", "[session]")
 
 TEST_CASE("Session: configurable cookie name", "[session]")
 {
-    mw::session_config cfg;
-    cfg.cookie_name = "my_session";
-    cfg.cookie_path = "/app";
-    mw::session_middleware sm(cfg);
+    mw::session_middleware sm;
+    sm.cookie_name("my_session").cookie_path("/app");
 
     test_scaffold ts;
     ts.router().set_http_handler<http::verb::get>(

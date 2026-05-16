@@ -3,105 +3,48 @@
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include <functional>
+#include <memory>
 #include <string>
 #include <string_view>
 
 namespace httplib::server::middleware {
 
-namespace detail {
-
-inline std::string base64_decode(std::string_view encoded)
-{
-    static constexpr std::string_view table =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        "abcdefghijklmnopqrstuvwxyz"
-        "0123456789+/";
-
-    std::string decoded;
-    int val = 0, bits = -8;
-    for (unsigned char c : encoded) {
-        if (c == '=' || c == '\n' || c == '\r')
-            break;
-        auto pos = table.find(c);
-        if (pos == std::string_view::npos)
-            continue;
-        val = (val << 6) | static_cast<int>(pos);
-        bits += 6;
-        if (bits >= 0) {
-            decoded.push_back(static_cast<char>((val >> bits) & 0xFF));
-            bits -= 8;
-        }
-    }
-    return decoded;
-}
-
-} // namespace detail
-
-class basic_auth_middleware
+class HTTPLIB_API basic_auth_middleware
 {
 public:
     using validator_t = std::function<bool(std::string_view username, std::string_view password)>;
 
-    explicit basic_auth_middleware(validator_t validator, std::string realm = "Restricted")
-        : validator_(std::move(validator))
-        , realm_(std::move(realm))
-    {
-    }
+    explicit basic_auth_middleware(validator_t validator, std::string realm = "Restricted");
+    ~basic_auth_middleware();
+    basic_auth_middleware(const basic_auth_middleware&);
+    basic_auth_middleware& operator=(const basic_auth_middleware&);
+    basic_auth_middleware(basic_auth_middleware&&) noexcept;
+    basic_auth_middleware& operator=(basic_auth_middleware&&) noexcept;
 
-    bool before(request& req, response& resp)
-    {
-        auto auth = std::string(req.base()[http::field::authorization]);
-        if (auth.starts_with("Basic ")) {
-            auto creds      = detail::base64_decode(std::string_view(auth).substr(6));
-            auto colon      = creds.find(':');
-            auto username   = std::string_view(creds).substr(0, colon);
-            auto password   = colon != std::string::npos
-                                  ? std::string_view(creds).substr(colon + 1)
-                                  : std::string_view{};
-            if (validator_ && validator_(username, password))
-                return true;
-        }
-
-        resp.set(http::field::www_authenticate,
-                 std::string("Basic realm=\"") + realm_ + '"');
-        resp.set_json_content({{"error", "unauthorized"}}, http::status::unauthorized);
-        return false;
-    }
+    bool before(request& req, response& resp);
 
 private:
-    validator_t validator_;
-    std::string realm_;
+    class impl;
+    std::unique_ptr<impl> impl_;
 };
 
-class bearer_auth_middleware
+class HTTPLIB_API bearer_auth_middleware
 {
 public:
     using validator_t = std::function<bool(std::string_view token)>;
 
-    explicit bearer_auth_middleware(validator_t validator, std::string realm = "Restricted")
-        : validator_(std::move(validator))
-        , realm_(std::move(realm))
-    {
-    }
+    explicit bearer_auth_middleware(validator_t validator, std::string realm = "Restricted");
+    ~bearer_auth_middleware();
+    bearer_auth_middleware(const bearer_auth_middleware&);
+    bearer_auth_middleware& operator=(const bearer_auth_middleware&);
+    bearer_auth_middleware(bearer_auth_middleware&&) noexcept;
+    bearer_auth_middleware& operator=(bearer_auth_middleware&&) noexcept;
 
-    bool before(request& req, response& resp)
-    {
-        auto auth = std::string(req.base()[http::field::authorization]);
-        if (auth.starts_with("Bearer ")) {
-            auto token = std::string_view(auth).substr(7);
-            if (validator_ && validator_(token))
-                return true;
-        }
-
-        resp.set(http::field::www_authenticate,
-                 std::string("Bearer realm=\"") + realm_ + '"');
-        resp.set_json_content({{"error", "unauthorized"}}, http::status::unauthorized);
-        return false;
-    }
+    bool before(request& req, response& resp);
 
 private:
-    validator_t validator_;
-    std::string realm_;
+    class impl;
+    std::unique_ptr<impl> impl_;
 };
 
 } // namespace httplib::server::middleware
