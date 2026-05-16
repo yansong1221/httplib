@@ -5,8 +5,13 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/message.hpp>
+#include <memory>
 
 namespace httplib::server {
+
+namespace middleware {
+class session;
+}
 
 class HTTPLIB_API request
 {
@@ -28,6 +33,11 @@ public:
     http::fields& base();
     const http::fields& base() const;
 
+    std::string_view operator[](http::field name) const;
+    std::string_view operator[](std::string_view name) const;
+    std::string_view at(http::field name) const;
+    std::string_view at(std::string_view name) const;
+
     std::string_view path() const;
     const html::query_params& query_params() const;
 
@@ -44,6 +54,9 @@ public:
     {
         return std::any_cast<T>(any_custom_data());
     }
+
+    void set_session(std::shared_ptr<middleware::session> sess);
+    std::shared_ptr<middleware::session> session() const;
 
     std::string_view path_param(const std::string& key) const;
     void add_path_param(const std::string& key, const std::string& val);

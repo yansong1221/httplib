@@ -103,6 +103,27 @@ void ws_client::impl::send(std::string&& data, bool binary /*= false*/)
         }
     });
 }
+
+void ws_client::impl::ping(std::string&& msg /*= std::string()*/)
+{
+    ac_que_.push([this, data = std::move(msg)]() mutable -> net::awaitable<void> {
+        auto ec = co_await async_ping(std::move(data));
+        if (ec) {
+            spdlog::error("Failed to send ping: {}", ec.message());
+        }
+    });
+}
+
+void ws_client::impl::pong(std::string&& msg /*= std::string()*/)
+{
+    ac_que_.push([this, data = std::move(msg)]() mutable -> net::awaitable<void> {
+        auto ec = co_await async_pong(std::move(data));
+        if (ec) {
+            spdlog::error("Failed to send pong: {}", ec.message());
+        }
+    });
+}
+
 void ws_client::impl::close()
 {
     ac_que_.clear();

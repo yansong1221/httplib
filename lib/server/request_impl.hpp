@@ -1,4 +1,5 @@
 #pragma once
+#include "httplib/server/middleware/session.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/util/misc.hpp"
 #include <boost/asio/ip/tcp.hpp>
@@ -43,6 +44,7 @@ public:
         remote_endpoint_ = std::move(other.remote_endpoint_);
         path_params_     = std::move(other.path_params_);
         custom_data_     = std::move(other.custom_data_);
+        session_         = std::move(other.session_);
         return *this;
     }
     impl(impl&& other) noexcept { impl::operator=(std::move(other)); }
@@ -79,6 +81,14 @@ public:
     std::any& custom_data() { return custom_data_; }
     const std::any& custom_data() const { return custom_data_; }
 
+    void set_session(std::shared_ptr<middleware::session> sess) { session_ = std::move(sess); }
+    std::shared_ptr<middleware::session> session() const { return session_; }
+
+    std::string_view operator[](http::field name) const { return this->base()[name]; }
+    std::string_view operator[](std::string_view name) const { return this->base()[name]; }
+    std::string_view at(http::field name) const { return this->base().at(name); }
+    std::string_view at(std::string_view name) const { return this->base().at(name); }
+
     std::string_view path_param(const std::string& key) const { return path_params_.at(key); }
     void add_path_param(const std::string& key, const std::string& val) { path_params_[key] = val; }
     void set_path_param(std::unordered_map<std::string, std::string>&& params)
@@ -112,5 +122,6 @@ private:
 
     std::unordered_map<std::string, std::string> path_params_;
     std::any custom_data_;
+    std::shared_ptr<middleware::session> session_;
 };
 } // namespace httplib::server

@@ -68,7 +68,7 @@ private:
     };
 
     std::unique_ptr<Node> root_;
-    // mutable std::shared_mutex mutex_;
+    mutable std::shared_mutex mutex_;
 
     coro_http_handler_type post_handler_;
     coro_http_handler_type not_found_handler_;

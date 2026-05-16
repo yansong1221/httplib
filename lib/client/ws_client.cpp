@@ -86,6 +86,16 @@ void ws_client::send(std::string&& data, bool binary /*= false*/)
     return impl_->send(std::move(data), binary);
 }
 
+void ws_client::ping(std::string&& msg /*= std::string()*/)
+{
+    return impl_->ping(std::move(msg));
+}
+
+void ws_client::pong(std::string&& msg /*= std::string()*/)
+{
+    return impl_->pong(std::move(msg));
+}
+
 void ws_client::close()
 {
     return impl_->close();

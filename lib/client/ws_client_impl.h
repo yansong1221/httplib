@@ -26,6 +26,8 @@ public:
     void async_run(std::string_view path, const http::fields& headers = {});
 
     void send(std::string&& data, bool binary = false);
+    void ping(std::string&& msg = std::string());
+    void pong(std::string&& msg = std::string());
     void close();
 
     bool got_binary() const noexcept;

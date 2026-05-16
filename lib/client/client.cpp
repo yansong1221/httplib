@@ -89,6 +89,15 @@ http_client::async_head(std::string_view path,
 
 net::awaitable<http_client::response_result> http_client::async_post(
     std::string_view path,
+    const html::query_params& params /*= {}*/,
+    const http::fields& headers /*= http::fields()*/)
+{
+    auto target = make_target(path, params);
+    co_return co_await async_request(http::verb::post, target, headers);
+}
+
+net::awaitable<http_client::response_result> http_client::async_post(
+    std::string_view path,
     std::string_view body,
     const html::query_params& params /*= {}*/,
     const http::fields& headers /*= http::fields()*/)
@@ -175,6 +184,24 @@ http_client::async_options(std::string_view path,
 }
 
 net::awaitable<http_client::response_result>
+http_client::async_connect(std::string_view path,
+                            const html::query_params& params,
+                            const http::fields& headers /*= http::fields()*/)
+{
+    auto target = make_target(path, params);
+    co_return co_await async_request(http::verb::connect, target, headers);
+}
+
+net::awaitable<http_client::response_result>
+http_client::async_trace(std::string_view path,
+                          const html::query_params& params,
+                          const http::fields& headers /*= http::fields()*/)
+{
+    auto target = make_target(path, params);
+    co_return co_await async_request(http::verb::trace, target, headers);
+}
+
+net::awaitable<http_client::response_result>
 http_client::async_request(http::verb method,
                            std::string_view path,
                            const http::fields& headers /*= http::fields()*/)
@@ -220,9 +247,16 @@ http_client::response_result http_client::head(std::string_view path,
 }
 
 http_client::response_result http_client::post(std::string_view path,
-                                               std::string_view body,
-                                               const html::query_params& params /*= {}*/,
-                                               const http::fields& headers /*= http::fields()*/)
+                                                const html::query_params& params /*= {}*/,
+                                                const http::fields& headers /*= http::fields()*/)
+{
+    return run_sync(impl_->executor_, [&] { return async_post(path, params, headers); });
+}
+
+http_client::response_result http_client::post(std::string_view path,
+                                                std::string_view body,
+                                                const html::query_params& params /*= {}*/,
+                                                const http::fields& headers /*= http::fields()*/)
 {
     return run_sync(impl_->executor_, [&] { return async_post(path, body, params, headers); });
 }
@@ -289,6 +323,20 @@ http_client::response_result http_client::options(std::string_view path,
                                                   const http::fields& headers /*= http::fields()*/)
 {
     return run_sync(impl_->executor_, [&] { return async_options(path, params, headers); });
+}
+
+http_client::response_result http_client::connect(std::string_view path,
+                                                   const html::query_params& params,
+                                                   const http::fields& headers /*= http::fields()*/)
+{
+    return run_sync(impl_->executor_, [&] { return async_connect(path, params, headers); });
+}
+
+http_client::response_result http_client::trace(std::string_view path,
+                                                 const html::query_params& params,
+                                                 const http::fields& headers /*= http::fields()*/)
+{
+    return run_sync(impl_->executor_, [&] { return async_trace(path, params, headers); });
 }
 
 http_client::response_result http_client::send_request(

@@ -29,7 +29,7 @@ void router_impl::set_http_handler_impl(http::verb method,
                                         std::string_view path,
                                         coro_http_handler_type&& handler)
 {
-    // std::unique_lock lock(mutex_);
+    std::unique_lock lock(mutex_);
     auto segments          = detail::split_segments(path);
     auto node              = insert(root_.get(), segments, 0);
     node->handlers[method] = std::move(handler);
@@ -104,7 +104,7 @@ router_impl::Node* router_impl::insert(Node* parent,
 // ---------------- 匹配路由 ----------------
 net::awaitable<void> router_impl::proc_routing(request& req, response& resp) const
 {
-    // std::shared_lock lock(mutex_);
+    std::shared_lock lock(mutex_);
 
     auto segments = detail::split_segments(req.path());
 
@@ -144,7 +144,7 @@ void router_impl::set_ws_handler_impl(std::string_view path,
                                       websocket_conn::coro_message_handler_type&& message_handler,
                                       websocket_conn::coro_close_handler_type&& close_handler)
 {
-    // std::unique_lock lock(mutex_);
+    std::unique_lock lock(mutex_);
     auto segments = detail::split_segments(path);
 
     auto node = insert(root_.get(), segments, 0);
@@ -158,7 +158,7 @@ void router_impl::set_ws_handler_impl(std::string_view path,
 
 std::optional<router_impl::ws_handler_entry> router_impl::query_ws_handler(request& req) const
 {
-    // std::shared_lock lock(mutex_);
+    std::shared_lock lock(mutex_);
     auto segments = detail::split_segments(req.path());
 
     std::unordered_map<std::string, std::string> params;

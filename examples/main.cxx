@@ -5,6 +5,9 @@
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/ws_client.hpp"
+#include "httplib/server/middleware/auth.hpp"
+#include "httplib/server/middleware/cors.hpp"
+#include "httplib/server/middleware/rate_limit.hpp"
 #include "httplib/server/mount_point_entry.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
@@ -23,6 +26,7 @@ namespace fs    = std::filesystem;
 namespace beast = httplib::beast;
 namespace http  = httplib::http;
 namespace net   = httplib::net;
+namespace mw    = httplib::server::middleware;
 
 #ifdef HTTPLIB_ENABLED_SSL
 constexpr auto server_crt = R"(-----BEGIN CERTIFICATE-----
@@ -79,13 +83,15 @@ d6jDUgydraEmQvIPiKMpTE18rW+jierv2FlB8AGcwxm2VWxuM25wQ40J2YuZLY7k
 )"sv;
 #endif
 
-// ===== Aspect (middleware) examples =====
+// ===== Custom aspect example =====
+// Users can write their own aspect classes for custom middleware needs.
+// An aspect needs a before() and/or after() method taking (request&, response&).
 
 struct log_t
 {
     bool before(httplib::server::request& req, httplib::server::response&)
     {
-        spdlog::info("[{}] {} {}", req.method_string(), req.path(), req.query_params().encoded());
+        spdlog::info("[{}] {}", req.method_string(), req.path());
         return true;
     }
     bool after(httplib::server::request& req, httplib::server::response&)
@@ -95,39 +101,20 @@ struct log_t
     }
 };
 
-struct auth_t
-{
-    bool before(httplib::server::request& req, httplib::server::response& resp)
-    {
-        auto auth = std::string(req.base()[http::field::authorization]);
-        if (auth.empty()) {
-            resp.set_string_content(
-                R"({"error":"unauthorized"})"sv, "application/json"sv, http::status::unauthorized);
-            return false;
-        }
-        spdlog::info("authorized: {}", auth);
-        return true;
-    }
-};
-
-struct custom_data_t
-{
-    bool before(httplib::server::request& req, httplib::server::response& resp)
-    {
-        req.set_custom_data(std::any(std::string("computed-early")));
-        return true;
-    }
-};
-
 // ===== Server setup =====
 
 static void setup_http_routes(httplib::server::router& router)
 {
-    // ---- Basic HTTP methods ----
+    // ---- Built-in middleware: CORS (applied per-route as an aspect) ----
+    // CORS can also be set globally via the post_handler pattern (see setup_cors below)
+
+    // ---- Basic HTTP methods (with CORS) ----
     router.set_http_handler<http::verb::get>(
-        "/api/hello", [](httplib::server::request&, httplib::server::response& resp) {
+        "/api/hello",
+        [](httplib::server::request&, httplib::server::response& resp) {
             resp.set_string_content("Hello, World!"sv, "text/plain"sv);
-        });
+        },
+        mw::cors_middleware{});
 
     router.set_http_handler<http::verb::get>(
         "/api/greet/:name", [](httplib::server::request& req, httplib::server::response& resp) {
@@ -168,27 +155,25 @@ static void setup_http_routes(httplib::server::router& router)
             resp.set_json_content(std::move(obj));
         });
 
-    // ---- PUT ----
+    // ---- RESTful: PUT / PATCH / DELETE ----
     router.set_http_handler<http::verb::put>(
         "/api/resource/:id", [](httplib::server::request& req, httplib::server::response& resp) {
             auto id = std::string(req.path_param("id"));
             resp.set_json_content({{"updated", id}});
         });
 
-    // ---- PATCH ----
     router.set_http_handler<http::verb::patch>(
         "/api/resource/:id", [](httplib::server::request& req, httplib::server::response& resp) {
             auto id = std::string(req.path_param("id"));
             resp.set_json_content({{"patched", id}});
         });
 
-    // ---- DELETE ----
     router.set_http_handler<http::verb::delete_>(
         "/api/resource/:id", [](httplib::server::request& req, httplib::server::response& resp) {
             resp.set_json_content({{"deleted", std::string(req.path_param("id"))}});
         });
 
-    // ---- OPTIONS ----
+    // ---- OPTIONS (CORS preflight handled by cors_middleware) ----
     router.set_http_handler<http::verb::options>(
         "/*", [](httplib::server::request&, httplib::server::response& resp) {
             resp.set(http::field::allow, "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS");
@@ -231,37 +216,70 @@ static void setup_http_routes(httplib::server::router& router)
                 "text/plain");
         });
 
-    // ---- Authentication-protected route ----
+    // ---- Built-in middleware: Basic Auth ----
     router.set_http_handler<http::verb::get>(
         "/api/admin",
         [](httplib::server::request&, httplib::server::response& resp) {
             resp.set_json_content({{"secret", "admin data"}});
         },
-        auth_t {});
+        mw::basic_auth_middleware(
+            [](std::string_view user, std::string_view pass) {
+                return user == "admin" && pass == "secret";
+            },
+            "Admin Area"));
 
-    // ---- Custom data on request ----
+    // ---- Built-in middleware: Bearer Token Auth ----
+    router.set_http_handler<http::verb::get>(
+        "/api/token-protected",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            resp.set_json_content({{"data", "token-gated content"}});
+        },
+        mw::bearer_auth_middleware(
+            [](std::string_view token) {
+                return token == "my-secret-token";
+            }));
+
+    // ---- Built-in middleware: Rate Limit (10 req / 10 seconds per IP) ----
+    auto rate_limiter = std::make_shared<mw::rate_limit_middleware>(
+        10, std::chrono::seconds(10));
+
+    router.set_http_handler<http::verb::get>(
+        "/api/limited",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            resp.set_json_content({{"message", "you are not rate-limited... yet"}});
+        },
+        *rate_limiter);
+
+    // ---- Custom data on request (via custom aspect) ----
     router.set_http_handler<http::verb::get>(
         "/api/custom-data",
         [](httplib::server::request& req, httplib::server::response& resp) {
             auto data = req.custom_data<std::string>();
             resp.set_json_content({{"data", data}});
         },
-        custom_data_t {});
+        [](httplib::server::request& req, httplib::server::response&) {
+            req.set_custom_data(std::any(std::string("computed-early")));
+            return true;
+        });
 
-    // ---- 404 handler ----
+    // ---- 404 handler with log aspect ----
     router.set_http_not_found_handler(
         [](httplib::server::request& req, httplib::server::response& resp) {
             resp.set_json_content({{"error", "not found"}, {"path", std::string(req.path())}},
                                   http::status::not_found);
-        });
+        },
+        log_t{});
 }
 
 static void setup_cors(httplib::server::router& router)
 {
+    // Global CORS via post_handler (runs after every route handler)
     router.set_http_post_handler([](httplib::server::request&, httplib::server::response& resp) {
-        resp.set("Access-Control-Allow-Origin", "*");
-        resp.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-        resp.set("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization");
+        resp.set(std::string_view("Access-Control-Allow-Origin"), std::string_view("*"));
+        resp.set(std::string_view("Access-Control-Allow-Methods"),
+                 std::string_view("GET, POST, PUT, DELETE, OPTIONS"));
+        resp.set(std::string_view("Access-Control-Allow-Headers"),
+                 std::string_view("Origin, Content-Type, Authorization"));
     });
 }
 
@@ -317,7 +335,7 @@ static void run_http_client_demo(net::any_io_executor ex, std::string host, uint
 
     // POST JSON
     {
-        auto r = client.post("/api/echo-json", {{"msg", "hello from client"}, {"count", 42}});
+        auto r = client.post("/api/echo-json", {{"msg", "hello"}, {"count", 42}});
         if (r)
             spdlog::info("POST /api/echo-json -> {}", r.value().result_int());
     }
@@ -338,7 +356,7 @@ static void run_http_client_demo(net::any_io_executor ex, std::string host, uint
                          std::string(r.value()[http::field::allow]));
     }
 
-    // Redirect (follow manually)
+    // Redirect
     {
         auto r = client.get("/api/redirect");
         if (r)
@@ -356,6 +374,22 @@ static void run_http_client_demo(net::any_io_executor ex, std::string host, uint
         client.set_chunk_handler(nullptr);
         if (r)
             spdlog::info("GET /api/stream -> {}", r.value().result_int());
+    }
+
+    // Auth: Basic (should fail without credentials)
+    {
+        auto r = client.get("/api/admin");
+        if (r)
+            spdlog::info("GET /api/admin (no auth) -> {}", r.value().result_int());
+    }
+
+    // Auth: Basic (with correct credentials)
+    {
+        auto hdrs = httplib::http::fields();
+        hdrs.set(http::field::authorization, "Basic YWRtaW46c2VjcmV0");
+        auto r = client.send_request(http::verb::get, "/api/admin", std::string_view{}, hdrs);
+        if (r)
+            spdlog::info("GET /api/admin (with auth) -> {}", r.value().result_int());
     }
 
     // 404
@@ -394,7 +428,7 @@ static void run_ws_client_demo(net::any_io_executor ex, std::string host, uint16
             }
             co_return;
         },
-        [&](std::string_view msg, bool binary) -> net::awaitable<void> {
+        [&](std::string_view msg, bool) -> net::awaitable<void> {
             spdlog::info("WS client received: {}", msg);
             ws.close();
             co_return;
@@ -428,6 +462,16 @@ Server options:
 Client options:
   --host H     Server host (default: 127.0.0.1)
   --port N     Server port (default: 18808)
+
+Built-in middleware on display:
+  cors_middleware      CORS header injection + OPTIONS preflight
+  basic_auth_middleware     HTTP Basic auth (admin:secret on /api/admin)
+  bearer_auth_middleware    Token auth (my-secret-token on /api/token-protected)
+  rate_limit_middleware     10 req / 10 s per IP (on /api/limited)
+
+Custom aspects:
+  log_t                Request/response logging
+  Anonymous aspect     Attaches computed data via req.set_custom_data()
 
 Press Ctrl+C to stop the server.
 )";
@@ -470,7 +514,6 @@ int main(int argc, char** argv)
         run_ws_client_demo(ex, host, port);
     }
     else {
-        // server or all
         httplib::server::http_server svr(ex);
         svr.get_logger()->set_level(spdlog::level::info);
 
@@ -489,13 +532,13 @@ int main(int argc, char** argv)
         setup_ws(router);
         setup_static_files(router);
 
-        // Shutdown endpoint
         router.set_http_handler<http::verb::post>(
             "/api/shutdown", [&](httplib::server::request&, httplib::server::response& resp) {
                 resp.set_json_content({{"message", "shutting down"}});
                 svr.async_stop();
             });
 
+        spdlog::info("Server listening on {}:{}", host, port);
         svr.async_run();
 
         if (mode == "all") {

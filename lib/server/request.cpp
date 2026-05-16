@@ -1,4 +1,5 @@
 
+#include "httplib/server/middleware/session.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/util/misc.hpp"
 #include "request_impl.hpp"
@@ -43,6 +44,26 @@ httplib::http::fields& request::base()
 const httplib::http::fields& request::base() const
 {
     return impl_->base();
+}
+
+std::string_view request::operator[](http::field name) const
+{
+    return (*impl_)[name];
+}
+
+std::string_view request::operator[](std::string_view name) const
+{
+    return (*impl_)[name];
+}
+
+std::string_view request::at(http::field name) const
+{
+    return impl_->at(name);
+}
+
+std::string_view request::at(std::string_view name) const
+{
+    return impl_->at(name);
 }
 
 std::string_view request::path() const
@@ -97,6 +118,16 @@ std::any& request::any_custom_data()
 const std::any& request::any_custom_data() const
 {
     return impl_->custom_data();
+}
+
+void request::set_session(std::shared_ptr<middleware::session> sess)
+{
+    impl_->set_session(std::move(sess));
+}
+
+std::shared_ptr<middleware::session> request::session() const
+{
+    return impl_->session();
 }
 
 request::impl* request::get_impl()
