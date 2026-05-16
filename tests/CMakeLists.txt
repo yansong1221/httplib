@@ -1,5 +1,7 @@
 set(MOUDLE httplib_tests)
 
+find_package(Catch2 CONFIG REQUIRED)
+
 file(GLOB_RECURSE MOUDLE_SOURCES *.h *.cpp *.hpp *.cxx)
 source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${MOUDLE_SOURCES})
 
@@ -7,6 +9,7 @@ add_executable(${MOUDLE} ${MOUDLE_SOURCES})
 
 target_link_libraries(${MOUDLE}
 PRIVATE httplib
+PRIVATE Catch2::Catch2WithMain
 )
 
 if (MSVC)
