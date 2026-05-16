@@ -22,8 +22,12 @@ PUBLIC  Boost::beast Boost::json
 PUBLIC  spdlog::spdlog fmt::fmt
 )
 
-target_include_directories(${MOUDLE} PUBLIC ${HTTPLIB_INCLUDE_DIR})
-target_include_directories(${MOUDLE} PRIVATE ${HTTPLIB_LIB_DIR})
+target_include_directories(${MOUDLE} 
+    PUBLIC 
+        $<BUILD_INTERFACE:${HTTPLIB_INCLUDE_DIR}>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    PRIVATE ${HTTPLIB_LIB_DIR}
+)
 
 if (MSVC)
     target_compile_options(${MOUDLE} PRIVATE /bigobj)
@@ -54,3 +58,31 @@ if (WIN32)
             _WIN32_WINNT=${winnt_version}   # Keep this public so user's can't accidentally use conflicting versions
     )
 endif()
+
+include(GNUInstallDirs)
+
+install(TARGETS ${MOUDLE}
+    EXPORT httplib-targets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+install(DIRECTORY ${HTTPLIB_INCLUDE_DIR}/httplib
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+install(EXPORT httplib-targets
+    NAMESPACE httplib::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/httplib
+)
+
+include(CMakePackageConfigHelpers)
+configure_package_config_file(
+    ${PROJECT_SOURCE_DIR}/cmake/httplib-config.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/httplib-config.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/httplib
+)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/httplib-config.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/httplib
+)
