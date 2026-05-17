@@ -104,13 +104,14 @@ public:
         compressor_->consume_all();
         for (;;) {
             auto result = proxy_->get(ec);
-            if (!result || ec)
-                return result;
-
+            if (ec)
+                return boost::none;
             if (!result) {
                 compressor_->finish();
                 auto buffer = compressor_->buffer();
-                return {{buffer, false}};
+                if (buffer.size() != 0)
+                    return {{buffer, false}};
+                return boost::none;
             }
 
             compressor_->write(net::buffer(result->first), result->second);
@@ -127,8 +128,7 @@ private:
         return std::visit(
             [&](auto& t) -> detail::proxy_writer::ptr {
                 using value_type = std::decay_t<decltype(t)>;
-                // 提取匹配的 Body 类型
-                using body_type = typename any_body::match_body<value_type, Bodies...>::type;
+                using body_type  = typename any_body::match_body<value_type, Bodies...>::type;
                 static_assert(!std::is_void_v<body_type>, "No matching Body type found");
 
                 using T = detail::proxy_writer_impl<body_type>;
@@ -185,9 +185,15 @@ public:
         compressor_->write(buffers);
 
         auto decoded_buffer = compressor_->buffer();
-        if (decoded_buffer.size() != 0) {
+        while (decoded_buffer.size() != 0 && !ec) {
             auto bytes = proxy_->put(decoded_buffer, ec);
             compressor_->consume(bytes);
+            if (ec == http::error::need_more && bytes > 0) {
+                ec             = {};
+                decoded_buffer = compressor_->buffer();
+                continue;
+            }
+            decoded_buffer = compressor_->buffer();
         }
         return buffers.size();
     }
@@ -198,29 +204,31 @@ public:
 
         compressor_->finish();
         auto decoded_buffer = compressor_->buffer();
-        if (decoded_buffer.size() != 0) {
-            proxy_->put(decoded_buffer, ec);
+        while (decoded_buffer.size() != 0 && !ec) {
+            auto bytes = proxy_->put(decoded_buffer, ec);
+            if (ec == http::error::need_more) {
+                ec = {};
+                decoded_buffer =
+                    net::const_buffer(static_cast<const char*>(decoded_buffer.data()) + bytes,
+                                      decoded_buffer.size() - bytes);
+                continue;
+            }
+            decoded_buffer =
+                net::const_buffer(static_cast<const char*>(decoded_buffer.data()) + bytes,
+                                  decoded_buffer.size() - bytes);
         }
-        return proxy_->finish(ec);
+        proxy_->finish(ec);
     }
 
 private:
     template<class Body>
     auto create_proxy_reader(http::fields& h, any_body::value_type& b)
     {
-        return std::visit(
-            [&](auto& t) mutable -> detail::proxy_reader::ptr {
-                using value_type = std::decay_t<decltype(t)>;
-                if constexpr (!std::same_as<value_type, typename Body::value_type>) {
-                    b = typename Body::value_type {};
-                    return create_proxy_reader<Body>(h, b);
-                }
-                else {
-                    using T = detail::proxy_reader_impl<Body>;
-                    return  std::make_unique<T>(h, t);
-                }
-            },
-            b);
+        if (!std::holds_alternative<typename Body::value_type>(b))
+            b = typename Body::value_type {};
+
+        using T = detail::proxy_reader_impl<Body>;
+        return std::make_unique<T>(h, std::get<typename Body::value_type>(b));
     }
 
 private:
@@ -232,7 +240,7 @@ private:
 };
 
 any_body::writer::writer(http::fields& h, value_type& b)
-    : impl_( std::make_unique<any_body::writer::impl>(h, b))
+    : impl_(std::make_unique<any_body::writer::impl>(h, b))
 {
 }
 
@@ -251,7 +259,7 @@ any_body::writer::get(boost::system::error_code& ec)
 }
 
 any_body::reader::reader(http::fields& h, value_type& b)
-    : impl_( std::make_unique<any_body::reader::impl>(h, b))
+    : impl_(std::make_unique<any_body::reader::impl>(h, b))
 {
 }
 any_body::reader::~reader()

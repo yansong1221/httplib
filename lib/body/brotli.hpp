@@ -169,6 +169,6 @@ public:
 };
 BOOST_IOSTREAMS_PIPABLE(basic_brotli_decompressor, 1)
 
-typedef basic_brotli_compressor<> brotli_decompressor;
+typedef basic_brotli_decompressor<> brotli_decompressor;
 
 } // namespace httplib::body

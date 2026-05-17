@@ -120,11 +120,20 @@ file_body::reader::reader(const http::fields&, value_type& b)
 void file_body::reader::init(boost::optional<std::uint64_t> const& content_length,
                              boost::system::error_code& ec)
 {
+    boost::ignore_unused(content_length);
+    ec = {};
+}
+
+std::size_t file_body::reader::put(const_buffers_type const& buffers, boost::system::error_code& ec)
+{
+    boost::ignore_unused(buffers);
+    ec = {};
+    return net::buffer_size(buffers);
 }
 
 void file_body::reader::finish(boost::system::error_code& ec)
 {
-    ec.clear();
+    ec = {};
 }
 
 } // namespace httplib::body

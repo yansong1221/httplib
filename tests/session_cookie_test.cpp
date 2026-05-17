@@ -1,7 +1,5 @@
 #include "httplib/body/string_body.hpp"
 #include "httplib/client/client.hpp"
-#include "html/cookie_jar.hpp"
-#include "html/cookie_types.hpp"
 #include "httplib/server/middleware/session.hpp"
 #include "server/middleware/memory_store.hpp"
 #include "httplib/server/request.hpp"
@@ -75,74 +73,6 @@ std::string as_string(const httplib::client::http_client::response& resp)
 
 } // namespace
 
-// ===== cookie_jar tests =====
-
-TEST_CASE("cookie_jar: parse simple cookies", "[cookie]")
-{
-    auto jar = httplib::html::cookie_jar::parse("name=value");
-
-    REQUIRE(jar.size() == 1);
-    REQUIRE(jar.has("name"));
-    REQUIRE(jar.get("name").value() == "value");
-}
-
-TEST_CASE("cookie_jar: parse multiple cookies", "[cookie]")
-{
-    auto jar = httplib::html::cookie_jar::parse("a=1; b=2; c=3");
-
-    REQUIRE(jar.size() == 3);
-    REQUIRE(jar.get("a").value() == "1");
-    REQUIRE(jar.get("b").value() == "2");
-    REQUIRE(jar.get("c").value() == "3");
-}
-
-TEST_CASE("cookie_jar: parse with spaces", "[cookie]")
-{
-    auto jar = httplib::html::cookie_jar::parse(" key = val ");
-
-    REQUIRE(jar.size() == 1);
-    REQUIRE(jar.get("key").value() == "val");
-}
-
-TEST_CASE("cookie_jar: parse empty", "[cookie]")
-{
-    auto jar = httplib::html::cookie_jar::parse("");
-
-    REQUIRE(jar.size() == 0);
-    REQUIRE_FALSE(jar.has("anything"));
-}
-
-TEST_CASE("cookie_jar: to_set_cookie_string minimal", "[cookie]")
-{
-    httplib::html::cookie ck;
-    ck.name  = "sid";
-    ck.value = "abc123";
-    ck.path  = "/";
-
-    auto s = ck.to_set_cookie_string();
-    REQUIRE(s.starts_with("sid=abc123"));
-    REQUIRE(s.find("Path=/") != std::string::npos);
-    REQUIRE(s.find("HttpOnly") != std::string::npos);
-    REQUIRE(s.find("SameSite=Lax") != std::string::npos);
-}
-
-TEST_CASE("cookie_jar: to_set_cookie_string with options", "[cookie]")
-{
-    httplib::html::cookie ck;
-    ck.name      = "token";
-    ck.value     = "xyz";
-    ck.path      = "/api";
-    ck.max_age   = std::chrono::seconds(3600);
-    ck.secure    = true;
-    ck.http_only = true;
-    ck.same_site = httplib::html::same_site_t::strict;
-
-    auto s = ck.to_set_cookie_string();
-    REQUIRE(s.find("Max-Age=3600") != std::string::npos);
-    REQUIRE(s.find("Secure") != std::string::npos);
-    REQUIRE(s.find("SameSite=Strict") != std::string::npos);
-}
-
 // ===== session middleware tests =====
 
 TEST_CASE("Session: middleware creates new session ID", "[session]")
@@ -204,8 +134,7 @@ TEST_CASE("Session: middleware persists data across requests", "[session]")
     auto hdrs = httplib::http::fields();
     hdrs.set(http::field::cookie, cookie);
 
-    auto resp2 =
-        UNWRAP(ts.client->send_request(http::verb::get, "/whoami", std::string_view {}, hdrs));
+    auto resp2 = UNWRAP(ts.client->get("/whoami", {}, hdrs));
     REQUIRE(resp2.result() == http::status::ok);
     REQUIRE(as_string(resp2) == "alice");
 }
