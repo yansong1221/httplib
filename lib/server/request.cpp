@@ -1,4 +1,3 @@
-
 #include "httplib/server/middleware/session.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/util/misc.hpp"
@@ -56,6 +55,16 @@ std::string_view request::operator[](std::string_view name) const
     return (*impl_)[name];
 }
 
+header_proxy request::operator[](http::field name)
+{
+    return header_proxy(base(), name);
+}
+
+header_proxy request::operator[](std::string_view name)
+{
+    return header_proxy(base(), name);
+}
+
 std::string_view request::at(http::field name) const
 {
     return impl_->at(name);
@@ -74,16 +83,6 @@ bool request::has(http::field name) const
 bool request::has(std::string_view name) const
 {
     return impl_->has(name);
-}
-
-std::string_view request::get(http::field name) const
-{
-    return impl_->get(name);
-}
-
-std::string_view request::get(std::string_view name) const
-{
-    return impl_->get(name);
 }
 
 void request::set(http::field name, std::string_view value)

@@ -91,8 +91,6 @@ public:
 
     bool has(http::field name) const { return this->base().find(name) != this->base().end(); }
     bool has(std::string_view name) const { return this->base().find(name) != this->base().end(); }
-    std::string_view get(http::field name) const { return (*this)[name]; }
-    std::string_view get(std::string_view name) const { return (*this)[name]; }
     void set(http::field name, std::string_view value) { this->base().set(name, value); }
     void set(std::string_view name, std::string_view value) { this->base().set(name, value); }
     void erase(http::field name) { this->base().erase(name); }

@@ -2,6 +2,7 @@
 #include "httplib/body/any_body.hpp"
 #include "httplib/config.hpp"
 #include "httplib/html/form_data.hpp"
+#include "httplib/server/header_proxy.hpp"
 #include "httplib/server/helper.hpp"
 #include "httplib/util/misc.hpp"
 #include <boost/beast/http/fields.hpp>
@@ -24,13 +25,18 @@ public:
     http::fields& base();
     const http::fields& base() const;
 
+    std::string_view operator[](http::field name) const;
+    std::string_view operator[](std::string_view name) const;
+    header_proxy operator[](http::field name);
+    header_proxy operator[](std::string_view name);
+    std::string_view at(http::field name) const;
+    std::string_view at(std::string_view name) const;
+
     void set(http::field name, std::string_view value);
     void set(std::string_view name, std::string_view value);
 
     bool has(http::field name) const;
     bool has(std::string_view name) const;
-    std::string_view get(http::field name) const;
-    std::string_view get(std::string_view name) const;
     void erase(http::field name);
     void erase(std::string_view name);
 

@@ -34,6 +34,36 @@ void response::set(std::string_view name, std::string_view value)
     impl_->set(name, value);
 }
 
+std::string_view response::operator[](http::field name) const
+{
+    return (*impl_)[name];
+}
+
+std::string_view response::operator[](std::string_view name) const
+{
+    return (*impl_)[name];
+}
+
+header_proxy response::operator[](http::field name)
+{
+    return header_proxy(impl_->base(), name);
+}
+
+header_proxy response::operator[](std::string_view name)
+{
+    return header_proxy(impl_->base(), name);
+}
+
+std::string_view response::at(http::field name) const
+{
+    return impl_->base().at(name);
+}
+
+std::string_view response::at(std::string_view name) const
+{
+    return impl_->base().at(name);
+}
+
 bool response::has(http::field name) const
 {
     return impl_->find(name) != impl_->end();
@@ -42,16 +72,6 @@ bool response::has(http::field name) const
 bool response::has(std::string_view name) const
 {
     return impl_->find(name) != impl_->end();
-}
-
-std::string_view response::get(http::field name) const
-{
-    return (*impl_)[name];
-}
-
-std::string_view response::get(std::string_view name) const
-{
-    return (*impl_)[name];
 }
 
 void response::erase(http::field name)

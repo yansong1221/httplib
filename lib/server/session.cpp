@@ -154,9 +154,7 @@ net::awaitable<session::task::ptr> session::detect_ssl_task::then()
         http_stream(std::move(stream_)), std::move(buffer), serv_);
 }
 void session::detect_ssl_task::abort()
-{
-    stream_.close();
-}
+{ stream_.close(); }
 
 session::http_task::http_task(http_stream&& stream,
                               beast::flat_buffer&& buffer,
@@ -286,28 +284,21 @@ net::awaitable<session::task::ptr> session::http_task::then()
 }
 
 void session::http_task::abort()
-{
-    stream_.close();
-}
+{ stream_.close(); }
 
 net::awaitable<bool> session::http_task::async_write(const request& req, response& resp)
 {
-    if (resp.get_impl()->stream_handler_) {
-        resp.get_impl()->chunked(true);
-    }
+    if (resp.get_impl()->stream_handler_) { resp.get_impl()->chunked(true); }
     else {
         if (!resp.get_impl()->has_content_length())
             resp.get_impl()->prepare_payload();
 
-        if (auto iter = req.get_impl()->find(http::field::accept_encoding);
-            iter != req.get_impl()->end())
-        {
+        if (auto accept_encoding = req[http::field::accept_encoding]; !accept_encoding.empty()) {
             html::accept_encoding_content encoding_content;
-            if (encoding_content.parse(iter->value())) {
+            if (encoding_content.parse(accept_encoding)) {
                 if (auto encoding = encoding_content.server_apply_encoding(); !encoding.empty()) {
-                    auto content_type = resp.get_impl()->operator[](http::field::content_type);
-                    if (serv_.should_compress_content_type(
-                            std::string_view(content_type.data(), content_type.size())))
+                    if (auto content_type = resp[http::field::content_type];
+                        serv_.should_compress_content_type(content_type))
                     {
                         resp.set(http::field::content_encoding, encoding);
                         resp.get_impl()->chunked(true);
@@ -326,7 +317,8 @@ net::awaitable<bool> session::http_task::async_write(const request& req, respons
             serializer.split(true);
 
         while (resp.get_impl()->stream_handler_ ? !serializer.is_header_done()
-                                                : !serializer.is_done()) {
+                                                : !serializer.is_done())
+        {
             stream_.expires_after(serv_.write_timeout());
             co_await http::async_write_some(stream_, serializer, util::net_awaitable[ec]);
             if (ec) {
@@ -386,9 +378,7 @@ httplib::net::awaitable<session::task::ptr> session::websocket_task::then()
 }
 
 void session::websocket_task::abort()
-{
-    conn_->close();
-}
+{ conn_->close(); }
 
 session::http_proxy_task::http_proxy_task(http_stream&& stream,
                                           request&& req,
