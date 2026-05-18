@@ -247,7 +247,18 @@ TEST_CASE("http_ranges: suffix range", "[body-utils]")
     REQUIRE(ranges.parse("bytes=-100", 1000));
     REQUIRE(ranges.size() == 1);
     auto r = ranges.front();
+    REQUIRE(r.first == 900);
     REQUIRE(r.second == 999);
+}
+
+TEST_CASE("http_ranges: suffix range small", "[body-utils]")
+{
+    httplib::html::http_ranges ranges;
+    REQUIRE(ranges.parse("bytes=-4", 10));
+    REQUIRE(ranges.size() == 1);
+    auto r = ranges.front();
+    REQUIRE(r.first == 6);
+    REQUIRE(r.second == 9);
 }
 
 TEST_CASE("http_ranges: empty check", "[body-utils]")

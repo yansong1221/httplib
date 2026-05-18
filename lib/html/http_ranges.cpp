@@ -21,15 +21,30 @@ bool http_ranges::parse(std::string_view range_str, size_t file_size)
     }
 
     if (range_str == "-") {
-        ranges_.push_back(range_type {0, file_size - 1});
+        ranges_.push_back(range_type {0, static_cast<int64_t>(file_size) - 1});
         return true;
     }
     auto ranges = util::split(range_str, ",");
     for (const auto& range : ranges) {
+        // Handle suffix range: -N
+        if (range.starts_with("-")) {
+            auto str       = range.substr(1);
+            int64_t count  = 0;
+            auto [ptr, ec] = std::from_chars(str.data(), str.data() + str.size(), count);
+            if (ec != std::errc {} || count <= 0) {
+                ranges_.clear();
+                return false;
+            }
+            ranges_.push_back(range_type {
+                static_cast<int64_t>(file_size) - count,
+                static_cast<int64_t>(file_size) - 1});
+            continue;
+        }
+
         auto sub_range  = util::split(range, "-");
         auto fist_range = boost::trim_copy(sub_range[0]);
 
-        int start = 0;
+        int64_t start = 0;
         if (fist_range.empty()) {
             start = -1;
         }
@@ -42,14 +57,14 @@ bool http_ranges::parse(std::string_view range_str, size_t file_size)
             }
         }
 
-        int end = 0;
+        int64_t end = 0;
         if (sub_range.size() == 1) {
-            end = file_size - 1;
+            end = static_cast<int64_t>(file_size) - 1;
         }
         else {
             auto second_range = boost::trim_copy(sub_range[1]);
             if (second_range.empty()) {
-                end = file_size - 1;
+                end = static_cast<int64_t>(file_size) - 1;
             }
             else {
                 auto [ptr, ec] = std::from_chars(
@@ -62,18 +77,17 @@ bool http_ranges::parse(std::string_view range_str, size_t file_size)
         }
 
         if (start > 0 && (start >= file_size || start == end)) {
-            // out of range
             ranges_.clear();
             return false;
         }
 
-        if (end > 0 && end >= file_size) {
-            end = file_size - 1;
+        if (end > 0 && end >= static_cast<int64_t>(file_size)) {
+            end = static_cast<int64_t>(file_size) - 1;
         }
 
         if (start == -1) {
-            start = file_size - end;
-            end   = file_size - 1;
+            start = static_cast<int64_t>(file_size) - end;
+            end   = static_cast<int64_t>(file_size) - 1;
         }
         ranges_.push_back(range_type {start, end});
     }
