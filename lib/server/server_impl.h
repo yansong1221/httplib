@@ -13,6 +13,7 @@
 #include <memory>
 #include <span>
 #include <spdlog/spdlog.h>
+#include <string_view>
 #include <unordered_set>
 
 namespace httplib::server {
@@ -48,6 +49,9 @@ public:
     std::shared_ptr<spdlog::logger> get_logger() const;
     void set_logger(std::shared_ptr<spdlog::logger> logger);
 
+    void set_compress_content_types(std::function<bool(std::string_view)> predicate);
+    bool should_compress_content_type(std::string_view content_type) const;
+
     void use_ssl(const net::const_buffer& cert_file,
                  const net::const_buffer& key_file,
                  std::string passwd = {});
@@ -73,6 +77,8 @@ private:
 
     std::shared_ptr<spdlog::logger> default_logger_;
     std::shared_ptr<spdlog::logger> custom_logger_;
+
+    std::function<bool(std::string_view)> compress_content_type_predicate_;
 
 #ifdef HTTPLIB_ENABLED_SSL
     std::shared_ptr<ssl::context> ssl_context_;

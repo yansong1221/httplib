@@ -209,6 +209,29 @@ void http_server::impl::set_logger(std::shared_ptr<spdlog::logger> logger)
     custom_logger_ = logger;
 }
 
+void http_server::impl::set_compress_content_types(std::function<bool(std::string_view)> predicate)
+{
+    compress_content_type_predicate_ = std::move(predicate);
+}
+
+static bool default_compress_content_type(std::string_view content_type)
+{
+    return content_type.starts_with("text/") ||
+           content_type.starts_with("application/json") ||
+           content_type.starts_with("application/javascript") ||
+           content_type.starts_with("application/xml") ||
+           content_type.starts_with("application/xhtml+xml") ||
+           content_type.starts_with("image/svg+xml") ||
+           content_type.starts_with("application/ld+json");
+}
+
+bool http_server::impl::should_compress_content_type(std::string_view content_type) const
+{
+    if (compress_content_type_predicate_)
+        return compress_content_type_predicate_(content_type);
+    return default_compress_content_type(content_type);
+}
+
 void http_server::impl::use_ssl(const net::const_buffer& cert_file,
                                 const net::const_buffer& key_file,
                                 std::string passwd /*= {}*/)

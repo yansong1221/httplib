@@ -5,8 +5,10 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/socket_base.hpp>
 #include <filesystem>
+#include <functional>
 #include <future>
 #include <span>
+#include <string_view>
 
 namespace httplib::server {
 
@@ -49,6 +51,8 @@ public:
 
     std::shared_ptr<spdlog::logger> get_logger() const;
     void set_logger(std::shared_ptr<spdlog::logger> logger);
+
+    void set_compress_content_types(std::function<bool(std::string_view)> predicate);
 
     void use_ssl(const std::span<const char>& cert_file,
                  const std::span<const char>& key_file,

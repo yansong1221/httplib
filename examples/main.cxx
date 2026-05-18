@@ -527,6 +527,14 @@ int main(int argc, char** argv)
 
         auto& router = svr.router();
 
+        // Enable compression only for compressible content types
+        // Default: text/*, application/json, application/javascript, application/xml, image/svg+xml
+        // Customize with a predicate:
+        // svr.set_compress_content_types([](std::string_view ct) {
+        //     return ct.starts_with("application/json");
+        // });
+        // To disable all compression: svr.set_compress_content_types([](std::string_view) { return false; });
+
         setup_http_routes(router);
         setup_cors(router);
         setup_ws(router);

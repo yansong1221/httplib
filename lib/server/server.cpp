@@ -109,6 +109,11 @@ void http_server::set_logger(std::shared_ptr<spdlog::logger> logger)
     impl_->set_logger(logger);
 }
 
+void http_server::set_compress_content_types(std::function<bool(std::string_view)> predicate)
+{
+    impl_->set_compress_content_types(std::move(predicate));
+}
+
 void http_server::use_ssl(const std::span<const char>& cert_file,
                           const std::span<const char>& key_file,
                           std::string passwd /*= {}*/)

@@ -305,8 +305,13 @@ net::awaitable<bool> session::http_task::async_write(const request& req, respons
             html::accept_encoding_content encoding_content;
             if (encoding_content.parse(iter->value())) {
                 if (auto encoding = encoding_content.server_apply_encoding(); !encoding.empty()) {
-                    resp.set(http::field::content_encoding, encoding);
-                    resp.get_impl()->chunked(true);
+                    auto content_type = resp.get_impl()->operator[](http::field::content_type);
+                    if (serv_.should_compress_content_type(
+                            std::string_view(content_type.data(), content_type.size())))
+                    {
+                        resp.set(http::field::content_encoding, encoding);
+                        resp.get_impl()->chunked(true);
+                    }
                 }
             }
         }
