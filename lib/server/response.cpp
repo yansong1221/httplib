@@ -34,6 +34,36 @@ void response::set(std::string_view name, std::string_view value)
     impl_->set(name, value);
 }
 
+bool response::has(http::field name) const
+{
+    return impl_->find(name) != impl_->end();
+}
+
+bool response::has(std::string_view name) const
+{
+    return impl_->find(name) != impl_->end();
+}
+
+std::string_view response::get(http::field name) const
+{
+    return (*impl_)[name];
+}
+
+std::string_view response::get(std::string_view name) const
+{
+    return (*impl_)[name];
+}
+
+void response::erase(http::field name)
+{
+    impl_->erase(name);
+}
+
+void response::erase(std::string_view name)
+{
+    impl_->erase(name);
+}
+
 httplib::http::status response::result() const
 {
     return impl_->result();

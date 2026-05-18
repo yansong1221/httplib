@@ -27,6 +27,13 @@ public:
     void set(http::field name, std::string_view value);
     void set(std::string_view name, std::string_view value);
 
+    bool has(http::field name) const;
+    bool has(std::string_view name) const;
+    std::string_view get(http::field name) const;
+    std::string_view get(std::string_view name) const;
+    void erase(http::field name);
+    void erase(std::string_view name);
+
     http::status result() const;
     unsigned result_int() const;
 

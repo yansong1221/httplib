@@ -66,6 +66,46 @@ std::string_view request::at(std::string_view name) const
     return impl_->at(name);
 }
 
+bool request::has(http::field name) const
+{
+    return impl_->has(name);
+}
+
+bool request::has(std::string_view name) const
+{
+    return impl_->has(name);
+}
+
+std::string_view request::get(http::field name) const
+{
+    return impl_->get(name);
+}
+
+std::string_view request::get(std::string_view name) const
+{
+    return impl_->get(name);
+}
+
+void request::set(http::field name, std::string_view value)
+{
+    impl_->set(name, value);
+}
+
+void request::set(std::string_view name, std::string_view value)
+{
+    impl_->set(name, value);
+}
+
+void request::erase(http::field name)
+{
+    impl_->erase(name);
+}
+
+void request::erase(std::string_view name)
+{
+    impl_->erase(name);
+}
+
 std::string_view request::path() const
 {
     return impl_->path();

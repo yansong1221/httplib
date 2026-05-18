@@ -38,6 +38,15 @@ public:
     std::string_view at(http::field name) const;
     std::string_view at(std::string_view name) const;
 
+    bool has(http::field name) const;
+    bool has(std::string_view name) const;
+    std::string_view get(http::field name) const;
+    std::string_view get(std::string_view name) const;
+    void set(http::field name, std::string_view value);
+    void set(std::string_view name, std::string_view value);
+    void erase(http::field name);
+    void erase(std::string_view name);
+
     std::string_view path() const;
     const html::query_params& query_params() const;
 
