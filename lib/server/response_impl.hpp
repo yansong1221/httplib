@@ -90,11 +90,15 @@ public:
         reset_content();
         std::error_code ec;
         auto file_size = fs::file_size(path, ec);
-        if (ec)
+        if (ec) {
+            set_error_content(http::status::not_found);
             return;
+        }
         auto file_write_time = html::file_last_write_time(path, ec);
-        if (ec)
+        if (ec) {
+            set_error_content(http::status::not_found);
             return;
+        }
 
         html::http_ranges ranges;
         if (!ranges.parse(req_header[http::field::range], file_size)) {
@@ -117,8 +121,10 @@ public:
 
         body::file_body::value_type file;
         file.open(path, std::ios::in | std::ios::binary);
-        if (!file.is_open())
+        if (!file.is_open()) {
+            set_error_content(http::status::not_found);
             return;
+        }
 
         file.content_type = mime::get_mime_type(path.extension().string());
         file.ranges       = std::move(ranges);

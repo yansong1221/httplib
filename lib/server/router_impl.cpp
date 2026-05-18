@@ -92,8 +92,9 @@ router_impl::Node* router_impl::insert(Node* parent,
         return insert(parent->regex_children.back().get(), segments, index + 1);
     }
     auto [iter, inserted] =
-        parent->static_children.try_emplace(std::string(seg), std::make_unique<Node>());
+        parent->static_children.try_emplace(std::string(seg), nullptr);
     if (inserted) {
+        iter->second   = std::make_unique<Node>();
         iter->second->key  = seg;
         iter->second->type = Node::node_type::static_node;
     }

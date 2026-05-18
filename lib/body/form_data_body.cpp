@@ -96,6 +96,7 @@ form_data_body::writer::writer(http::fields const&, value_type& b)
 boost::optional<std::pair<form_data_body::writer::const_buffers_type, bool>>
 form_data_body::writer::get(boost::system::error_code& ec)
 {
+    ec = {};
     if (field_data_index_ >= body_.fields.size()) {
         return boost::none;
     }

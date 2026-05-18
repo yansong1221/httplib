@@ -11,6 +11,7 @@ file_body::writer::writer(const http::fields&, value_type& b)
 void file_body::writer::init(boost::system::error_code& ec)
 {
     ec.clear();
+    file_size_ = body_.file_size();
 }
 
 boost::optional<std::pair<file_body::writer::const_buffers_type, bool>>
@@ -64,7 +65,7 @@ file_body::writer::get(boost::system::error_code& ec)
             header += fmt::format(
                 "Content-Range: bytes {}-{}/{}\r\n", range.first, range.second, file_size_);
             header += "\r\n";
-            strcpy(buf_, header.c_str());
+            net::buffer_copy(net::buffer(buf_, sizeof(buf_)), net::buffer(header));
             step_ = step::content;
             pos_  = std::nullopt;
             return {{{buf_, header.size()}, true}};

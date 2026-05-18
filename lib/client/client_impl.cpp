@@ -87,8 +87,11 @@ http_client::impl::async_send_request(http_client::request& req, bool retry /*= 
     catch (const boost::system::system_error& error) {
         ec = error.code();
     }
+    catch (const std::exception&) {
+        ec = boost::system::errc::make_error_code(boost::system::errc::protocol_error);
+    }
     catch (...) {
-        ec = boost::system::errc::make_error_code(boost::system::errc::invalid_argument);
+        ec = boost::system::errc::make_error_code(boost::system::errc::protocol_error);
     }
     close();
 

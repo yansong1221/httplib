@@ -1,7 +1,9 @@
 #pragma once
 #include "httplib/config.hpp"
 #include <boost/asio/awaitable.hpp>
+#include <functional>
 #include <memory>
+#include <string_view>
 
 namespace httplib::server {
 class request;

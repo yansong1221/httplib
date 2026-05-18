@@ -67,7 +67,8 @@ void websocket_conn_impl::close()
         co_await (ws_.async_close(reason, util::net_awaitable[ec]) ||
                   timer.async_wait(util::net_awaitable[ec]));
 
-        serv_.get_logger()->debug("websocket async_close failed: {}", ec.message());
+        if (ec && ec != boost::asio::error::operation_aborted)
+            serv_.get_logger()->debug("websocket async_close failed: {}", ec.message());
 
         ws_.socket().shutdown(net::socket_base::shutdown_both, ec);
         ws_.socket().close(ec);

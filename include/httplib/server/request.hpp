@@ -7,6 +7,9 @@
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/message.hpp>
 #include <memory>
+#include <string>
+#include <string_view>
+#include <unordered_map>
 
 namespace httplib::server {
 

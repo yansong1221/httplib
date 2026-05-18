@@ -79,13 +79,7 @@ ws_client::impl::async_send(std::string&& data, bool binary /*= false*/)
         else {
             stream_->text(true);
         }
-
-        if (binary) {
-            co_await stream_->async_write(net::buffer(data), net::use_awaitable);
-        }
-        else {
-            co_await stream_->async_write(net::buffer(data), net::use_awaitable);
-        }
+        co_await stream_->async_write(net::buffer(data), net::use_awaitable);
 
         co_return boost::system::error_code {};
     }
@@ -199,11 +193,13 @@ httplib::net::awaitable<boost::system::error_code> ws_client::impl::async_close(
     websocket::close_reason reason("normal");
     co_await (stream_->async_close(reason, util::net_awaitable[ec]) ||
               timer.async_wait(util::net_awaitable[ec]));
-    if (!ec)
-        co_return ec;
+    if (!ec || ec == boost::asio::error::operation_aborted)
+    {
+        stream_->socket().shutdown(net::socket_base::shutdown_both, ec);
+        stream_->socket().close(ec);
+        co_return boost::system::error_code {};
+    }
 
-    stream_->socket().shutdown(net::socket_base::shutdown_both, ec);
-    stream_->socket().close(ec);
     co_return ec;
 }
 
@@ -227,24 +223,30 @@ void ws_client::impl::async_run(std::string_view path, const http::fields& heade
         executor_,
         [this, self = shared_from_this(), path = std::string(path), headers]()
             -> net::awaitable<void> {
-            auto ec = co_await async_connect(path, headers);
-            co_await open_handler_(ec);
-            if (ec) {
-                co_return;
-            }
-
-            while (is_open()) {
-                auto read_ec = co_await async_read();
-                if (read_ec) {
-                    break;
+            try {
+                auto ec = co_await async_connect(path, headers);
+                co_await open_handler_(ec);
+                if (ec) {
+                    co_return;
                 }
-                if (message_handler_) {
-                    co_await message_handler_(got_data(), got_binary());
+
+                while (is_open()) {
+                    auto read_ec = co_await async_read();
+                    if (read_ec) {
+                        break;
+                    }
+                    if (message_handler_) {
+                        co_await message_handler_(got_data(), got_binary());
+                    }
+                }
+
+                if (close_handler_) {
+                    co_await close_handler_();
                 }
             }
-
-            if (close_handler_) {
-                co_await close_handler_();
+            catch (const std::exception& e) {
+            }
+            catch (...) {
             }
         },
         boost::asio::detached);

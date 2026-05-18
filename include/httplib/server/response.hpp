@@ -9,6 +9,9 @@
 #include <boost/beast/http/message.hpp>
 #include <boost/json/value.hpp>
 #include <filesystem>
+#include <functional>
+#include <string_view>
+#include <vector>
 
 
 namespace httplib::server {

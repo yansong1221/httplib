@@ -96,7 +96,13 @@ public:
     void erase(http::field name) { this->base().erase(name); }
     void erase(std::string_view name) { this->base().erase(name); }
 
-    std::string_view path_param(const std::string& key) const { return path_params_.at(key); }
+    std::string_view path_param(const std::string& key) const
+    {
+        auto it = path_params_.find(key);
+        if (it != path_params_.end())
+            return it->second;
+        return {};
+    }
     void add_path_param(const std::string& key, const std::string& val) { path_params_[key] = val; }
     void set_path_param(std::unordered_map<std::string, std::string>&& params)
     {
