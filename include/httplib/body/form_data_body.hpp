@@ -63,7 +63,7 @@ public:
             boundary_line,
             boundary_header,
             boundary_content,
-            finshed,
+            finished,
             eof
         };
         step step_ = step::boundary_line;

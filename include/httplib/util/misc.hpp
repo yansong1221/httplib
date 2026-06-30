@@ -32,7 +32,7 @@ static inline auto make_coro_handler(Func&& handler)
  * @param c The hexadecimal input.
  * @return The decimal output.
  */
-static inline std::uint8_t hex2dec(std::uint8_t c)
+static inline std::uint8_t hex_to_dec(std::uint8_t c)
 {
     if (c >= '0' && c <= '9')
         c -= '0';
@@ -64,8 +64,8 @@ static inline void url_decode(std::string& str)
     for (size_t r = 0; r < str.size(); ++r) {
         uint8_t v = str[r];
         if (str[r] == '%') {
-            v = hex2dec(str[++r]) << 4;
-            v |= hex2dec(str[++r]);
+            v = hex_to_dec(str[++r]) << 4;
+            v |= hex_to_dec(str[++r]);
         }
         str[w++] = v;
     }

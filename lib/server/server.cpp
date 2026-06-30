@@ -57,19 +57,19 @@ http_server& http_server::listen(uint16_t port,
     return listen("0.0.0.0", port, backlog);
 }
 
-net::awaitable<boost::system::error_code> http_server::co_run()
+net::awaitable<boost::system::error_code> http_server::async_run()
 {
-    co_return co_await impl_->co_run();
+    co_return co_await impl_->async_run();
 }
 
-std::shared_future<boost::system::error_code> http_server::async_run()
+std::shared_future<boost::system::error_code> http_server::run()
 {
-    return impl_->async_run();
+    return impl_->run();
 }
 
-std::shared_future<void> http_server::async_stop()
+std::shared_future<void> http_server::stop()
 {
-    return impl_->async_stop();
+    return impl_->stop();
 }
 router& http_server::router()
 {
@@ -91,18 +91,18 @@ void http_server::set_write_timeout(const std::chrono::steady_clock::duration& d
     impl_->set_write_timeout(dur);
 }
 
-const std::chrono::steady_clock::duration& http_server::read_timeout() const
+std::chrono::steady_clock::duration http_server::read_timeout() const
 {
     return impl_->read_timeout();
 }
 
-const std::chrono::steady_clock::duration& http_server::write_timeout() const
+std::chrono::steady_clock::duration http_server::write_timeout() const
 {
     return impl_->write_timeout();
 }
-std::shared_ptr<spdlog::logger> http_server::get_logger() const
+std::shared_ptr<spdlog::logger> http_server::logger() const
 {
-    return impl_->get_logger();
+    return impl_->logger();
 }
 void http_server::set_logger(std::shared_ptr<spdlog::logger> logger)
 {
@@ -138,9 +138,9 @@ const httplib::server::http_server::impl* http_server::get_impl() const
     return impl_.get();
 }
 
-httplib::net::awaitable<void> http_server::co_stop()
+net::awaitable<void> http_server::async_stop()
 {
-    co_return co_await impl_->co_stop();
+    co_return co_await impl_->async_stop();
 }
 
 } // namespace httplib::server

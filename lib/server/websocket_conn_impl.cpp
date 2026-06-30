@@ -68,7 +68,7 @@ void websocket_conn_impl::close()
                   timer.async_wait(util::net_awaitable[ec]));
 
         if (ec && ec != boost::asio::error::operation_aborted)
-            serv_.get_logger()->debug("websocket async_close failed: {}", ec.message());
+            serv_.logger()->debug("websocket async_close failed: {}", ec.message());
 
         ws_.socket().shutdown(net::socket_base::shutdown_both, ec);
         ws_.socket().close(ec);
@@ -85,7 +85,7 @@ httplib::net::awaitable<void> websocket_conn_impl::run()
 
     co_await ws_.async_accept((*req_.get_impl()), util::net_awaitable[ec]);
     if (ec) {
-        serv_.get_logger()->error("websocket handshake failed: {}", ec.message());
+        serv_.logger()->error("websocket handshake failed: {}", ec.message());
         co_return;
     }
 
@@ -93,18 +93,18 @@ httplib::net::awaitable<void> websocket_conn_impl::run()
         co_await entry->open_handler(weak_from_this());
     }
     catch (const std::exception& e) {
-        serv_.get_logger()->error("websocket open handler failed: {}", e.what());
+        serv_.logger()->error("websocket open handler failed: {}", e.what());
         co_return;
     }
 
-    serv_.get_logger()->debug(
+    serv_.logger()->debug(
         "websocket new connection: [{}:{}]", remote_endp.address().to_string(), remote_endp.port());
 
 
     for (;;) {
         auto bytes = co_await ws_.async_read(buffer_, util::net_awaitable[ec]);
         if (ec) {
-            serv_.get_logger()->debug("websocket disconnect: [{}:{}] what: {}",
+            serv_.logger()->debug("websocket disconnect: [{}:{}] what: {}",
                                       remote_endp.address().to_string(),
                                       remote_endp.port(),
                                       ec.message());
@@ -114,7 +114,7 @@ httplib::net::awaitable<void> websocket_conn_impl::run()
                 co_await entry->close_handler(weak_from_this());
             }
             catch (const std::exception& e) {
-                serv_.get_logger()->error("websocket close handler failed: {}", e.what());
+                serv_.logger()->error("websocket close handler failed: {}", e.what());
             }
             co_return;
         }
@@ -123,7 +123,7 @@ httplib::net::awaitable<void> websocket_conn_impl::run()
                 weak_from_this(), util::buffer_to_string_view(buffer_.data()), ws_.got_binary());
         }
         catch (const std::exception& e) {
-            serv_.get_logger()->error("websocket message handler failed: {}", e.what());
+            serv_.logger()->error("websocket message handler failed: {}", e.what());
         }
         buffer_.consume(bytes);
     }

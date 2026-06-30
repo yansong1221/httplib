@@ -30,23 +30,23 @@ public:
                 uint16_t port,
                 int backlog = net::socket_base::max_listen_connections);
 
-    std::shared_future<boost::system::error_code> async_run();
-    net::awaitable<boost::system::error_code> co_run();
+    std::shared_future<boost::system::error_code> run();
+    net::awaitable<boost::system::error_code> async_run();
 
-    std::shared_future<void> async_stop();
-    net::awaitable<void> co_stop();
+    std::shared_future<void> stop();
+    net::awaitable<void> async_stop();
 
     router_impl& router();
 
     void set_read_timeout(const std::chrono::steady_clock::duration& dur);
     void set_write_timeout(const std::chrono::steady_clock::duration& dur);
 
-    const std::chrono::steady_clock::duration& read_timeout() const;
-    const std::chrono::steady_clock::duration& write_timeout() const;
+    std::chrono::steady_clock::duration read_timeout() const;
+    std::chrono::steady_clock::duration write_timeout() const;
 
     tcp::endpoint local_endpoint() const;
 
-    std::shared_ptr<spdlog::logger> get_logger() const;
+    std::shared_ptr<spdlog::logger> logger() const;
     void set_logger(std::shared_ptr<spdlog::logger> logger);
 
     void set_compress_content_types(std::function<bool(std::string_view)> predicate);
@@ -70,7 +70,7 @@ private:
     tcp::acceptor acceptor_;
 
     std::mutex session_mutex_;
-    std::unordered_set<std::shared_ptr<session>> session_map_;
+    std::unordered_set<std::shared_ptr<session>> sessions_;
 
     std::chrono::steady_clock::duration read_timeout_  = std::chrono::seconds(30);
     std::chrono::steady_clock::duration write_timeout_ = std::chrono::seconds(30);

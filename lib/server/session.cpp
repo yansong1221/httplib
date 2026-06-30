@@ -74,7 +74,7 @@ public:
             ssl::stream_base::server, buffer_.data(), util::net_awaitable[ec]);
         beast::get_lowest_layer(stream_).expires_never();
         if (ec) {
-            serv_.get_logger()->trace("ssl handshake failed: {}", ec.message());
+            serv_.logger()->trace("ssl handshake failed: {}", ec.message());
             co_return nullptr;
         }
         buffer_.consume(bytes_used);
@@ -141,7 +141,7 @@ net::awaitable<session::task::ptr> session::detect_ssl_task::then()
         bool is_ssl = co_await beast::async_detect_ssl(stream_, buffer, util::net_awaitable[ec]);
         stream_.expires_never();
         if (ec) {
-            serv_.get_logger()->trace("async_detect_ssl failed: {}", ec.message());
+            serv_.logger()->trace("async_detect_ssl failed: {}", ec.message());
             co_return nullptr;
         }
         if (is_ssl) {
@@ -189,7 +189,7 @@ net::awaitable<session::task::ptr> session::http_task::then()
         co_await http::async_read_header(stream_, buffer_, header_parser, util::net_awaitable[ec]);
         stream_.expires_never();
         if (ec) {
-            serv_.get_logger()->trace("read http header failed: {}", ec.message());
+            serv_.logger()->trace("read http header failed: {}", ec.message());
             co_return nullptr;
         }
 
@@ -232,7 +232,7 @@ net::awaitable<session::task::ptr> session::http_task::then()
                         stream_, buffer_, body_parser, util::net_awaitable[ec]);
                     if (ec) {
                         stream_.expires_never();
-                        serv_.get_logger()->trace("read http body failed: {}", ec.message());
+                        serv_.logger()->trace("read http body failed: {}", ec.message());
                         co_return nullptr;
                     }
                 }
@@ -240,18 +240,18 @@ net::awaitable<session::task::ptr> session::http_task::then()
                 req.get_impl()->body() = std::move(body_parser.release().body());
                 start_time             = std::chrono::steady_clock::now();
 
-                co_await _router.proc_routing(req, resp);
+                co_await _router.process_routing(req, resp);
             }
             co_await _router.post_routing(req, resp);
         }
         catch (const std::exception& e) {
-            serv_.get_logger()->warn("exception in business function, reason: {}", e.what());
+            serv_.logger()->warn("exception in business function, reason: {}", e.what());
             resp.set_string_content(
                 std::string(e.what()), "text/plain", http::status::internal_server_error);
         }
         catch (...) {
             using namespace std::string_view_literals;
-            serv_.get_logger()->warn("unknown exception in business function");
+            serv_.logger()->warn("unknown exception in business function");
             resp.set_string_content(std::string("unknown exception"),
                                     "text/plain",
                                     http::status::internal_server_error);
@@ -259,7 +259,7 @@ net::awaitable<session::task::ptr> session::http_task::then()
 
         auto span_time = std::chrono::steady_clock::now() - start_time;
 
-        serv_.get_logger()->debug(
+        serv_.logger()->debug(
             "{} {} ({}) {} {}ms",
             req.method_string(),
             req.target(),
@@ -323,7 +323,7 @@ net::awaitable<bool> session::http_task::async_write(const request& req, respons
             co_await http::async_write_some(stream_, serializer, util::net_awaitable[ec]);
             if (ec) {
                 stream_.expires_never();
-                serv_.get_logger()->trace("write http body failed: {}", ec.message());
+                serv_.logger()->trace("write http body failed: {}", ec.message());
                 co_return false;
             }
         }
@@ -334,7 +334,7 @@ net::awaitable<bool> session::http_task::async_write(const request& req, respons
         for (;;) {
             bool has_more = co_await handler(buffer_, ec);
             if (ec) {
-                serv_.get_logger()->trace("read chunk body failed: {}", ec.message());
+                serv_.logger()->trace("read chunk body failed: {}", ec.message());
                 co_return false;
             }
             if (buffer_.size() != 0) {
@@ -343,7 +343,7 @@ net::awaitable<bool> session::http_task::async_write(const request& req, respons
                 co_await net::async_write(stream_, chunk_b, util::net_awaitable[ec]);
                 stream_.expires_never();
                 if (ec) {
-                    serv_.get_logger()->trace("write chunk body failed: {}", ec.message());
+                    serv_.logger()->trace("write chunk body failed: {}", ec.message());
                     co_return false;
                 }
                 buffer_.consume(buffer_.size());
@@ -354,7 +354,7 @@ net::awaitable<bool> session::http_task::async_write(const request& req, respons
                 co_await net::async_write(stream_, chunk_last, util::net_awaitable[ec]);
                 stream_.expires_never();
                 if (ec) {
-                    serv_.get_logger()->trace("write chunk last failed: {}", ec.message());
+                    serv_.logger()->trace("write chunk last failed: {}", ec.message());
                     co_return false;
                 }
                 break;
@@ -396,7 +396,7 @@ net::awaitable<session::task::ptr> session::http_proxy_task::then()
     auto target = req_.target();
     auto pos    = target.find(":");
     if (pos == std::string_view::npos || pos == target.size() - 1) {
-        serv_.get_logger()->trace("http_proxy: invalid target: {}", target);
+        serv_.logger()->trace("http_proxy: invalid target: {}", target);
         co_return nullptr;
     }
 
@@ -406,13 +406,13 @@ net::awaitable<session::task::ptr> session::http_proxy_task::then()
     boost::system::error_code ec;
     auto results = co_await resolver_.async_resolve(host, port, util::net_awaitable[ec]);
     if (ec) {
-        serv_.get_logger()->trace("http_proxy: resolve failed {}: {}", host, ec.message());
+        serv_.logger()->trace("http_proxy: resolve failed {}: {}", host, ec.message());
         co_return nullptr;
     }
 
     co_await net::async_connect(proxy_socket_, results, util::net_awaitable[ec]);
     if (ec) {
-        serv_.get_logger()->trace("http_proxy: connect failed {}: {}", host, ec.message());
+        serv_.logger()->trace("http_proxy: connect failed {}: {}", host, ec.message());
         co_return nullptr;
     }
 
@@ -422,7 +422,7 @@ net::awaitable<session::task::ptr> session::http_proxy_task::then()
     resp.get_impl()->result(http::status::ok);
     co_await http::async_write(stream_, (*resp.get_impl()), util::net_awaitable[ec]);
     if (ec) {
-        serv_.get_logger()->trace("http_proxy: write response failed: {}", ec.message());
+        serv_.logger()->trace("http_proxy: write response failed: {}", ec.message());
         co_return nullptr;
     }
 

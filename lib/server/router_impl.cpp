@@ -26,11 +26,11 @@ router_impl::router_impl()
 }
 
 void router_impl::set_http_handler_impl(http::verb method,
-                                        std::string_view path,
+                                       std::string_view key,
                                         coro_http_handler_type&& handler)
 {
     std::unique_lock lock(mutex_);
-    auto segments          = detail::split_segments(path);
+    auto segments          = detail::split_segments(key);
     auto node              = insert(root_.get(), segments, 0);
     node->handlers[method] = std::move(handler);
 }
@@ -103,7 +103,7 @@ router_impl::Node* router_impl::insert(Node* parent,
 
 
 // ---------------- 匹配路由 ----------------
-net::awaitable<void> router_impl::proc_routing(request& req, response& resp) const
+net::awaitable<void> router_impl::process_routing(request& req, response& resp) const
 {
     std::shared_lock lock(mutex_);
 
@@ -283,15 +283,15 @@ net::awaitable<void> router_impl::post_routing(request& req, response& resp) con
     if (not_found_handler_ && resp.get_impl()->result() == http::status::not_found)
         co_await not_found_handler_(req, resp);
 
-    if (post_handler_)
-        co_await post_handler_(req, resp);
+    if (post_routing_handler_)
+        co_await post_routing_handler_(req, resp);
 
     co_return;
 }
 
-void router_impl::set_http_post_handler_impl(coro_http_handler_type&& handler)
+void router_impl::set_post_routing_handler_impl(coro_http_handler_type&& handler)
 {
-    post_handler_ = std::move(handler);
+    post_routing_handler_ = std::move(handler);
 }
 
 

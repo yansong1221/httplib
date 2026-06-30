@@ -40,7 +40,7 @@ struct ws_test_server {
 
     ~ws_test_server()
     {
-        server.async_stop().wait();
+        server.stop().wait();
         ioc.stop();
         if (thread.joinable())
             thread.join();
@@ -50,7 +50,7 @@ struct ws_test_server {
     {
         server.listen("127.0.0.1", 0);
         endpoint = server.local_endpoint();
-        server.async_run();
+        server.run();
         thread = std::thread([this] { ioc.run(); });
     }
 
@@ -113,7 +113,7 @@ TEST_CASE("WebSocket echo server and client", "[websocket]")
         []() -> net::awaitable<void> { co_return; });
 
     auto work = net::make_work_guard(client_ioc);
-    ws_client.async_run("/ws");
+    ws_client.run("/ws");
 
     client_ioc.run_for(std::chrono::seconds(5));
 
@@ -169,7 +169,7 @@ TEST_CASE("WebSocket binary message", "[websocket]")
         []() -> net::awaitable<void> { co_return; });
 
     auto work = net::make_work_guard(client_ioc);
-    ws_client.async_run("/ws-bin");
+    ws_client.run("/ws-bin");
 
     client_ioc.run_for(std::chrono::seconds(5));
 
@@ -219,7 +219,7 @@ TEST_CASE("WebSocket close propagates to server", "[websocket]")
         });
 
     auto work = net::make_work_guard(client_ioc);
-    ws_client.async_run("/ws-close");
+    ws_client.run("/ws-close");
 
     client_ioc.run_for(std::chrono::seconds(5));
 

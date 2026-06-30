@@ -83,7 +83,7 @@ public:
                                                 boost::json::value&& body,
                                                 const html::query_params& params = {},
                                                 const http::fields& headers = http::fields());
-    net::awaitable<response_result> async_delete(std::string_view path,
+    net::awaitable<response_result> async_del(std::string_view path,
                                                  const html::query_params& params = {},
                                                  const http::fields& headers      = http::fields());
     net::awaitable<response_result> async_options(std::string_view path,
@@ -95,14 +95,14 @@ public:
     net::awaitable<response_result> async_trace(std::string_view path,
                                                   const html::query_params& params = {},
                                                   const http::fields& headers      = http::fields());
-    net::awaitable<response_result> async_request(http::verb method,
+    net::awaitable<response_result> async_send_request(http::verb method,
                                                   std::string_view path,
                                                   const http::fields& headers = http::fields());
-    net::awaitable<response_result> async_request(http::verb method,
+    net::awaitable<response_result> async_send_request(http::verb method,
                                                   std::string_view path,
                                                   std::string_view body,
                                                   const http::fields& headers = http::fields());
-    net::awaitable<response_result> async_request(http::verb method,
+    net::awaitable<response_result> async_send_request(http::verb method,
                                                   std::string_view path,
                                                   boost::json::value&& body,
                                                   const http::fields& headers = http::fields());

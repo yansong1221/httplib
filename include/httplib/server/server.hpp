@@ -33,11 +33,11 @@ public:
                         int backlog = net::socket_base::max_listen_connections);
     http_server& listen(uint16_t port, int backlog = net::socket_base::max_listen_connections);
 
-    net::awaitable<boost::system::error_code> co_run();
-    std::shared_future<boost::system::error_code> async_run();
+    std::shared_future<boost::system::error_code> run();
+    net::awaitable<boost::system::error_code> async_run();
 
-    std::shared_future<void> async_stop();
-    net::awaitable<void> co_stop();
+    std::shared_future<void> stop();
+    net::awaitable<void> async_stop();
 
     httplib::server::router& router();
 
@@ -46,10 +46,10 @@ public:
     void set_read_timeout(const std::chrono::steady_clock::duration& dur);
     void set_write_timeout(const std::chrono::steady_clock::duration& dur);
 
-    const std::chrono::steady_clock::duration& read_timeout() const;
-    const std::chrono::steady_clock::duration& write_timeout() const;
+    std::chrono::steady_clock::duration read_timeout() const;
+    std::chrono::steady_clock::duration write_timeout() const;
 
-    std::shared_ptr<spdlog::logger> get_logger() const;
+    std::shared_ptr<spdlog::logger> logger() const;
     void set_logger(std::shared_ptr<spdlog::logger> logger);
 
     void set_compress_content_types(std::function<bool(std::string_view)> predicate);

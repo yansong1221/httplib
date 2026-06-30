@@ -113,10 +113,10 @@ void router::set_static_mount_point(mount_point_entry&& entry, Aspects&&... asps
         std::forward<Aspects>(asps)...);
 }
 template<typename Func>
-void router::set_http_post_handler(Func&& handler)
+void router::set_post_routing_handler(Func&& handler)
 {
     auto coro_handler = util::make_coro_handler(std::forward<Func>(handler));
-    set_http_post_handler_impl(std::move(coro_handler));
+    set_post_routing_handler_impl(std::move(coro_handler));
 }
 
 } // namespace httplib::server

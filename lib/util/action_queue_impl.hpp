@@ -27,7 +27,7 @@ public:
 
     void push(act_t&& handler)
     {
-        if (shutdowning_)
+        if (shutting_down_)
             return;
 
         std::unique_lock<std::mutex> lck(que_mutex_);
@@ -56,11 +56,11 @@ public:
 
     net::awaitable<void> co_shutdown(bool cancel_signal = true)
     {
-        if (!running_ && shutdowning_) {
+        if (!running_ && shutting_down_) {
             co_return;
         }
 
-        shutdowning_ = true;
+        shutting_down_ = true;
         if (cancel_signal)
             cs_.emit(boost::asio::cancellation_type::all);
 
@@ -99,7 +99,7 @@ private:
             que_.pop();
             lck.unlock();
 
-            if (!shutdowning_ && !cs.cancelled())
+            if (!shutting_down_ && !cs.cancelled())
                 co_await handler();
         }
     }
@@ -111,7 +111,7 @@ private:
     std::queue<act_t> que_;
 
     std::atomic_bool running_     = false;
-    std::atomic_bool shutdowning_ = false;
+    std::atomic_bool shutting_down_ = false;
 
     boost::asio::cancellation_signal cs_;
 };

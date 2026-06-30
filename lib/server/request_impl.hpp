@@ -103,7 +103,7 @@ public:
             return it->second;
         return {};
     }
-    void add_path_param(const std::string& key, const std::string& val) { path_params_[key] = val; }
+    void set_path_param(const std::string& key, const std::string& val) { path_params_[key] = val; }
     void set_path_param(std::unordered_map<std::string, std::string>&& params)
     {
         path_params_ = std::move(params);

@@ -87,7 +87,7 @@ void mount_point_entry::operator()(request& req, response& res) const
     }
 
     if (!path.has_filename()) {
-        for (const auto& doc_name : default_doc_name_) {
+        for (const auto& doc_name : default_document_name_) {
             auto doc_path = path / doc_name;
 
             boost::system::error_code ec;
@@ -106,9 +106,9 @@ void mount_point_entry::operator()(request& req, response& res) const
         return;
     }
     else if (fs::is_directory(path, ec)) {
-        if (enabled_dir_) {
+        if (enabled_directory_) {
             beast::error_code ec;
-            switch (dir_type_) {
+            switch (directory_type_) {
                 case mount_point_entry::dir_format_type::json: {
                     auto doc = html::format_dir_to_json(path, ec);
                     res.set_json_content(std::move(doc));
@@ -130,19 +130,19 @@ void mount_point_entry::operator()(request& req, response& res) const
     res.set_error_content(http::status::forbidden);
 }
 
-void mount_point_entry::set_enabled_dir(bool enabled)
+void mount_point_entry::set_enabled_directory(bool enabled)
 {
-    enabled_dir_ = enabled;
+    enabled_directory_ = enabled;
 }
 
-void mount_point_entry::set_dir_format(dir_format_type type)
+void mount_point_entry::set_directory_format(dir_format_type type)
 {
-    dir_type_ = type;
+    directory_type_ = type;
 }
 
-void mount_point_entry::set_default_doc_name(const std::vector<std::string>& default_doc_name)
+void mount_point_entry::set_default_document_name(const std::vector<std::string>& default_document_name)
 {
-    default_doc_name_ = default_doc_name;
+    default_document_name_ = default_document_name;
 }
 
 } // namespace httplib::server

@@ -35,7 +35,7 @@ public:
     bool got_text() const noexcept;
     std::string_view got_data() const noexcept;
 
-    void async_run(std::string_view path, const http::fields& headers = {});
+    void run(std::string_view path, const http::fields& headers = {});
 
     void send(std::string&& data, bool binary = false);
     void ping(std::string&& msg = std::string());

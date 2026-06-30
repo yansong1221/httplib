@@ -33,7 +33,7 @@ struct test_scaffold {
 
     ~test_scaffold()
     {
-        server.async_stop().wait();
+        server.stop().wait();
         ioc.stop();
         if (thread.joinable())
             thread.join();
@@ -43,7 +43,7 @@ struct test_scaffold {
     {
         server.listen("127.0.0.1", 0);
         endpoint = server.local_endpoint();
-        server.async_run();
+        server.run();
         thread = std::thread([this] { ioc.run(); });
 
         client = std::make_unique<httplib::client::http_client>(
@@ -187,7 +187,7 @@ TEST_CASE("Router: multiple named parameters", "[router]")
     REQUIRE(resp.result() == http::status::ok);
 }
 
-TEST_CASE("Router: set_http_post_handler for CORS", "[router]")
+TEST_CASE("Router: set_post_routing_handler for CORS", "[router]")
 {
     test_scaffold ts;
     ts.router().set_http_handler<http::verb::options>(
@@ -197,7 +197,7 @@ TEST_CASE("Router: set_http_post_handler for CORS", "[router]")
             resp.set("Access-Control-Allow-Methods", "GET, POST");
             resp.set_empty_content(http::status::no_content);
         });
-    ts.router().set_http_post_handler(
+    ts.router().set_post_routing_handler(
         [](httplib::server::request&, httplib::server::response& resp) {
             resp.set("Access-Control-Allow-Origin", "*");
             resp.set("Access-Control-Allow-Methods", "GET, POST");

@@ -56,7 +56,7 @@ public:
     void set_static_mount_point(mount_point_entry&& entry, Aspects&&... asps);
 
     template<typename Func>
-    void set_http_post_handler(Func&& handler);
+    void set_post_routing_handler(Func&& handler);
 
 protected:
     using coro_http_handler_type =
@@ -75,7 +75,7 @@ protected:
                                      websocket_conn::coro_open_handler_type&& open_handler,
                                      websocket_conn::coro_message_handler_type&& message_handler,
                                      websocket_conn::coro_close_handler_type&& close_handler) = 0;
-    virtual void set_http_post_handler_impl(coro_http_handler_type&& handler)                 = 0;
+    virtual void set_post_routing_handler_impl(coro_http_handler_type&& handler)              = 0;
 };
 
 } // namespace httplib::server

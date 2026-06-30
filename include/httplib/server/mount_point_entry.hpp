@@ -24,20 +24,20 @@ public:
     const std::string& mount_point() const;
     const fs::path& base_dir() const;
 
-    void set_enabled_dir(bool enabled);
-    void set_dir_format(dir_format_type type);
-    void set_default_doc_name(const std::vector<std::string>& default_doc_name);
+    void set_enabled_directory(bool enabled);
+    void set_directory_format(dir_format_type type);
+    void set_default_document_name(const std::vector<std::string>& default_document_name);
 
 public:
-    void operator()(request& req, response& res) const;
+    void operator()(request& req, response& resp) const;
 
 private:
     std::string mount_point_;
     fs::path base_dir_;
-    bool enabled_dir_         = true;
-    dir_format_type dir_type_ = dir_format_type::json;
+    bool enabled_directory_           = true;
+    dir_format_type directory_type_   = dir_format_type::json;
 
-    std::vector<std::string> default_doc_name_ = {"index.html", "index.htm"};
+    std::vector<std::string> default_document_name_ = {"index.html", "index.htm"};
 };
 
 } // namespace httplib::server

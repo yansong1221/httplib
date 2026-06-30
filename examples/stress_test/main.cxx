@@ -308,9 +308,9 @@ int main(int argc, char** argv)
 
                     httplib::client::http_client::response_result result;
                     if (cfg.body.empty())
-                        result = co_await client.async_request(cfg.verb, cfg.path);
+                        result = co_await client.async_send_request(cfg.verb, cfg.path);
                     else
-                        result = co_await client.async_request(cfg.verb, cfg.path, cfg.body);
+                        result = co_await client.async_send_request(cfg.verb, cfg.path, cfg.body);
 
                     auto t1       = std::chrono::steady_clock::now();
                     double lat_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();

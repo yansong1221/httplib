@@ -39,7 +39,7 @@ void http_server::impl::listen(std::string_view host,
 
 
     auto listen_endp = local_endpoint();
-    get_logger()->info(
+    logger()->info(
         "Http Server Listen on: [{}:{}]", listen_endp.address().to_string(), listen_endp.port());
 }
 
@@ -48,26 +48,26 @@ net::any_io_executor http_server::impl::get_executor() noexcept
     return ex_;
 }
 
-std::shared_future<boost::system::error_code> http_server::impl::async_run()
+std::shared_future<boost::system::error_code> http_server::impl::run()
 {
     return net::co_spawn(
         ex_,
         [this, self = shared_from_this()]() -> net::awaitable<boost::system::error_code> {
-            co_return co_await co_run();
+            co_return co_await async_run();
         },
         boost::asio::use_future);
 }
 
-std::shared_future<void> http_server::impl::async_stop()
+std::shared_future<void> http_server::impl::stop()
 {
     return net::co_spawn(
         ex_,
         [this, self = shared_from_this()]() -> net::awaitable<void> {
-            co_return co_await co_stop();
+            co_return co_await async_stop();
         },
         boost::asio::use_future);
 }
-httplib::net::awaitable<void> http_server::impl::co_stop()
+httplib::net::awaitable<void> http_server::impl::async_stop()
 {
     if (acceptor_.is_open()) {
         boost::system::error_code ec;
@@ -76,7 +76,7 @@ httplib::net::awaitable<void> http_server::impl::co_stop()
     }
     {
         std::lock_guard lck(session_mutex_);
-        for (const auto& v : session_map_)
+        for (const auto& v : sessions_)
             v->abort();
     }
     boost::system::error_code ec;
@@ -85,7 +85,7 @@ httplib::net::awaitable<void> http_server::impl::co_stop()
     while (true) {
         {
             std::lock_guard lck(session_mutex_);
-            if (session_map_.empty())
+            if (sessions_.empty())
                 break;
         }
 
@@ -101,7 +101,7 @@ router_impl& http_server::impl::router()
     return router_;
 }
 
-net::awaitable<boost::system::error_code> http_server::impl::co_run()
+net::awaitable<boost::system::error_code> http_server::impl::async_run()
 {
     std::vector<net::awaitable<boost::system::error_code>> ops;
     for (int i = 0; i < 32; ++i)
@@ -109,7 +109,7 @@ net::awaitable<boost::system::error_code> http_server::impl::co_run()
 
     auto&& results = co_await util::when_all(std::move(ops));
 
-    co_await co_stop();
+    co_await async_stop();
 
     for (const auto& ec : results)
         if (ec)
@@ -139,35 +139,35 @@ net::awaitable<boost::system::error_code> http_server::impl::co_accept()
         }
         net::co_spawn(ex_, handle_accept(std::move(sock)), net::detached);
     }
-    get_logger()->trace("async_accept: {}", ec.message());
+    logger()->trace("async_accept: {}", ec.message());
     co_return ec;
 }
 net::awaitable<void> http_server::impl::handle_accept(tcp::socket sock)
 {
     auto remote_endp = sock.remote_endpoint();
     auto local_endp  = sock.local_endpoint();
-    get_logger()->trace(
+    logger()->trace(
         "accept new connection [{}:{}]", remote_endp.address().to_string(), remote_endp.port());
 
     auto conn = std::make_shared<session>(std::move(sock), *this);
     {
         std::lock_guard lck(session_mutex_);
-        session_map_.insert(conn);
+        sessions_.insert(conn);
     }
     try {
         co_await conn->run();
     }
     catch (const std::exception& e) {
-        get_logger()->error("session::run() exception: {}", e.what());
+        logger()->error("session::run() exception: {}", e.what());
     }
     catch (...) {
-        get_logger()->error("session::run() unknown exception");
+        logger()->error("session::run() unknown exception");
     }
     {
         std::lock_guard lck(session_mutex_);
-        session_map_.erase(conn);
+        sessions_.erase(conn);
     }
-    get_logger()->trace(
+    logger()->trace(
         "close connection [{}:{}]", remote_endp.address().to_string(), remote_endp.port());
 }
 
@@ -181,12 +181,12 @@ void http_server::impl::set_write_timeout(const std::chrono::steady_clock::durat
     write_timeout_ = dur;
 }
 
-const std::chrono::steady_clock::duration& http_server::impl::read_timeout() const
+std::chrono::steady_clock::duration http_server::impl::read_timeout() const
 {
     return read_timeout_;
 }
 
-const std::chrono::steady_clock::duration& http_server::impl::write_timeout() const
+std::chrono::steady_clock::duration http_server::impl::write_timeout() const
 {
     return write_timeout_;
 }
@@ -197,7 +197,7 @@ tcp::endpoint http_server::impl::local_endpoint() const
     return acceptor_.local_endpoint(ec);
 }
 
-std::shared_ptr<spdlog::logger> http_server::impl::get_logger() const
+std::shared_ptr<spdlog::logger> http_server::impl::logger() const
 {
     if (custom_logger_)
         return custom_logger_;

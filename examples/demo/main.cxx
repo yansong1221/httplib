@@ -274,7 +274,7 @@ static void setup_http_routes(httplib::server::router& router)
 static void setup_cors(httplib::server::router& router)
 {
     // Global CORS via post_handler (runs after every route handler)
-    router.set_http_post_handler([](httplib::server::request&, httplib::server::response& resp) {
+    router.set_post_routing_handler([](httplib::server::request&, httplib::server::response& resp) {
         resp.set(std::string_view("Access-Control-Allow-Origin"), std::string_view("*"));
         resp.set(std::string_view("Access-Control-Allow-Methods"),
                  std::string_view("GET, POST, PUT, DELETE, OPTIONS"));
@@ -312,8 +312,8 @@ static void setup_ws(httplib::server::router& router)
 static void setup_static_files(httplib::server::router& router)
 {
     auto mp = httplib::server::mount_point_entry("/static", fs::current_path());
-    mp.set_dir_format(httplib::server::mount_point_entry::dir_format_type::html);
-    mp.set_enabled_dir(true);
+    mp.set_directory_format(httplib::server::mount_point_entry::dir_format_type::html);
+    mp.set_enabled_directory(true);
     router.set_static_mount_point(std::move(mp));
 }
 
@@ -438,7 +438,7 @@ static void run_ws_client_demo(net::any_io_executor ex, std::string host, uint16
             co_return;
         });
 
-    ws.async_run("/ws");
+    ws.run("/ws");
 }
 
 // ===== Main =====
@@ -515,7 +515,7 @@ int main(int argc, char** argv)
     }
     else {
         httplib::server::http_server svr(ex);
-        svr.get_logger()->set_level(spdlog::level::info);
+        svr.logger()->set_level(spdlog::level::info);
 
 #ifdef HTTPLIB_ENABLED_SSL
         if (use_ssl)
@@ -543,11 +543,11 @@ int main(int argc, char** argv)
         router.set_http_handler<http::verb::post>(
             "/api/shutdown", [&](httplib::server::request&, httplib::server::response& resp) {
                 resp.set_json_content({{"message", "shutting down"}});
-                svr.async_stop();
+                svr.stop();
             });
 
         spdlog::info("Server listening on {}:{}", host, port);
-        svr.async_run();
+        svr.run();
 
         if (mode == "all") {
             run_http_client_demo(ex, host, port);

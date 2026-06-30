@@ -72,7 +72,7 @@ public:
     std::shared_ptr<middleware::session> session() const;
 
     std::string_view path_param(const std::string& key) const;
-    void add_path_param(const std::string& key, const std::string& val);
+    void set_path_param(const std::string& key, const std::string& val);
     void set_path_param(std::unordered_map<std::string, std::string>&& params);
 
     httplib::body::any_body::value_type& body();

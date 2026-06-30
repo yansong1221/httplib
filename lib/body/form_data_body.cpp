@@ -206,7 +206,7 @@ std::size_t form_data_body::reader::put(const_buffers_type const& buffers,
                 return boundary_line.size();
             }
             else if (data.starts_with(boundary_line_last)) {
-                step_ = step::finshed;
+                step_ = step::finished;
                 return boundary_line_last.size();
             }
             ec = http::error::unexpected_body;
@@ -284,7 +284,7 @@ std::size_t form_data_body::reader::put(const_buffers_type const& buffers,
             field_data_.content.append(data.substr(0, pos));
             return pos;
         } break;
-        case step::finshed: {
+        case step::finished: {
             if (beast::buffer_bytes(buffers) < 2) {
                 ec = http::error::need_more;
                 return 0;

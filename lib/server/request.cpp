@@ -135,9 +135,9 @@ std::string_view request::path_param(const std::string& key) const
     return impl_->path_param(key);
 }
 
-void request::add_path_param(const std::string& key, const std::string& val)
+void request::set_path_param(const std::string& key, const std::string& val)
 {
-    impl_->add_path_param(key, val);
+    impl_->set_path_param(key, val);
 }
 void request::set_path_param(std::unordered_map<std::string, std::string>&& params)
 {

@@ -40,7 +40,7 @@ struct test_scaffold {
 
     ~test_scaffold()
     {
-        server.async_stop().wait();
+        server.stop().wait();
         ioc.stop();
         if (thread.joinable())
             thread.join();
@@ -50,7 +50,7 @@ struct test_scaffold {
     {
         server.listen("127.0.0.1", 0);
         endpoint = server.local_endpoint();
-        server.async_run();
+        server.run();
         thread = std::thread([this] { ioc.run(); });
 
         client = std::make_unique<httplib::client::http_client>(

@@ -18,7 +18,7 @@ class router_impl : public router
 public:
     router_impl();
 
-    net::awaitable<void> proc_routing(request& req, response& resp) const;
+    net::awaitable<void> process_routing(request& req, response& resp) const;
 
     struct ws_handler_entry
     {
@@ -33,14 +33,14 @@ public:
 
 protected:
     void set_http_handler_impl(http::verb method,
-                               std::string_view path,
+                               std::string_view key,
                                coro_http_handler_type&& handler) override;
     void set_not_found_handler_impl(coro_http_handler_type&& handler) override;
     void set_ws_handler_impl(std::string_view path,
                              websocket_conn::coro_open_handler_type&& open_handler,
                              websocket_conn::coro_message_handler_type&& message_handler,
                              websocket_conn::coro_close_handler_type&& close_handler) override;
-    void set_http_post_handler_impl(coro_http_handler_type&& handler) override;
+    void set_post_routing_handler_impl(coro_http_handler_type&& handler) override;
 
 private:
     struct Node
@@ -70,7 +70,7 @@ private:
     std::unique_ptr<Node> root_;
     mutable std::shared_mutex mutex_;
 
-    coro_http_handler_type post_handler_;
+    coro_http_handler_type post_routing_handler_;
     coro_http_handler_type not_found_handler_;
 
     // 内部函数

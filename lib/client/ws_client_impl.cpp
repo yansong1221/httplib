@@ -217,7 +217,7 @@ void ws_client::impl::set_handler_impl(coro_open_handler_type&& open_handler,
     close_handler_   = std::move(close_handler);
 }
 
-void ws_client::impl::async_run(std::string_view path, const http::fields& headers /*= {}*/)
+void ws_client::impl::run(std::string_view path, const http::fields& headers /*= {}*/)
 {
     boost::asio::co_spawn(
         executor_,

@@ -76,9 +76,9 @@ void ws_client::set_handler_impl(coro_open_handler_type&& open_handler,
         std::move(open_handler), std::move(message_handler), std::move(close_handler));
 }
 
-void ws_client::async_run(std::string_view path, const http::fields& headers /*= {}*/)
+void ws_client::run(std::string_view path, const http::fields& headers /*= {}*/)
 {
-    return impl_->async_run(path, headers);
+    return impl_->run(path, headers);
 }
 
 void ws_client::send(std::string&& data, bool binary /*= false*/)
