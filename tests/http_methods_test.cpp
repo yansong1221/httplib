@@ -1,4 +1,6 @@
 #include "httplib/body/json_body.hpp"
+#include "httplib/body/form_data_body.hpp"
+#include "httplib/body/query_params_body.hpp"
 #include "httplib/body/string_body.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
@@ -359,4 +361,106 @@ TEST_CASE("Multiple query parameters", "[http-methods]")
     auto query = params({{"a", "1"}, {"b", "hello"}, {"c", "true"}});
     auto resp  = UNWRAP(ts.client->get("/multi-query", query));
     REQUIRE(resp.result() == http::status::ok);
+}
+
+TEST_CASE("HTTP TRACE method", "[http-methods]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::trace>(
+        "/method/trace",
+        [](httplib::server::request& req, httplib::server::response& resp) {
+            resp.set("Content-Type", "message/http");
+            resp.set_string_content(std::string(req.base().at(http::field::user_agent)),
+                                    "text/plain"sv);
+        });
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->trace("/method/trace", query_q1(), base_headers()));
+    REQUIRE(resp.result() == http::status::ok);
+}
+
+TEST_CASE("HTTP Expect: 100-continue header is sent", "[http-methods]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::post>(
+        "/expect-100",
+        [](httplib::server::request& req, httplib::server::response& resp) {
+            REQUIRE(req.base()[http::field::expect] == "100-continue");
+            REQUIRE(req.body().as<httplib::body::string_body>() == "large-payload");
+            resp.set_empty_content(http::status::ok);
+        });
+    ts.start();
+
+    auto hdrs   = headers({{http::field::expect, "100-continue"}});
+    auto resp   = UNWRAP(ts.client->send_request(http::verb::post, "/expect-100",
+                                                  "large-payload"sv, hdrs));
+    // Note: client does not transparently handle 100 Continue; this test
+    // verifies the server receives and processes the header and body correctly.
+    REQUIRE(resp.result() != http::status::bad_request);
+}
+
+TEST_CASE("Form-urlencoded body parsing", "[http-methods]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::post>(
+        "/form-encoded",
+        [](httplib::server::request& req, httplib::server::response& resp) {
+            const auto& params = req.body().as<httplib::body::query_params_body>();
+            auto it_name  = params.params().find("name");
+            auto it_value = params.params().find("value");
+            REQUIRE(it_name != params.params().end());
+            REQUIRE(it_value != params.params().end());
+            auto name  = it_name->second;
+            auto value = it_value->second;
+            resp.set_string_content(name + "=" + value, "text/plain"sv);
+        });
+    ts.start();
+
+    auto hdrs = httplib::http::fields();
+    hdrs.set(http::field::content_type, "application/x-www-form-urlencoded");
+    auto resp = UNWRAP(ts.client->send_request(http::verb::post, "/form-encoded",
+                                                "name=foo&value=bar"sv, hdrs));
+    REQUIRE(resp.result() == http::status::ok);
+    REQUIRE(as_string(resp) == "foo=bar");
+}
+
+TEST_CASE("Multipart form-data body parsing", "[http-methods]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::post>(
+        "/multipart",
+        [](httplib::server::request& req, httplib::server::response& resp) {
+            const auto& fd = req.body().as<httplib::body::form_data_body>();
+            std::string result;
+            for (const auto& field : fd.fields) {
+                result += std::format("{}={}", field.name, std::string(field.content));
+                if (field.is_file())
+                    result += std::format(":{}", field.filename);
+                result += ";";
+            }
+            resp.set_string_content(result, "text/plain"sv);
+        });
+    ts.start();
+
+    std::string boundary = "----TestBoundary123";
+    std::string body     = std::format(
+        "--{}\r\n"
+        "Content-Disposition: form-data; name=\"field1\"\r\n"
+        "\r\n"
+        "value1\r\n"
+        "--{}\r\n"
+        "Content-Disposition: form-data; name=\"file1\"; filename=\"test.txt\"\r\n"
+        "Content-Type: text/plain\r\n"
+        "\r\n"
+        "file-content\r\n"
+        "--{}--\r\n",
+        boundary, boundary, boundary);
+
+    auto hdrs = httplib::http::fields();
+    hdrs.set(http::field::content_type,
+             std::format("multipart/form-data; boundary={}", boundary));
+    auto resp = UNWRAP(
+        ts.client->send_request(http::verb::post, "/multipart", body, hdrs));
+    REQUIRE(resp.result() == http::status::ok);
+    REQUIRE(as_string(resp) == "field1=value1;file1=file-content:test.txt;");
 }

@@ -7,6 +7,7 @@
 #include <boost/asio/io_context.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
+#include <regex>
 #include <spdlog/sinks/null_sink.h>
 #include <spdlog/spdlog.h>
 #include <string>
@@ -24,6 +25,7 @@ struct test_scaffold {
     httplib::tcp::endpoint endpoint;
     std::thread thread;
     std::unique_ptr<httplib::client::http_client> client;
+    bool started_ = false;
 
     test_scaffold() : server(ioc)
     {
@@ -33,10 +35,12 @@ struct test_scaffold {
 
     ~test_scaffold()
     {
-        server.stop().wait();
-        ioc.stop();
-        if (thread.joinable())
-            thread.join();
+        if (started_) {
+            server.stop().wait();
+            ioc.stop();
+            if (thread.joinable())
+                thread.join();
+        }
     }
 
     void start()
@@ -45,6 +49,7 @@ struct test_scaffold {
         endpoint = server.local_endpoint();
         server.run();
         thread = std::thread([this] { ioc.run(); });
+        started_ = true;
 
         client = std::make_unique<httplib::client::http_client>(
             ioc.get_executor(), endpoint.address().to_string(), endpoint.port());
@@ -235,4 +240,56 @@ TEST_CASE("Router: member function handler", "[router]")
     auto resp = UNWRAP(ts.client->get("/member/test"));
     REQUIRE(resp.result() == http::status::ok);
     REQUIRE(as_string(resp) == "member-test");
+}
+
+TEST_CASE("Router: 405 Method Not Allowed", "[router]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/readonly",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            set_text(resp, "get-only");
+        });
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->post("/readonly", ""sv));
+    REQUIRE(resp.result() == http::status::method_not_allowed);
+    REQUIRE(resp["Allow"] == "GET");
+}
+
+TEST_CASE("Router: static path priority over param", "[router]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/users/all",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            set_text(resp, "all-users");
+        });
+    ts.router().set_http_handler<http::verb::get>(
+        "/users/:id",
+        [](httplib::server::request& req, httplib::server::response& resp) {
+            set_text(resp, "user-" + std::string(req.path_param("id")));
+        });
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->get("/users/all"));
+    REQUIRE(resp.result() == http::status::ok);
+    REQUIRE(as_string(resp) == "all-users");
+
+    auto resp2 = UNWRAP(ts.client->get("/users/42"));
+    REQUIRE(resp2.result() == http::status::ok);
+    REQUIRE(as_string(resp2) == "user-42");
+}
+
+TEST_CASE("Router: regex param error in pre_routing", "[router]")
+{
+    test_scaffold ts;
+    REQUIRE_THROWS_AS(
+        ts.router().set_http_handler<http::verb::get>(
+            "/bad/{id:[}",
+            [](httplib::server::request&, httplib::server::response&) {}),
+        std::regex_error);
+    // Note: server was never started via ts.start(), so destructor cleanly
+    // handles the unstarted state since stop() and ioc.stop() are no-ops
+    // when not running.
 }

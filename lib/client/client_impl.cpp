@@ -12,6 +12,8 @@
 #include <boost/beast/http/write.hpp>
 #include <boost/beast/version.hpp>
 #include <fmt/format.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/spdlog.h>
 
 namespace httplib::client {
 
@@ -26,6 +28,10 @@ http_client::impl::impl(const net::any_io_executor& ex,
     , port_(port)
     , use_ssl_(ssl)
 {
+    auto console_sink                 = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+    spdlog::sinks_init_list sink_list = {console_sink};
+    default_logger_ = std::make_shared<spdlog::logger>("httplib.client", sink_list);
+    default_logger_->set_level(spdlog::level::info);
 }
 http_client::impl::~impl()
 {
@@ -76,6 +82,18 @@ bool http_client::impl::is_open() const
     return stream_ && stream_->is_open();
 }
 
+std::shared_ptr<spdlog::logger> http_client::impl::logger() const
+{
+    if (custom_logger_)
+        return custom_logger_;
+    return default_logger_;
+}
+
+void http_client::impl::set_logger(std::shared_ptr<spdlog::logger> logger)
+{
+    custom_logger_ = std::move(logger);
+}
+
 net::awaitable<http_client::response_result>
 http_client::impl::async_send_request(http_client::request& req, bool retry /*= true*/)
 {
@@ -86,20 +104,25 @@ http_client::impl::async_send_request(http_client::request& req, bool retry /*= 
     }
     catch (const boost::system::system_error& error) {
         ec = error.code();
+        logger()->warn("{} {} {}: {}", host_, std::to_string(port_), error.what(), ec.message());
     }
-    catch (const std::exception&) {
+    catch (const std::exception& e) {
         ec = boost::system::errc::make_error_code(boost::system::errc::protocol_error);
+        logger()->warn("{} {}: {}", host_, std::to_string(port_), e.what());
     }
     catch (...) {
         ec = boost::system::errc::make_error_code(boost::system::errc::protocol_error);
+        logger()->warn("{} {}: unknown exception", host_, std::to_string(port_));
     }
     close();
 
     if (ec == boost::asio::error::connection_aborted ||
         ec == boost::asio::error::connection_reset || ec == http::error::end_of_stream)
     {
-        if (retry)
+        if (retry) {
+            logger()->trace("retrying request...");
             co_return co_await async_send_request(req, false);
+        }
     }
     co_return ec;
 }
@@ -130,6 +153,7 @@ http_client::impl::async_send_request_impl(http_client::request& req)
             std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
             stream_ = std::make_unique<http_stream>(executor_, host_, use_ssl_);
         }
+        logger()->trace("{} connecting to {}:{}", req.method_string(), host_, port_);
 
         boost::system::error_code ec;
         auto addr = net::ip::make_address(host_, ec);
@@ -213,7 +237,13 @@ http_client::impl::async_send_request_impl(http_client::request& req)
     stream_->expires_never();
     if (!parser.keep_alive())
         close();
-    co_return parser.release();
+    auto resp = parser.release();
+    logger()->trace("{} {} -> {} {}",
+                    req.method_string(),
+                    req.target(),
+                    resp.result_int(),
+                    resp.reason());
+    co_return resp;
 }
 
 void http_client::impl::set_chunk_handler(chunk_handler_type&& handler)

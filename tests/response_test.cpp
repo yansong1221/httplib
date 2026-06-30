@@ -488,3 +488,65 @@ TEST_CASE("Response: custom response headers", "[response]")
     REQUIRE(resp["X-Custom-One"] == "value1");
     REQUIRE(resp["X-Custom-Two"] == "value2");
 }
+
+TEST_CASE("Response: redirect 302", "[response]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/redirect-302",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            resp.set_redirect("/target", http::status::found);
+        });
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->get("/redirect-302"));
+    REQUIRE(resp.result() == http::status::found);
+    REQUIRE(resp[http::field::location] == "/target");
+}
+
+TEST_CASE("Response: redirect 303", "[response]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/redirect-303",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            resp.set_redirect("/target", http::status::see_other);
+        });
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->get("/redirect-303"));
+    REQUIRE(resp.result() == http::status::see_other);
+    REQUIRE(resp[http::field::location] == "/target");
+}
+
+TEST_CASE("Response: redirect 307", "[response]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/redirect-307",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            resp.set_redirect("/target", http::status::temporary_redirect);
+        });
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->get("/redirect-307"));
+    REQUIRE(resp.result() == http::status::temporary_redirect);
+    REQUIRE(resp[http::field::location] == "/target");
+}
+
+TEST_CASE("Response: keep-alive close response", "[response]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/close-conn",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            resp.set(http::field::connection, "close");
+            resp.set_string_content("closing"sv, "text/plain"sv);
+        });
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->get("/close-conn"));
+    REQUIRE(resp.result() == http::status::ok);
+    REQUIRE(as_string(resp) == "closing");
+    REQUIRE(resp[http::field::connection] == "close");
+}

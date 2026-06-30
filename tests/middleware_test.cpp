@@ -330,3 +330,112 @@ TEST_CASE("Combined: CORS + Auth", "[middleware]")
     REQUIRE(as_string(resp) == "protected-data");
     REQUIRE(resp["Access-Control-Allow-Origin"] == "*");
 }
+
+TEST_CASE("CORS: allow_origins with multiple origins", "[middleware]")
+{
+    test_scaffold ts;
+    mw::cors_middleware cors;
+    cors.allow_origins({"https://a.com", "https://b.com"});
+
+    ts.router().set_http_handler<http::verb::get>(
+        "/cors-multi",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            resp.set_string_content("cors-data"sv, "text/plain"sv);
+        },
+        cors);
+    ts.start();
+
+    auto hdrs = httplib::http::fields();
+    hdrs.set(http::field::origin, "https://a.com");
+    auto resp = UNWRAP(
+        ts.client->send_request(http::verb::get, "/cors-multi", std::string_view{}, hdrs));
+    REQUIRE(resp.result() == http::status::ok);
+    REQUIRE(as_string(resp) == "cors-data");
+}
+
+TEST_CASE("CORS: allow_methods custom", "[middleware]")
+{
+    test_scaffold ts;
+    mw::cors_middleware cors;
+    cors.allow_methods({"PUT", "PATCH"});
+    cors.allow_origin("https://x.com");
+
+    ts.router().set_http_handler<http::verb::options>(
+        "/cors-methods",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            resp.set_empty_content(http::status::no_content);
+        },
+        cors);
+    ts.start();
+
+    auto hdrs = httplib::http::fields();
+    hdrs.set(http::field::origin, "https://x.com");
+    auto resp = UNWRAP(
+        ts.client->send_request(http::verb::options, "/cors-methods", std::string_view{}, hdrs));
+    REQUIRE(resp.result() == http::status::no_content);
+    auto methods = std::string(resp["Access-Control-Allow-Methods"]);
+    REQUIRE(methods.find("PUT") != std::string::npos);
+    REQUIRE(methods.find("PATCH") != std::string::npos);
+}
+
+TEST_CASE("Rate Limit: shared limits apply across routes", "[middleware]")
+{
+    test_scaffold ts;
+    auto limiter = std::make_shared<mw::rate_limit_middleware>(2, std::chrono::seconds(60));
+
+    ts.router().set_http_handler<http::verb::get>(
+        "/rl-ip",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            resp.set_string_content("ok"sv, "text/plain"sv);
+        },
+        *limiter);
+    ts.start();
+
+    // First client from default IP (127.0.0.1) uses 2 requests
+    UNWRAP(ts.client->get("/rl-ip"));
+    UNWRAP(ts.client->get("/rl-ip"));
+    auto blocked = ts.client->get("/rl-ip");
+    REQUIRE(blocked.has_value());
+    REQUIRE(blocked->result() == http::status::too_many_requests);
+
+    // Second client from same IP should also be rate-limited (shared bucket)
+    auto client2 = std::make_unique<httplib::client::http_client>(
+        ts.ioc.get_executor(), ts.host(), ts.port());
+    client2->set_timeout(std::chrono::seconds(5));
+    auto resp2 = client2->get("/rl-ip");
+    REQUIRE(resp2.has_value());
+    REQUIRE(resp2->result() == http::status::too_many_requests);
+}
+
+TEST_CASE("Bearer Auth: missing header returns 401", "[middleware]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/bearer-missing",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            resp.set_string_content("secret"sv, "text/plain"sv);
+        },
+        mw::bearer_auth_middleware([](std::string_view) { return true; }));
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->get("/bearer-missing"));
+    REQUIRE(resp.result() == http::status::unauthorized);
+}
+
+TEST_CASE("Bearer Auth: non-Bearer scheme returns 401", "[middleware]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/bearer-scheme",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            resp.set_string_content("secret"sv, "text/plain"sv);
+        },
+        mw::bearer_auth_middleware([](std::string_view) { return true; }));
+    ts.start();
+
+    auto hdrs = httplib::http::fields();
+    hdrs.set(http::field::authorization, "Digest xxx");
+    auto resp = UNWRAP(
+        ts.client->send_request(http::verb::get, "/bearer-scheme", std::string_view{}, hdrs));
+    REQUIRE(resp.result() == http::status::unauthorized);
+}

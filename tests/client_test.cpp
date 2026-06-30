@@ -200,3 +200,80 @@ TEST_CASE("Client host and port", "[client]")
     REQUIRE(client->port() == ts.port());
     REQUIRE_FALSE(client->is_use_ssl());
 }
+
+TEST_CASE("Client: timeout_policy step", "[client]")
+{
+    test_scaffold ts;
+    ts.start_with_routes();
+
+    auto client = ts.make_client();
+    client->set_timeout_policy(httplib::client::http_client::timeout_policy::step);
+    client->set_timeout(std::chrono::seconds(5));
+
+    auto params = httplib::html::query_params();
+    params.add("msg", "step-timeout");
+    auto resp = UNWRAP(client->get("/echo", params));
+    REQUIRE(resp.result() == http::status::ok);
+}
+
+TEST_CASE("Client: timeout_policy never", "[client]")
+{
+    test_scaffold ts;
+    ts.start_with_routes();
+
+    auto client = ts.make_client();
+    client->set_timeout_policy(httplib::client::http_client::timeout_policy::never);
+
+    auto params = httplib::html::query_params();
+    params.add("msg", "never-timeout");
+    auto resp = UNWRAP(client->get("/echo", params));
+    REQUIRE(resp.result() == http::status::ok);
+}
+
+TEST_CASE("Client: HEAD request", "[client]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::head>(
+        "/head-test",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            resp.set(http::field::content_type, "text/plain");
+            resp.set(http::field::content_length, "4");
+            resp.set_empty_content(http::status::ok);
+        });
+    ts.start_with_routes();
+
+    auto client = ts.make_client();
+    auto resp   = UNWRAP(client->head("/head-test"));
+    REQUIRE(resp.result() == http::status::ok);
+    REQUIRE(resp[http::field::content_type] == "text/plain");
+}
+
+TEST_CASE("Client: 204 No Content response", "[client]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/empty-204",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            resp.set_empty_content(http::status::no_content);
+        });
+    ts.start_with_routes();
+
+    auto client = ts.make_client();
+    auto resp   = UNWRAP(client->get("/empty-204"));
+    REQUIRE(resp.result() == http::status::no_content);
+}
+
+TEST_CASE("Client: 304 Not Modified response", "[client]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/not-modified",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            resp.set_empty_content(http::status::not_modified);
+        });
+    ts.start_with_routes();
+
+    auto client = ts.make_client();
+    auto resp   = UNWRAP(client->get("/not-modified"));
+    REQUIRE(resp.result() == http::status::not_modified);
+}

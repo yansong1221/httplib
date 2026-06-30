@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <functional>
 #include <limits>
+#include <memory>
 
 namespace httplib::client {
 
@@ -43,6 +44,9 @@ public:
     std::string_view host() const;
     uint16_t port() const;
     bool is_use_ssl() const;
+
+    std::shared_ptr<spdlog::logger> logger() const;
+    void set_logger(std::shared_ptr<spdlog::logger> logger);
 
     void set_chunk_handler(chunk_handler_type&& handler);
 

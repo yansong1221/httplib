@@ -68,6 +68,16 @@ std::string_view ws_client::got_data() const noexcept
     return impl_->got_data();
 }
 
+std::shared_ptr<spdlog::logger> ws_client::logger() const
+{
+    return impl_->logger();
+}
+
+void ws_client::set_logger(std::shared_ptr<spdlog::logger> logger)
+{
+    impl_->set_logger(std::move(logger));
+}
+
 void ws_client::set_handler_impl(coro_open_handler_type&& open_handler,
                                  coro_message_handler_type&& message_handler,
                                  coro_close_handler_type&& close_handler)

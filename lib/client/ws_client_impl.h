@@ -4,6 +4,7 @@
 #include "stream/websocket_stream.hpp"
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/system/result.hpp>
+#include <spdlog/spdlog.h>
 
 namespace httplib::client {
 class ws_client::impl : public std::enable_shared_from_this<impl>
@@ -36,6 +37,9 @@ public:
 
     bool is_open() const;
 
+    std::shared_ptr<spdlog::logger> logger() const;
+    void set_logger(std::shared_ptr<spdlog::logger> logger);
+
 
     void set_handler_impl(coro_open_handler_type&& open_handler,
                           coro_message_handler_type&& message_handler,
@@ -56,5 +60,8 @@ private:
     ws_client::coro_open_handler_type open_handler_;
     ws_client::coro_message_handler_type message_handler_;
     ws_client::coro_close_handler_type close_handler_;
+
+    std::shared_ptr<spdlog::logger> default_logger_;
+    std::shared_ptr<spdlog::logger> custom_logger_;
 };
 } // namespace httplib::client

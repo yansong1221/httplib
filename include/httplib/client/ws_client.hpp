@@ -35,6 +35,9 @@ public:
     bool got_text() const noexcept;
     std::string_view got_data() const noexcept;
 
+    std::shared_ptr<spdlog::logger> logger() const;
+    void set_logger(std::shared_ptr<spdlog::logger> logger);
+
     void run(std::string_view path, const http::fields& headers = {});
 
     void send(std::string&& data, bool binary = false);

@@ -2,6 +2,7 @@
 
 #include "httplib/client/client.hpp"
 #include "stream/http_stream.hpp"
+#include <spdlog/spdlog.h>
 
 namespace httplib::client {
 
@@ -25,6 +26,9 @@ public:
     void close();
     bool is_open() const;
 
+    std::shared_ptr<spdlog::logger> logger() const;
+    void set_logger(std::shared_ptr<spdlog::logger> logger);
+
     net::awaitable<http_client::response_result> async_send_request(http_client::request& req,
                                                                     bool retry = true);
     void expires_after(bool first = false);
@@ -46,6 +50,9 @@ public:
 
     std::function<std::size_t(std::uint64_t, std::string_view, boost::system::error_code&)>
         chunk_handler_;
+
+    std::shared_ptr<spdlog::logger> default_logger_;
+    std::shared_ptr<spdlog::logger> custom_logger_;
 };
 
 } // namespace httplib::client

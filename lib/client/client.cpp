@@ -68,6 +68,16 @@ bool http_client::is_use_ssl() const
     return impl_->use_ssl_;
 }
 
+std::shared_ptr<spdlog::logger> http_client::logger() const
+{
+    return impl_->logger();
+}
+
+void http_client::set_logger(std::shared_ptr<spdlog::logger> logger)
+{
+    impl_->set_logger(std::move(logger));
+}
+
 net::awaitable<http_client::response_result>
 http_client::async_get(std::string_view path,
                        const html::query_params& params,

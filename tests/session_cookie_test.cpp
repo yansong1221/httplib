@@ -227,3 +227,65 @@ TEST_CASE("Session: configurable cookie name", "[session]")
     REQUIRE(set_cookie.starts_with("my_session="));
     REQUIRE(set_cookie.find("Path=/app") != std::string::npos);
 }
+
+TEST_CASE("Session: cookie attributes http_only, secure, max_age", "[session]")
+{
+    mw::session_middleware sm;
+    sm.cookie_name("attrs").http_only(true).secure(true).max_age(std::chrono::hours(1));
+
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/attrs",
+        [](httplib::server::request& req, httplib::server::response& resp) {
+            req.session()->set("x", "1");
+            resp.set_string_content("ok"sv, "text/plain"sv);
+        },
+        sm);
+    ts.start();
+
+    auto resp       = UNWRAP(ts.client->get("/attrs"));
+    auto set_cookie = std::string(resp[http::field::set_cookie]);
+    REQUIRE(set_cookie.find("HttpOnly") != std::string::npos);
+    REQUIRE(set_cookie.find("Secure") != std::string::npos);
+    REQUIRE(set_cookie.find("Max-Age=3600") != std::string::npos);
+}
+
+TEST_CASE("Session: same_site strict", "[session]")
+{
+    mw::session_middleware sm;
+    sm.cookie_name("samesite").same_site_strict();
+
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/samesite",
+        [](httplib::server::request& req, httplib::server::response& resp) {
+            req.session()->set("x", "1");
+            resp.set_string_content("ok"sv, "text/plain"sv);
+        },
+        sm);
+    ts.start();
+
+    auto resp       = UNWRAP(ts.client->get("/samesite"));
+    auto set_cookie = std::string(resp[http::field::set_cookie]);
+    REQUIRE(set_cookie.find("SameSite=Strict") != std::string::npos);
+}
+
+TEST_CASE("Session: max_age cookie attribute", "[session]")
+{
+    mw::session_middleware sm;
+    sm.cookie_name("aged").max_age(std::chrono::seconds(1800));
+
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/aged",
+        [](httplib::server::request& req, httplib::server::response& resp) {
+            req.session()->set("x", "1");
+            resp.set_string_content("ok"sv, "text/plain"sv);
+        },
+        sm);
+    ts.start();
+
+    auto resp       = UNWRAP(ts.client->get("/aged"));
+    auto set_cookie = std::string(resp[http::field::set_cookie]);
+    REQUIRE(set_cookie.find("Max-Age=1800") != std::string::npos);
+}
