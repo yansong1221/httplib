@@ -464,3 +464,62 @@ TEST_CASE("Multipart form-data body parsing", "[http-methods]")
     REQUIRE(resp.result() == http::status::ok);
     REQUIRE(as_string(resp) == "field1=value1;file1=file-content:test.txt;");
 }
+
+TEST_CASE("Server: handler throws exception returns 500", "[http-methods]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/throw-std",
+        [](httplib::server::request&, httplib::server::response&) {
+            throw std::runtime_error("deliberate crash");
+        });
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->get("/throw-std"));
+    REQUIRE(resp.result() == http::status::internal_server_error);
+}
+
+TEST_CASE("Server: handler throws unknown exception returns 500", "[http-methods]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/throw-unknown",
+        [](httplib::server::request&, httplib::server::response&) {
+            throw 42;
+        });
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->get("/throw-unknown"));
+    REQUIRE(resp.result() == http::status::internal_server_error);
+}
+
+TEST_CASE("Server: read timeout", "[http-methods]")
+{
+    test_scaffold ts;
+    ts.server.set_read_timeout(std::chrono::seconds(1));
+    ts.router().set_http_handler<http::verb::post>(
+        "/read-timeout",
+        [](httplib::server::request& req, httplib::server::response& resp) {
+            REQUIRE(req.body().as<httplib::body::string_body>() == "ok");
+            set_text(resp, "received"sv);
+        });
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->post("/read-timeout", "ok"sv));
+    REQUIRE(resp.result() == http::status::ok);
+}
+
+TEST_CASE("Server: write timeout", "[http-methods]")
+{
+    test_scaffold ts;
+    ts.server.set_write_timeout(std::chrono::seconds(5));
+    ts.router().set_http_handler<http::verb::get>(
+        "/write-timeout",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            set_text(resp, "ok"sv);
+        });
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->get("/write-timeout"));
+    REQUIRE(resp.result() == http::status::ok);
+}
