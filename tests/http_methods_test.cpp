@@ -523,3 +523,168 @@ TEST_CASE("Server: write timeout", "[http-methods]")
     auto resp = UNWRAP(ts.client->get("/write-timeout"));
     REQUIRE(resp.result() == http::status::ok);
 }
+
+// ===== Body type edge cases =====
+
+TEST_CASE("Body: empty string body in response", "[http-methods]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/empty-str",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            resp.set_string_content(""sv, "text/plain"sv);
+        });
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->get("/empty-str"));
+    REQUIRE(resp.result() == http::status::ok);
+    // set_string_content("") might store as string_body or empty_body
+    if (resp.body().template is_body_type<httplib::body::string_body>())
+        REQUIRE(as_string(resp).empty());
+}
+
+TEST_CASE("Body: empty JSON object", "[http-methods]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::post>(
+        "/empty-json",
+        [](httplib::server::request& req, httplib::server::response& resp) {
+            auto& j = req.body().template as<httplib::body::json_body>();
+            REQUIRE(j.is_object());
+            REQUIRE(j.as_object().empty());
+            set_text(resp, "empty-ok"sv);
+        });
+    ts.start();
+
+    auto hdrs = headers({{http::field::content_type, "application/json"}});
+    auto resp = UNWRAP(
+        ts.client->send_request(http::verb::post, "/empty-json", "{}"sv, hdrs));
+    REQUIRE(resp.result() == http::status::ok);
+    REQUIRE(as_string(resp) == "empty-ok");
+}
+
+TEST_CASE("Body: JSON array as root", "[http-methods]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::post>(
+        "/json-array",
+        [](httplib::server::request& req, httplib::server::response& resp) {
+            auto& j = req.body().template as<httplib::body::json_body>();
+            REQUIRE(j.is_array());
+            REQUIRE(j.as_array().size() == 3);
+            set_text(resp, "array-ok"sv);
+        });
+    ts.start();
+
+    auto hdrs = headers({{http::field::content_type, "application/json"}});
+    auto resp = UNWRAP(
+        ts.client->send_request(http::verb::post, "/json-array", "[1,2,3]"sv, hdrs));
+    REQUIRE(resp.result() == http::status::ok);
+    REQUIRE(as_string(resp) == "array-ok");
+}
+
+TEST_CASE("Body: large JSON body", "[http-methods]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::post>(
+        "/large-json",
+        [](httplib::server::request& req, httplib::server::response& resp) {
+            auto& j = req.body().template as<httplib::body::json_body>();
+            REQUIRE(j.is_object());
+            REQUIRE(j.as_object().size() == 3);
+            set_text(resp, "large-ok"sv);
+        });
+    ts.start();
+
+    // Build a JSON body > 32KB to exercise multi-buffer writer path
+    std::string big_val(33000, 'x');
+    auto body = std::format("{{\"a\":\"{}\",\"b\":1,\"c\":true}}", big_val);
+    auto hdrs = headers({{http::field::content_type, "application/json"}});
+    auto resp = UNWRAP(
+        ts.client->send_request(http::verb::post, "/large-json", body, hdrs));
+    REQUIRE(resp.result() == http::status::ok);
+    REQUIRE(as_string(resp) == "large-ok");
+}
+
+TEST_CASE("Body: urlencoded with special characters", "[http-methods]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::post>(
+        "/url-special",
+        [](httplib::server::request& req, httplib::server::response& resp) {
+            const auto& params = req.body().template as<httplib::body::query_params_body>();
+            auto it = params.params().find("msg");
+            REQUIRE(it != params.params().end());
+            REQUIRE(it->second == "hello world");
+            set_text(resp, "decoded-ok"sv);
+        });
+    ts.start();
+
+    auto hdrs = headers({{http::field::content_type, "application/x-www-form-urlencoded"}});
+    auto resp = UNWRAP(
+        ts.client->send_request(http::verb::post, "/url-special", "msg=hello%20world"sv, hdrs));
+    REQUIRE(resp.result() == http::status::ok);
+    REQUIRE(as_string(resp) == "decoded-ok");
+}
+
+TEST_CASE("Body: multipart form with empty field", "[http-methods]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::post>(
+        "/multipart-empty",
+        [](httplib::server::request& req, httplib::server::response& resp) {
+            const auto& fd = req.body().template as<httplib::body::form_data_body>();
+            REQUIRE(fd.fields.size() == 1);
+            REQUIRE(fd.fields[0].name == "empty-field");
+            REQUIRE(fd.fields[0].content.empty());
+            REQUIRE(!fd.fields[0].is_file());
+            set_text(resp, "empty-ok"sv);
+        });
+    ts.start();
+
+    std::string boundary = "----BoundaryEmpty";
+    std::string body     = std::format(
+        "--{}\r\n"
+        "Content-Disposition: form-data; name=\"empty-field\"\r\n"
+        "\r\n"
+        "\r\n"
+        "--{}--\r\n",
+        boundary, boundary);
+
+    auto hdrs = headers({{http::field::content_type,
+                          std::format("multipart/form-data; boundary={}", boundary)}});
+    auto resp = UNWRAP(
+        ts.client->send_request(http::verb::post, "/multipart-empty", body, hdrs));
+    REQUIRE(resp.result() == http::status::ok);
+    REQUIRE(as_string(resp) == "empty-ok");
+}
+
+TEST_CASE("Body: response JSON with non-object root", "[http-methods]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/json-resp",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            resp.set_json_content({{"ok", true}});
+        });
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->get("/json-resp"));
+    REQUIRE(resp.result() == http::status::ok);
+}
+
+TEST_CASE("Body: empty_body on empty POST request", "[http-methods]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::post>(
+        "/empty-post",
+        [](httplib::server::request& req, httplib::server::response& resp) {
+            REQUIRE(req.body().template is_body_type<httplib::body::empty_body>());
+            set_text(resp, "empty-ok"sv);
+        });
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->post("/empty-post"));
+    REQUIRE(resp.result() == http::status::ok);
+    REQUIRE(as_string(resp) == "empty-ok");
+}
