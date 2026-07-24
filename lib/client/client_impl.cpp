@@ -95,11 +95,13 @@ void http_client::impl::set_logger(std::shared_ptr<spdlog::logger> logger)
 }
 
 net::awaitable<http_client::response_result>
-http_client::impl::async_send_request(http_client::request& req, bool retry /*= true*/)
+http_client::impl::async_send_request(http_client::request& req,
+                                       bool retry /*= true*/,
+                                       const body_setup_fn& body_setup /*= {}*/)
 {
     boost::system::error_code ec;
     try {
-        http_client::response resp = co_await async_send_request_impl(req);
+        http_client::response resp = co_await async_send_request_impl(req, body_setup);
         co_return resp;
     }
     catch (const boost::system::system_error& error) {
@@ -121,7 +123,7 @@ http_client::impl::async_send_request(http_client::request& req, bool retry /*= 
     {
         if (retry) {
             logger()->trace("retrying request...");
-            co_return co_await async_send_request(req, false);
+            co_return co_await async_send_request(req, false, body_setup);
         }
     }
     co_return ec;
@@ -145,7 +147,8 @@ void http_client::impl::expires_after(bool first /*= false*/)
 }
 
 net::awaitable<http_client::response>
-http_client::impl::async_send_request_impl(http_client::request& req)
+http_client::impl::async_send_request_impl(http_client::request& req,
+                                            const body_setup_fn& body_setup /*= {}*/)
 {
     // Set up an HTTP GET request message
     if (!is_open()) {
@@ -205,6 +208,9 @@ http_client::impl::async_send_request_impl(http_client::request& req)
     parser.header_limit(std::numeric_limits<std::uint32_t>::max());
     parser.body_limit(std::numeric_limits<std::uint64_t>::max());
 
+    if (body_setup)
+        body_setup(parser.get().body());
+
     if (chunk_handler_)
         parser.on_chunk_body(chunk_handler_);
 
@@ -258,6 +264,28 @@ void http_client::impl::set_chunk_handler(chunk_handler_type&& handler)
         handler(body, ec);
         return body.size();
     };
+}
+
+net::awaitable<http_client::response_result>
+http_client::impl::async_download(http_client::request& req, const fs::path& save_path)
+{
+    auto setup = [save_path](body::any_body::value_type& body) {
+        body       = body::file_body::value_type {};
+        auto& fb   = std::get<body::file_body::value_type>(body);
+        fb.open(save_path, std::ios::out | std::ios::binary | std::ios::trunc);
+        if (!fb.is_open())
+            throw boost::system::system_error(
+                boost::system::errc::make_error_code(boost::system::errc::permission_denied));
+    };
+    auto result = co_await async_send_request(req, true, setup);
+
+    if (!result.has_value() ||
+        result->result() == http::status::no_content ||
+        result->result() == http::status::not_modified) {
+        std::error_code ec;
+        fs::remove(save_path, ec);
+    }
+    co_return result;
 }
 
 } // namespace httplib::client

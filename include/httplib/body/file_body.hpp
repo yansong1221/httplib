@@ -29,6 +29,7 @@ struct file_body
         void open(const fs::path& path,
                   std::ios_base::openmode mode = std::ios_base::in | std::ios_base::out)
         {
+            path_      = path;
             file_size_ = 0;
             file_.open(path, mode);
             if (file_) {
@@ -39,9 +40,15 @@ struct file_body
         }
         bool is_open() const { return file_.is_open(); }
 
+        void write(const void* buffer, std::size_t n) { file_.write((const char*)buffer, n); }
+        void close() { file_.close(); }
+
+        const fs::path& path() const { return path_; }
+
     private:
         std::fstream file_;
         std::size_t file_size_ = 0;
+        fs::path path_;
     };
 
     class writer

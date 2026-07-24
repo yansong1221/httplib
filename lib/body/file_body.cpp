@@ -1,4 +1,5 @@
 #include "httplib/body/file_body.hpp"
+#include <boost/asio/buffer.hpp>
 #include <fmt/format.h>
 
 namespace httplib::body {
@@ -122,18 +123,25 @@ void file_body::reader::init(boost::optional<std::uint64_t> const& content_lengt
                              boost::system::error_code& ec)
 {
     boost::ignore_unused(content_length);
+    if (!body_.is_open()) {
+        ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+        return;
+    }
     ec = {};
 }
 
 std::size_t file_body::reader::put(const_buffers_type const& buffers, boost::system::error_code& ec)
 {
-    boost::ignore_unused(buffers);
+    auto data = static_cast<const char*>(buffers.data());
+    auto size = buffers.size();
+    body_.write(data, size);
     ec = {};
-    return net::buffer_size(buffers);
+    return size;
 }
 
 void file_body::reader::finish(boost::system::error_code& ec)
 {
+    body_.close();
     ec = {};
 }
 

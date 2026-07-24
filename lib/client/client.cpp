@@ -8,7 +8,9 @@ namespace httplib::client {
 namespace {
 
 std::string make_target(std::string_view path, const html::query_params& params)
+
 {
+
     std::string target(path);
     if (!params.empty()) {
         target += target.find('?') == std::string::npos ? "?" : "&";
@@ -17,10 +19,10 @@ std::string make_target(std::string_view path, const html::query_params& params)
     return target;
 }
 
-template<typename AwaitableFactory>
-http_client::response_result run_sync(const net::any_io_executor& ex, AwaitableFactory&& factory)
+template<typename Factory>
+http_client::response_result run_sync(const net::any_io_executor& ex, Factory&& factory)
 {
-    auto future = net::co_spawn(ex, std::forward<AwaitableFactory>(factory)(), net::use_future);
+    auto future = net::co_spawn(ex, std::forward<Factory>(factory)(), net::use_future);
     return future.get();
 }
 
@@ -242,6 +244,29 @@ http_client::async_send_request(http::verb method,
     co_return co_await impl_->async_send_request(request);
 }
 
+net::awaitable<http_client::response_result>
+http_client::async_download(http::verb method,
+                             std::string_view path,
+                             const fs::path& save_path,
+                             const http::fields& headers)
+{
+    auto request = impl_->make_http_request(method, path, headers);
+    co_return co_await impl_->async_download(request, save_path);
+}
+
+net::awaitable<http_client::response_result>
+http_client::async_download(http::verb method,
+                             std::string_view path,
+                             const fs::path& save_path,
+                             std::string_view body,
+                             const http::fields& headers)
+{
+    auto request    = impl_->make_http_request(method, path, headers);
+    request.body()  = std::string(body);
+    request.content_length(body.size());
+    co_return co_await impl_->async_download(request, save_path);
+}
+
 http_client::response_result http_client::get(std::string_view path,
                                               const html::query_params& params,
                                               const http::fields& headers /*= http::fields()*/)
@@ -372,6 +397,25 @@ http_client::response_result http_client::send_request(
 {
     return run_sync(impl_->executor_,
                     [&] { return async_send_request(method, path, std::move(body), headers); });
+}
+
+http_client::response_result http_client::download(http::verb method,
+                                                    std::string_view path,
+                                                    const fs::path& save_path,
+                                                    const http::fields& headers)
+{
+    return run_sync(impl_->executor_,
+                    [&] { return async_download(method, path, save_path, headers); });
+}
+
+http_client::response_result http_client::download(http::verb method,
+                                                    std::string_view path,
+                                                    const fs::path& save_path,
+                                                    std::string_view body,
+                                                    const http::fields& headers)
+{
+    return run_sync(impl_->executor_,
+                    [&] { return async_download(method, path, save_path, body, headers); });
 }
 
 void http_client::close()

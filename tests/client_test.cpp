@@ -8,6 +8,8 @@
 #include <boost/asio/io_context.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 #include <spdlog/sinks/null_sink.h>
 #include <spdlog/spdlog.h>
@@ -276,4 +278,79 @@ TEST_CASE("Client: 304 Not Modified response", "[client]")
     auto client = ts.make_client();
     auto resp   = UNWRAP(client->get("/not-modified"));
     REQUIRE(resp.result() == http::status::not_modified);
+}
+
+TEST_CASE("Client: download saves response body to file", "[client]")
+{
+    auto server_path =
+        std::filesystem::temp_directory_path() / "httplib_dl_server.txt";
+    {
+        std::ofstream f(server_path, std::ios::binary);
+        f << "download test content\n";
+    }
+
+    auto dl_path =
+        std::filesystem::temp_directory_path() / "httplib_dl_output.bin";
+
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/dl-file",
+        [&](httplib::server::request&, httplib::server::response& resp) {
+            resp.set_file_content(server_path);
+        });
+    ts.start_with_routes();
+
+    auto client = ts.make_client();
+    auto resp   = UNWRAP(client->download(http::verb::get, "/dl-file", dl_path));
+    REQUIRE(resp.result() == http::status::ok);
+
+    {
+        std::ifstream dl_file(dl_path, std::ios::binary);
+        REQUIRE(dl_file.is_open());
+        std::string content(
+            (std::istreambuf_iterator<char>(dl_file)), std::istreambuf_iterator<char>());
+        REQUIRE(content == "download test content\n");
+    }
+
+    std::filesystem::remove(server_path);
+    std::filesystem::remove(dl_path);
+}
+
+TEST_CASE("Client: download with Range request", "[client]")
+{
+    auto server_path =
+        std::filesystem::temp_directory_path() / "httplib_dl_range_server.txt";
+    {
+        std::ofstream f(server_path, std::ios::binary);
+        f << "0123456789";
+    }
+
+    auto dl_path =
+        std::filesystem::temp_directory_path() / "httplib_dl_range_output.bin";
+
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/dl-range",
+        [&](httplib::server::request& req, httplib::server::response& resp) {
+            resp.set_file_content(server_path, req.base());
+        });
+    ts.start_with_routes();
+
+    auto client  = ts.make_client();
+    auto headers = httplib::http::fields();
+    headers.set(http::field::range, "bytes=0-4");
+
+    auto resp = UNWRAP(client->download(http::verb::get, "/dl-range", dl_path, headers));
+    REQUIRE(resp.result() == http::status::partial_content);
+
+    {
+        std::ifstream dl_file(dl_path, std::ios::binary);
+        REQUIRE(dl_file.is_open());
+        std::string content(
+            (std::istreambuf_iterator<char>(dl_file)), std::istreambuf_iterator<char>());
+        REQUIRE(content == "01234");
+    }
+
+    std::filesystem::remove(server_path);
+    std::filesystem::remove(dl_path);
 }

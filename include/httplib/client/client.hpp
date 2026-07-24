@@ -107,9 +107,19 @@ public:
                                                   std::string_view body,
                                                   const http::fields& headers = http::fields());
     net::awaitable<response_result> async_send_request(http::verb method,
-                                                  std::string_view path,
-                                                  boost::json::value&& body,
-                                                  const http::fields& headers = http::fields());
+                                                   std::string_view path,
+                                                   boost::json::value&& body,
+                                                   const http::fields& headers = http::fields());
+
+    net::awaitable<response_result> async_download(http::verb method,
+                                                    std::string_view path,
+                                                    const fs::path& save_path,
+                                                    const http::fields& headers = http::fields());
+    net::awaitable<response_result> async_download(http::verb method,
+                                                    std::string_view path,
+                                                    const fs::path& save_path,
+                                                    std::string_view body,
+                                                    const http::fields& headers = http::fields());
 
     response_result get(std::string_view path,
                          const html::query_params& params = {},
@@ -167,9 +177,19 @@ public:
                                  std::string_view body,
                                  const http::fields& headers = http::fields());
     response_result send_request(http::verb method,
-                                 std::string_view path,
-                                 boost::json::value&& body,
-                                 const http::fields& headers = http::fields());
+                                  std::string_view path,
+                                  boost::json::value&& body,
+                                  const http::fields& headers = http::fields());
+
+    response_result download(http::verb method,
+                             std::string_view path,
+                             const fs::path& save_path,
+                             const http::fields& headers = http::fields());
+    response_result download(http::verb method,
+                             std::string_view path,
+                             const fs::path& save_path,
+                             std::string_view body,
+                             const http::fields& headers = http::fields());
 
     void close();
     bool is_open() const;

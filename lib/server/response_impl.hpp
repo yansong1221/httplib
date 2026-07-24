@@ -122,7 +122,7 @@ public:
         body::file_body::value_type file;
         file.open(path, std::ios::in | std::ios::binary);
         if (!file.is_open()) {
-            set_error_content(http::status::not_found);
+            set_error_content(http::status::forbidden);
             return;
         }
 

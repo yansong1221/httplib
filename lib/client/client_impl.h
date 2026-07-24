@@ -2,6 +2,7 @@
 
 #include "httplib/client/client.hpp"
 #include "stream/http_stream.hpp"
+#include <functional>
 #include <spdlog/spdlog.h>
 
 namespace httplib::client {
@@ -9,6 +10,8 @@ namespace httplib::client {
 class http_client::impl
 {
 public:
+    using body_setup_fn = std::function<void(body::any_body::value_type&)>;
+
     impl(const net::any_io_executor& ex, std::string_view host, uint16_t port, bool ssl);
     ~impl();
 
@@ -29,11 +32,19 @@ public:
     std::shared_ptr<spdlog::logger> logger() const;
     void set_logger(std::shared_ptr<spdlog::logger> logger);
 
-    net::awaitable<http_client::response_result> async_send_request(http_client::request& req,
-                                                                    bool retry = true);
+    net::awaitable<http_client::response_result> async_send_request(
+        http_client::request& req,
+        bool retry = true,
+        const body_setup_fn& body_setup = {});
     void expires_after(bool first = false);
 
-    net::awaitable<http_client::response> async_send_request_impl(http_client::request& req);
+    net::awaitable<http_client::response> async_send_request_impl(
+        http_client::request& req,
+        const body_setup_fn& body_setup = {});
+
+    net::awaitable<http_client::response_result> async_download(
+        http_client::request& req,
+        const fs::path& save_path);
 
 
     net::any_io_executor executor_;
