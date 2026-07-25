@@ -5,6 +5,7 @@
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
+#include "httplib/server/mount_point_entry.hpp"
 #include "httplib/server/server.hpp"
 #include <boost/asio/io_context.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
@@ -180,6 +181,40 @@ TEST_CASE("Response: set_form_data_content", "[response]")
     REQUIRE(resp.result() == http::status::ok);
     REQUIRE_FALSE(resp[http::field::content_type].empty());
     REQUIRE(resp[http::field::content_type].starts_with("multipart/form-data"));
+}
+
+TEST_CASE("Response: set_form_data_content with file_path", "[response]")
+{
+    auto tmp_path =
+        std::filesystem::temp_directory_path() / "httplib_form_file.bin";
+    {
+        std::ofstream f(tmp_path, std::ios::binary);
+        f << "file content from disk";
+    }
+
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/form-file",
+        [&](httplib::server::request&, httplib::server::response& resp) {
+            std::vector<httplib::html::form_data::field> fields;
+            auto& fld  = fields.emplace_back();
+            fld.name   = "file";
+            fld.filename = "test.bin";
+            fld.content_type = "application/octet-stream";
+            fld.file_path = tmp_path;
+            resp.set_form_data_content(std::move(fields));
+        });
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->get("/form-file"));
+    REQUIRE(resp.result() == http::status::ok);
+    auto& fd = resp.body().as<httplib::body::form_data_body>();
+    REQUIRE(fd.fields.size() == 1);
+    REQUIRE(fd.fields[0].name == "file");
+    REQUIRE(fd.fields[0].filename == "test.bin");
+    REQUIRE(fd.fields[0].content == "file content from disk");
+
+    std::filesystem::remove(tmp_path);
 }
 
 TEST_CASE("Response: set_file_content serves a file", "[response]")
@@ -549,4 +584,135 @@ TEST_CASE("Response: keep-alive close response", "[response]")
     REQUIRE(resp.result() == http::status::ok);
     REQUIRE(as_string(resp) == "closing");
     REQUIRE(resp[http::field::connection] == "close");
+}
+
+TEST_CASE("Static mount: serves a file", "[response]")
+{
+    auto tmp_dir  = std::filesystem::temp_directory_path() / "httplib_static";
+    auto filepath = tmp_dir / "test.txt";
+    std::filesystem::create_directories(tmp_dir);
+    {
+        std::ofstream f(filepath);
+        f << "static content";
+    }
+
+    test_scaffold ts;
+    ts.router().set_static_mount_point("/static", tmp_dir);
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->get("/static/test.txt"));
+    REQUIRE(resp.result() == http::status::ok);
+    REQUIRE(as_string(resp) == "static content");
+
+    std::filesystem::remove_all(tmp_dir);
+}
+
+TEST_CASE("Static mount: returns 404 for non-existent file", "[response]")
+{
+    auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_404";
+    std::filesystem::create_directories(tmp_dir);
+
+    test_scaffold ts;
+    ts.router().set_static_mount_point("/files", tmp_dir);
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->get("/files/nope.txt"));
+    REQUIRE(resp.result() == http::status::not_found);
+
+    std::filesystem::remove_all(tmp_dir);
+}
+
+TEST_CASE("Static mount: blocks path traversal", "[response]")
+{
+    auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_pt";
+    std::filesystem::create_directories(tmp_dir);
+
+    test_scaffold ts;
+    ts.router().set_static_mount_point("/files", tmp_dir);
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->get("/files/../../../etc/passwd"));
+    REQUIRE(resp.result() == http::status::bad_request);
+
+    std::filesystem::remove_all(tmp_dir);
+}
+
+TEST_CASE("Static mount: default document index.html", "[response]")
+{
+    auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_dd";
+    std::filesystem::create_directories(tmp_dir);
+    {
+        std::ofstream f(tmp_dir / "index.html");
+        f << "<h1>hello</h1>";
+    }
+
+    test_scaffold ts;
+    ts.router().set_static_mount_point("/", tmp_dir);
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->get("/"));
+    REQUIRE(resp.result() == http::status::ok);
+    REQUIRE(as_string(resp) == "<h1>hello</h1>");
+
+    std::filesystem::remove_all(tmp_dir);
+}
+
+TEST_CASE("Static mount: directory listing via subpath", "[response]")
+{
+    auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_list";
+    auto sub_dir = tmp_dir / "data";
+    std::filesystem::create_directories(sub_dir);
+    {
+        std::ofstream f(sub_dir / "a.txt");
+        f << "a";
+    }
+
+    auto entry = httplib::server::mount_point_entry("/dir", tmp_dir);
+    entry.set_enabled_directory(true);
+    entry.set_directory_format(httplib::server::mount_point_entry::dir_format_type::json);
+
+    test_scaffold ts;
+    ts.router().set_static_mount_point(std::move(entry));
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->get("/dir/data/"));
+    REQUIRE(resp.result() == http::status::ok);
+
+    std::filesystem::remove_all(tmp_dir);
+}
+
+TEST_CASE("Static mount: non-existent file returns 404 via mount", "[response]")
+{
+    auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_no";
+    std::filesystem::create_directories(tmp_dir);
+
+    test_scaffold ts;
+    ts.router().set_static_mount_point("/pub", tmp_dir);
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->get("/pub/nope.txt"));
+    REQUIRE(resp.result() == http::status::not_found);
+
+    std::filesystem::remove_all(tmp_dir);
+}
+
+TEST_CASE("Static mount: file in subdirectory", "[response]")
+{
+    auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_sub";
+    auto sub_dir = tmp_dir / "sub";
+    std::filesystem::create_directories(sub_dir);
+    {
+        std::ofstream f(sub_dir / "deep.txt");
+        f << "nested";
+    }
+
+    test_scaffold ts;
+    ts.router().set_static_mount_point("/pub", tmp_dir);
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->get("/pub/sub/deep.txt"));
+    REQUIRE(resp.result() == http::status::ok);
+    REQUIRE(as_string(resp) == "nested");
+
+    std::filesystem::remove_all(tmp_dir);
 }

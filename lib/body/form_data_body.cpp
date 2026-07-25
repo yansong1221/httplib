@@ -123,6 +123,39 @@ form_data_body::writer::get(boost::system::error_code& ec)
             return std::make_pair(buffer_.cdata(), true);
         } break;
         case step::content: {
+            if (field_data.file_path) {
+                if (!file_stream_.is_open()) {
+                    file_stream_.open(*field_data.file_path,
+                                      std::ios::in | std::ios::binary);
+                    if (!file_stream_.is_open()) {
+                        ec = boost::system::errc::make_error_code(
+                            boost::system::errc::no_such_file_or_directory);
+                        return boost::none;
+                    }
+                    std::error_code fs_ec;
+                    file_remaining_ = fs::file_size(*field_data.file_path, fs_ec);
+                    if (fs_ec) {
+                        file_stream_.close();
+                        ec = fs_ec;
+                        return boost::none;
+                    }
+                }
+                if (file_remaining_ == 0) {
+                    file_stream_.close();
+                    step_ = step::content_end;
+                    return get(ec);
+                }
+                auto n = std::min<std::uintmax_t>(file_buf_size_, file_remaining_);
+                file_stream_.read(file_buf_.data(), static_cast<std::streamsize>(n));
+                auto read          = static_cast<std::uintmax_t>(file_stream_.gcount());
+                file_remaining_   -= read;
+                if (file_remaining_ == 0) {
+                    file_stream_.close();
+                    step_ = step::content_end;
+                }
+                return std::make_pair<const_buffers_type>(
+                    net::buffer(file_buf_.data(), read), true);
+            }
             step_ = step::content_end;
             return std::make_pair<const_buffers_type>(net::buffer(field_data.content), true);
         } break;
@@ -150,6 +183,8 @@ void form_data_body::writer::init(boost::system::error_code& ec)
 {
     ec.clear();
     field_data_index_ = 0;
+    file_stream_.close();
+    file_remaining_   = 0;
 }
 
 form_data_body::reader::reader(http::fields const& h, value_type& b)
@@ -261,6 +296,7 @@ std::size_t form_data_body::reader::put(const_buffers_type const& buffers,
         } break;
         case step::boundary_content: {
             auto data = util::buffer_to_string_view(buffers);
+            bool save_to_file = !field_data_.filename.empty() && !body_.save_dir.empty();
             if (data.starts_with("\r")) {
                 const std::string eof_boundary_line = "\r\n--" + boundary_;
 
@@ -269,19 +305,42 @@ std::size_t form_data_body::reader::put(const_buffers_type const& buffers,
                     return 0;
                 }
                 if (data.starts_with(eof_boundary_line)) {
+                    if (save_to_file) {
+                        if (file_stream_.is_open())
+                            file_stream_.close();
+                        field_data_.file_path = current_file_path_;
+                    }
                     step_ = step::boundary_line;
                     body_.fields.push_back(std::move(field_data_));
                     return 2;
                 }
-                field_data_.content.push_back('\r');
+                if (save_to_file) {
+                    write_content("\r", ec);
+                    if (ec)
+                        return 0;
+                }
+                else
+                    field_data_.content.push_back('\r');
                 return 1;
             }
             auto pos = data.find("\r");
             if (pos == std::string_view::npos) {
-                field_data_.content.append(data);
+                if (save_to_file) {
+                    write_content(data, ec);
+                    if (ec)
+                        return 0;
+                }
+                else
+                    field_data_.content.append(data);
                 return data.length();
             }
-            field_data_.content.append(data.substr(0, pos));
+            if (save_to_file) {
+                write_content(data.substr(0, pos), ec);
+                if (ec)
+                    return 0;
+            }
+            else
+                field_data_.content.append(data.substr(0, pos));
             return pos;
         } break;
         case step::finished: {
@@ -307,9 +366,35 @@ std::size_t form_data_body::reader::put(const_buffers_type const& buffers,
 void form_data_body::reader::finish(boost::system::error_code& ec)
 {
     ec.clear();
+    if (file_stream_.is_open())
+        file_stream_.close();
     if (step_ != step::eof) {
         ec = http::error::partial_message;
     }
+}
+
+void form_data_body::reader::write_content(std::string_view data, boost::system::error_code& ec)
+{
+    if (!file_stream_.is_open()) {
+        auto name = field_data_.filename.empty()
+                        ? "upload"
+                        : field_data_.filename;
+        current_file_path_  = body_.save_dir / name;
+        file_bytes_written_ = 0;
+        file_stream_.open(current_file_path_,
+                          std::ios::out | std::ios::binary | std::ios::trunc);
+    }
+    if (body_.max_file_size) {
+        file_bytes_written_ += data.size();
+        if (file_bytes_written_ > body_.max_file_size) {
+            file_stream_.close();
+            std::error_code rm_ec;
+            fs::remove(current_file_path_, rm_ec);
+            ec = http::error::body_limit;
+            return;
+        }
+    }
+    file_stream_.write(data.data(), static_cast<std::streamsize>(data.size()));
 }
 
 } // namespace httplib::body

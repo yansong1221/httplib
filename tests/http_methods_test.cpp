@@ -13,6 +13,7 @@
 #include <boost/json.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
+#include <random>
 #include <spdlog/sinks/null_sink.h>
 #include <spdlog/spdlog.h>
 #include <string>
@@ -465,6 +466,221 @@ TEST_CASE("Multipart form-data body parsing", "[http-methods]")
     REQUIRE(as_string(resp) == "field1=value1;file1=file-content:test.txt;");
 }
 
+TEST_CASE("Multipart file upload saved to disk", "[http-methods]")
+{
+    auto upload_dir =
+        std::filesystem::temp_directory_path() / "httplib_uploads";
+    std::filesystem::create_directories(upload_dir);
+
+    test_scaffold ts;
+    ts.server.set_upload_dir(upload_dir);
+    ts.router().set_http_handler<http::verb::post>(
+        "/upload-disk",
+        [](httplib::server::request& req, httplib::server::response& resp) {
+            const auto& fd = req.body().as<httplib::body::form_data_body>();
+            REQUIRE(fd.fields.size() == 2);
+            REQUIRE(fd.fields[0].name == "text");
+            REQUIRE(fd.fields[0].content == "hello");
+            REQUIRE(fd.fields[1].name == "file");
+            REQUIRE(fd.fields[1].filename == "upload.bin");
+            REQUIRE(fd.fields[1].file_path.has_value());
+            REQUIRE(fd.fields[1].content.empty());
+            resp.set_string_content("ok"sv, "text/plain"sv);
+        });
+    ts.start();
+
+    std::string boundary = "----DiskUploadBoundary";
+    std::string body     = std::format(
+        "--{}\r\n"
+        "Content-Disposition: form-data; name=\"text\"\r\n"
+        "\r\n"
+        "hello\r\n"
+        "--{}\r\n"
+        "Content-Disposition: form-data; name=\"file\"; filename=\"upload.bin\"\r\n"
+        "Content-Type: application/octet-stream\r\n"
+        "\r\n"
+        "binary-content-here\r\n"
+        "--{}--\r\n",
+        boundary,
+        boundary,
+        boundary);
+
+    auto hdrs = httplib::http::fields();
+    hdrs.set(http::field::content_type,
+             std::format("multipart/form-data; boundary={}", boundary));
+    auto resp = UNWRAP(
+        ts.client->send_request(http::verb::post, "/upload-disk", body, hdrs));
+    REQUIRE(resp.result() == http::status::ok);
+
+    std::filesystem::remove_all(upload_dir);
+}
+
+TEST_CASE("Multipart file upload exceeds size limit", "[http-methods]")
+{
+    auto upload_dir =
+        std::filesystem::temp_directory_path() / "httplib_uploads_limit";
+    std::filesystem::create_directories(upload_dir);
+
+    test_scaffold ts;
+    ts.server.set_upload_dir(upload_dir);
+    ts.server.set_upload_file_limit(4);  // only 4 bytes
+    ts.router().set_http_handler<http::verb::post>(
+        "/upload-limit",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            resp.set_string_content("ok"sv, "text/plain"sv);
+        });
+    ts.start();
+
+    std::string boundary = "----LimitBoundary";
+    std::string body     = std::format(
+        "--{}\r\n"
+        "Content-Disposition: form-data; name=\"file\"; filename=\"big.bin\"\r\n"
+        "\r\n"
+        "too-large\r\n"
+        "--{}--\r\n",
+        boundary,
+        boundary);
+
+    auto hdrs = httplib::http::fields();
+    hdrs.set(http::field::content_type,
+             std::format("multipart/form-data; boundary={}", boundary));
+    auto resp = ts.client->send_request(http::verb::post, "/upload-limit", body, hdrs);
+    REQUIRE_FALSE(resp.has_value());  // body parse fails, connection closed
+
+    std::filesystem::remove_all(upload_dir);
+}
+
+TEST_CASE("Multipart multiple files saved to disk", "[http-methods]")
+{
+    auto upload_dir =
+        std::filesystem::temp_directory_path() / "httplib_uploads_multi";
+    std::filesystem::create_directories(upload_dir);
+
+    test_scaffold ts;
+    ts.server.set_upload_dir(upload_dir);
+    ts.router().set_http_handler<http::verb::post>(
+        "/upload-multi",
+        [](httplib::server::request& req, httplib::server::response& resp) {
+            const auto& fd = req.body().as<httplib::body::form_data_body>();
+            REQUIRE(fd.fields.size() == 2);
+            REQUIRE(fd.fields[0].name == "f1");
+            REQUIRE(fd.fields[0].file_path.has_value());
+            REQUIRE(fd.fields[1].name == "f2");
+            REQUIRE(fd.fields[1].file_path.has_value());
+            REQUIRE(fd.fields[0].file_path != fd.fields[1].file_path);
+            resp.set_string_content("ok"sv, "text/plain"sv);
+        });
+    ts.start();
+
+    std::string boundary = "----MultiBoundary";
+    std::string body     = std::format(
+        "--{}\r\n"
+        "Content-Disposition: form-data; name=\"f1\"; filename=\"a.bin\"\r\n"
+        "\r\n"
+        "aaa\r\n"
+        "--{}\r\n"
+        "Content-Disposition: form-data; name=\"f2\"; filename=\"b.bin\"\r\n"
+        "\r\n"
+        "bbb\r\n"
+        "--{}--\r\n",
+        boundary,
+        boundary,
+        boundary);
+
+    auto hdrs = httplib::http::fields();
+    hdrs.set(http::field::content_type,
+             std::format("multipart/form-data; boundary={}", boundary));
+    auto resp = UNWRAP(
+        ts.client->send_request(http::verb::post, "/upload-multi", body, hdrs));
+    REQUIRE(resp.result() == http::status::ok);
+
+    std::filesystem::remove_all(upload_dir);
+}
+
+TEST_CASE("Multipart randomized round-trip", "[http-methods]")
+{
+    auto upload_dir =
+        std::filesystem::temp_directory_path() / "httplib_uploads_fuzz";
+    std::filesystem::create_directories(upload_dir);
+
+    std::mt19937 rng(42);
+    std::uniform_int_distribution<int> nfields_dist(1, 10);
+    std::uniform_int_distribution<int> content_len(0, 4096);
+    std::uniform_int_distribution<int> byte_dist(0, 255);
+
+    for (int round = 0; round < 20; ++round) {
+        int nfields = nfields_dist(rng);
+        std::vector<std::string> names;
+        std::vector<std::string> contents;
+        std::vector<std::string> filenames;
+
+        std::string boundary = std::format("----FuzzBoundary{:04d}", round);
+        std::string body;
+
+        for (int i = 0; i < nfields; ++i) {
+            auto name     = std::format("field{}", i);
+            bool is_file  = (i % 3 == 0);
+            auto filename = is_file ? std::format("file{}.bin", i) : "";
+            int len       = content_len(rng);
+            std::string content;
+            content.reserve(len);
+            for (int j = 0; j < len; ++j)
+                content.push_back(static_cast<char>(byte_dist(rng)));
+
+            names.push_back(name);
+            contents.push_back(content);
+            filenames.push_back(filename);
+
+            body += std::format("--{}\r\n", boundary);
+            body += std::format("Content-Disposition: form-data; name=\"{}\"", name);
+            if (is_file)
+                body += std::format("; filename=\"{}\"", filename);
+            body += "\r\n\r\n";
+            body += content;
+            body += "\r\n";
+        }
+        body += std::format("--{}--\r\n", boundary);
+
+        test_scaffold ts;
+        ts.server.set_upload_dir(upload_dir);
+        ts.router().set_http_handler<http::verb::post>(
+            "/fuzz",
+            [&](httplib::server::request& req, httplib::server::response& resp) {
+                const auto& fd = req.body().as<httplib::body::form_data_body>();
+                REQUIRE(fd.fields.size() == static_cast<size_t>(nfields));
+                for (int i = 0; i < nfields; ++i) {
+                    REQUIRE(fd.fields[i].name == names[i]);
+                    if (filenames[i].empty()) {
+                        REQUIRE(fd.fields[i].content == contents[i]);
+                    }
+                    else {
+                        REQUIRE(fd.fields[i].filename == filenames[i]);
+                        REQUIRE(fd.fields[i].file_path.has_value());
+                        std::ifstream f(*fd.fields[i].file_path, std::ios::binary);
+                        std::string disk_content(
+                            (std::istreambuf_iterator<char>(f)),
+                            std::istreambuf_iterator<char>());
+                        REQUIRE(disk_content == contents[i]);
+                    }
+                }
+                resp.set_string_content("ok"sv, "text/plain"sv);
+            });
+        ts.start();
+
+        auto hdrs = httplib::http::fields();
+        hdrs.set(http::field::content_type,
+                 std::format("multipart/form-data; boundary={}", boundary));
+        auto resp = UNWRAP(
+            ts.client->send_request(http::verb::post, "/fuzz", body, hdrs));
+        REQUIRE(resp.result() == http::status::ok);
+
+        for (auto& f : std::filesystem::directory_iterator(upload_dir))
+            std::filesystem::remove(f);
+    }
+
+    std::filesystem::remove_all(upload_dir);
+}
+
 TEST_CASE("Server: handler throws exception returns 500", "[http-methods]")
 {
     test_scaffold ts;
@@ -687,4 +903,94 @@ TEST_CASE("Body: empty_body on empty POST request", "[http-methods]")
     auto resp = UNWRAP(ts.client->post("/empty-post"));
     REQUIRE(resp.result() == http::status::ok);
     REQUIRE(as_string(resp) == "empty-ok");
+}
+
+TEST_CASE("JSON randomized round-trip", "[http-methods]")
+{
+    std::mt19937 rng(123);
+    std::uniform_int_distribution<int> nkeys_dist(1, 12);
+    std::uniform_int_distribution<int> strlen_dist(0, 256);
+    std::uniform_int_distribution<int> byte_dist(32, 126);
+    std::uniform_int_distribution<int> type_dist(0, 3);  // string/number/bool/null
+
+    for (int round = 0; round < 15; ++round) {
+        int nkeys = nkeys_dist(rng);
+        boost::json::object sent;
+        for (int i = 0; i < nkeys; ++i) {
+            auto key = std::format("key{:02d}", i);
+            switch (type_dist(rng)) {
+                case 0: {  // string with random content
+                    int len = strlen_dist(rng);
+                    std::string val;
+                    val.reserve(len);
+                    for (int j = 0; j < len; ++j)
+                        val.push_back(static_cast<char>(byte_dist(rng)));
+                    sent[key] = val;
+                    break;
+                }
+                case 1: sent[key] = static_cast<int64_t>(byte_dist(rng)); break;
+                case 2: sent[key] = (type_dist(rng) % 2 == 0); break;
+                case 3: sent[key] = nullptr; break;
+            }
+        }
+
+        test_scaffold ts;
+        ts.router().set_http_handler<http::verb::post>(
+            "/json-fuzz",
+            [&](httplib::server::request& req, httplib::server::response& resp) {
+                auto& j = req.body().as<httplib::body::json_body>();
+                REQUIRE(j.is_object());
+                REQUIRE(j.as_object() == sent);
+                resp.set_json_content({{"ok", true}});
+            });
+        ts.start();
+
+        auto hdrs = httplib::http::fields();
+        hdrs.set(http::field::content_type, "application/json");
+        auto body = boost::json::serialize(sent);
+        auto resp = UNWRAP(
+            ts.client->send_request(http::verb::post, "/json-fuzz", body, hdrs));
+        REQUIRE(resp.result() == http::status::ok);
+    }
+}
+
+TEST_CASE("Query params randomized round-trip", "[http-methods]")
+{
+    std::mt19937 rng(456);
+    std::uniform_int_distribution<int> npairs_dist(1, 10);  // at least 1 pair
+    std::uniform_int_distribution<int> val_len_dist(0, 32);
+    std::uniform_int_distribution<int> char_dist(97, 122);  // a-z only
+
+    for (int round = 0; round < 15; ++round) {
+        httplib::html::query_params sent;
+        std::vector<std::pair<std::string, std::string>> expected;
+        int npairs = npairs_dist(rng);
+        for (int i = 0; i < npairs; ++i) {
+            auto key = std::format("p{:02d}", i);
+            int len  = val_len_dist(rng);
+            std::string val;
+            val.reserve(len);
+            for (int j = 0; j < len; ++j)
+                val.push_back(static_cast<char>(char_dist(rng)));
+            sent.add(key, val);
+            expected.emplace_back(key, val);
+        }
+
+        test_scaffold ts;
+        ts.router().set_http_handler<http::verb::post>(
+            "/query-fuzz",
+            [&](httplib::server::request& req, httplib::server::response& resp) {
+                const auto& pq  = req.body().as<httplib::body::query_params_body>();
+                const auto& map = pq.params();
+                REQUIRE(map.size() == expected.size());
+                resp.set_string_content("ok"sv, "text/plain"sv);
+            });
+        ts.start();
+
+        auto hdrs = httplib::http::fields();
+        hdrs.set(http::field::content_type, "application/x-www-form-urlencoded");
+        auto resp = UNWRAP(
+            ts.client->send_request(http::verb::post, "/query-fuzz", sent.encoded(), hdrs));
+        REQUIRE(resp.result() == http::status::ok);
+    }
 }

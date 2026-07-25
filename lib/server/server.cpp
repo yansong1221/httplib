@@ -114,6 +114,16 @@ void http_server::set_compress_content_types(std::function<bool(std::string_view
     impl_->set_compress_content_types(std::move(predicate));
 }
 
+void http_server::set_upload_dir(const fs::path& dir)
+{
+    impl_->set_upload_dir(dir);
+}
+
+void http_server::set_upload_file_limit(std::uint64_t max_bytes)
+{
+    impl_->set_upload_file_limit(max_bytes);
+}
+
 void http_server::use_ssl(const std::span<const char>& cert_file,
                           const std::span<const char>& key_file,
                           std::string passwd /*= {}*/)

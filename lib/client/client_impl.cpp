@@ -129,6 +129,74 @@ http_client::impl::async_send_request(http_client::request& req,
     co_return ec;
 }
 
+net::awaitable<http_client::response_result>
+http_client::impl::async_send_request_with_redirect(http_client::request& req,
+                                                     bool retry /*= true*/,
+                                                     const body_setup_fn& body_setup /*= {}*/)
+{
+    if (max_redirects_ <= 0)
+        co_return co_await async_send_request(req, retry, body_setup);
+
+    for (int r = 0; r <= max_redirects_; ++r) {
+        boost::system::error_code ec;
+        http_client::response resp;
+        try {
+            resp = co_await async_send_request_impl(req, body_setup);
+        }
+        catch (const boost::system::system_error& error) {
+            ec = error.code();
+            logger()->warn("{} {} {}: {}", host_, std::to_string(port_), error.what(), ec.message());
+        }
+        catch (const std::exception& e) {
+            ec = boost::system::errc::make_error_code(boost::system::errc::protocol_error);
+            logger()->warn("{} {}: {}", host_, std::to_string(port_), e.what());
+        }
+        catch (...) {
+            ec = boost::system::errc::make_error_code(boost::system::errc::protocol_error);
+            logger()->warn("{} {}: unknown exception", host_, std::to_string(port_));
+        }
+
+        if (ec) {
+            close();
+            if (retry &&
+                (ec == boost::asio::error::connection_aborted ||
+                 ec == boost::asio::error::connection_reset ||
+                 ec == http::error::end_of_stream))
+            {
+                logger()->trace("retrying request...");
+                continue;
+            }
+            co_return ec;
+        }
+
+        auto s = static_cast<unsigned>(resp.result());
+        if (r < max_redirects_ && (s == 301 || s == 302 || s == 303 || s == 307 || s == 308)) {
+            auto loc = resp[http::field::location];
+            if (loc.empty())
+                co_return resp;
+
+            logger()->trace("redirect {} -> {}", req.target(), std::string(loc));
+
+            if (s == 303 || ((s == 301 || s == 302) && req.method() != http::verb::head)) {
+                req.method(http::verb::get);
+                req.body() = body::empty_body::value_type{};
+                req.erase(http::field::content_type);
+                req.erase(http::field::content_length);
+                req.prepare_payload();
+            }
+
+            req.target(std::string(loc));
+            req.set(http::field::host, host_);
+            continue;
+        }
+
+        co_return resp;
+    }
+
+    co_return boost::system::errc::make_error_code(
+        boost::system::errc::too_many_symbolic_link_levels);
+}
+
 void http_client::impl::expires_after(bool first /*= false*/)
 {
     std::unique_lock<std::recursive_mutex> lck(stream_mutex_);

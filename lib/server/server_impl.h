@@ -52,6 +52,11 @@ public:
     void set_compress_content_types(std::function<bool(std::string_view)> predicate);
     bool should_compress_content_type(std::string_view content_type) const;
 
+    void set_upload_dir(const fs::path& dir) { upload_dir_ = dir; }
+    void set_upload_file_limit(std::uint64_t max_bytes) { upload_file_limit_ = max_bytes; }
+    const fs::path& upload_dir() const { return upload_dir_; }
+    uint64_t upload_file_limit() const { return upload_file_limit_; }
+
     void use_ssl(const net::const_buffer& cert_file,
                  const net::const_buffer& key_file,
                  std::string passwd = {});
@@ -79,6 +84,9 @@ private:
     std::shared_ptr<spdlog::logger> custom_logger_;
 
     std::function<bool(std::string_view)> compress_content_type_predicate_;
+
+    fs::path upload_dir_;
+    std::uint64_t upload_file_limit_ = 10 * 1024 * 1024;
 
 #ifdef HTTPLIB_ENABLED_SSL
     std::shared_ptr<ssl::context> ssl_context_;

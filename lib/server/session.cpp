@@ -226,6 +226,16 @@ net::awaitable<session::task::ptr> session::http_task::then()
                 }
 
                 http::request_parser<body::any_body> body_parser(std::move(header_parser));
+                if (!serv_.upload_dir().empty()) {
+                    auto ct = body_parser.get()[http::field::content_type];
+                    if (ct.starts_with("multipart/form-data")) {
+                        auto& body = body_parser.get().body();
+                        body       = body::form_data_body::value_type {};
+                        auto& fd   = std::get<body::form_data_body::value_type>(body);
+                        fd.save_dir      = serv_.upload_dir();
+                        fd.max_file_size = serv_.upload_file_limit();
+                    }
+                }
                 while (!body_parser.is_done()) {
                     stream_.expires_after(serv_.read_timeout());
                     co_await http::async_read_some(

@@ -54,6 +54,9 @@ public:
 
     void set_compress_content_types(std::function<bool(std::string_view)> predicate);
 
+    void set_upload_dir(const fs::path& dir);
+    void set_upload_file_limit(std::uint64_t max_bytes);
+
     void use_ssl(const std::span<const char>& cert_file,
                  const std::span<const char>& key_file,
                  std::string passwd = {});

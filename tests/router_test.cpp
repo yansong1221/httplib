@@ -289,7 +289,35 @@ TEST_CASE("Router: regex param error in pre_routing", "[router]")
             "/bad/{id:[}",
             [](httplib::server::request&, httplib::server::response&) {}),
         std::regex_error);
-    // Note: server was never started via ts.start(), so destructor cleanly
-    // handles the unstarted state since stop() and ioc.stop() are no-ops
-    // when not running.
+}
+
+TEST_CASE("Router: trailing slash exact match", "[router]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/page/",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            set_text(resp, "slash");
+        });
+    ts.router().set_http_handler<http::verb::get>(
+        "/page",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            set_text(resp, "no-slash");
+        });
+    ts.start();
+
+    auto r1 = UNWRAP(ts.client->get("/page/"));
+    REQUIRE(as_string(r1) == "slash");
+
+    auto r2 = UNWRAP(ts.client->get("/page"));
+    REQUIRE(as_string(r2) == "no-slash");
+}
+
+TEST_CASE("Router: returns 404 for missing route", "[router]")
+{
+    test_scaffold ts;
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->get("/nonexistent"));
+    REQUIRE(resp.result() == http::status::not_found);
 }

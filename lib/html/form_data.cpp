@@ -55,7 +55,10 @@ std::string form_data::dump() const
         ss << field.name << ":\n";
         ss << "  type     = " << field.content_type << "\n";
         ss << "  filename = " << field.filename << "\n";
-        ss << "  content  = " << field.content << "\n";
+        if (field.file_path)
+            ss << "  file     = " << field.file_path->string() << "\n";
+        else
+            ss << "  content  = " << field.content << "\n";
         ss << "\n";
     }
 

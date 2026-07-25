@@ -226,3 +226,39 @@ TEST_CASE("WebSocket close propagates to server", "[websocket]")
     REQUIRE(server_close_called);
     REQUIRE(client_close_called);
 }
+
+TEST_CASE("WebSocket client ping", "[websocket]")
+{
+    ws_test_server server;
+    std::atomic<bool> ping_received{false};
+
+    server.router().set_ws_handler(
+        "/ws-ping",
+        [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; },
+        [&](httplib::server::websocket_conn::weak_ptr,
+            std::string_view,
+            bool) -> net::awaitable<void> { co_return; },
+        [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });
+    server.start();
+
+    net::io_context client_ioc;
+    httplib::client::ws_client ws_client(client_ioc, server.host(), server.port());
+    bool ping_result = false;
+
+    ws_client.set_handler(
+        [&](boost::system::error_code ec) -> net::awaitable<void> {
+            REQUIRE(!ec);
+            auto result = co_await ws_client.async_ping("hello");
+            ping_result = !result;
+            ws_client.close();
+            co_return;
+        },
+        [](std::string_view, bool) -> net::awaitable<void> { co_return; },
+        []() -> net::awaitable<void> { co_return; });
+
+    auto work = net::make_work_guard(client_ioc);
+    ws_client.run("/ws-ping");
+    client_ioc.run_for(std::chrono::seconds(5));
+
+    REQUIRE(ping_result);
+}

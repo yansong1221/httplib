@@ -219,7 +219,7 @@ http_client::async_send_request(http::verb method,
                            const http::fields& headers /*= http::fields()*/)
 {
     auto request = impl_->make_http_request(method, path, headers);
-    co_return co_await impl_->async_send_request(request);
+    co_return co_await impl_->async_send_request_with_redirect(request);
 }
 
 net::awaitable<http_client::response_result> http_client::async_send_request(
@@ -228,7 +228,7 @@ net::awaitable<http_client::response_result> http_client::async_send_request(
     auto request    = impl_->make_http_request(method, path, headers);
     request.body()  = std::string(body);
     request.content_length(body.size());
-    co_return co_await impl_->async_send_request(request);
+    co_return co_await impl_->async_send_request_with_redirect(request);
 }
 
 net::awaitable<http_client::response_result>
@@ -241,7 +241,7 @@ http_client::async_send_request(http::verb method,
     request.set(http::field::content_type, "application/json");
     request.body() = std::move(body);
     request.prepare_payload();
-    co_return co_await impl_->async_send_request(request);
+    co_return co_await impl_->async_send_request_with_redirect(request);
 }
 
 net::awaitable<http_client::response_result>
@@ -431,6 +431,11 @@ bool http_client::is_open() const
 void http_client::set_chunk_handler(chunk_handler_type&& handler)
 {
     impl_->set_chunk_handler(std::move(handler));
+}
+
+void http_client::set_max_redirects(int n)
+{
+    impl_->set_max_redirects(n);
 }
 
 } // namespace httplib::client

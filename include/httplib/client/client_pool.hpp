@@ -1,5 +1,6 @@
 #pragma once
 #include "httplib/client/client.hpp"
+#include <chrono>
 #include <memory>
 
 namespace httplib::client {
@@ -10,24 +11,24 @@ private:
     class impl;
 
 public:
-    class HTTPLIB_API ClientHandle
+    class HTTPLIB_API client_handle
     {
         friend class http_client_pool;
 
         std::weak_ptr<impl> pool_;
         std::unique_ptr<http_client> conn_;
 
-        ClientHandle(std::weak_ptr<impl> pool, std::unique_ptr<http_client> conn);
+        client_handle(std::weak_ptr<impl> pool, std::unique_ptr<http_client> conn);
         void release();
 
     public:
-        ClientHandle(const ClientHandle&)            = delete;
-        ClientHandle& operator=(const ClientHandle&) = delete;
+        client_handle(const client_handle&)            = delete;
+        client_handle& operator=(const client_handle&) = delete;
 
-        ClientHandle(ClientHandle&& other) noexcept;
-        ClientHandle& operator=(ClientHandle&& other) noexcept;
+        client_handle(client_handle&& other) noexcept;
+        client_handle& operator=(client_handle&& other) noexcept;
 
-        ~ClientHandle();
+        ~client_handle();
 
         http_client* get() noexcept;
         const http_client* get() const noexcept;
@@ -40,13 +41,29 @@ public:
         const http_client& operator*() const noexcept;
     };
 
+    struct pool_stats
+    {
+        size_t idle   = 0;
+        size_t active = 0;
+    };
+
 public:
-    explicit http_client_pool(const net::any_io_executor& ex, size_t max_size = 10);
+    explicit http_client_pool(const net::any_io_executor& ex,
+                               size_t max_size = 10,
+                               std::chrono::seconds idle_timeout = std::chrono::seconds(60));
     ~http_client_pool();
 
-    ClientHandle acquire(std::string_view host, uint16_t port, bool ssl = false);
+    http_client_pool(const http_client_pool&)            = delete;
+    http_client_pool& operator=(const http_client_pool&) = delete;
+
+    client_handle acquire(std::string_view host, uint16_t port, bool ssl = false);
 
     net::any_io_executor get_executor() noexcept;
+
+    void set_max_size(size_t n);
+    void set_idle_timeout(std::chrono::seconds timeout);
+
+    pool_stats stats(std::string_view host, uint16_t port, bool ssl = false) const;
 
 private:
     std::shared_ptr<impl> impl_;

@@ -1,9 +1,11 @@
 #pragma once
 #include "httplib/config.hpp"
 #include "httplib/html/form_data.hpp"
+#include <array>
 #include <boost/algorithm/string/trim.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/fields.hpp>
+#include <fstream>
 
 namespace httplib::body {
 
@@ -27,6 +29,11 @@ public:
         value_type& body_;
         int field_data_index_ = 0;
         beast::flat_buffer buffer_;
+
+        std::ifstream file_stream_;
+        std::uintmax_t file_remaining_ = 0;
+        static constexpr std::size_t file_buf_size_ = 8192;
+        std::array<char, file_buf_size_> file_buf_;
 
         enum class step
         {
@@ -68,6 +75,11 @@ public:
         };
         step step_ = step::boundary_line;
         html::form_data::field field_data_;
+
+        std::ofstream file_stream_;
+        fs::path current_file_path_;
+        std::uint64_t file_bytes_written_ = 0;
+        void write_content(std::string_view data, boost::system::error_code& ec);
     };
 };
 } // namespace httplib::body

@@ -21,8 +21,9 @@ public:
         std::string filename;
         std::string content_type;
         std::string content;
+        std::optional<fs::path> file_path;
 
-        bool has_data() const { return !content.empty(); }
+        bool has_data() const { return !content.empty() || file_path.has_value(); }
         bool is_file() const { return !filename.empty(); }
     };
 
@@ -32,6 +33,8 @@ public:
     std::vector<field> fields;
 
     std::string boundary;
+    fs::path save_dir;
+    std::uint64_t max_file_size = 0;
 
     /**
      * Get a field by name.

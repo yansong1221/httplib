@@ -25,6 +25,8 @@ public:
 
     void set_chunk_handler(chunk_handler_type&& handler);
 
+    void set_max_redirects(int n) { max_redirects_ = n; }
+
 public:
     void close();
     bool is_open() const;
@@ -33,6 +35,11 @@ public:
     void set_logger(std::shared_ptr<spdlog::logger> logger);
 
     net::awaitable<http_client::response_result> async_send_request(
+        http_client::request& req,
+        bool retry = true,
+        const body_setup_fn& body_setup = {});
+
+    net::awaitable<http_client::response_result> async_send_request_with_redirect(
         http_client::request& req,
         bool retry = true,
         const body_setup_fn& body_setup = {});
@@ -61,6 +68,7 @@ public:
 
     std::function<std::size_t(std::uint64_t, std::string_view, boost::system::error_code&)>
         chunk_handler_;
+    int max_redirects_ = 0;
 
     std::shared_ptr<spdlog::logger> default_logger_;
     std::shared_ptr<spdlog::logger> custom_logger_;

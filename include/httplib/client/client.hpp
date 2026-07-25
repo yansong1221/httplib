@@ -50,6 +50,8 @@ public:
 
     void set_chunk_handler(chunk_handler_type&& handler);
 
+    void set_max_redirects(int n);
+
 public:
     net::awaitable<response_result> async_get(std::string_view path,
                                                const html::query_params& params = {},
