@@ -5,6 +5,8 @@
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <boost/asio/use_future.hpp>
+#include <deque>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -15,35 +17,44 @@ namespace httplib::client {
 
 namespace {
 
-struct ConnectionInfo
+struct connection_info
 {
     std::string host;
     uint16_t port;
     bool ssl;
 
-    bool operator==(const ConnectionInfo& other) const
+    bool operator==(const connection_info& other) const
     {
         return host == other.host && port == other.port && ssl == other.ssl;
     }
 };
 
-struct ConnectionInfoHash
+struct connection_info_hash
 {
-    size_t operator()(const ConnectionInfo& info) const noexcept
+    size_t operator()(const connection_info& info) const noexcept
     {
-        std::size_t seed = std::hash<std::string>{}(info.host);
-        seed ^= std::hash<uint16_t>{}(info.port) + 0x9e3779b97f4a7c15ULL + (seed << 6) +
-                (seed >> 2);
-        seed ^= std::hash<bool>{}(info.ssl) + 0x9e3779b97f4a7c15ULL + (seed << 6) +
-                (seed >> 2);
+        std::size_t seed = std::hash<std::string> {}(info.host);
+        seed ^=
+            std::hash<uint16_t> {}(info.port) + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
+        seed ^= std::hash<bool> {}(info.ssl) + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
         return seed;
     }
 };
 
-struct PooledConn
+struct pooled_conn
 {
     std::unique_ptr<http_client> client;
     std::chrono::steady_clock::time_point idle_since;
+};
+
+struct waiter_node
+{
+    net::steady_timer timer;
+
+    explicit waiter_node(const net::any_io_executor& ex)
+        : timer(ex)
+    {
+    }
 };
 
 } // namespace
@@ -63,43 +74,56 @@ public:
 
     void start_cleanup()
     {
-        net::co_spawn(ex_,
+        net::co_spawn(
+            ex_,
             [this, self = shared_from_this()]() -> net::awaitable<void> {
                 co_await co_cleanup_expired();
             },
             net::detached);
     }
 
-    std::unique_ptr<http_client> acquire(std::string_view host, uint16_t port, bool ssl)
+    net::awaitable<boost::system::result<std::unique_ptr<http_client>>>
+    async_acquire(std::string_view host, uint16_t port, bool ssl, bool wait = true)
     {
-        ConnectionInfo info{std::string(host), port, ssl};
+        connection_info info {std::string(host), port, ssl};
+        auto node = std::make_shared<waiter_node>(ex_);
 
-        auto now = std::chrono::steady_clock::now();
+        for (;;) {
+            bool should_create = false;
 
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            auto it = pools_.find(info);
-            if (it != pools_.end()) {
-                auto& pool = it->second;
-                // Evict stale connections from the front
-                while (!pool.empty()) {
-                    auto& front = pool.front();
-                    if (now - front.idle_since > idle_timeout_) {
-                        front.client->close();
-                        pool.erase(pool.begin());
-                        continue;
-                    }
-                    auto conn = std::move(front.client);
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+
+                auto it = pools_.find(info);
+                if (it != pools_.end() && !it->second.empty()) {
+                    auto& pool = it->second;
+                    auto conn  = std::move(pool.front().client);
                     pool.erase(pool.begin());
-                    return conn;
+                    if (pool.empty())
+                        pools_.erase(it);
+                    active_count_++;
+                    co_return conn;
                 }
-                if (pool.empty())
-                    pools_.erase(it);
-            }
-        }
 
-        // No valid idle connection — create new
-        return std::make_unique<http_client>(ex_, info.host, info.port, info.ssl);
+                if (!wait || active_count_ < max_size_) {
+                    active_count_++;
+                    should_create = true;
+                }
+                else {
+                    node->timer.expires_at(std::chrono::steady_clock::time_point::max());
+                    waiters_.push_back(node);
+                }
+            }
+
+            if (should_create)
+                co_return std::make_unique<http_client>(ex_, info.host, info.port, info.ssl);
+
+            boost::system::error_code ec;
+            co_await node->timer.async_wait(util::net_awaitable[ec]);
+
+            if (stopped_)
+                co_return boost::system::errc::make_error_code(boost::system::errc::operation_canceled);
+        }
     }
 
     void release(std::unique_ptr<http_client> conn)
@@ -107,36 +131,59 @@ public:
         if (!conn)
             return;
 
-        ConnectionInfo info{std::string(conn->host()), conn->port(), conn->is_use_ssl()};
+        connection_info info {std::string(conn->host()), conn->port(), conn->is_use_ssl()};
 
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::shared_ptr<waiter_node> w;
 
-        if (active_count_ > 0)
-            active_count_--;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
 
-        auto& pool = pools_[info];
-        if (pool.size() < max_size_) {
-            pool.push_back({std::move(conn), std::chrono::steady_clock::now()});
-            return;
+            if (active_count_ > 0)
+                active_count_--;
+
+            auto& pool = pools_[info];
+            if (pool.size() < max_size_) {
+                pool.push_back({std::move(conn), std::chrono::steady_clock::now()});
+            }
+            else {
+                conn->close();
+            }
+
+            while (!waiters_.empty()) {
+                w = waiters_.front();
+                waiters_.pop_front();
+                break;
+            }
         }
 
-        conn->close();
+        if (w)
+            w->timer.cancel();
     }
 
     void close_all()
     {
         stopped_ = true;
         cleanup_timer_.cancel();
-        std::lock_guard<std::mutex> lock(mutex_);
-        for (auto& [info, pool] : pools_) {
-            for (auto& pc : pool)
-                pc.client->close();
-            pool.clear();
+
+        std::vector<std::shared_ptr<waiter_node>> waiters_copy;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            waiters_copy.insert(waiters_copy.end(), waiters_.begin(), waiters_.end());
+            waiters_.clear();
+
+            for (auto& [info, pool] : pools_) {
+                for (auto& pc : pool)
+                    pc.client->close();
+                pool.clear();
+            }
+            pools_.clear();
         }
-        pools_.clear();
+
+        for (auto& w : waiters_copy)
+            w->timer.cancel();
     }
 
-    pool_stats stats(const ConnectionInfo& info) const
+    pool_stats stats(const connection_info& info) const
     {
         std::lock_guard<std::mutex> lock(mutex_);
         pool_stats s;
@@ -198,26 +245,29 @@ private:
     }
 
 private:
-    using Pool = std::vector<PooledConn>;
+    using pool_list    = std::vector<pooled_conn>;
+    using waiters_list = std::deque<std::shared_ptr<waiter_node>>;
 
     mutable std::mutex mutex_;
-    std::unordered_map<ConnectionInfo, Pool, ConnectionInfoHash> pools_;
+    std::unordered_map<connection_info, pool_list, connection_info_hash> pools_;
     size_t max_size_;
     std::chrono::seconds idle_timeout_;
     size_t active_count_ = 0;
 
+    waiters_list waiters_;
+
 public:
-    net::any_io_executor ex_;  // for get_executor()
+    net::any_io_executor ex_; // for get_executor()
 
 private:
-    std::atomic<bool> stopped_{false};
+    std::atomic<bool> stopped_ {false};
     net::steady_timer cleanup_timer_;
 };
 
 // ---- client_handle ----
 
 http_client_pool::client_handle::client_handle(std::weak_ptr<impl> pool,
-                                              std::unique_ptr<http_client> conn)
+                                               std::unique_ptr<http_client> conn)
     : pool_(std::move(pool))
     , conn_(std::move(conn))
 {
@@ -287,11 +337,11 @@ void http_client_pool::client_handle::release()
         pool->release(std::move(conn_));
 }
 
-// ---- Pool ----
+// ---- pool_list ----
 
 http_client_pool::http_client_pool(const net::any_io_executor& ex,
-                                    size_t max_size /*= 10*/,
-                                    std::chrono::seconds idle_timeout /*= 60s*/)
+                                   size_t max_size /*= 10*/,
+                                   std::chrono::seconds idle_timeout /*= 60s*/)
     : impl_(std::make_shared<impl>(ex, max_size, idle_timeout))
 {
     impl_->start_cleanup();
@@ -302,12 +352,28 @@ http_client_pool::~http_client_pool()
     impl_->close_all();
 }
 
-http_client_pool::client_handle http_client_pool::acquire(std::string_view host,
-                                                          uint16_t port,
-                                                          bool ssl /*= false*/)
+std::future<http_client_pool::handle_result>
+http_client_pool::acquire(std::string_view host,
+                           uint16_t port,
+                           bool ssl /*= false*/)
 {
-    auto conn = impl_->acquire(host, port, ssl);
-    return client_handle(impl_, std::move(conn));
+    return net::co_spawn(
+               get_executor(),
+               [this, h = std::string(host), port, ssl]()
+                   -> net::awaitable<handle_result> {
+                   co_return co_await async_acquire(h, port, ssl);
+               },
+               net::use_future);
+}
+
+net::awaitable<http_client_pool::handle_result>
+http_client_pool::async_acquire(std::string_view host, uint16_t port, bool ssl /*= false*/)
+{
+    auto r = co_await impl_->async_acquire(host, port, ssl);
+    if (!r)
+        co_return r.error();
+        
+    co_return client_handle(impl_, std::move(r.value()));
 }
 
 net::any_io_executor http_client_pool::get_executor() noexcept
@@ -326,10 +392,10 @@ void http_client_pool::set_idle_timeout(std::chrono::seconds timeout)
 }
 
 http_client_pool::pool_stats http_client_pool::stats(std::string_view host,
-                                                  uint16_t port,
-                                                  bool ssl /*= false*/) const
+                                                     uint16_t port,
+                                                     bool ssl /*= false*/) const
 {
-    ConnectionInfo info{std::string(host), port, ssl};
+    connection_info info {std::string(host), port, ssl};
     return impl_->stats(info);
 }
 

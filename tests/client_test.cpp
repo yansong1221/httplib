@@ -103,9 +103,9 @@ TEST_CASE("Client pool: acquire and use a connection", "[client]")
 
     {
         httplib::client::http_client_pool pool(ts.executor(), 4);
-        auto handle = pool.acquire(ts.host(), ts.port());
-        REQUIRE(handle);
-        auto resp = UNWRAP(handle->get("/echo", params));
+        auto handle = pool.acquire(ts.host(), ts.port()).get();
+        REQUIRE(handle.has_value());
+        auto resp = UNWRAP((*handle)->get("/echo", params));
         REQUIRE(resp.result() == http::status::ok);
         REQUIRE(as_string(resp) == "hello");
     }
@@ -126,16 +126,16 @@ TEST_CASE("Client pool: multiple acquires", "[client]")
     ts.start_with_routes();
 
     httplib::client::http_client_pool pool(ts.executor(), 4);
-    auto h1 = pool.acquire(ts.host(), ts.port());
-    REQUIRE(h1);
-    auto h2 = pool.acquire(ts.host(), ts.port());
-    REQUIRE(h2);
-    auto h3 = pool.acquire(ts.host(), ts.port());
-    REQUIRE(h3);
+    auto h1 = pool.acquire(ts.host(), ts.port()).get();
+    REQUIRE(h1.has_value());
+    auto h2 = pool.acquire(ts.host(), ts.port()).get();
+    REQUIRE(h2.has_value());
+    auto h3 = pool.acquire(ts.host(), ts.port()).get();
+    REQUIRE(h3.has_value());
 
-    auto r1 = UNWRAP(h1->get("/echo", params));
-    auto r2 = UNWRAP(h2->get("/echo", params));
-    auto r3 = UNWRAP(h3->get("/echo", params));
+    auto r1 = UNWRAP((*h1)->get("/echo", params));
+    auto r2 = UNWRAP((*h2)->get("/echo", params));
+    auto r3 = UNWRAP((*h3)->get("/echo", params));
     REQUIRE(r1.result() == http::status::ok);
     REQUIRE(r2.result() == http::status::ok);
     REQUIRE(r3.result() == http::status::ok);
@@ -151,14 +151,14 @@ TEST_CASE("Client pool: connection reuse", "[client]")
 
     httplib::client::http_client_pool pool(ts.executor(), 4);
     auto* raw = [&] {
-        auto h  = pool.acquire(ts.host(), ts.port());
-        return h.get();
+        auto h  = pool.acquire(ts.host(), ts.port()).get();
+        return (*h).get();
     }();  // handle destroyed, connection returned to pool
 
     // Re-acquire should get the same connection back
-    auto h2 = pool.acquire(ts.host(), ts.port());
-    REQUIRE(h2.get() == raw);
-    auto resp = UNWRAP(h2->get("/echo", params));
+    auto h2 = pool.acquire(ts.host(), ts.port()).get();
+    REQUIRE((*h2).get() == raw);
+    auto resp = UNWRAP((*h2)->get("/echo", params));
     REQUIRE(resp.result() == http::status::ok);
 }
 
@@ -169,8 +169,8 @@ TEST_CASE("Client pool: stats reflects idle count", "[client]")
 
     httplib::client::http_client_pool pool(ts.executor(), 4);
     {
-        auto h1 = pool.acquire(ts.host(), ts.port());
-        auto h2 = pool.acquire(ts.host(), ts.port());
+        auto h1 = pool.acquire(ts.host(), ts.port()).get();
+        auto h2 = pool.acquire(ts.host(), ts.port()).get();
         // h1, h2 in use, none idle
         auto s = pool.stats(ts.host(), ts.port());
         REQUIRE(s.idle == 0);
@@ -185,15 +185,14 @@ TEST_CASE("Client pool: respects max_size", "[client]")
     test_scaffold ts;
     ts.start_with_routes();
 
-    httplib::client::http_client_pool pool(ts.executor(), 2);
+    httplib::client::http_client_pool pool(ts.executor(), 3);
     {
-        auto h1 = pool.acquire(ts.host(), ts.port());
-        auto h2 = pool.acquire(ts.host(), ts.port());
-        auto h3 = pool.acquire(ts.host(), ts.port());
+        auto h1 = pool.acquire(ts.host(), ts.port()).get();
+        auto h2 = pool.acquire(ts.host(), ts.port()).get();
+        auto h3 = pool.acquire(ts.host(), ts.port()).get();
     }
-    // All released, should cap at max_size=2 idle
     auto s = pool.stats(ts.host(), ts.port());
-    REQUIRE(s.idle <= 2);
+    REQUIRE(s.idle == 3);
 }
 
 TEST_CASE("Client pool: closed connection still reusable", "[client]")
@@ -206,16 +205,16 @@ TEST_CASE("Client pool: closed connection still reusable", "[client]")
 
     httplib::client::http_client_pool pool(ts.executor(), 4);
     auto* raw = [&] {
-        auto h = pool.acquire(ts.host(), ts.port());
-        auto p = h.get();
-        UNWRAP(h->get("/echo", params));
+        auto h = pool.acquire(ts.host(), ts.port()).get();
+        auto p = (*h).get();
+        UNWRAP((*h)->get("/echo", params));
         return p;
     }();
     raw->close();
 
     // Re-acquire — gets the same connection, reconnects on next request
-    auto h2 = pool.acquire(ts.host(), ts.port());
-    auto resp = UNWRAP(h2->get("/echo", params));
+    auto h2 = pool.acquire(ts.host(), ts.port()).get();
+    auto resp = UNWRAP((*h2)->get("/echo", params));
     REQUIRE(resp.result() == http::status::ok);
 }
 

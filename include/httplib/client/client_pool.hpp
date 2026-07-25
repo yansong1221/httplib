@@ -1,6 +1,9 @@
 #pragma once
 #include "httplib/client/client.hpp"
+#include <boost/asio/awaitable.hpp>
+#include <boost/system/result.hpp>
 #include <chrono>
+#include <future>
 #include <memory>
 
 namespace httplib::client {
@@ -22,6 +25,7 @@ public:
         void release();
 
     public:
+        client_handle()                                = default;
         client_handle(const client_handle&)            = delete;
         client_handle& operator=(const client_handle&) = delete;
 
@@ -47,16 +51,22 @@ public:
         size_t active = 0;
     };
 
+    using handle_result = boost::system::result<client_handle>;
+
 public:
     explicit http_client_pool(const net::any_io_executor& ex,
-                               size_t max_size = 10,
-                               std::chrono::seconds idle_timeout = std::chrono::seconds(60));
+                              size_t max_size                   = 10,
+                              std::chrono::seconds idle_timeout = std::chrono::seconds(60));
     ~http_client_pool();
 
     http_client_pool(const http_client_pool&)            = delete;
     http_client_pool& operator=(const http_client_pool&) = delete;
 
-    client_handle acquire(std::string_view host, uint16_t port, bool ssl = false);
+    std::future<handle_result> acquire(std::string_view host, uint16_t port, bool ssl = false);
+
+    net::awaitable<handle_result> async_acquire(std::string_view host,
+                                                                        uint16_t port,
+                                                                        bool ssl = false);
 
     net::any_io_executor get_executor() noexcept;
 

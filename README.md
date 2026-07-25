@@ -17,7 +17,7 @@ A small, embeddable HTTP/1.1 & WebSocket server and client library for C++23, bu
 - **SSL/TLS** — HTTPS and WSS support via OpenSSL (optional)
 - **Built-in middleware** — CORS, Basic Auth, Bearer Auth, Rate Limiting, Session
 - **Custom aspects** — per-route middleware with `before`/`after` hooks
-- **Client connection pool** — RAII handles with automatic reuse
+- **Client connection pool** — RAII handles, connection reuse, async acquire with backpressure
 - **Logging** — integrated spdlog
 
 ## Platform Support
@@ -79,7 +79,7 @@ int main() {
         });
 
     svr.listen("127.0.0.1", 8080);
-    svr.async_run();
+    svr.run();
     ioc.run();
 }
 ```
@@ -109,15 +109,28 @@ int main() {
 ```cpp
 #include <httplib/client/client_pool.hpp>
 
-client::http_client_pool pool(ex, 4);  // max 4 connections
+client::http_client_pool pool(ex, 4);  // max 4 active connections
+
+// Synchronous — returns std::future<handle_result>
 {
-    auto handle = pool.acquire("127.0.0.1", 8080);
-    if (handle) {
-        auto resp = handle->get("/api/hello");
+    auto handle = pool.acquire("127.0.0.1", 8080).get();
+    if (handle.has_value()) {
+        auto resp = (*handle)->get("/api/hello");
         // handle released back to pool on scope exit
     }
 }
+
+// Asynchronous — waits when pool is at capacity
+net::co_spawn(ex, []() -> net::awaitable<void> {
+    auto result = co_await pool.async_acquire("127.0.0.1", 8080);
+    if (result.has_value()) {
+        auto resp = co_await (*result)->async_get("/api/hello");
+    }
+    co_return;
+}, net::detached);
 ```
+
+`handle_result` is `boost::system::result<client_handle>`. Both `acquire` and `async_acquire` respect `max_size` — they block/wait when the pool has reached the limit.
 
 ## Routing
 
@@ -246,7 +259,7 @@ router.set_ws_handler(
 ```cpp
 client::ws_client ws(ex, "127.0.0.1", 8080);
 ws.set_handler(open_handler, message_handler, close_handler);
-ws.async_run("/ws");
+ws.async_connect("/ws");
 ```
 
 ## Static File Serving
