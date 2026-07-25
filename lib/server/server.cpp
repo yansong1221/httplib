@@ -124,18 +124,18 @@ void http_server::set_upload_file_limit(std::uint64_t max_bytes)
     impl_->set_upload_file_limit(max_bytes);
 }
 
-void http_server::use_ssl(const std::span<const char>& cert_file,
+void http_server::set_ssl(const std::span<const char>& cert_file,
                           const std::span<const char>& key_file,
                           std::string passwd /*= {}*/)
 {
     impl_->use_ssl(cert_file, key_file, passwd);
 }
 
-void http_server::use_ssl_file(const fs::path& cert_file,
+void http_server::set_ssl_file(const fs::path& cert_file,
                                const fs::path& key_file,
                                std::string passwd /*= {}*/)
 {
-    use_ssl(detail::read_file_fast(cert_file), detail::read_file_fast(key_file), passwd);
+    set_ssl(detail::read_file_fast(cert_file), detail::read_file_fast(key_file), passwd);
 }
 
 httplib::server::http_server::impl* http_server::get_impl()

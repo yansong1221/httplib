@@ -21,14 +21,14 @@ void action_queue::clear()
     impl_->clear();
 }
 
-httplib::net::awaitable<void> action_queue::co_shutdown(bool cancel_signal /*= true*/)
+httplib::net::awaitable<void> action_queue::async_shutdown(bool cancel_signal /*= true*/)
 {
-    co_return co_await impl_->co_shutdown(cancel_signal);
+    co_return co_await impl_->async_shutdown(cancel_signal);
 }
 
-std::shared_future<void> action_queue::async_shutdown(bool cancel_signal /*= true*/)
+std::shared_future<void> action_queue::shutdown(bool cancel_signal /*= true*/)
 {
-    return impl_->async_shutdown(cancel_signal);
+    return impl_->shutdown(cancel_signal);
 }
 
 } // namespace httplib::util

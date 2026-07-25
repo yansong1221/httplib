@@ -23,8 +23,8 @@ public:
     ~websocket_conn_impl();
 
 public:
-    void send_message(std::string&& msg, bool binary) override;
-    void send_ping(std::string&& msg) override;
+    void send(std::string&& msg, bool binary) override;
+    void ping(std::string&& msg) override;
 
     void close() override;
     const request& http_request() const override { return req_; }

@@ -54,7 +54,7 @@ public:
     }
     net::any_io_executor get_executor() const { return executor_; }
 
-    net::awaitable<void> co_shutdown(bool cancel_signal = true)
+    net::awaitable<void> async_shutdown(bool cancel_signal = true)
     {
         if (!running_ && shutting_down_) {
             co_return;
@@ -73,12 +73,12 @@ public:
                 break;
         }
     }
-    std::shared_future<void> async_shutdown(bool cancel_signal = true)
+    std::shared_future<void> shutdown(bool cancel_signal = true)
     {
         return boost::asio::co_spawn(
             executor_,
             [this, self = shared_from_this()]() -> net::awaitable<void> {
-                co_return co_await co_shutdown();
+                co_return co_await async_shutdown();
             },
             boost::asio::use_future);
     }

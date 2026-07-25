@@ -119,7 +119,7 @@ const http_ranges::range_type& http_ranges::front() const
     return ranges_.front();
 }
 
-void http_ranges::append(const range_type& range)
+void http_ranges::add(const range_type& range)
 {
     ranges_.push_back(range);
 }

@@ -22,7 +22,7 @@ websocket_conn_impl::~websocket_conn_impl()
 {
 }
 
-void websocket_conn_impl::send_message(std::string&& msg, bool binary)
+void websocket_conn_impl::send(std::string&& msg, bool binary)
 {
     if (!ws_.is_open())
         return;
@@ -38,7 +38,7 @@ void websocket_conn_impl::send_message(std::string&& msg, bool binary)
             co_await ws_.async_write(net::buffer(msg), util::net_awaitable[ec]);
         });
 };
-void websocket_conn_impl::send_ping(std::string&& msg)
+void websocket_conn_impl::ping(std::string&& msg)
 {
     if (!ws_.is_open())
         return;
@@ -109,7 +109,7 @@ httplib::net::awaitable<void> websocket_conn_impl::run()
                                       remote_endp.port(),
                                       ec.message());
             ac_que_.clear();
-            co_await ac_que_.co_shutdown();
+            co_await ac_que_.async_shutdown();
             try {
                 co_await entry->close_handler(weak_from_this());
             }

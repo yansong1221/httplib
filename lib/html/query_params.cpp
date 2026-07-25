@@ -23,7 +23,7 @@ std::vector<std::string_view> query_params::all(const std::string& key) const
     return values;
 }
 
-bool query_params::exists(const std::string& key) const
+bool query_params::has(const std::string& key) const
 {
     return params_.find(key) != params_.end();
 }

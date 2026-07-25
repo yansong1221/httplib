@@ -82,7 +82,7 @@ TEST_CASE("WebSocket echo server and client", "[websocket]")
             }
             auto c = conn.lock();
             if (c)
-                c->send_message(msg, binary);
+                c->send(msg, binary);
             co_return;
         },
         [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });
@@ -139,7 +139,7 @@ TEST_CASE("WebSocket binary message", "[websocket]")
             received_content = msg;
             auto c           = conn.lock();
             if (c)
-                c->send_message(msg, binary);
+                c->send(msg, binary);
             co_return;
         },
         [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });

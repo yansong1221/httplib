@@ -149,12 +149,12 @@ const html::query_params& request::query_params() const
     return impl_->query_params();
 }
 
-std::any& request::any_custom_data()
+std::any& request::custom_data()
 {
     return impl_->custom_data();
 }
 
-const std::any& request::any_custom_data() const
+const std::any& request::custom_data() const
 {
     return impl_->custom_data();
 }

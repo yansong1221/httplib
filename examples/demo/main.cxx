@@ -290,7 +290,7 @@ static void setup_ws(httplib::server::router& router)
         [](httplib::server::websocket_conn::weak_ptr hdl) -> net::awaitable<void> {
             auto conn = hdl.lock();
             if (conn)
-                conn->send_message("Welcome!"sv, false);
+                conn->send("Welcome!"sv, false);
             co_return;
         },
         [](httplib::server::websocket_conn::weak_ptr hdl,
@@ -299,7 +299,7 @@ static void setup_ws(httplib::server::router& router)
             auto conn = hdl.lock();
             if (conn) {
                 spdlog::info("WS received: {} (binary={})", msg, binary);
-                conn->send_message(std::format("Echo: {}", msg), binary);
+                conn->send(std::format("Echo: {}", msg), binary);
             }
             co_return;
         },
@@ -519,7 +519,7 @@ int main(int argc, char** argv)
 
 #ifdef HTTPLIB_ENABLED_SSL
         if (use_ssl)
-            svr.use_ssl(server_crt, server_key, "test");
+            svr.set_ssl(server_crt, server_key, "test");
 #else
         (void)use_ssl;
 #endif

@@ -55,8 +55,8 @@ TEST_CASE("query_params: exists check", "[body-utils]")
     httplib::html::query_params qp;
     REQUIRE(qp.decode("key=val"));
 
-    REQUIRE(qp.exists("key"));
-    REQUIRE_FALSE(qp.exists("missing"));
+    REQUIRE(qp.has("key"));
+    REQUIRE_FALSE(qp.has("missing"));
 }
 
 TEST_CASE("query_params: empty check", "[body-utils]")
@@ -272,7 +272,7 @@ TEST_CASE("http_ranges: empty check", "[body-utils]")
 TEST_CASE("http_ranges: append", "[body-utils]")
 {
     httplib::html::http_ranges ranges;
-    ranges.append({0, 99});
-    ranges.append({200, 299});
+    ranges.add({0, 99});
+    ranges.add({200, 299});
     REQUIRE(ranges.size() == 2);
 }

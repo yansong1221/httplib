@@ -22,12 +22,12 @@ public:
 
     virtual void close()                                             = 0;
     virtual const request& http_request() const                      = 0;
-    virtual void send_message(std::string&& msg, bool binary = true) = 0;
-    virtual void send_ping(std::string&& msg = std::string())        = 0;
+    virtual void send(std::string&& msg, bool binary = true) = 0;
+    virtual void ping(std::string&& msg = std::string())        = 0;
 
-    inline void send_message(std::string_view msg, bool binary = true)
+    inline void send(std::string_view msg, bool binary = true)
     {
-        return send_message(std::string(msg), binary);
+        return send(std::string(msg), binary);
     };
 };
 

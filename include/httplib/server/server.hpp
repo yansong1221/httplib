@@ -56,12 +56,12 @@ public:
 
     void set_upload_dir(const fs::path& dir);
     void set_upload_file_limit(std::uint64_t max_bytes);
-
-    void use_ssl(const std::span<const char>& cert_file,
-                 const std::span<const char>& key_file,
-                 std::string passwd = {});
-    void use_ssl_file(const fs::path& cert_file, const fs::path& key_file, std::string passwd = {});
-
+    void set_ssl(const std::span<const char>& cert_file,
+                  const std::span<const char>& key_file,
+                  std::string passwd = {});
+    void set_ssl_file(const fs::path& cert_file,
+                       const fs::path& key_file,
+                       std::string passwd = {});
     impl* get_impl();
     const impl* get_impl() const;
 

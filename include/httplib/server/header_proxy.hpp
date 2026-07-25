@@ -35,8 +35,6 @@ public:
         return *this;
     }
 
-    std::string_view value() const { return fields_[name_]; }
-
 private:
     http::fields& fields_;
     std::string name_;

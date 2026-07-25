@@ -18,8 +18,8 @@ public:
     void push(act_t&& handler);
     void clear();
 
-    std::shared_future<void> async_shutdown(bool cancel_signal = true);
-    net::awaitable<void> co_shutdown(bool cancel_signal = true);
+    std::shared_future<void> shutdown(bool cancel_signal = true);
+    net::awaitable<void> async_shutdown(bool cancel_signal = true);
 
 private:
     action_queue(const action_queue&)            = delete;

@@ -225,14 +225,14 @@ router.set_ws_handler(
     // on_open
     [](server::websocket_conn::weak_ptr hdl) -> net::awaitable<void> {
         if (auto conn = hdl.lock())
-            conn->send_message("Welcome!");
+            conn->send("Welcome!");
         co_return;
     },
     // on_message
     [](server::websocket_conn::weak_ptr hdl,
        std::string_view msg, bool binary) -> net::awaitable<void> {
         if (auto conn = hdl.lock())
-            conn->send_message(std::format("Echo: {}", msg), binary);
+            conn->send(std::format("Echo: {}", msg), binary);
         co_return;
     },
     // on_close
@@ -367,10 +367,10 @@ router.set_http_handler<http::verb::get>(
 server::http_server svr(ioc);
 
 // From memory
-svr.use_ssl(cert_pem, key_pem, "password");
+svr.set_ssl(cert_pem, key_pem, "password");
 
 // From files
-svr.use_ssl_file("server.crt", "server.key", "password");
+svr.set_ssl_file("server.crt", "server.key", "password");
 ```
 
 SSL clients simply pass `ssl=true`:

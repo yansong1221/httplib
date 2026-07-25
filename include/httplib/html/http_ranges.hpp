@@ -18,7 +18,7 @@ public:
     const range_type& front() const;
     const range_type& at(std::size_t index) const;
 
-    void append(const range_type& range);
+    void add(const range_type& range);
 
     const ranges_type& ranges() const;
     bool parse(std::string_view range_str, size_t file_size);

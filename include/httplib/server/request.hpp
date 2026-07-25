@@ -59,13 +59,13 @@ public:
     const tcp::endpoint& remote_endpoint() const;
 
     void set_custom_data(std::any&& data);
-    std::any& any_custom_data();
-    const std::any& any_custom_data() const;
+    std::any& custom_data();
+    const std::any& custom_data() const;
 
     template<typename T>
     inline auto custom_data()
     {
-        return std::any_cast<T>(any_custom_data());
+        return std::any_cast<T>(custom_data());
     }
 
     void set_session(std::shared_ptr<middleware::session> sess);

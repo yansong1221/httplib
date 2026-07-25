@@ -55,7 +55,7 @@ public:
     }
     void add_bool(const std::string& key, bool val);
 
-    bool exists(const std::string& key) const;
+    bool has(const std::string& key) const;
     bool empty() const;
     const container_type& params() const;
 
