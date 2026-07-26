@@ -41,6 +41,9 @@ protected:
                              websocket_conn::coro_message_handler_type&& message_handler,
                              websocket_conn::coro_close_handler_type&& close_handler) override;
     void set_post_routing_handler_impl(coro_http_handler_type&& handler) override;
+    void set_chunked_http_handler_impl(http::verb method,
+                                       std::string_view key,
+                                       coro_http_handler_type&& handler) override;
 
 private:
     struct Node
@@ -59,6 +62,7 @@ private:
         node_type type = node_type::static_node;
 
         std::unordered_map<http::verb, coro_http_handler_type> handlers;
+        std::unordered_map<http::verb, coro_http_handler_type> chunked_handlers;
         std::optional<ws_handler_entry> ws_handler;
 
         std::unordered_map<std::string, std::unique_ptr<Node>> static_children;

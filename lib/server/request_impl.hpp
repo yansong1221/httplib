@@ -2,7 +2,17 @@
 #include "httplib/server/middleware/session.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/util/misc.hpp"
+#include "httplib/util/use_awaitable.hpp"
+#include "stream/http_stream.hpp"
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/beast/core/flat_buffer.hpp>
+#include <boost/beast/http/empty_body.hpp>
+#include <boost/beast/http/parser.hpp>
+#include <boost/beast/http/read.hpp>
+#include <boost/beast/http/string_body.hpp>
+#include <chrono>
+#include <deque>
+#include <functional>
 
 namespace httplib::server {
 
@@ -84,6 +94,86 @@ public:
     void set_session(std::shared_ptr<middleware::session> sess) { session_ = std::move(sess); }
     std::shared_ptr<middleware::session> session() const { return session_; }
 
+    void set_is_chunked_handler(bool v) { is_chunked_handler_ = v; }
+    bool is_chunked_handler() const { return is_chunked_handler_; }
+
+    struct chunk_read_ctx
+    {
+        std::shared_ptr<http::request_parser<http::string_body>> parser;
+        http_stream* stream = nullptr;
+        beast::flat_buffer* buffer = nullptr;
+        std::chrono::steady_clock::duration read_timeout{30};
+
+        std::function<std::size_t(std::uint64_t, std::string_view, beast::error_code&)> chunk_cb;
+        std::deque<std::string> chunks;
+        size_t body_offset = 0;
+        bool done = false;
+    };
+
+    void setup_chunked_reading(http_stream& stream,
+                               beast::flat_buffer& buffer,
+                               http::request_parser<http::empty_body>&& header_parser,
+                               std::chrono::steady_clock::duration read_timeout)
+    {
+        auto parser = std::make_shared<http::request_parser<http::string_body>>(
+            std::move(header_parser));
+        chunk_ctx_           = std::make_shared<chunk_read_ctx>();
+        chunk_ctx_->parser   = std::move(parser);
+        chunk_ctx_->stream   = &stream;
+        chunk_ctx_->buffer   = &buffer;
+        chunk_ctx_->read_timeout = read_timeout;
+        chunk_ctx_->body_offset  = 0;
+        chunk_ctx_->done          = chunk_ctx_->parser->is_done();
+
+        auto ctx = chunk_ctx_;
+        chunk_ctx_->chunk_cb =
+            [ctx](std::uint64_t /*remain*/,
+                  std::string_view body,
+                  beast::error_code&) -> std::size_t {
+                ctx->chunks.push_back(std::string(body));
+                return body.size();
+            };
+        chunk_ctx_->parser->on_chunk_body(chunk_ctx_->chunk_cb);
+    }
+
+    net::awaitable<std::string_view> read_chunk()
+    {
+        if (!chunk_ctx_)
+            co_return std::string_view{};
+
+        while (chunk_ctx_->chunks.empty() && !chunk_ctx_->done) {
+            boost::system::error_code ec;
+            chunk_ctx_->stream->expires_after(chunk_ctx_->read_timeout);
+            co_await http::async_read_some(*chunk_ctx_->stream,
+                                           *chunk_ctx_->buffer,
+                                           *chunk_ctx_->parser,
+                                           util::net_awaitable[ec]);
+            chunk_ctx_->stream->expires_never();
+            if (ec)
+                throw boost::system::system_error(ec);
+            chunk_ctx_->done = chunk_ctx_->parser->is_done();
+        }
+
+        if (!chunk_ctx_->chunks.empty()) {
+            chunk_buf_ = std::move(chunk_ctx_->chunks.front());
+            chunk_ctx_->chunks.pop_front();
+            co_return chunk_buf_;
+        }
+
+        if (chunk_ctx_->done) {
+            auto& body = chunk_ctx_->parser->get().body();
+            if (chunk_ctx_->body_offset < body.size()) {
+                auto result = std::string_view(body).substr(chunk_ctx_->body_offset);
+                chunk_ctx_->body_offset = body.size();
+                chunk_buf_              = result;
+                co_return chunk_buf_;
+            }
+        }
+
+        chunk_buf_.clear();
+        co_return std::string_view{};
+    }
+
     std::string_view operator[](http::field name) const { return this->base()[name]; }
     std::string_view operator[](std::string_view name) const { return this->base()[name]; }
     std::string_view at(http::field name) const { return this->base().at(name); }
@@ -136,5 +226,9 @@ private:
     std::unordered_map<std::string, std::string> path_params_;
     std::any custom_data_;
     std::shared_ptr<middleware::session> session_;
+
+    bool is_chunked_handler_ = false;
+    std::shared_ptr<chunk_read_ctx> chunk_ctx_;
+    std::string chunk_buf_;
 };
 } // namespace httplib::server

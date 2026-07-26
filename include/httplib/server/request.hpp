@@ -3,6 +3,7 @@
 #include "httplib/config.hpp"
 #include "httplib/server/header_proxy.hpp"
 #include <any>
+#include <boost/asio/awaitable.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/message.hpp>
@@ -77,6 +78,10 @@ public:
 
     httplib::body::any_body::value_type& body();
     const httplib::body::any_body::value_type& body() const;
+
+    bool is_chunked_handler() const;
+
+    net::awaitable<std::string_view> read_chunk();
 
 
     impl* get_impl();

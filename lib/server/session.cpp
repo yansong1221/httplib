@@ -154,7 +154,9 @@ net::awaitable<session::task::ptr> session::detect_ssl_task::then()
         http_stream(std::move(stream_)), std::move(buffer), serv_);
 }
 void session::detect_ssl_task::abort()
-{ stream_.close(); }
+{
+    stream_.close();
+}
 
 session::http_task::http_task(http_stream&& stream,
                               beast::flat_buffer&& buffer,
@@ -193,7 +195,11 @@ net::awaitable<session::task::ptr> session::http_task::then()
             co_return nullptr;
         }
 
+        auto start_time = std::chrono::steady_clock::now();
+
         const auto& header = header_parser.get();
+        serv_.logger()->trace(
+            "{} {} ({})", header.method_string(), header.target(), log_endp_format);
 
         // http proxy
         if (header.method() == http::verb::connect) {
@@ -213,7 +219,15 @@ net::awaitable<session::task::ptr> session::http_task::then()
         auto req  = request::impl::make_request(
             local_endp, remote_endp, http::request<http::empty_body>(header));
 
-        auto start_time = std::chrono::steady_clock::now();
+        auto h_start    = std::chrono::steady_clock::time_point {};
+        auto handler_ms = std::chrono::milliseconds::zero();
+
+        auto record_handler_time = [&] {
+            if (handler_ms == std::chrono::milliseconds::zero() &&
+                h_start != std::chrono::steady_clock::time_point {})
+                handler_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - h_start);
+        };
 
         try {
             if (co_await _router.pre_routing(req, resp)) {
@@ -225,41 +239,51 @@ net::awaitable<session::task::ptr> session::http_task::then()
                         co_return nullptr;
                 }
 
-                http::request_parser<body::any_body> body_parser(std::move(header_parser));
-                if (!serv_.upload_dir().empty()) {
-                    auto ct = body_parser.get()[http::field::content_type];
-                    if (ct.starts_with("multipart/form-data")) {
-                        auto& body = body_parser.get().body();
-                        body       = body::form_data_body::value_type {};
-                        auto& fd   = std::get<body::form_data_body::value_type>(body);
-                        fd.save_dir      = serv_.upload_dir();
-                        fd.max_file_size = serv_.upload_file_limit();
-                    }
+                if (req.is_chunked_handler()) {
+                    req.get_impl()->setup_chunked_reading(
+                        stream_, buffer_, std::move(header_parser), serv_.read_timeout());
                 }
-                while (!body_parser.is_done()) {
-                    stream_.expires_after(serv_.read_timeout());
-                    co_await http::async_read_some(
-                        stream_, buffer_, body_parser, util::net_awaitable[ec]);
-                    if (ec) {
-                        stream_.expires_never();
-                        serv_.logger()->trace("read http body failed: {}", ec.message());
-                        co_return nullptr;
+                else {
+                    http::request_parser<body::any_body> body_parser(std::move(header_parser));
+                    if (!serv_.upload_dir().empty()) {
+                        auto ct = body_parser.get()[http::field::content_type];
+                        if (ct.starts_with("multipart/form-data")) {
+                            auto& body       = body_parser.get().body();
+                            body             = body::form_data_body::value_type {};
+                            auto& fd         = std::get<body::form_data_body::value_type>(body);
+                            fd.save_dir      = serv_.upload_dir();
+                            fd.max_file_size = serv_.upload_file_limit();
+                        }
                     }
+                    while (!body_parser.is_done()) {
+                        stream_.expires_after(serv_.read_timeout());
+                        co_await http::async_read_some(
+                            stream_, buffer_, body_parser, util::net_awaitable[ec]);
+                        if (ec) {
+                            stream_.expires_never();
+                            serv_.logger()->trace("read http body failed: {}", ec.message());
+                            co_return nullptr;
+                        }
+                    }
+                    stream_.expires_never();
+                    req.get_impl()->body() = std::move(body_parser.release().body());
                 }
-                stream_.expires_never();
-                req.get_impl()->body() = std::move(body_parser.release().body());
-                start_time             = std::chrono::steady_clock::now();
 
+                h_start = std::chrono::steady_clock::now();
                 co_await _router.process_routing(req, resp);
+                handler_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now() - h_start);
             }
             co_await _router.post_routing(req, resp);
         }
         catch (const std::exception& e) {
+            record_handler_time();
             serv_.logger()->warn("exception in business function, reason: {}", e.what());
             resp.set_string_content(
                 std::string(e.what()), "text/plain", http::status::internal_server_error);
         }
         catch (...) {
+            record_handler_time();
             using namespace std::string_view_literals;
             serv_.logger()->warn("unknown exception in business function");
             resp.set_string_content(std::string("unknown exception"),
@@ -267,19 +291,21 @@ net::awaitable<session::task::ptr> session::http_task::then()
                                     http::status::internal_server_error);
         }
 
-        auto span_time = std::chrono::steady_clock::now() - start_time;
-
-        serv_.logger()->debug(
-            "{} {} ({}) {} {}ms",
-            req.method_string(),
-            req.target(),
-            log_endp_format,
-            resp.result_int(),
-            std::chrono::duration_cast<std::chrono::milliseconds>(span_time).count());
-
-
         if (!co_await async_write(req, resp))
             co_return nullptr;
+
+        auto total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start_time);
+
+        using namespace std::chrono_literals;
+        serv_.logger()->log(handler_ms > 10s ? spdlog::level::warn : spdlog::level::debug,
+                            "{} {} ({}) {} handler={}ms total={}ms",
+                            req.method_string(),
+                            req.target(),
+                            log_endp_format,
+                            resp.result_int(),
+                            handler_ms.count(),
+                            total_ms.count());
 
         if (!resp.get_impl()->keep_alive()) {
             boost::system::error_code ec;
@@ -294,11 +320,15 @@ net::awaitable<session::task::ptr> session::http_task::then()
 }
 
 void session::http_task::abort()
-{ stream_.close(); }
+{
+    stream_.close();
+}
 
 net::awaitable<bool> session::http_task::async_write(const request& req, response& resp)
 {
-    if (resp.get_impl()->stream_handler_) { resp.get_impl()->chunked(true); }
+    if (resp.get_impl()->stream_handler_) {
+        resp.get_impl()->chunked(true);
+    }
     else {
         if (!resp.get_impl()->has_content_length())
             resp.get_impl()->prepare_payload();
@@ -388,7 +418,9 @@ httplib::net::awaitable<session::task::ptr> session::websocket_task::then()
 }
 
 void session::websocket_task::abort()
-{ conn_->close(); }
+{
+    conn_->close();
+}
 
 session::http_proxy_task::http_proxy_task(http_stream&& stream,
                                           request&& req,

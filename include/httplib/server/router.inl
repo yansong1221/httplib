@@ -119,4 +119,16 @@ void router::set_post_routing_handler(Func&& handler)
     set_post_routing_handler_impl(std::move(coro_handler));
 }
 
+template<typename Func, typename... Aspects>
+void router::set_chunked_http_handler(http::verb method,
+                                      std::string_view key,
+                                      Func&& handler,
+                                      Aspects&&... asps)
+{
+    set_chunked_http_handler_impl(
+        method,
+        key,
+        make_coro_http_handler(std::forward<Func>(handler), std::forward<Aspects>(asps)...));
+}
+
 } // namespace httplib::server
