@@ -405,8 +405,8 @@ static void run_http_client_pool_demo(net::any_io_executor ex, std::string host,
     httplib::client::http_client_pool pool(ex, 4);
     {
         auto h = pool.acquire(host, port).get();
-        if (h.has_value()) {
-            auto r = (*h)->get("/api/hello");
+        if (h) {
+            auto r = h->get("/api/hello");
             if (r)
                 spdlog::info("Pool GET /api/hello -> {}", r.value().result_int());
         }

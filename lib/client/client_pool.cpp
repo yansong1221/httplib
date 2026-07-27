@@ -6,6 +6,7 @@
 #include <boost/asio/detached.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/use_future.hpp>
+#include <boost/system/system_error.hpp>
 #include <deque>
 #include <mutex>
 #include <string>
@@ -82,7 +83,7 @@ public:
             net::detached);
     }
 
-    net::awaitable<boost::system::result<std::unique_ptr<http_client>>>
+    net::awaitable<client_handle>
     async_acquire(std::string_view host, uint16_t port, bool ssl, bool wait = true)
     {
         connection_info info {std::string(host), port, ssl};
@@ -94,6 +95,10 @@ public:
             {
                 std::lock_guard<std::mutex> lock(mutex_);
 
+                if (stopped_)
+                    co_return client_handle(boost::system::errc::make_error_code(
+                        boost::system::errc::operation_canceled));
+
                 auto it = pools_.find(info);
                 if (it != pools_.end() && !it->second.empty()) {
                     auto& pool = it->second;
@@ -102,7 +107,7 @@ public:
                     if (pool.empty())
                         pools_.erase(it);
                     active_count_++;
-                    co_return conn;
+                    co_return client_handle(shared_from_this(), std::move(conn));
                 }
 
                 if (!wait || active_count_ < max_size_) {
@@ -116,13 +121,12 @@ public:
             }
 
             if (should_create)
-                co_return std::make_unique<http_client>(ex_, info.host, info.port, info.ssl);
+                co_return client_handle(
+                    shared_from_this(),
+                    std::make_unique<http_client>(ex_, info.host, info.port, info.ssl));
 
             boost::system::error_code ec;
             co_await node->timer.async_wait(util::net_awaitable[ec]);
-
-            if (stopped_)
-                co_return boost::system::errc::make_error_code(boost::system::errc::operation_canceled);
         }
     }
 
@@ -137,6 +141,11 @@ public:
 
         {
             std::lock_guard<std::mutex> lock(mutex_);
+
+            if (stopped_) {
+                conn->close();
+                return;
+            }
 
             if (active_count_ > 0)
                 active_count_--;
@@ -162,7 +171,9 @@ public:
 
     void close_all()
     {
-        stopped_ = true;
+        if (stopped_.exchange(true))
+            return;
+
         cleanup_timer_.cancel();
 
         std::vector<std::shared_ptr<waiter_node>> waiters_copy;
@@ -179,8 +190,10 @@ public:
             pools_.clear();
         }
 
-        for (auto& w : waiters_copy)
+        for (auto& w : waiters_copy) {
             w->timer.cancel();
+            w->timer.expires_after(std::chrono::seconds(0));
+        }
     }
 
     pool_stats stats(const connection_info& info) const
@@ -273,9 +286,15 @@ http_client_pool::client_handle::client_handle(std::weak_ptr<impl> pool,
 {
 }
 
+http_client_pool::client_handle::client_handle(boost::system::error_code ec)
+    : error_(ec)
+{
+}
+
 http_client_pool::client_handle::client_handle(client_handle&& other) noexcept
     : pool_(std::move(other.pool_))
     , conn_(std::move(other.conn_))
+    , error_(other.error_)
 {
 }
 
@@ -284,8 +303,9 @@ http_client_pool::client_handle::operator=(client_handle&& other) noexcept
 {
     if (this != &other) {
         release();
-        pool_ = std::move(other.pool_);
-        conn_ = std::move(other.conn_);
+        pool_  = std::move(other.pool_);
+        conn_  = std::move(other.conn_);
+        error_ = other.error_;
     }
     return *this;
 }
@@ -295,39 +315,53 @@ http_client_pool::client_handle::~client_handle()
     release();
 }
 
-http_client* http_client_pool::client_handle::get() noexcept
+http_client* http_client_pool::client_handle::get()
 {
+    if (!conn_)
+        throw boost::system::system_error(error_);
     return conn_.get();
 }
 
-const http_client* http_client_pool::client_handle::get() const noexcept
+const http_client* http_client_pool::client_handle::get() const
 {
+    if (!conn_)
+        throw boost::system::system_error(error_);
     return conn_.get();
 }
 
 http_client_pool::client_handle::operator bool() const noexcept
 {
-    return static_cast<bool>(conn_);
+    return !has_error();
 }
 
-http_client* http_client_pool::client_handle::operator->() noexcept
+bool http_client_pool::client_handle::has_error() const noexcept
+{
+    return conn_ == nullptr;
+}
+
+http_client* http_client_pool::client_handle::operator->()
 {
     return get();
 }
 
-const http_client* http_client_pool::client_handle::operator->() const noexcept
+const http_client* http_client_pool::client_handle::operator->() const
 {
     return get();
 }
 
-http_client& http_client_pool::client_handle::operator*() noexcept
+http_client& http_client_pool::client_handle::operator*()
 {
-    return *conn_;
+    return *get();
 }
 
-const http_client& http_client_pool::client_handle::operator*() const noexcept
+const http_client& http_client_pool::client_handle::operator*() const
 {
-    return *conn_;
+    return *get();
+}
+
+const boost::system::error_code& http_client_pool::client_handle::error() const noexcept
+{
+    return error_;
 }
 
 void http_client_pool::client_handle::release()
@@ -352,28 +386,22 @@ http_client_pool::~http_client_pool()
     impl_->close_all();
 }
 
-std::future<http_client_pool::handle_result>
-http_client_pool::acquire(std::string_view host,
-                           uint16_t port,
-                           bool ssl /*= false*/)
+std::future<http_client_pool::client_handle> http_client_pool::acquire(std::string_view host,
+                                                                       uint16_t port,
+                                                                       bool ssl /*= false*/)
 {
     return net::co_spawn(
-               get_executor(),
-               [this, h = std::string(host), port, ssl]()
-                   -> net::awaitable<handle_result> {
-                   co_return co_await async_acquire(h, port, ssl);
-               },
-               net::use_future);
+        get_executor(),
+        [this, h = std::string(host), port, ssl]() -> net::awaitable<client_handle> {
+            co_return co_await async_acquire(h, port, ssl);
+        },
+        net::use_future);
 }
 
-net::awaitable<http_client_pool::handle_result>
+net::awaitable<http_client_pool::client_handle>
 http_client_pool::async_acquire(std::string_view host, uint16_t port, bool ssl /*= false*/)
 {
-    auto r = co_await impl_->async_acquire(host, port, ssl);
-    if (!r)
-        co_return r.error();
-        
-    co_return client_handle(impl_, std::move(r.value()));
+    co_return co_await impl_->async_acquire(host, port, ssl);
 }
 
 net::any_io_executor http_client_pool::get_executor() noexcept
@@ -389,6 +417,11 @@ void http_client_pool::set_max_size(size_t n)
 void http_client_pool::set_idle_timeout(std::chrono::seconds timeout)
 {
     impl_->set_idle_timeout(timeout);
+}
+
+void http_client_pool::stop()
+{
+    impl_->close_all();
 }
 
 http_client_pool::pool_stats http_client_pool::stats(std::string_view host,

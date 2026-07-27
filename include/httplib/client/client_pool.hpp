@@ -1,7 +1,7 @@
 #pragma once
 #include "httplib/client/client.hpp"
 #include <boost/asio/awaitable.hpp>
-#include <boost/system/result.hpp>
+#include <boost/system/error_code.hpp>
 #include <chrono>
 #include <future>
 #include <memory>
@@ -20,8 +20,10 @@ public:
 
         std::weak_ptr<impl> pool_;
         std::unique_ptr<http_client> conn_;
+        boost::system::error_code error_;
 
         client_handle(std::weak_ptr<impl> pool, std::unique_ptr<http_client> conn);
+        client_handle(boost::system::error_code ec);
         void release();
 
     public:
@@ -34,15 +36,19 @@ public:
 
         ~client_handle();
 
-        http_client* get() noexcept;
-        const http_client* get() const noexcept;
+        http_client* get();
+        const http_client* get() const;
 
         explicit operator bool() const noexcept;
-        http_client* operator->() noexcept;
-        const http_client* operator->() const noexcept;
+        bool has_error() const noexcept;
 
-        http_client& operator*() noexcept;
-        const http_client& operator*() const noexcept;
+        http_client* operator->();
+        const http_client* operator->() const;
+
+        http_client& operator*();
+        const http_client& operator*() const;
+
+        const boost::system::error_code& error() const noexcept;
     };
 
     struct pool_stats
@@ -50,8 +56,6 @@ public:
         size_t idle   = 0;
         size_t active = 0;
     };
-
-    using handle_result = boost::system::result<client_handle>;
 
 public:
     explicit http_client_pool(const net::any_io_executor& ex,
@@ -62,16 +66,18 @@ public:
     http_client_pool(const http_client_pool&)            = delete;
     http_client_pool& operator=(const http_client_pool&) = delete;
 
-    std::future<handle_result> acquire(std::string_view host, uint16_t port, bool ssl = false);
+    std::future<client_handle> acquire(std::string_view host, uint16_t port, bool ssl = false);
 
-    net::awaitable<handle_result> async_acquire(std::string_view host,
-                                                                        uint16_t port,
-                                                                        bool ssl = false);
+    net::awaitable<client_handle> async_acquire(std::string_view host,
+                                                uint16_t port,
+                                                bool ssl = false);
 
     net::any_io_executor get_executor() noexcept;
 
     void set_max_size(size_t n);
     void set_idle_timeout(std::chrono::seconds timeout);
+
+    void stop();
 
     pool_stats stats(std::string_view host, uint16_t port, bool ssl = false) const;
 
