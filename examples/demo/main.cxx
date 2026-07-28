@@ -387,7 +387,7 @@ static void run_http_client_demo(net::any_io_executor ex, std::string host, uint
     {
         auto hdrs = httplib::http::fields();
         hdrs.set(http::field::authorization, "Basic YWRtaW46c2VjcmV0");
-        auto r = client.send_request(http::verb::get, "/api/admin", std::string_view{}, hdrs);
+        auto r = client.send_request(http::verb::get, "/api/admin", hdrs);
         if (r)
             spdlog::info("GET /api/admin (with auth) -> {}", r.value().result_int());
     }

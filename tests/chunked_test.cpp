@@ -300,7 +300,7 @@ TEST_CASE("Chunked: middleware is wrapped via set_chunked_http_handler", "[chunk
     auto hdrs = httplib::http::fields();
     hdrs.set(http::field::origin, "https://example.com");
     auto get_resp = UNWRAP(ts.client->send_request(
-        http::verb::get, "/chunked/cors", std::string_view{}, hdrs));
+        http::verb::get, "/chunked/cors", hdrs));
     REQUIRE(get_resp.result() == http::status::ok);
     REQUIRE(as_string(get_resp) == "cors-get");
     REQUIRE(get_resp[http::field::access_control_allow_origin] == "https://example.com");

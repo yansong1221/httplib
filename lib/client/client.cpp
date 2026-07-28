@@ -8,9 +8,7 @@ namespace httplib::client {
 namespace {
 
 std::string make_target(std::string_view path, const html::query_params& params)
-
 {
-
     std::string target(path);
     if (!params.empty()) {
         target += target.find('?') == std::string::npos ? "?" : "&";
@@ -80,162 +78,36 @@ void http_client::set_logger(std::shared_ptr<spdlog::logger> logger)
     impl_->set_logger(std::move(logger));
 }
 
-net::awaitable<http_client::response_result>
-http_client::async_get(std::string_view path,
-                       const html::query_params& params,
-                       const http::fields& headers /*= http::fields()*/)
-{
-    auto target = make_target(path, params);
-    co_return co_await async_send_request(http::verb::get, target, headers);
-}
-
-
-net::awaitable<http_client::response_result>
-http_client::async_head(std::string_view path,
-                        const html::query_params& params,
-                        const http::fields& headers /*= http::fields()*/)
-{
-    auto target = make_target(path, params);
-    co_return co_await async_send_request(http::verb::head, target, headers);
-}
-
-net::awaitable<http_client::response_result> http_client::async_post(
-    std::string_view path,
-    const html::query_params& params /*= {}*/,
-    const http::fields& headers /*= http::fields()*/)
-{
-    auto target = make_target(path, params);
-    co_return co_await async_send_request(http::verb::post, target, headers);
-}
-
-net::awaitable<http_client::response_result> http_client::async_post(
-    std::string_view path,
-    std::string_view body,
-    const html::query_params& params /*= {}*/,
-    const http::fields& headers /*= http::fields()*/)
-{
-    auto target = make_target(path, params);
-    co_return co_await async_send_request(http::verb::post, target, body, headers);
-}
-
-net::awaitable<http_client::response_result>
-http_client::async_post(std::string_view path,
-                        boost::json::value&& body,
-                        const html::query_params& params /*= {}*/,
-                        const http::fields& headers /*= http::fields()*/)
-{
-    auto target = make_target(path, params);
-    co_return co_await async_send_request(http::verb::post, target, std::move(body), headers);
-}
-
-net::awaitable<http_client::response_result>
-http_client::async_put(std::string_view path,
-                       const html::query_params& params,
-                       const http::fields& headers /*= http::fields()*/)
-{
-    auto target = make_target(path, params);
-    co_return co_await async_send_request(http::verb::put, target, headers);
-}
-
-net::awaitable<http_client::response_result> http_client::async_put(
-    std::string_view path,
-    std::string_view body,
-    const html::query_params& params /*= {}*/,
-    const http::fields& headers /*= http::fields()*/)
-{
-    auto target = make_target(path, params);
-    co_return co_await async_send_request(http::verb::put, target, body, headers);
-}
-
-net::awaitable<http_client::response_result>
-http_client::async_put(std::string_view path,
-                       boost::json::value&& body,
-                       const html::query_params& params /*= {}*/,
-                       const http::fields& headers /*= http::fields()*/)
-{
-    auto target = make_target(path, params);
-    co_return co_await async_send_request(http::verb::put, target, std::move(body), headers);
-}
-
-net::awaitable<http_client::response_result> http_client::async_patch(
-    std::string_view path,
-    std::string_view body,
-    const html::query_params& params /*= {}*/,
-    const http::fields& headers /*= http::fields()*/)
-{
-    auto target = make_target(path, params);
-    co_return co_await async_send_request(http::verb::patch, target, body, headers);
-}
-
-net::awaitable<http_client::response_result>
-http_client::async_patch(std::string_view path,
-                         boost::json::value&& body,
-                         const html::query_params& params /*= {}*/,
-                         const http::fields& headers /*= http::fields()*/)
-{
-    auto target = make_target(path, params);
-    co_return co_await async_send_request(http::verb::patch, target, std::move(body), headers);
-}
-
-net::awaitable<http_client::response_result>
-http_client::async_del(std::string_view path,
-                          const html::query_params& params,
-                          const http::fields& headers /*= http::fields()*/)
-{
-    auto target = make_target(path, params);
-    co_return co_await async_send_request(http::verb::delete_, target, headers);
-}
-
-net::awaitable<http_client::response_result>
-http_client::async_options(std::string_view path,
-                           const html::query_params& params,
-                           const http::fields& headers /*= http::fields()*/)
-{
-    auto target = make_target(path, params);
-    co_return co_await async_send_request(http::verb::options, target, headers);
-}
-
-net::awaitable<http_client::response_result>
-http_client::async_connect(std::string_view path,
-                            const html::query_params& params,
-                            const http::fields& headers /*= http::fields()*/)
-{
-    auto target = make_target(path, params);
-    co_return co_await async_send_request(http::verb::connect, target, headers);
-}
-
-net::awaitable<http_client::response_result>
-http_client::async_trace(std::string_view path,
-                          const html::query_params& params,
-                          const http::fields& headers /*= http::fields()*/)
-{
-    auto target = make_target(path, params);
-    co_return co_await async_send_request(http::verb::trace, target, headers);
-}
+// =============================================================================
+// async_send overloads (core)
+// =============================================================================
 
 net::awaitable<http_client::response_result>
 http_client::async_send_request(http::verb method,
-                           std::string_view path,
-                           const http::fields& headers /*= http::fields()*/)
+                        std::string_view path,
+                        const http::fields& headers)
 {
     auto request = impl_->make_http_request(method, path, headers);
     co_return co_await impl_->async_send_request_with_redirect(request);
 }
 
-net::awaitable<http_client::response_result> http_client::async_send_request(
-    http::verb method, std::string_view path, std::string_view body, const http::fields& headers)
+net::awaitable<http_client::response_result>
+http_client::async_send_request(http::verb method,
+                        std::string_view path,
+                        std::string_view body,
+                        const http::fields& headers)
 {
-    auto request    = impl_->make_http_request(method, path, headers);
-    request.body()  = std::string(body);
+    auto request   = impl_->make_http_request(method, path, headers);
+    request.body() = std::string(body);
     request.content_length(body.size());
     co_return co_await impl_->async_send_request_with_redirect(request);
 }
 
 net::awaitable<http_client::response_result>
 http_client::async_send_request(http::verb method,
-                           std::string_view path,
-                           boost::json::value&& body,
-                           const http::fields& headers)
+                        std::string_view path,
+                        boost::json::value&& body,
+                        const http::fields& headers)
 {
     auto request = impl_->make_http_request(method, path, headers);
     request.set(http::field::content_type, "application/json");
@@ -245,85 +117,485 @@ http_client::async_send_request(http::verb method,
 }
 
 net::awaitable<http_client::response_result>
-http_client::async_download(http::verb method,
+http_client::async_send_request(http::verb method,
+                        std::string_view path,
+                        html::form_data&& body,
+                        const http::fields& headers)
+{
+    auto request = impl_->make_http_request(method, path, headers);
+    request.set(http::field::content_type,
+                fmt::format("multipart/form-data; boundary={}", body.boundary));
+    request.body() = std::move(body);
+    request.prepare_payload();
+    co_return co_await impl_->async_send_request_with_redirect(request);
+}
+
+net::awaitable<http_client::response_result>
+http_client::async_send_request(http::verb method,
+                        std::string_view path,
+                        html::query_params&& body,
+                        const http::fields& headers)
+{
+    auto request = impl_->make_http_request(method, path, headers);
+    request.set(http::field::content_type, "application/x-www-form-urlencoded");
+    request.body() = std::move(body);
+    request.prepare_payload();
+    co_return co_await impl_->async_send_request_with_redirect(request);
+}
+
+net::awaitable<http_client::response_result>
+http_client::async_send_file(http::verb method,
                              std::string_view path,
-                             const fs::path& save_path,
+                             const fs::path& file_path,
                              const http::fields& headers)
+{
+    auto request = impl_->make_http_request(method, path, headers);
+    body::file_body::value_type file_body;
+    file_body.open(file_path, std::ios::in | std::ios::binary);
+    request.body() = std::move(file_body);
+    request.prepare_payload();
+    co_return co_await impl_->async_send_request_with_redirect(request);
+}
+
+// =============================================================================
+// async_send_request with query params
+// =============================================================================
+
+net::awaitable<http_client::response_result>
+http_client::async_send_request(http::verb method,
+                                std::string_view path,
+                                const html::query_params& params,
+                                const http::fields& headers)
+{
+    co_return co_await async_send_request(method, make_target(path, params), headers);
+}
+
+net::awaitable<http_client::response_result>
+http_client::async_send_request(http::verb method,
+                                std::string_view path,
+                                const html::query_params& params,
+                                std::string_view body,
+                                const http::fields& headers)
+{
+    co_return co_await async_send_request(method, make_target(path, params), body, headers);
+}
+
+net::awaitable<http_client::response_result>
+http_client::async_send_request(http::verb method,
+                                std::string_view path,
+                                const html::query_params& params,
+                                boost::json::value&& body,
+                                const http::fields& headers)
+{
+    co_return co_await async_send_request(
+        method, make_target(path, params), std::move(body), headers);
+}
+
+net::awaitable<http_client::response_result>
+http_client::async_send_request(http::verb method,
+                                std::string_view path,
+                                const html::query_params& params,
+                                html::form_data&& body,
+                                const http::fields& headers)
+{
+    co_return co_await async_send_request(
+        method, make_target(path, params), std::move(body), headers);
+}
+
+net::awaitable<http_client::response_result>
+http_client::async_send_request(http::verb method,
+                                std::string_view path,
+                                const html::query_params& params,
+                                html::query_params&& body,
+                                const http::fields& headers)
+{
+    co_return co_await async_send_request(
+        method, make_target(path, params), std::move(body), headers);
+}
+
+net::awaitable<http_client::response_result>
+http_client::async_send_file(http::verb method,
+                             std::string_view path,
+                             const html::query_params& params,
+                             const fs::path& file_path,
+                             const http::fields& headers)
+{
+    co_return co_await async_send_file(method, make_target(path, params), file_path, headers);
+}
+
+// =============================================================================
+// HTTP method shorthands (no body)
+// =============================================================================
+
+net::awaitable<http_client::response_result>
+http_client::async_get(std::string_view path,
+                       const html::query_params& params,
+                       const http::fields& headers)
+{
+    co_return co_await async_send_request(http::verb::get, make_target(path, params), headers);
+}
+
+net::awaitable<http_client::response_result>
+http_client::async_head(std::string_view path,
+                        const html::query_params& params,
+                        const http::fields& headers)
+{
+    co_return co_await async_send_request(http::verb::head, make_target(path, params), headers);
+}
+
+net::awaitable<http_client::response_result>
+http_client::async_post(std::string_view path,
+                        const html::query_params& params,
+                        const http::fields& headers)
+{
+    co_return co_await async_send_request(http::verb::post, make_target(path, params), headers);
+}
+
+net::awaitable<http_client::response_result>
+http_client::async_put(std::string_view path,
+                       const html::query_params& params,
+                       const http::fields& headers)
+{
+    co_return co_await async_send_request(http::verb::put, make_target(path, params), headers);
+}
+
+net::awaitable<http_client::response_result>
+http_client::async_patch(std::string_view path,
+                         const html::query_params& params,
+                         const http::fields& headers)
+{
+    co_return co_await async_send_request(http::verb::patch, make_target(path, params), headers);
+}
+
+net::awaitable<http_client::response_result>
+http_client::async_del(std::string_view path,
+                       const html::query_params& params,
+                       const http::fields& headers)
+{
+    co_return co_await async_send_request(http::verb::delete_, make_target(path, params), headers);
+}
+
+net::awaitable<http_client::response_result>
+http_client::async_options(std::string_view path,
+                           const html::query_params& params,
+                           const http::fields& headers)
+{
+    co_return co_await async_send_request(http::verb::options, make_target(path, params), headers);
+}
+
+net::awaitable<http_client::response_result>
+http_client::async_connect(std::string_view path,
+                           const html::query_params& params,
+                           const http::fields& headers)
+{
+    co_return co_await async_send_request(http::verb::connect, make_target(path, params), headers);
+}
+
+net::awaitable<http_client::response_result>
+http_client::async_trace(std::string_view path,
+                         const html::query_params& params,
+                         const http::fields& headers)
+{
+    co_return co_await async_send_request(http::verb::trace, make_target(path, params), headers);
+}
+
+// =============================================================================
+// HTTP method shorthands (with body)
+// =============================================================================
+
+net::awaitable<http_client::response_result>
+http_client::async_post(std::string_view path,
+                        std::string_view body,
+                        const html::query_params& params,
+                        const http::fields& headers)
+{
+    co_return co_await async_send_request(http::verb::post, make_target(path, params), body, headers);
+}
+
+net::awaitable<http_client::response_result>
+http_client::async_post(std::string_view path,
+                        boost::json::value&& body,
+                        const html::query_params& params,
+                        const http::fields& headers)
+{
+    co_return co_await async_send_request(
+        http::verb::post, make_target(path, params), std::move(body), headers);
+}
+
+net::awaitable<http_client::response_result>
+http_client::async_put(std::string_view path,
+                       std::string_view body,
+                       const html::query_params& params,
+                       const http::fields& headers)
+{
+    co_return co_await async_send_request(http::verb::put, make_target(path, params), body, headers);
+}
+
+net::awaitable<http_client::response_result>
+http_client::async_put(std::string_view path,
+                       boost::json::value&& body,
+                       const html::query_params& params,
+                       const http::fields& headers)
+{
+    co_return co_await async_send_request(
+        http::verb::put, make_target(path, params), std::move(body), headers);
+}
+
+net::awaitable<http_client::response_result>
+http_client::async_patch(std::string_view path,
+                         std::string_view body,
+                         const html::query_params& params,
+                         const http::fields& headers)
+{
+    co_return co_await async_send_request(
+        http::verb::patch, make_target(path, params), body, headers);
+}
+
+net::awaitable<http_client::response_result>
+http_client::async_patch(std::string_view path,
+                         boost::json::value&& body,
+                         const html::query_params& params,
+                         const http::fields& headers)
+{
+    co_return co_await async_send_request(
+        http::verb::patch, make_target(path, params), std::move(body), headers);
+}
+
+// =============================================================================
+// Download
+// =============================================================================
+
+net::awaitable<http_client::response_result>
+http_client::async_download(http::verb method,
+                            std::string_view path,
+                            const fs::path& save_path,
+                            const http::fields& headers)
 {
     auto request = impl_->make_http_request(method, path, headers);
     co_return co_await impl_->async_download(request, save_path);
 }
 
-net::awaitable<http_client::response_result>
-http_client::async_download(http::verb method,
-                             std::string_view path,
-                             const fs::path& save_path,
-                             std::string_view body,
-                             const http::fields& headers)
+// =============================================================================
+// send overloads (sync)
+// =============================================================================
+
+http_client::response_result http_client::send_request(http::verb method,
+                                               std::string_view path,
+                                               const http::fields& headers)
 {
-    auto request    = impl_->make_http_request(method, path, headers);
-    request.body()  = std::string(body);
-    request.content_length(body.size());
-    co_return co_await impl_->async_download(request, save_path);
+    return run_sync(impl_->executor_, [&] { return async_send_request(method, path, headers); });
 }
+
+http_client::response_result http_client::send_request(http::verb method,
+                                               std::string_view path,
+                                               std::string_view body,
+                                               const http::fields& headers)
+{
+    return run_sync(impl_->executor_,
+                    [&] { return async_send_request(method, path, body, headers); });
+}
+
+http_client::response_result http_client::send_request(http::verb method,
+                                               std::string_view path,
+                                               boost::json::value&& body,
+                                               const http::fields& headers)
+{
+    return run_sync(impl_->executor_,
+                    [&] { return async_send_request(method, path, std::move(body), headers); });
+}
+
+http_client::response_result http_client::send_request(http::verb method,
+                                               std::string_view path,
+                                               html::form_data&& body,
+                                               const http::fields& headers)
+{
+    return run_sync(impl_->executor_,
+                    [&] { return async_send_request(method, path, std::move(body), headers); });
+}
+
+http_client::response_result http_client::send_request(http::verb method,
+                                               std::string_view path,
+                                               html::query_params&& body,
+                                               const http::fields& headers)
+{
+    return run_sync(impl_->executor_,
+                    [&] { return async_send_request(method, path, std::move(body), headers); });
+}
+
+http_client::response_result http_client::send_file(http::verb method,
+                                                    std::string_view path,
+                                                    const fs::path& file_path,
+                                                    const http::fields& headers)
+{
+    return run_sync(impl_->executor_,
+                     [&] { return async_send_file(method, path, file_path, headers); });
+}
+
+// =============================================================================
+// send_request with query params (sync)
+// =============================================================================
+
+http_client::response_result http_client::send_request(http::verb method,
+                                                       std::string_view path,
+                                                       const html::query_params& params,
+                                                       const http::fields& headers)
+{
+    return run_sync(impl_->executor_,
+                    [&] { return async_send_request(method, path, params, headers); });
+}
+
+http_client::response_result http_client::send_request(http::verb method,
+                                                       std::string_view path,
+                                                       const html::query_params& params,
+                                                       std::string_view body,
+                                                       const http::fields& headers)
+{
+    return run_sync(impl_->executor_,
+                    [&] { return async_send_request(method, path, params, body, headers); });
+}
+
+http_client::response_result http_client::send_request(http::verb method,
+                                                       std::string_view path,
+                                                       const html::query_params& params,
+                                                       boost::json::value&& body,
+                                                       const http::fields& headers)
+{
+    return run_sync(impl_->executor_,
+                    [&] { return async_send_request(method, path, params, std::move(body), headers); });
+}
+
+http_client::response_result http_client::send_request(http::verb method,
+                                                       std::string_view path,
+                                                       const html::query_params& params,
+                                                       html::form_data&& body,
+                                                       const http::fields& headers)
+{
+    return run_sync(impl_->executor_,
+                    [&] { return async_send_request(method, path, params, std::move(body), headers); });
+}
+
+http_client::response_result http_client::send_request(http::verb method,
+                                                       std::string_view path,
+                                                       const html::query_params& params,
+                                                       html::query_params&& body,
+                                                       const http::fields& headers)
+{
+    return run_sync(impl_->executor_,
+                    [&] { return async_send_request(method, path, params, std::move(body), headers); });
+}
+
+http_client::response_result http_client::send_file(http::verb method,
+                                                    std::string_view path,
+                                                    const html::query_params& params,
+                                                    const fs::path& file_path,
+                                                    const http::fields& headers)
+{
+    return run_sync(impl_->executor_,
+                    [&] { return async_send_file(method, path, params, file_path, headers); });
+}
+
+// =============================================================================
+// HTTP method shorthands (sync, no body)
+// =============================================================================
 
 http_client::response_result http_client::get(std::string_view path,
                                               const html::query_params& params,
-                                              const http::fields& headers /*= http::fields()*/)
+                                              const http::fields& headers)
 {
     return run_sync(impl_->executor_, [&] { return async_get(path, params, headers); });
 }
 
 http_client::response_result http_client::head(std::string_view path,
                                                const html::query_params& params,
-                                               const http::fields& headers /*= http::fields()*/)
+                                               const http::fields& headers)
 {
     return run_sync(impl_->executor_, [&] { return async_head(path, params, headers); });
 }
 
 http_client::response_result http_client::post(std::string_view path,
-                                                const html::query_params& params /*= {}*/,
-                                                const http::fields& headers /*= http::fields()*/)
+                                               const html::query_params& params,
+                                               const http::fields& headers)
 {
     return run_sync(impl_->executor_, [&] { return async_post(path, params, headers); });
 }
 
-http_client::response_result http_client::post(std::string_view path,
-                                                std::string_view body,
-                                                const html::query_params& params /*= {}*/,
-                                                const http::fields& headers /*= http::fields()*/)
+http_client::response_result http_client::put(std::string_view path,
+                                              const html::query_params& params,
+                                              const http::fields& headers)
 {
-    return run_sync(impl_->executor_, [&] { return async_post(path, body, params, headers); });
+    return run_sync(impl_->executor_, [&] { return async_put(path, params, headers); });
+}
+
+http_client::response_result http_client::patch(std::string_view path,
+                                                const html::query_params& params,
+                                                const http::fields& headers)
+{
+    return run_sync(impl_->executor_, [&] { return async_patch(path, params, headers); });
+}
+
+http_client::response_result http_client::del(std::string_view path,
+                                              const html::query_params& params,
+                                              const http::fields& headers)
+{
+    return run_sync(impl_->executor_, [&] { return async_del(path, params, headers); });
+}
+
+http_client::response_result http_client::options(std::string_view path,
+                                                  const html::query_params& params,
+                                                  const http::fields& headers)
+{
+    return run_sync(impl_->executor_, [&] { return async_options(path, params, headers); });
+}
+
+http_client::response_result http_client::connect(std::string_view path,
+                                                  const html::query_params& params,
+                                                  const http::fields& headers)
+{
+    return run_sync(impl_->executor_, [&] { return async_connect(path, params, headers); });
+}
+
+http_client::response_result http_client::trace(std::string_view path,
+                                                const html::query_params& params,
+                                                const http::fields& headers)
+{
+    return run_sync(impl_->executor_, [&] { return async_trace(path, params, headers); });
+}
+
+// =============================================================================
+// HTTP method shorthands (sync, with body)
+// =============================================================================
+
+http_client::response_result http_client::post(std::string_view path,
+                                               std::string_view body,
+                                               const html::query_params& params,
+                                               const http::fields& headers)
+{
+    return run_sync(impl_->executor_,
+                    [&] { return async_post(path, body, params, headers); });
 }
 
 http_client::response_result http_client::post(std::string_view path,
                                                boost::json::value&& body,
-                                               const html::query_params& params /*= {}*/,
-                                               const http::fields& headers /*= http::fields()*/)
+                                               const html::query_params& params,
+                                               const http::fields& headers)
 {
     return run_sync(impl_->executor_,
                     [&] { return async_post(path, std::move(body), params, headers); });
 }
 
 http_client::response_result http_client::put(std::string_view path,
-                                              const html::query_params& params,
-                                              const http::fields& headers /*= http::fields()*/)
-{
-    return run_sync(impl_->executor_, [&] { return async_put(path, params, headers); });
-}
-
-http_client::response_result http_client::put(std::string_view path,
                                               std::string_view body,
-                                              const html::query_params& params /*= {}*/,
-                                              const http::fields& headers /*= http::fields()*/)
+                                              const html::query_params& params,
+                                              const http::fields& headers)
 {
-    return run_sync(impl_->executor_, [&] { return async_put(path, body, params, headers); });
+    return run_sync(impl_->executor_,
+                    [&] { return async_put(path, body, params, headers); });
 }
 
 http_client::response_result http_client::put(std::string_view path,
                                               boost::json::value&& body,
-                                              const html::query_params& params /*= {}*/,
-                                              const http::fields& headers /*= http::fields()*/)
+                                              const html::query_params& params,
+                                              const http::fields& headers)
 {
     return run_sync(impl_->executor_,
                     [&] { return async_put(path, std::move(body), params, headers); });
@@ -331,91 +603,33 @@ http_client::response_result http_client::put(std::string_view path,
 
 http_client::response_result http_client::patch(std::string_view path,
                                                 std::string_view body,
-                                                const html::query_params& params /*= {}*/,
-                                                const http::fields& headers /*= http::fields()*/)
+                                                const html::query_params& params,
+                                                const http::fields& headers)
 {
-    return run_sync(impl_->executor_, [&] { return async_patch(path, body, params, headers); });
+    return run_sync(impl_->executor_,
+                    [&] { return async_patch(path, body, params, headers); });
 }
 
 http_client::response_result http_client::patch(std::string_view path,
                                                 boost::json::value&& body,
-                                                const html::query_params& params /*= {}*/,
-                                                const http::fields& headers /*= http::fields()*/)
+                                                const html::query_params& params,
+                                                const http::fields& headers)
 {
     return run_sync(impl_->executor_,
                     [&] { return async_patch(path, std::move(body), params, headers); });
 }
 
-http_client::response_result http_client::del(std::string_view path,
-                                              const html::query_params& params,
-                                              const http::fields& headers /*= http::fields()*/)
-{
-    return run_sync(impl_->executor_, [&] { return async_del(path, params, headers); });
-}
-
-http_client::response_result http_client::options(std::string_view path,
-                                                  const html::query_params& params,
-                                                  const http::fields& headers /*= http::fields()*/)
-{
-    return run_sync(impl_->executor_, [&] { return async_options(path, params, headers); });
-}
-
-http_client::response_result http_client::connect(std::string_view path,
-                                                   const html::query_params& params,
-                                                   const http::fields& headers /*= http::fields()*/)
-{
-    return run_sync(impl_->executor_, [&] { return async_connect(path, params, headers); });
-}
-
-http_client::response_result http_client::trace(std::string_view path,
-                                                 const html::query_params& params,
-                                                 const http::fields& headers /*= http::fields()*/)
-{
-    return run_sync(impl_->executor_, [&] { return async_trace(path, params, headers); });
-}
-
-http_client::response_result http_client::send_request(
-    http::verb method, std::string_view path, const http::fields& headers /*= http::fields()*/)
-{
-    return run_sync(impl_->executor_, [&] { return async_send_request(method, path, headers); });
-}
-
-http_client::response_result http_client::send_request(
-    http::verb method,
-    std::string_view path,
-    std::string_view body,
-    const http::fields& headers /*= http::fields()*/)
-{
-    return run_sync(impl_->executor_, [&] { return async_send_request(method, path, body, headers); });
-}
-
-http_client::response_result http_client::send_request(
-    http::verb method,
-    std::string_view path,
-    boost::json::value&& body,
-    const http::fields& headers /*= http::fields()*/)
-{
-    return run_sync(impl_->executor_,
-                    [&] { return async_send_request(method, path, std::move(body), headers); });
-}
+// =============================================================================
+// Download (sync)
+// =============================================================================
 
 http_client::response_result http_client::download(http::verb method,
-                                                    std::string_view path,
-                                                    const fs::path& save_path,
-                                                    const http::fields& headers)
+                                                   std::string_view path,
+                                                   const fs::path& save_path,
+                                                   const http::fields& headers)
 {
     return run_sync(impl_->executor_,
                     [&] { return async_download(method, path, save_path, headers); });
-}
-
-http_client::response_result http_client::download(http::verb method,
-                                                    std::string_view path,
-                                                    const fs::path& save_path,
-                                                    std::string_view body,
-                                                    const http::fields& headers)
-{
-    return run_sync(impl_->executor_,
-                    [&] { return async_download(method, path, save_path, body, headers); });
 }
 
 void http_client::close()

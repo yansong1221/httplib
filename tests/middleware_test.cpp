@@ -152,7 +152,7 @@ TEST_CASE("Basic Auth: valid credentials pass through", "[middleware]")
     hdrs.set(http::field::authorization, "Basic dXNlcjpwYXNz");
 
     auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/secret",
-                                                std::string_view{}, hdrs));
+                                                hdrs));
     REQUIRE(resp.result() == http::status::ok);
     REQUIRE(as_string(resp) == "secret-data");
 }
@@ -174,7 +174,7 @@ TEST_CASE("Basic Auth: invalid credentials return 401", "[middleware]")
     hdrs.set(http::field::authorization, "Basic dXNlcjp3cm9uZw==");
 
     auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/secret",
-                                                std::string_view{}, hdrs));
+                                                hdrs));
     REQUIRE(resp.result() == http::status::unauthorized);
 }
 
@@ -215,7 +215,7 @@ TEST_CASE("Bearer Auth: valid token passes through", "[middleware]")
     hdrs.set(http::field::authorization, "Bearer abc-123");
 
     auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/token-area",
-                                                std::string_view{}, hdrs));
+                                                hdrs));
     REQUIRE(resp.result() == http::status::ok);
 }
 
@@ -236,7 +236,7 @@ TEST_CASE("Bearer Auth: invalid token returns 401", "[middleware]")
     hdrs.set(http::field::authorization, "Bearer wrong-token");
 
     auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/token-area",
-                                                std::string_view{}, hdrs));
+                                                hdrs));
     REQUIRE(resp.result() == http::status::unauthorized);
 }
 
@@ -325,7 +325,7 @@ TEST_CASE("Combined: CORS + Auth", "[middleware]")
     hdrs.set(http::field::authorization, "Basic dTpw");
 
     auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/protected",
-                                                std::string_view{}, hdrs));
+                                                hdrs));
     REQUIRE(resp.result() == http::status::ok);
     REQUIRE(as_string(resp) == "protected-data");
     REQUIRE(resp["Access-Control-Allow-Origin"] == "*");
@@ -348,7 +348,7 @@ TEST_CASE("CORS: allow_origins with multiple origins", "[middleware]")
     auto hdrs = httplib::http::fields();
     hdrs.set(http::field::origin, "https://a.com");
     auto resp = UNWRAP(
-        ts.client->send_request(http::verb::get, "/cors-multi", std::string_view{}, hdrs));
+        ts.client->send_request(http::verb::get, "/cors-multi", hdrs));
     REQUIRE(resp.result() == http::status::ok);
     REQUIRE(as_string(resp) == "cors-data");
 }
@@ -371,7 +371,7 @@ TEST_CASE("CORS: allow_methods custom", "[middleware]")
     auto hdrs = httplib::http::fields();
     hdrs.set(http::field::origin, "https://x.com");
     auto resp = UNWRAP(
-        ts.client->send_request(http::verb::options, "/cors-methods", std::string_view{}, hdrs));
+        ts.client->send_request(http::verb::options, "/cors-methods", hdrs));
     REQUIRE(resp.result() == http::status::no_content);
     auto methods = std::string(resp["Access-Control-Allow-Methods"]);
     REQUIRE(methods.find("PUT") != std::string::npos);
@@ -436,6 +436,6 @@ TEST_CASE("Bearer Auth: non-Bearer scheme returns 401", "[middleware]")
     auto hdrs = httplib::http::fields();
     hdrs.set(http::field::authorization, "Digest xxx");
     auto resp = UNWRAP(
-        ts.client->send_request(http::verb::get, "/bearer-scheme", std::string_view{}, hdrs));
+        ts.client->send_request(http::verb::get, "/bearer-scheme", hdrs));
     REQUIRE(resp.result() == http::status::unauthorized);
 }

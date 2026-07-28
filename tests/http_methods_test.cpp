@@ -310,7 +310,7 @@ TEST_CASE("send_request generic method", "[http-methods]")
     ts.start();
 
     auto resp = UNWRAP(ts.client->send_request(http::verb::post, "/method/send-request",
-                                                "generic-body"sv, base_headers()));
+                                                  "generic-body"sv, base_headers()));
     REQUIRE(resp.result() == http::status::ok);
     REQUIRE(as_string(resp) == "send-request-ok");
 }

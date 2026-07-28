@@ -262,7 +262,7 @@ TEST_CASE("Response: set_file_content with Range request", "[response]")
     range_headers.set(http::field::range, "bytes=0-4");
 
     auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-range",
-                                                std::string_view{}, range_headers));
+                                                range_headers));
     REQUIRE(resp.result() == http::status::partial_content);
     REQUIRE(as_string(resp) == "01234");
 
@@ -290,7 +290,7 @@ TEST_CASE("Response: Range request open-ended (bytes=N-)", "[response]")
     range_headers.set(http::field::range, "bytes=7-");
 
     auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-range-open",
-                                                std::string_view{}, range_headers));
+                                                range_headers));
     REQUIRE(resp.result() == http::status::partial_content);
     REQUIRE(as_string(resp) == "789");
 
@@ -318,7 +318,7 @@ TEST_CASE("Response: Range request suffix (bytes=-N)", "[response]")
     range_headers.set(http::field::range, "bytes=-4");
 
     auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-range-suffix",
-                                                std::string_view{}, range_headers));
+                                                range_headers));
     REQUIRE(resp.result() == http::status::partial_content);
     REQUIRE(as_string(resp) == "6789");
 
@@ -346,7 +346,7 @@ TEST_CASE("Response: Range request Content-Range header", "[response]")
     range_headers.set(http::field::range, "bytes=2-5");
 
     auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-cr",
-                                                std::string_view{}, range_headers));
+                                                range_headers));
     REQUIRE(resp.result() == http::status::partial_content);
     REQUIRE(as_string(resp) == "cdef");
     REQUIRE(resp.base().find(http::field::content_range) != resp.base().end());
@@ -376,7 +376,7 @@ TEST_CASE("Response: Range request out of bounds returns 416", "[response]")
     range_headers.set(http::field::range, "bytes=10-20");
 
     auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-range-oob",
-                                                std::string_view{}, range_headers));
+                                                range_headers));
     REQUIRE(resp.result() == http::status::range_not_satisfiable);
     REQUIRE(resp.base().find(http::field::content_range) != resp.base().end());
 
@@ -410,7 +410,7 @@ TEST_CASE("Response: If-None-Match returns 304 for matching ETag", "[response]")
     auto hdrs = httplib::http::fields();
     hdrs.set(http::field::if_none_match, etag);
     auto resp2 = UNWRAP(ts.client->send_request(http::verb::get, "/file-etag",
-                                                 std::string_view{}, hdrs));
+                                                 hdrs));
     REQUIRE(resp2.result() == http::status::not_modified);
 
     std::filesystem::remove(tmp_path);
@@ -443,7 +443,7 @@ TEST_CASE("Response: If-Modified-Since returns 304 for unmodified", "[response]"
     auto hdrs = httplib::http::fields();
     hdrs.set(http::field::if_modified_since, last_mod);
     auto resp2 = UNWRAP(ts.client->send_request(http::verb::get, "/file-ims",
-                                                 std::string_view{}, hdrs));
+                                                 hdrs));
     REQUIRE(resp2.result() == http::status::not_modified);
 
     std::filesystem::remove(tmp_path);
@@ -495,7 +495,7 @@ TEST_CASE("Response: Multi-range request returns multipart/byteranges", "[respon
     range_headers.set(http::field::range, "bytes=0-2,5-7");
 
     auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-multi-range",
-                                                std::string_view{}, range_headers));
+                                                range_headers));
     REQUIRE(resp.result() == http::status::partial_content);
     auto ct = std::string(resp[http::field::content_type]);
     REQUIRE(ct.starts_with("multipart/byteranges"));
