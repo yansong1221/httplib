@@ -131,4 +131,16 @@ void router::set_chunked_http_handler(http::verb method,
         make_coro_http_handler(std::forward<Func>(handler), std::forward<Aspects>(asps)...));
 }
 
+template<typename Func, typename... Aspects>
+void router::set_buffer_body_http_handler(http::verb method,
+                                     std::string_view key,
+                                     Func&& handler,
+                                     Aspects&&... asps)
+{
+    set_buffer_body_http_handler_impl(
+        method,
+        key,
+        make_coro_http_handler(std::forward<Func>(handler), std::forward<Aspects>(asps)...));
+}
+
 } // namespace httplib::server

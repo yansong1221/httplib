@@ -34,26 +34,36 @@ public:
     std::shared_ptr<spdlog::logger> logger() const;
     void set_logger(std::shared_ptr<spdlog::logger> logger);
 
-    net::awaitable<http_client::response_result> async_send_request(
-        http_client::request& req,
-        bool retry = true,
-        const body_setup_fn& body_setup = {});
+    net::awaitable<http_client::response_result>
+    async_send_request(http_client::request& req,
+                       const body_setup_fn& body_setup,
+                       const chunk_body_generator& body_write,
+                       bool retry) noexcept;
 
-    net::awaitable<http_client::response_result> async_send_request_with_redirect(
-        http_client::request& req,
-        bool retry = true,
-        const body_setup_fn& body_setup = {});
+    net::awaitable<http_client::response_result>
+    async_send_request_with_redirect(http_client::request& req,
+                                     const body_setup_fn& body_setup,
+                                     const chunk_body_generator& body_write);
+
+
+    net::awaitable<http_client::response_result> async_download(http_client::request& req,
+                                                                const fs::path& save_path);
+
+
+private:
+    net::awaitable<void> co_connect();
+    net::awaitable<void> co_write_request(http::request<body::any_body>& req, bool headers_only);
+    net::awaitable<http_client::response> co_read_response(const body_setup_fn& body_setup = {},
+                                                           bool is_head                    = false);
+
     void expires_after(bool first = false);
 
-    net::awaitable<http_client::response> async_send_request_impl(
-        http_client::request& req,
-        const body_setup_fn& body_setup = {});
+    net::awaitable<http_client::response>
+    async_send_request_impl(http_client::request& req,
+                            const body_setup_fn& body_setup,
+                            const chunk_body_generator& body_write);
 
-    net::awaitable<http_client::response_result> async_download(
-        http_client::request& req,
-        const fs::path& save_path);
-
-
+public:
     net::any_io_executor executor_;
     tcp::resolver resolver_;
     timeout_policy timeout_policy_               = timeout_policy::overall;

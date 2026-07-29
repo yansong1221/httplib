@@ -239,7 +239,11 @@ net::awaitable<session::task::ptr> session::http_task::then()
                         co_return nullptr;
                 }
 
-                if (req.is_chunked_handler()) {
+                if (req.get_impl()->is_buffer_body_handler()) {
+                    req.get_impl()->setup_buffer_body_reading(
+                        stream_, buffer_, std::move(header_parser), serv_.read_timeout());
+                }
+                else if (req.get_impl()->is_chunked_handler()) {
                     req.get_impl()->setup_chunked_reading(
                         stream_, buffer_, std::move(header_parser), serv_.read_timeout());
                 }

@@ -110,15 +110,22 @@ net::awaitable<void> router_impl::process_routing(request& req, response& resp) 
     auto segments = detail::split_segments(req.path());
 
     std::set<std::string> allows;
-    bool is_chunked_handler = req.is_chunked_handler();
+    bool is_chunked_handler     = req.is_chunked_handler();
+    bool is_buffer_body_handler = req.is_buffer_body_handler();
 
     auto pred = [&](const Node* node) {
         for (const auto& v : node->handlers)
             allows.insert(to_string(v.first));
         for (const auto& v : node->chunked_handlers)
             allows.insert(to_string(v.first));
+        for (const auto& v : node->buffer_body_handlers)
+            allows.insert(to_string(v.first));
         if (is_chunked_handler) {
             return node->chunked_handlers.find(req.method()) != node->chunked_handlers.end();
+        }
+        if (is_buffer_body_handler) {
+            return node->buffer_body_handlers.find(req.method()) !=
+                   node->buffer_body_handlers.end();
         }
         return node->handlers.find(req.method()) != node->handlers.end();
     };
@@ -131,6 +138,13 @@ net::awaitable<void> router_impl::process_routing(request& req, response& resp) 
         if (is_chunked_handler) {
             auto iter = node->chunked_handlers.find(req.method());
             if (iter != node->chunked_handlers.end()) {
+                co_await iter->second(req, resp);
+                co_return;
+            }
+        }
+        else if (is_buffer_body_handler) {
+            auto iter = node->buffer_body_handlers.find(req.method());
+            if (iter != node->buffer_body_handlers.end()) {
                 co_await iter->second(req, resp);
                 co_return;
             }
@@ -210,11 +224,16 @@ net::awaitable<bool> router_impl::pre_routing(request& req, response& resp) cons
                     for (const auto& v : node->chunked_handlers)
                         allows.insert(to_string(v.first));
                 }
+                for (const auto& v : node->buffer_body_handlers)
+                    allows.insert(to_string(v.first));
 
                 if (node->handlers.find(req.method()) != node->handlers.end())
                     return true;
                 if (is_chunked_te &&
                     node->chunked_handlers.find(req.method()) != node->chunked_handlers.end())
+                    return true;
+                if (node->buffer_body_handlers.find(req.method()) !=
+                    node->buffer_body_handlers.end())
                     return true;
                 return false;
             });
@@ -225,6 +244,12 @@ net::awaitable<bool> router_impl::pre_routing(request& req, response& resp) cons
                     node->chunked_handlers.find(req.method()) != node->chunked_handlers.end())
                 {
                     req.get_impl()->set_is_chunked_handler(true);
+                    co_return true;
+                }
+                if (node->buffer_body_handlers.find(req.method()) !=
+                    node->buffer_body_handlers.end())
+                {
+                    req.get_impl()->set_is_buffer_body_handler(true);
                     co_return true;
                 }
             }
@@ -329,6 +354,16 @@ void router_impl::set_chunked_http_handler_impl(http::verb method,
     auto segments                  = detail::split_segments(key);
     auto node                      = insert(root_.get(), segments, 0);
     node->chunked_handlers[method] = std::move(handler);
+}
+
+void router_impl::set_buffer_body_http_handler_impl(http::verb method,
+                                               std::string_view key,
+                                               coro_http_handler_type&& handler)
+{
+    std::unique_lock lock(mutex_);
+    auto segments                      = detail::split_segments(key);
+    auto node                          = insert(root_.get(), segments, 0);
+    node->buffer_body_handlers[method] = std::move(handler);
 }
 
 

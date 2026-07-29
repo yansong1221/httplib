@@ -160,7 +160,10 @@ public:
         auto content_type     = header_[http::field::content_type];
         auto content_encoding = header_[http::field::content_encoding];
 
-        if (std::holds_alternative<body::file_body::value_type>(body_)) {
+        if (std::holds_alternative<body::buffer_body::value_type>(body_)) {
+            proxy_ = create_proxy_reader<body::buffer_body>(header_, body_);
+        }
+        else if (std::holds_alternative<body::file_body::value_type>(body_)) {
             proxy_ = create_proxy_reader<body::file_body>(header_, body_);
         }
         else if (content_type.starts_with("multipart/form-data")) {

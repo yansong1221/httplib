@@ -80,8 +80,10 @@ public:
     const httplib::body::any_body::value_type& body() const;
 
     bool is_chunked_handler() const;
+    bool is_buffer_body_handler() const;
 
     net::awaitable<std::string_view> read_chunk();
+    net::awaitable<std::string_view> read_buffer_body_some();
 
 
     impl* get_impl();

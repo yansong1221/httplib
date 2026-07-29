@@ -4,6 +4,7 @@
 #include "httplib/util/use_awaitable.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
+#include <boost/asio/write.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/parser.hpp>
 #include <boost/beast/http/read.hpp>
@@ -96,12 +97,13 @@ void http_client::impl::set_logger(std::shared_ptr<spdlog::logger> logger)
 
 net::awaitable<http_client::response_result>
 http_client::impl::async_send_request(http_client::request& req,
-                                       bool retry /*= true*/,
-                                       const body_setup_fn& body_setup /*= {}*/)
+                                      const body_setup_fn& body_setup,
+                                      const chunk_body_generator& body_write,
+                                      bool retry) noexcept
 {
     boost::system::error_code ec;
     try {
-        http_client::response resp = co_await async_send_request_impl(req, body_setup);
+        http_client::response resp = co_await async_send_request_impl(req, body_setup, body_write);
         co_return resp;
     }
     catch (const boost::system::system_error& error) {
@@ -123,7 +125,7 @@ http_client::impl::async_send_request(http_client::request& req,
     {
         if (retry) {
             logger()->trace("retrying request...");
-            co_return co_await async_send_request(req, false, body_setup);
+            co_return co_await async_send_request(req, body_setup, body_write, false);
         }
     }
     co_return ec;
@@ -131,55 +133,70 @@ http_client::impl::async_send_request(http_client::request& req,
 
 net::awaitable<http_client::response_result>
 http_client::impl::async_send_request_with_redirect(http_client::request& req,
-                                                     bool retry /*= true*/,
-                                                     const body_setup_fn& body_setup /*= {}*/)
+                                                    const body_setup_fn& body_setup,
+                                                    const chunk_body_generator& body_write)
 {
     if (max_redirects_ <= 0)
-        co_return co_await async_send_request(req, retry, body_setup);
+        co_return co_await async_send_request(req, body_setup, body_write, true);
 
     for (int r = 0; r <= max_redirects_; ++r) {
-        boost::system::error_code ec;
-        http_client::response resp;
-        try {
-            resp = co_await async_send_request_impl(req, body_setup);
+        auto result = co_await async_send_request(req, body_setup, body_write, true);
+        if (result.has_error()) {
+            co_return result;
         }
-        catch (const boost::system::system_error& error) {
-            ec = error.code();
-            logger()->warn("{} {} {}: {}", host_, std::to_string(port_), error.what(), ec.message());
-        }
-        catch (const std::exception& e) {
-            ec = boost::system::errc::make_error_code(boost::system::errc::protocol_error);
-            logger()->warn("{} {}: {}", host_, std::to_string(port_), e.what());
-        }
-        catch (...) {
-            ec = boost::system::errc::make_error_code(boost::system::errc::protocol_error);
-            logger()->warn("{} {}: unknown exception", host_, std::to_string(port_));
-        }
-
-        if (ec) {
-            close();
-            if (retry &&
-                (ec == boost::asio::error::connection_aborted ||
-                 ec == boost::asio::error::connection_reset ||
-                 ec == http::error::end_of_stream))
-            {
-                logger()->trace("retrying request...");
-                continue;
-            }
-            co_return ec;
-        }
-
-        auto s = static_cast<unsigned>(resp.result());
-        if (r < max_redirects_ && (s == 301 || s == 302 || s == 303 || s == 307 || s == 308)) {
+        auto& resp = result.value();
+        auto s     = resp.result();
+        if (r < max_redirects_ &&
+            (s == http::status::moved_permanently || s == http::status::found ||
+             s == http::status::see_other || s == http::status::temporary_redirect ||
+             s == http::status::permanent_redirect))
+        {
             auto loc = resp[http::field::location];
             if (loc.empty())
-                co_return resp;
+                co_return result;
 
-            logger()->trace("redirect {} -> {}", req.target(), std::string(loc));
+            logger()->trace("redirect {} -> {}", req.target(), std::string_view(loc));
 
-            if (s == 303 || ((s == 301 || s == 302) && req.method() != http::verb::head)) {
+            // Full URL (cross-domain) → create new impl
+            if (loc.starts_with("http://") || loc.starts_with("https://")) {
+                auto scheme_end = loc.find("://");
+                auto path_start = loc.find('/', scheme_end + 3);
+                auto host_port  = path_start == std::string_view::npos
+                                    ? loc.substr(scheme_end + 3)
+                                    : loc.substr(scheme_end + 3, path_start - scheme_end - 3);
+
+                auto colon     = host_port.find(':');
+                auto new_host  = colon == std::string_view::npos
+                                     ? std::string(host_port)
+                                     : std::string(host_port.substr(0, colon));
+                auto new_ssl   = loc.starts_with("https://");
+                uint16_t new_port = new_ssl ? 443 : 80;
+                if (colon != std::string_view::npos)
+                    new_port =
+                        static_cast<uint16_t>(std::stoul(std::string(host_port.substr(colon + 1))));
+
+                auto new_target = path_start == std::string_view::npos
+                                    ? std::string("/")
+                                    : std::string(loc.substr(path_start));
+
+                req.target(std::move(new_target));
+                req.set(http::field::host, new_host);
+
+                auto new_impl = std::make_unique<impl>(executor_, new_host, new_port, new_ssl);
+                new_impl->timeout_policy_ = timeout_policy_;
+                new_impl->timeout_        = timeout_;
+                new_impl->set_logger(logger());
+                new_impl->max_redirects_  = max_redirects_ - r - 1;
+
+                co_return co_await new_impl->async_send_request(req, body_setup, body_write, true);
+            }
+
+            if (s == http::status::see_other ||
+                ((s == http::status::moved_permanently || s == http::status::found) &&
+                 req.method() != http::verb::head))
+            {
                 req.method(http::verb::get);
-                req.body() = body::empty_body::value_type{};
+                req.body() = body::empty_body::value_type {};
                 req.erase(http::field::content_type);
                 req.erase(http::field::content_length);
                 req.prepare_payload();
@@ -190,7 +207,7 @@ http_client::impl::async_send_request_with_redirect(http_client::request& req,
             continue;
         }
 
-        co_return resp;
+        co_return result;
     }
 
     co_return boost::system::errc::make_error_code(
@@ -214,17 +231,12 @@ void http_client::impl::expires_after(bool first /*= false*/)
     }
 }
 
-net::awaitable<http_client::response>
-http_client::impl::async_send_request_impl(http_client::request& req,
-                                            const body_setup_fn& body_setup /*= {}*/)
+net::awaitable<void> http_client::impl::co_connect()
 {
-    // Set up an HTTP GET request message
+    std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
     if (!is_open()) {
-        {
-            std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
-            stream_ = std::make_unique<http_stream>(executor_, host_, use_ssl_);
-        }
-        logger()->trace("{} connecting to {}:{}", req.method_string(), host_, port_);
+        stream_ = std::make_unique<http_stream>(executor_, host_, use_ssl_);
+        lck.unlock();
 
         boost::system::error_code ec;
         auto addr = net::ip::make_address(host_, ec);
@@ -239,15 +251,27 @@ http_client::impl::async_send_request_impl(http_client::request& req,
             co_await stream_->async_connect(endpoints);
         }
     }
+    expires_after();
+}
 
+net::awaitable<void> http_client::impl::co_write_request(http::request<body::any_body>& req,
+                                                         bool headers_only)
+{
     http::request_serializer<body::any_body> serializer(req);
-    while (!serializer.is_done()) {
+    if (headers_only)
+        serializer.split(true);
+
+    while (headers_only ? !serializer.is_header_done() : !serializer.is_done()) {
         expires_after();
-        co_await http::async_write_some(*stream_, serializer);
+        co_await http::async_write_some(*stream_, serializer, boost::asio::use_awaitable);
     }
+    expires_after();
+}
 
-
-    if (req.method() == http::verb::head) {
+net::awaitable<http_client::response> http_client::impl::co_read_response(
+    const body_setup_fn& body_setup /*= {}*/, bool is_head /*= false*/)
+{
+    if (is_head) {
         http::response_parser<http::empty_body> parser;
         parser.skip(true);
         parser.header_limit(std::numeric_limits<std::uint32_t>::max());
@@ -262,12 +286,12 @@ http_client::impl::async_send_request_impl(http_client::request& req,
         if (!parser.keep_alive())
             close();
 
-        auto header_response = parser.release();
+        auto hr = parser.release();
         http_client::response response;
-        response.version(header_response.version());
-        response.result(header_response.result());
-        response.keep_alive(header_response.keep_alive());
-        for (const auto& field : header_response)
+        response.version(hr.version());
+        response.result(hr.result());
+        response.keep_alive(hr.keep_alive());
+        for (const auto& field : hr)
             response.set(field.name_string(), field.value());
         co_return response;
     }
@@ -293,12 +317,12 @@ http_client::impl::async_send_request_impl(http_client::request& req,
         if (!parser.keep_alive())
             close();
 
-        const auto& header_response = parser.get();
+        const auto& hr = parser.get();
         http_client::response response;
-        response.version(header_response.version());
-        response.result(header_response.result());
-        response.keep_alive(header_response.keep_alive());
-        for (const auto& field : header_response)
+        response.version(hr.version());
+        response.result(hr.result());
+        response.keep_alive(hr.keep_alive());
+        for (const auto& field : hr)
             response.set(field.name_string(), field.value());
         co_return response;
     }
@@ -311,13 +335,41 @@ http_client::impl::async_send_request_impl(http_client::request& req,
     stream_->expires_never();
     if (!parser.keep_alive())
         close();
-    auto resp = parser.release();
-    logger()->trace("{} {} -> {} {}",
-                    req.method_string(),
-                    req.target(),
-                    resp.result_int(),
-                    resp.reason());
-    co_return resp;
+    co_return parser.release();
+}
+
+net::awaitable<http_client::response>
+http_client::impl::async_send_request_impl(http_client::request& req,
+                                           const body_setup_fn& body_setup,
+                                           const chunk_body_generator& chunk_body_write)
+{
+    co_await co_connect();
+    co_await co_write_request(req, chunk_body_write != nullptr);
+
+    if (chunk_body_write) {
+        for (boost::system::error_code ec;;) {
+            expires_after();
+            buffer_.consume(buffer_.size());
+            bool has_more = co_await chunk_body_write(buffer_, ec);
+            if (ec) {
+                throw boost::system::system_error(ec);
+            }
+            if (buffer_.size() != 0) {
+                http::chunk_body chunk_b(buffer_.data());
+                expires_after();
+                co_await net::async_write(*stream_, chunk_b, boost::asio::use_awaitable);
+            }
+            if (!has_more) {
+                http::chunk_last last_chunk;
+                expires_after();
+                co_await net::async_write(*stream_, last_chunk, boost::asio::use_awaitable);
+                break;
+            }
+        }
+        buffer_.consume(buffer_.size());
+    }
+
+    co_return co_await co_read_response(body_setup, req.method() == http::verb::head);
 }
 
 void http_client::impl::set_chunk_handler(chunk_handler_type&& handler)
@@ -338,18 +390,18 @@ net::awaitable<http_client::response_result>
 http_client::impl::async_download(http_client::request& req, const fs::path& save_path)
 {
     auto setup = [save_path](body::any_body::value_type& body) {
-        body       = body::file_body::value_type {};
-        auto& fb   = std::get<body::file_body::value_type>(body);
+        body     = body::file_body::value_type {};
+        auto& fb = std::get<body::file_body::value_type>(body);
         fb.open(save_path, std::ios::out | std::ios::binary | std::ios::trunc);
         if (!fb.is_open())
             throw boost::system::system_error(
                 boost::system::errc::make_error_code(boost::system::errc::permission_denied));
     };
-    auto result = co_await async_send_request(req, true, setup);
+    auto result = co_await async_send_request_with_redirect(req, setup, nullptr);
 
-    if (!result.has_value() ||
-        result->result() == http::status::no_content ||
-        result->result() == http::status::not_modified) {
+    if (!result.has_value() || result->result() == http::status::no_content ||
+        result->result() == http::status::not_modified)
+    {
         std::error_code ec;
         fs::remove(save_path, ec);
     }

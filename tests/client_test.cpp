@@ -534,3 +534,29 @@ TEST_CASE("Client: redirect loop is limited", "[client]")
     REQUIRE(resp.has_value());
     REQUIRE(resp->result() == http::status::found);
 }
+
+TEST_CASE("Client: redirect full URL creates new impl", "[client]")
+{
+    test_scaffold ts;
+
+    ts.router().set_http_handler<http::verb::get>(
+        "/ext-redirect",
+        [](httplib::server::request& req, httplib::server::response& resp) {
+            auto port = req.local_endpoint().port();
+            auto url  = std::format("http://127.0.0.1:{}/target-page", port);
+            resp.set_redirect(url, http::status::found);
+        });
+    ts.router().set_http_handler<http::verb::get>(
+        "/target-page",
+        [](httplib::server::request&, httplib::server::response& resp) {
+            resp.set_string_content("target-reached"sv, "text/plain");
+        });
+    ts.start_with_routes();
+
+    auto client = ts.make_client();
+    client->set_max_redirects(1);
+    auto resp   = client->get("/ext-redirect");
+    REQUIRE(resp.has_value());
+    REQUIRE(resp->result() == http::status::ok);
+    REQUIRE(as_string(resp.value()) == "target-reached");
+}

@@ -114,7 +114,7 @@ static void setup_http_routes(httplib::server::router& router)
         [](httplib::server::request&, httplib::server::response& resp) {
             resp.set_string_content("Hello, World!"sv, "text/plain"sv);
         },
-        mw::cors_middleware{});
+        mw::cors_middleware {});
 
     router.set_http_handler<http::verb::get>(
         "/api/greet/:name", [](httplib::server::request& req, httplib::server::response& resp) {
@@ -216,6 +216,21 @@ static void setup_http_routes(httplib::server::router& router)
                 "text/plain");
         });
 
+    router.set_buffer_body_http_handler<http::verb::post>(
+        "/api/buffer",
+        [](httplib::server::request& req,
+           httplib::server::response& resp) -> httplib::net::awaitable<void> {
+            std::string all;
+            for (;;) {
+                auto tunck = co_await req.read_buffer_body_some();
+                if (tunck.empty())
+                    break;
+                all.append(tunck);
+            }
+            resp.set_string_content(all, "text/plain");
+            co_return;
+        });
+
     // ---- Built-in middleware: Basic Auth ----
     router.set_http_handler<http::verb::get>(
         "/api/admin",
@@ -235,13 +250,10 @@ static void setup_http_routes(httplib::server::router& router)
             resp.set_json_content({{"data", "token-gated content"}});
         },
         mw::bearer_auth_middleware(
-            [](std::string_view token) {
-                return token == "my-secret-token";
-            }));
+            [](std::string_view token) { return token == "my-secret-token"; }));
 
     // ---- Built-in middleware: Rate Limit (10 req / 10 seconds per IP) ----
-    auto rate_limiter = std::make_shared<mw::rate_limit_middleware>(
-        10, std::chrono::seconds(10));
+    auto rate_limiter = std::make_shared<mw::rate_limit_middleware>(10, std::chrono::seconds(10));
 
     router.set_http_handler<http::verb::get>(
         "/api/limited",
@@ -268,7 +280,7 @@ static void setup_http_routes(httplib::server::router& router)
             resp.set_json_content({{"error", "not found"}, {"path", std::string(req.path())}},
                                   http::status::not_found);
         },
-        log_t{});
+        log_t {});
 }
 
 static void setup_cors(httplib::server::router& router)
@@ -533,7 +545,8 @@ int main(int argc, char** argv)
         // svr.set_compress_content_types([](std::string_view ct) {
         //     return ct.starts_with("application/json");
         // });
-        // To disable all compression: svr.set_compress_content_types([](std::string_view) { return false; });
+        // To disable all compression: svr.set_compress_content_types([](std::string_view) { return
+        // false; });
 
         setup_http_routes(router);
         setup_cors(router);

@@ -94,19 +94,52 @@ public:
     void set_session(std::shared_ptr<middleware::session> sess) { session_ = std::move(sess); }
     std::shared_ptr<middleware::session> session() const { return session_; }
 
+    struct buffer_body_read_ctx
+    {
+        std::shared_ptr<http::request_parser<body::any_body>> parser;
+        beast::flat_buffer* buffer = nullptr;
+        std::vector<char> buf_data = std::vector<char>(8192);
+        http_stream* stream        = nullptr;
+        std::chrono::steady_clock::duration read_timeout {30};
+        std::string current_chunk;
+    };
+
+    void setup_buffer_body_reading(http_stream& stream,
+                                   beast::flat_buffer& buffer,
+                                   http::request_parser<http::empty_body>&& header_parser,
+                                   std::chrono::steady_clock::duration read_timeout)
+    {
+        auto parser =
+            std::make_shared<http::request_parser<body::any_body>>(std::move(header_parser));
+        parser->get().body() = body::buffer_body::value_type {};
+
+        buffer_body_ctx_               = std::make_shared<buffer_body_read_ctx>();
+        buffer_body_ctx_->parser       = std::move(parser);
+        buffer_body_ctx_->buffer       = &buffer;
+        buffer_body_ctx_->stream       = &stream;
+        buffer_body_ctx_->read_timeout = read_timeout;
+
+        auto& body =
+            std::get<body::buffer_body::value_type>(buffer_body_ctx_->parser->get().body());
+        body.data = buffer_body_ctx_->buf_data.data();
+        body.size = buffer_body_ctx_->buf_data.size();
+    }
+
     void set_is_chunked_handler(bool v) { is_chunked_handler_ = v; }
     bool is_chunked_handler() const { return is_chunked_handler_; }
 
+    void set_is_buffer_body_handler(bool v) { is_buffer_body_handler_ = v; }
+    bool is_buffer_body_handler() const { return is_buffer_body_handler_; }
+
     struct chunk_read_ctx
     {
-        std::shared_ptr<http::request_parser<http::string_body>> parser;
-        http_stream* stream = nullptr;
+        std::shared_ptr<http::request_parser<body::any_body>> parser;
+        http_stream* stream        = nullptr;
         beast::flat_buffer* buffer = nullptr;
-        std::chrono::steady_clock::duration read_timeout{30};
+        std::chrono::steady_clock::duration read_timeout {30};
 
         std::function<std::size_t(std::uint64_t, std::string_view, beast::error_code&)> chunk_cb;
         std::deque<std::string> chunks;
-        size_t body_offset = 0;
         bool done = false;
     };
 
@@ -115,31 +148,29 @@ public:
                                http::request_parser<http::empty_body>&& header_parser,
                                std::chrono::steady_clock::duration read_timeout)
     {
-        auto parser = std::make_shared<http::request_parser<http::string_body>>(
-            std::move(header_parser));
-        chunk_ctx_           = std::make_shared<chunk_read_ctx>();
-        chunk_ctx_->parser   = std::move(parser);
-        chunk_ctx_->stream   = &stream;
-        chunk_ctx_->buffer   = &buffer;
+        auto parser =
+            std::make_shared<http::request_parser<body::any_body>>(std::move(header_parser));
+        chunk_ctx_               = std::make_shared<chunk_read_ctx>();
+        chunk_ctx_->parser       = std::move(parser);
+        chunk_ctx_->stream       = &stream;
+        chunk_ctx_->buffer       = &buffer;
         chunk_ctx_->read_timeout = read_timeout;
-        chunk_ctx_->body_offset  = 0;
-        chunk_ctx_->done          = chunk_ctx_->parser->is_done();
+        chunk_ctx_->done         = chunk_ctx_->parser->is_done();
 
-        auto ctx = chunk_ctx_;
-        chunk_ctx_->chunk_cb =
-            [ctx](std::uint64_t /*remain*/,
-                  std::string_view body,
-                  beast::error_code&) -> std::size_t {
-                ctx->chunks.push_back(std::string(body));
-                return body.size();
-            };
+        auto ctx             = chunk_ctx_;
+        chunk_ctx_->chunk_cb = [ctx](std::uint64_t /*remain*/,
+                                     std::string_view body,
+                                     beast::error_code&) -> std::size_t {
+            ctx->chunks.push_back(std::string(body));
+            return body.size();
+        };
         chunk_ctx_->parser->on_chunk_body(chunk_ctx_->chunk_cb);
     }
 
     net::awaitable<std::string_view> read_chunk()
     {
         if (!chunk_ctx_)
-            co_return std::string_view{};
+            co_return std::string_view {};
 
         while (chunk_ctx_->chunks.empty() && !chunk_ctx_->done) {
             boost::system::error_code ec;
@@ -159,19 +190,41 @@ public:
             chunk_ctx_->chunks.pop_front();
             co_return chunk_buf_;
         }
+        co_return std::string_view {};
+    }
 
-        if (chunk_ctx_->done) {
-            auto& body = chunk_ctx_->parser->get().body();
-            if (chunk_ctx_->body_offset < body.size()) {
-                auto result = std::string_view(body).substr(chunk_ctx_->body_offset);
-                chunk_ctx_->body_offset = body.size();
-                chunk_buf_              = result;
-                co_return chunk_buf_;
+    net::awaitable<std::string_view> read_buffer_body_some()
+    {
+        if (!buffer_body_ctx_)
+            co_return std::string_view {};
+
+        for (;;) {
+            if (buffer_body_ctx_->parser->is_done()) {
+                chunk_buf_.clear();
+                co_return std::string_view {};
+            }
+
+            boost::system::error_code ec;
+            buffer_body_ctx_->stream->expires_after(buffer_body_ctx_->read_timeout);
+            co_await http::async_read_some(*buffer_body_ctx_->stream,
+                                           *buffer_body_ctx_->buffer,
+                                           *buffer_body_ctx_->parser,
+                                           util::net_awaitable[ec]);
+            buffer_body_ctx_->stream->expires_never();
+            if (ec)
+                throw boost::system::system_error(ec);
+
+            auto& body =
+                std::get<body::buffer_body::value_type>(buffer_body_ctx_->parser->get().body());
+            auto consumed = buffer_body_ctx_->buf_data.size() - body.size;
+            if (consumed > 0) {
+                buffer_body_ctx_->current_chunk =
+                    std::string(buffer_body_ctx_->buf_data.data(), consumed);
+                body.data = buffer_body_ctx_->buf_data.data();
+                body.size = buffer_body_ctx_->buf_data.size();
+                co_return buffer_body_ctx_->current_chunk;
             }
         }
-
-        chunk_buf_.clear();
-        co_return std::string_view{};
     }
 
     std::string_view operator[](http::field name) const { return this->base()[name]; }
@@ -227,8 +280,10 @@ private:
     std::any custom_data_;
     std::shared_ptr<middleware::session> session_;
 
-    bool is_chunked_handler_ = false;
+    bool is_chunked_handler_     = false;
+    bool is_buffer_body_handler_ = false;
     std::shared_ptr<chunk_read_ctx> chunk_ctx_;
+    std::shared_ptr<buffer_body_read_ctx> buffer_body_ctx_;
     std::string chunk_buf_;
 };
 } // namespace httplib::server

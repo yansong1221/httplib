@@ -1,4 +1,5 @@
 #pragma once
+#include "httplib/body/buffer_body.hpp"
 #include "httplib/body/empty_body.hpp"
 #include "httplib/body/file_body.hpp"
 #include "httplib/body/form_data_body.hpp"
@@ -68,7 +69,8 @@ struct any_body
                                      json_body,
                                      form_data_body,
                                      file_body,
-                                     query_params_body>;
+                                     query_params_body,
+                                     buffer_body>;
 
     class writer
     {

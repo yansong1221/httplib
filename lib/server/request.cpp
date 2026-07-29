@@ -194,9 +194,19 @@ bool request::is_chunked_handler() const
     return impl_->is_chunked_handler();
 }
 
+bool request::is_buffer_body_handler() const
+{
+    return impl_->is_buffer_body_handler();
+}
+
 net::awaitable<std::string_view> request::read_chunk()
 {
     co_return co_await impl_->read_chunk();
+}
+
+net::awaitable<std::string_view> request::read_buffer_body_some()
+{
+    co_return co_await impl_->read_buffer_body_some();
 }
 
 } // namespace httplib::server

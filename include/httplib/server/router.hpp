@@ -70,6 +70,21 @@ public:
          ...);
     }
 
+    template<typename Func, typename... Aspects>
+    void set_buffer_body_http_handler(http::verb method,
+                                 std::string_view key,
+                                 Func&& handler,
+                                 Aspects&&... asps);
+
+    template<http::verb... method, typename Func, typename... Aspects>
+    void set_buffer_body_http_handler(std::string_view key, Func&& handler, Aspects&&... asps)
+    {
+        static_assert(sizeof...(method) >= 1, "must set method");
+        (set_buffer_body_http_handler(
+             method, key, std::forward<Func>(handler), std::forward<Aspects>(asps)...),
+         ...);
+    }
+
     template<typename Func>
     void set_post_routing_handler(Func&& handler);
 
@@ -95,6 +110,10 @@ protected:
     virtual void set_chunked_http_handler_impl(http::verb method,
                                                std::string_view key,
                                                coro_http_handler_type&& handler) = 0;
+
+    virtual void set_buffer_body_http_handler_impl(http::verb method,
+                                              std::string_view key,
+                                              coro_http_handler_type&& handler) = 0;
 };
 
 } // namespace httplib::server

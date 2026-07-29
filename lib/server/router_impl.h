@@ -44,6 +44,9 @@ protected:
     void set_chunked_http_handler_impl(http::verb method,
                                        std::string_view key,
                                        coro_http_handler_type&& handler) override;
+    void set_buffer_body_http_handler_impl(http::verb method,
+                                      std::string_view key,
+                                      coro_http_handler_type&& handler) override;
 
 private:
     struct Node
@@ -63,6 +66,7 @@ private:
 
         std::unordered_map<http::verb, coro_http_handler_type> handlers;
         std::unordered_map<http::verb, coro_http_handler_type> chunked_handlers;
+        std::unordered_map<http::verb, coro_http_handler_type> buffer_body_handlers;
         std::optional<ws_handler_entry> ws_handler;
 
         std::unordered_map<std::string, std::unique_ptr<Node>> static_children;
