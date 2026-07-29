@@ -200,14 +200,11 @@ std::vector<html::form_data::field> fields = {
 resp.set_form_data_content(std::move(fields));
 
 // Chunked streaming
-resp.set_stream_content(
+resp.set_chunked_write_handler(
     [idx = std::make_shared<int>(0)](
-        beast::flat_buffer& buf,
-        boost::system::error_code&) -> net::awaitable<bool> {
-        if (*idx >= 5) co_return false;
-        auto chunk = std::format("chunk #{}\n", (*idx)++);
-        buf.commit(net::buffer_copy(buf.prepare(chunk.size()), net::buffer(chunk)));
-        co_return true;
+        httplib::chunk_writer& writer) -> net::awaitable<void> {
+        while (*idx < 5)
+            co_await writer.write_chunk(std::format("chunk #{}\n", (*idx)++));
     },
     "text/plain");
 ```

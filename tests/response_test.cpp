@@ -1,7 +1,6 @@
 #include "httplib/body/string_body.hpp"
 #include "httplib/body/json_body.hpp"
 #include "httplib/body/file_body.hpp"
-#include "httplib/client/chunk_reader.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
@@ -131,25 +130,18 @@ TEST_CASE("Response: set_redirect", "[response]")
     REQUIRE(resp[http::field::location] == "/new");
 }
 
-TEST_CASE("Response: set_stream_content with multiple chunks", "[response]")
+TEST_CASE("Response: set_chunked_write_handler with multiple chunks", "[response]")
 {
     test_scaffold ts;
     ts.router().set_http_handler<http::verb::get>(
         "/stream",
         [](httplib::server::request&, httplib::server::response& resp) {
             auto idx = std::make_shared<int>(0);
-            resp.set_stream_content(
-                [idx](beast::flat_buffer& buffer,
-                      boost::system::error_code&) -> net::awaitable<bool> {
+            resp.set_chunked_write_handler(
+                [idx](httplib::chunk_writer& writer) -> net::awaitable<void> {
                     constexpr std::string_view chunks[] = {"A", "B", "C"};
-                    if (*idx >= 3)
-                        co_return false;
-
-                    auto chunk = chunks[*idx];
-                    ++(*idx);
-                    buffer.commit(
-                        net::buffer_copy(buffer.prepare(chunk.size()), net::buffer(chunk)));
-                    co_return *idx < 3;
+                    for (; *idx < 3; ++(*idx))
+                        co_await writer.write_chunk(std::string(chunks[*idx]));
                 },
                 "text/plain");
         });
@@ -157,7 +149,7 @@ TEST_CASE("Response: set_stream_content with multiple chunks", "[response]")
 
     std::string streamed;
     ts.client->set_chunked_read_handler(
-        [&](httplib::client::chunk_reader& reader,
+        [&](httplib::chunk_reader& reader,
             httplib::client::http_client::response&) -> net::awaitable<void> {
             while (true) {
                 auto chunk = co_await reader.read_chunk();

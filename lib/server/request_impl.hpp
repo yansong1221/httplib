@@ -1,4 +1,5 @@
 #pragma once
+#include "util/chunk_reader_impl.hpp"
 #include "httplib/server/middleware/session.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/util/misc.hpp"
@@ -43,7 +44,7 @@ public:
     }
 
     impl& operator=(impl&& other) noexcept = default;
-    impl(impl&& other) noexcept = default;
+    impl(impl&& other) noexcept            = default;
 
     std::string_view path() const
     {
@@ -117,67 +118,18 @@ public:
     void set_is_buffer_body_handler(bool v) { is_buffer_body_handler_ = v; }
     bool is_buffer_body_handler() const { return is_buffer_body_handler_; }
 
-    struct chunk_read_ctx
-    {
-        std::shared_ptr<http::request_parser<body::any_body>> parser;
-        http_stream* stream        = nullptr;
-        beast::flat_buffer* buffer = nullptr;
-        std::chrono::steady_clock::duration read_timeout {30};
-
-        std::function<std::size_t(std::uint64_t, std::string_view, beast::error_code&)> chunk_cb;
-        std::deque<std::string> chunks;
-        bool done = false;
-    };
-
     void setup_chunked_reading(http_stream& stream,
                                beast::flat_buffer& buffer,
                                http::request_parser<http::empty_body>&& header_parser,
                                std::chrono::steady_clock::duration read_timeout)
     {
-        auto parser =
+        chunk_parser_ =
             std::make_shared<http::request_parser<body::any_body>>(std::move(header_parser));
-        chunk_ctx_               = std::make_shared<chunk_read_ctx>();
-        chunk_ctx_->parser       = std::move(parser);
-        chunk_ctx_->stream       = &stream;
-        chunk_ctx_->buffer       = &buffer;
-        chunk_ctx_->read_timeout = read_timeout;
-        chunk_ctx_->done         = chunk_ctx_->parser->is_done();
-
-        auto ctx             = chunk_ctx_;
-        chunk_ctx_->chunk_cb = [ctx](std::uint64_t /*remain*/,
-                                     std::string_view body,
-                                     beast::error_code&) -> std::size_t {
-            ctx->chunks.push_back(std::string(body));
-            return body.size();
-        };
-        chunk_ctx_->parser->on_chunk_body(chunk_ctx_->chunk_cb);
+        chunk_reader_ = std::make_unique<chunk_reader_impl<true>>(
+            stream, buffer, *chunk_parser_, read_timeout);
     }
 
-    net::awaitable<std::string_view> read_chunk()
-    {
-        if (!chunk_ctx_)
-            co_return std::string_view {};
-
-        while (chunk_ctx_->chunks.empty() && !chunk_ctx_->done) {
-            boost::system::error_code ec;
-            chunk_ctx_->stream->expires_after(chunk_ctx_->read_timeout);
-            co_await http::async_read_some(*chunk_ctx_->stream,
-                                           *chunk_ctx_->buffer,
-                                           *chunk_ctx_->parser,
-                                           util::net_awaitable[ec]);
-            chunk_ctx_->stream->expires_never();
-            if (ec)
-                throw boost::system::system_error(ec);
-            chunk_ctx_->done = chunk_ctx_->parser->is_done();
-        }
-
-        if (!chunk_ctx_->chunks.empty()) {
-            chunk_buf_ = std::move(chunk_ctx_->chunks.front());
-            chunk_ctx_->chunks.pop_front();
-            co_return chunk_buf_;
-        }
-        co_return std::string_view {};
-    }
+    httplib::chunk_reader& get_chunk_reader() { return *chunk_reader_; }
 
     net::awaitable<std::string_view> read_buffer_body_some()
     {
@@ -268,7 +220,8 @@ private:
 
     bool is_chunked_handler_     = false;
     bool is_buffer_body_handler_ = false;
-    std::shared_ptr<chunk_read_ctx> chunk_ctx_;
+    std::shared_ptr<http::request_parser<body::any_body>> chunk_parser_;
+    std::unique_ptr<chunk_reader> chunk_reader_;
     std::shared_ptr<buffer_body_read_ctx> buffer_body_ctx_;
     std::string chunk_buf_;
 };

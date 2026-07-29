@@ -1,5 +1,6 @@
 #pragma once
 #include "html/html.h"
+#include "httplib/chunk_writer.hpp"
 #include "httplib/server/response.hpp"
 #include "mime_types.hpp"
 #include <boost/beast/version.hpp>
@@ -176,30 +177,21 @@ public:
         this->set(http::field::location, url);
         set_empty_content(status);
     }
-
-    template<typename Func>
-    void set_stream_content(Func&& func,
-                            std::string_view content_type,
-                            http::status status = http::status::ok)
-    {
-        auto handler = util::make_coro_handler(std::move(func));
-        set_stream_content_impl(std::move(handler), content_type, status);
-    }
-
-    void set_stream_content_impl(coro_stream_handler_type&& handler,
-                                 std::string_view content_type,
-                                 http::status status = http::status::ok)
+    void set_chunked_write_handler(chunked_write_handler_type&& handler,
+                                    std::string_view content_type,
+                                    http::status status = http::status::ok)
     {
         reset_content();
-        stream_handler_ = std::move(handler);
+        chunked_write_handler_ = std::move(handler);
         this->set(http::field::content_type, content_type);
         this->result(status);
         this->body() = body::empty_body::value_type {};
     }
+
     void reset_content()
     {
-        stream_handler_ = nullptr;
-        this->body()    = body::empty_body::value_type {};
+        chunked_write_handler_ = nullptr;
+        this->body()           = body::empty_body::value_type {};
     }
 
     static response make_response(unsigned int version, bool keep_alive)
@@ -208,7 +200,7 @@ public:
         return response(std::move(_impl));
     }
 
-    coro_stream_handler_type stream_handler_;
+    chunked_write_handler_type chunked_write_handler_;
 };
 
 } // namespace httplib::server

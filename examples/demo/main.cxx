@@ -2,7 +2,6 @@
 #include "httplib/body/json_body.hpp"
 #include "httplib/body/query_params_body.hpp"
 #include "httplib/body/string_body.hpp"
-#include "httplib/client/chunk_reader.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/ws_client.hpp"
@@ -204,15 +203,10 @@ static void setup_http_routes(httplib::server::router& router)
     router.set_http_handler<http::verb::get>(
         "/api/stream", [](httplib::server::request&, httplib::server::response& resp) {
             auto idx = std::make_shared<int>(0);
-            resp.set_stream_content(
-                [idx](beast::flat_buffer& buffer,
-                      boost::system::error_code&) -> net::awaitable<bool> {
-                    if (*idx >= 5)
-                        co_return false;
-                    auto chunk = std::format("chunk #{}\n", (*idx)++);
-                    buffer.commit(
-                        net::buffer_copy(buffer.prepare(chunk.size()), net::buffer(chunk)));
-                    co_return true;
+            resp.set_chunked_write_handler(
+                [idx](httplib::chunk_writer& writer) -> net::awaitable<void> {
+                    while (*idx < 5)
+                        co_await writer.write_chunk(std::format("chunk #{}\n", (*idx)++));
                 },
                 "text/plain");
         });
@@ -381,7 +375,7 @@ static void run_http_client_demo(net::any_io_executor ex, std::string host, uint
     // Stream with chunk handler
     {
         client.set_chunked_read_handler(
-            [](httplib::client::chunk_reader& reader, httplib::client::http_client::response&) -> net::awaitable<void> {
+            [](httplib::chunk_reader& reader, httplib::client::http_client::response&) -> net::awaitable<void> {
                 while (true) {
                     auto chunk = co_await reader.read_chunk();
                     if (chunk.empty())

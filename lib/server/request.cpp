@@ -199,9 +199,9 @@ bool request::is_buffer_body_handler() const
     return impl_->is_buffer_body_handler();
 }
 
-net::awaitable<std::string_view> request::read_chunk()
+httplib::chunk_reader& request::get_chunk_reader()
 {
-    co_return co_await impl_->read_chunk();
+    return impl_->get_chunk_reader();
 }
 
 net::awaitable<std::string_view> request::read_buffer_body_some()

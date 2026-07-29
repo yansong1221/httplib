@@ -1,6 +1,5 @@
 #pragma once
 #include "httplib/body/any_body.hpp"
-#include "httplib/client/chunk_reader.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "stream/http_stream.hpp"
 #include <boost/beast/core/flat_buffer.hpp>
@@ -11,30 +10,20 @@
 #include <functional>
 #include <memory>
 #include <string>
-#include <variant>
 
-namespace httplib::client {
+namespace httplib::detail {
 
-class chunk_reader::impl
+template<bool isRequest>
+class chunk_reader_core
 {
 public:
-    explicit impl() = default;
+    using parser_type = http::parser<isRequest, body::any_body>;
 
-    struct ctx
-    {
-        http::response_parser<body::any_body>* parser = nullptr;
-        http_stream* stream        = nullptr;
-        beast::flat_buffer* buffer = nullptr;
-        std::chrono::steady_clock::duration read_timeout {30};
-
-        std::function<std::size_t(std::uint64_t, std::string_view, beast::error_code&)> chunk_cb;
-        std::deque<std::string> chunks;
-        bool done = false;
-    };
+    chunk_reader_core() = default;
 
     void setup(http_stream& stream,
                beast::flat_buffer& buffer,
-               http::response_parser<body::any_body>& parser,
+               parser_type& parser,
                std::chrono::steady_clock::duration read_timeout)
     {
         ctx_               = std::make_shared<ctx>();
@@ -51,7 +40,7 @@ public:
             ctx->chunks.push_back(std::string(body));
             return body.size();
         };
-        ctx_->parser->on_chunk_body(ctx_->chunk_cb);
+        parser.on_chunk_body(ctx_->chunk_cb);
     }
 
     net::awaitable<std::string_view> read_chunk()
@@ -83,8 +72,20 @@ public:
     bool is_done() const { return ctx_ && ctx_->done && ctx_->chunks.empty(); }
 
 private:
+    struct ctx
+    {
+        parser_type* parser        = nullptr;
+        http_stream* stream        = nullptr;
+        beast::flat_buffer* buffer = nullptr;
+        std::chrono::steady_clock::duration read_timeout {30};
+
+        std::function<std::size_t(std::uint64_t, std::string_view, beast::error_code&)> chunk_cb;
+        std::deque<std::string> chunks;
+        bool done = false;
+    };
+
     std::shared_ptr<ctx> ctx_;
     std::string current_chunk_;
 };
 
-} // namespace httplib::client
+} // namespace httplib::detail

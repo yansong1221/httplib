@@ -1,8 +1,8 @@
 #include "client_impl.h"
 #include "body/compressor.hpp"
-#include "chunk_reader_impl.hpp"
-#include "chunk_writer_impl.hpp"
 #include "helper.hpp"
+#include "util/chunk_reader_impl.hpp"
+#include "util/chunk_writer_impl.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
@@ -285,12 +285,10 @@ net::awaitable<http_client::response> http_client::impl::co_read_response(
 
     if (!parser.is_done()) {
         if (parser.chunked() && chunked_read_handler_) {
-            auto& resp       = parser.get();
-            auto reader_impl = std::make_unique<chunk_reader::impl>();
-            reader_impl->setup(*stream_, buffer_, parser, timeout_);
-            chunk_reader reader(std::move(reader_impl));
+            auto reader_impl = std::make_unique<chunk_reader_impl<false>>(
+                *stream_, buffer_, parser, timeout_);
 
-            co_await chunked_read_handler_(reader, resp);
+            co_await chunked_read_handler_(*reader_impl, parser.get());
         }
         else {
             if (body_setup)
@@ -312,16 +310,15 @@ net::awaitable<http_client::response> http_client::impl::co_read_response(
 net::awaitable<http_client::response>
 http_client::impl::async_send_request_impl(http_client::request& req,
                                            const body_setup_fn& body_setup,
-                                           const chunked_write_handler_type& chunk_body_write)
+                                           const chunked_write_handler_type& chunked_write_handler)
 {
     co_await co_connect();
-    co_await co_write_request(req, chunk_body_write != nullptr);
+    co_await co_write_request(req, chunked_write_handler != nullptr);
 
-    if (chunk_body_write) {
-        auto writer_impl = std::make_unique<chunk_writer::impl>(*stream_, timeout_);
-        chunk_writer writer(std::move(writer_impl));
-        co_await chunk_body_write(writer);
-        co_await writer.close();
+    if (chunked_write_handler) {
+        auto writer = std::make_unique<chunk_writer_impl>(*stream_, timeout_);
+        co_await chunked_write_handler(*writer);
+        co_await writer->close();
     }
 
     co_return co_await co_read_response(body_setup, req.method() == http::verb::head);

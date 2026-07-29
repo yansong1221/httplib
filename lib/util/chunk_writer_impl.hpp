@@ -1,6 +1,5 @@
 #pragma once
-#include "httplib/client/chunk_writer.hpp"
-#include <variant>
+#include "httplib/chunk_writer.hpp"
 #include "stream/http_stream.hpp"
 #include <atomic>
 #include <boost/asio/write.hpp>
@@ -9,18 +8,18 @@
 #include <memory>
 #include <string>
 
-namespace httplib::client {
+namespace httplib {
 
-class chunk_writer::impl
+class chunk_writer_impl : public chunk_writer
 {
 public:
-    impl(http_stream& stream, std::chrono::steady_clock::duration write_timeout)
+    chunk_writer_impl(http_stream& stream, std::chrono::steady_clock::duration write_timeout)
         : stream_(&stream)
         , write_timeout_(write_timeout)
     {
     }
 
-    net::awaitable<void> write_chunk(std::string_view data)
+    net::awaitable<void> write_chunk(std::string_view data) override
     {
         std::string chunk(data);
         http::chunk_body chunk_b(net::buffer(chunk));
@@ -29,7 +28,7 @@ public:
         stream_->expires_never();
     }
 
-    net::awaitable<void> close()
+    net::awaitable<void> close() override
     {
         if (closed_.exchange(true))
             co_return;
@@ -45,4 +44,4 @@ private:
     std::atomic<bool> closed_ = false;
 };
 
-} // namespace httplib::client
+} // namespace httplib

@@ -162,25 +162,6 @@ TEST_CASE("Chunked: is_chunked_handler() false for Content-Length request", "[ch
     REQUIRE(as_string(resp) == "not-chunked");
 }
 
-TEST_CASE("Chunked: read_chunk() returns empty when not set up", "[chunked]")
-{
-    test_scaffold ts;
-
-    ts.router().set_http_handler<http::verb::post>(
-        "/chunked/noctx",
-        [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void> {
-            REQUIRE(!req.is_chunked_handler());
-            auto chunk = co_await req.read_chunk();
-            REQUIRE(chunk.empty());
-            resp.set_string_content("ok"sv, "text/plain");
-        });
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->post("/chunked/noctx", "data"sv));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(as_string(resp) == "ok");
-}
-
 TEST_CASE("Chunked: multi-verb chunked handler registration", "[chunked]")
 {
     test_scaffold ts;
@@ -396,7 +377,7 @@ TEST_CASE("Chunked: read_chunk() receives all chunks", "[chunked]")
             REQUIRE(req.is_chunked_handler());
             std::string accumulated;
             for (;;) {
-                auto chunk = co_await req.read_chunk();
+                auto chunk = co_await req.get_chunk_reader().read_chunk();
                 if (chunk.empty())
                     break;
                 accumulated.append(chunk);
@@ -421,7 +402,7 @@ TEST_CASE("Chunked: read_chunk() with multiple non-empty chunks", "[chunked]")
             int chunk_count = 0;
             std::string accumulated;
             for (;;) {
-                auto chunk = co_await req.read_chunk();
+                auto chunk = co_await req.get_chunk_reader().read_chunk();
                 if (chunk.empty())
                     break;
                 ++chunk_count;
@@ -446,7 +427,7 @@ TEST_CASE("Chunked: read_chunk() with single large chunk", "[chunked]")
             REQUIRE(req.is_chunked_handler());
             std::string accumulated;
             for (;;) {
-                auto chunk = co_await req.read_chunk();
+                auto chunk = co_await req.get_chunk_reader().read_chunk();
                 if (chunk.empty())
                     break;
                 accumulated.append(chunk);
@@ -471,7 +452,7 @@ TEST_CASE("Chunked: read_chunk() returns empty for zero-chunk request", "[chunke
             REQUIRE(req.is_chunked_handler());
             int count = 0;
             for (;;) {
-                auto chunk = co_await req.read_chunk();
+                auto chunk = co_await req.get_chunk_reader().read_chunk();
                 if (chunk.empty())
                     break;
                 ++count;
@@ -493,7 +474,7 @@ TEST_CASE("Chunked: read_chunk() respects is_chunked_handler() = true", "[chunke
         "/chunked/read-is-chunked",
         [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void> {
             bool was_chunked = req.is_chunked_handler();
-            auto chunk       = co_await req.read_chunk();
+            auto chunk       = co_await req.get_chunk_reader().read_chunk();
             resp.set_string_content(std::string(was_chunked ? "yes:" : "no:") +
                                         std::string(chunk),
                                     "text/plain");
@@ -516,7 +497,7 @@ TEST_CASE("Chunked: read_chunk() with path parameters", "[chunked]")
             auto id = std::string(req.path_param("id"));
             std::string accumulated;
             for (;;) {
-                auto chunk = co_await req.read_chunk();
+                auto chunk = co_await req.get_chunk_reader().read_chunk();
                 if (chunk.empty())
                     break;
                 accumulated.append(chunk);
@@ -541,7 +522,7 @@ TEST_CASE("Chunked: read_chunk() with wildcard path", "[chunked]")
             auto wild = std::string(req.path_param("*"));
             std::string accumulated;
             for (;;) {
-                auto chunk = co_await req.read_chunk();
+                auto chunk = co_await req.get_chunk_reader().read_chunk();
                 if (chunk.empty())
                     break;
                 accumulated.append(chunk);
@@ -565,7 +546,7 @@ TEST_CASE("Chunked: read_chunk() via PUT chunked handler", "[chunked]")
             REQUIRE(req.is_chunked_handler());
             std::string accumulated;
             for (;;) {
-                auto chunk = co_await req.read_chunk();
+                auto chunk = co_await req.get_chunk_reader().read_chunk();
                 if (chunk.empty())
                     break;
                 accumulated.append(chunk);
@@ -589,7 +570,7 @@ TEST_CASE("Chunked: read_chunk() via multi-verb chunked handler", "[chunked]")
             REQUIRE(req.is_chunked_handler());
             std::string accumulated;
             for (;;) {
-                auto chunk = co_await req.read_chunk();
+                auto chunk = co_await req.get_chunk_reader().read_chunk();
                 if (chunk.empty())
                     break;
                 accumulated.append(chunk);
@@ -618,7 +599,7 @@ TEST_CASE("Chunked: async_send_chunked_request via send_chunked_request", "[chun
             REQUIRE(req.is_chunked_handler());
             std::string accumulated;
             for (;;) {
-                auto chunk = co_await req.read_chunk();
+                auto chunk = co_await req.get_chunk_reader().read_chunk();
                 if (chunk.empty())
                     break;
                 accumulated.append(chunk);

@@ -1,5 +1,7 @@
 #pragma once
 #include "httplib/body/any_body.hpp"
+#include "httplib/chunk_reader.hpp"
+#include "httplib/chunk_writer.hpp"
 #include "httplib/config.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <filesystem>
@@ -8,9 +10,6 @@
 #include <memory>
 
 namespace httplib::client {
-
-class chunk_reader;
-class chunk_writer;
 
 class HTTPLIB_API http_client
 {
@@ -27,7 +26,7 @@ public:
     using request         = http::request<body::any_body>;
     using response_result = boost::system::result<response>;
 
-    using chunked_write_handler_type = std::function<net::awaitable<void>(chunk_writer& writer)>;
+    using chunked_write_handler_type = httplib::chunked_write_handler_type;
     using chunked_read_handler_type =
         std::function<net::awaitable<void>(chunk_reader& reader, response& resp)>;
 

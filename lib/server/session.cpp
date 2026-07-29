@@ -6,6 +6,7 @@
 #include "httplib/server/server.hpp"
 #include "request_impl.hpp"
 #include "response_impl.hpp"
+#include "util/chunk_writer_impl.hpp"
 #include "websocket_conn_impl.hpp"
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/write.hpp>
@@ -330,7 +331,7 @@ void session::http_task::abort()
 
 net::awaitable<bool> session::http_task::async_write(const request& req, response& resp)
 {
-    if (resp.get_impl()->stream_handler_) {
+    if (resp.get_impl()->chunked_write_handler_) {
         resp.get_impl()->chunked(true);
     }
     else {
@@ -357,11 +358,12 @@ net::awaitable<bool> session::http_task::async_write(const request& req, respons
     boost::system::error_code ec;
     http::response_serializer<body::any_body> serializer((*resp.get_impl()));
     {
-        if (resp.get_impl()->stream_handler_)
+        auto has_body_handler = resp.get_impl()->chunked_write_handler_ != nullptr;
+        if (has_body_handler)
             serializer.split(true);
 
-        while (resp.get_impl()->stream_handler_ ? !serializer.is_header_done()
-                                                : !serializer.is_done())
+        while (has_body_handler ? !serializer.is_header_done()
+                                : !serializer.is_done())
         {
             stream_.expires_after(serv_.write_timeout());
             co_await http::async_write_some(stream_, serializer, util::net_awaitable[ec]);
@@ -374,36 +376,10 @@ net::awaitable<bool> session::http_task::async_write(const request& req, respons
         stream_.expires_never();
     }
 
-    if (auto handler = resp.get_impl()->stream_handler_; handler) {
-        for (;;) {
-            bool has_more = co_await handler(buffer_, ec);
-            if (ec) {
-                serv_.logger()->trace("read chunk body failed: {}", ec.message());
-                co_return false;
-            }
-            if (buffer_.size() != 0) {
-                http::chunk_body chunk_b(buffer_.data());
-                stream_.expires_after(serv_.write_timeout());
-                co_await net::async_write(stream_, chunk_b, util::net_awaitable[ec]);
-                stream_.expires_never();
-                if (ec) {
-                    serv_.logger()->trace("write chunk body failed: {}", ec.message());
-                    co_return false;
-                }
-                buffer_.consume(buffer_.size());
-            }
-            if (!has_more) {
-                http::chunk_last chunk_last;
-                stream_.expires_after(serv_.write_timeout());
-                co_await net::async_write(stream_, chunk_last, util::net_awaitable[ec]);
-                stream_.expires_never();
-                if (ec) {
-                    serv_.logger()->trace("write chunk last failed: {}", ec.message());
-                    co_return false;
-                }
-                break;
-            }
-        }
+    if (auto handler = resp.get_impl()->chunked_write_handler_; handler) {
+        auto writer = std::make_unique<chunk_writer_impl>(stream_, serv_.write_timeout());
+        co_await handler(*writer);
+        co_await writer->close();
     }
     co_return true;
 }

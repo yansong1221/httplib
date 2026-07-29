@@ -1,5 +1,6 @@
 #pragma once
 #include "httplib/body/any_body.hpp"
+#include "httplib/chunk_reader.hpp"
 #include "httplib/config.hpp"
 #include "httplib/server/header_proxy.hpp"
 #include <any>
@@ -82,8 +83,9 @@ public:
     bool is_chunked_handler() const;
     bool is_buffer_body_handler() const;
 
-    net::awaitable<std::string_view> read_chunk();
     net::awaitable<std::string_view> read_buffer_body_some();
+
+    httplib::chunk_reader& get_chunk_reader();
 
 
     impl* get_impl();

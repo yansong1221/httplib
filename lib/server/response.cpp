@@ -132,11 +132,11 @@ void response::set_redirect(std::string_view url,
     impl_->set_redirect(url, status);
 }
 
-void response::set_stream_content_impl(coro_stream_handler_type&& handler,
-                                       std::string_view content_type,
-                                       http::status status /*= http::status::ok*/)
+void response::set_chunked_write_handler(chunked_write_handler_type&& handler,
+                                          std::string_view content_type,
+                                          http::status status /*= http::status::ok*/)
 {
-    impl_->set_stream_content_impl(std::move(handler), content_type, status);
+    impl_->set_chunked_write_handler(std::move(handler), content_type, status);
 }
 
 httplib::server::response::impl* response::get_impl()

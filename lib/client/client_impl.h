@@ -1,5 +1,6 @@
 #pragma once
 
+#include "httplib/chunk_reader.hpp"
 #include "httplib/client/client.hpp"
 #include "stream/http_stream.hpp"
 #include <functional>
@@ -37,7 +38,7 @@ public:
     net::awaitable<http_client::response_result>
     async_send_request(http_client::request& req,
                        const body_setup_fn& body_setup,
-                       const chunked_write_handler_type& body_write,
+                       const chunked_write_handler_type& chunked_write_handler,
                        bool retry) noexcept;
 
     net::awaitable<http_client::response_result>

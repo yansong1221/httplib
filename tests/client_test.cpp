@@ -1,5 +1,4 @@
 #include "httplib/body/string_body.hpp"
-#include "httplib/client/chunk_reader.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/server/request.hpp"
@@ -244,13 +243,11 @@ TEST_CASE("Client: custom chunk handler", "[client]")
         "/chunked",
         [](httplib::server::request&, httplib::server::response& resp) {
             auto counter = std::make_shared<int>(0);
-            resp.set_stream_content(
-                [counter](beast::flat_buffer& buf, beast::error_code& ec) -> net::awaitable<bool> {
-                    std::string chunk = "Chunk" + std::to_string((*counter)++);
-                    net::buffer_copy(buf.prepare(chunk.size()), net::buffer(chunk));
-                    buf.commit(chunk.size());
-                    ec.clear();
-                    co_return *counter < 5;
+            resp.set_chunked_write_handler(
+                [counter](httplib::chunk_writer& writer) -> net::awaitable<void> {
+                    while ((*counter) < 5) {
+                        co_await writer.write_chunk("Chunk" + std::to_string((*counter)++));
+                    }
                 },
                 "text/plain");
         });
@@ -259,7 +256,7 @@ TEST_CASE("Client: custom chunk handler", "[client]")
     std::vector<std::string> chunks;
     auto client = ts.make_client();
     client->set_chunked_read_handler(
-        [&](httplib::client::chunk_reader& reader,
+        [&](httplib::chunk_reader& reader,
             httplib::client::http_client::response& resp) -> net::awaitable<void> {
             while (true) {
                 auto chunk = co_await reader.read_chunk();
