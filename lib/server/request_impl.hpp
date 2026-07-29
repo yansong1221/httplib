@@ -8,6 +8,7 @@
 #include "stream/http_stream.hpp"
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
+#include <boost/beast/http/buffer_body.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/parser.hpp>
 #include <boost/beast/http/read.hpp>
@@ -81,7 +82,7 @@ public:
 
     struct buffer_body_read_ctx
     {
-        std::shared_ptr<http::request_parser<body::any_body>> parser;
+        std::shared_ptr<http::request_parser<http::buffer_body>> parser;
         detail::buffer_body_reader<true> reader;
     };
 
@@ -91,8 +92,7 @@ public:
                                    std::chrono::steady_clock::duration read_timeout)
     {
         auto parser =
-            std::make_shared<http::request_parser<body::any_body>>(std::move(header_parser));
-        parser->get().body() = body::buffer_body::value_type {};
+            std::make_shared<http::request_parser<http::buffer_body>>(std::move(header_parser));
 
         buffer_body_ctx_         = std::make_shared<buffer_body_read_ctx>();
         buffer_body_ctx_->parser = std::move(parser);

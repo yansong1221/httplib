@@ -1,8 +1,8 @@
 #pragma once
-#include "httplib/body/any_body.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "stream/http_stream.hpp"
 #include <boost/beast/core/flat_buffer.hpp>
+#include <boost/beast/http/buffer_body.hpp>
 #include <boost/beast/http/parser.hpp>
 #include <boost/beast/http/read.hpp>
 #include <chrono>
@@ -17,7 +17,7 @@ class buffer_body_reader
 public:
     void setup(http_stream& stream,
                beast::flat_buffer& buffer,
-               http::parser<isRequest, body::any_body>& parser,
+               http::parser<isRequest, http::buffer_body>& parser,
                std::chrono::steady_clock::duration read_timeout)
     {
         stream_       = &stream;
@@ -26,9 +26,9 @@ public:
         read_timeout_ = read_timeout;
         buf_data_     = std::vector<char>(8192);
 
-        auto& b      = std::get<body::buffer_body::value_type>(parser_->get().body());
-        b.data       = buf_data_.data();
-        b.size       = buf_data_.size();
+        auto& b = parser_->get().body();
+        b.data  = buf_data_.data();
+        b.size  = buf_data_.size();
     }
 
     net::awaitable<std::string_view> read_some()
@@ -44,8 +44,7 @@ public:
             if (ec)
                 throw boost::system::system_error(ec);
 
-            auto& body =
-                std::get<body::buffer_body::value_type>(parser_->get().body());
+            auto& body    = parser_->get().body();
             auto consumed = buf_data_.size() - body.size;
             if (consumed > 0) {
                 body.data = buf_data_.data();
@@ -58,9 +57,9 @@ public:
     bool is_done() const { return parser_ && parser_->is_done(); }
 
 private:
-    http::parser<isRequest, body::any_body>* parser_   = nullptr;
-    http_stream* stream_  = nullptr;
-    beast::flat_buffer* buffer_ = nullptr;
+    http::parser<isRequest, http::buffer_body>* parser_ = nullptr;
+    http_stream* stream_                               = nullptr;
+    beast::flat_buffer* buffer_                        = nullptr;
     std::chrono::steady_clock::duration read_timeout_ {30};
     std::vector<char> buf_data_;
 };
