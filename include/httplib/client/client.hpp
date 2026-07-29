@@ -9,6 +9,9 @@
 
 namespace httplib::client {
 
+class chunk_reader;
+class chunk_writer;
+
 class HTTPLIB_API http_client
 {
 public:
@@ -19,14 +22,14 @@ public:
         never
     };
 
-    using chunk_handler_type = std::function<void(std::string_view, boost::system::error_code&)>;
-    using chunk_body_generator =
-        std::function<net::awaitable<bool>(beast::flat_buffer& buf, boost::system::error_code& ec)>;
 
-    using response = http::response<body::any_body>;
-    using request  = http::request<body::any_body>;
-
+    using response        = http::response<body::any_body>;
+    using request         = http::request<body::any_body>;
     using response_result = boost::system::result<response>;
+
+    using chunked_write_handler_type = std::function<net::awaitable<void>(chunk_writer& writer)>;
+    using chunked_read_handler_type =
+        std::function<net::awaitable<void>(chunk_reader& reader, response& resp)>;
 
 public:
     explicit http_client(net::io_context& ex,
@@ -50,7 +53,7 @@ public:
     std::shared_ptr<spdlog::logger> logger() const;
     void set_logger(std::shared_ptr<spdlog::logger> logger);
 
-    void set_chunk_handler(chunk_handler_type&& handler);
+    void set_chunked_read_handler(chunked_read_handler_type&& handler);
 
     void set_max_redirects(int n);
 
@@ -244,13 +247,13 @@ public:
     net::awaitable<response_result>
     async_send_chunked_request(http::verb method,
                                std::string_view path,
-                               chunk_body_generator generator,
+                               chunked_write_handler_type handler,
                                const html::query_params& params = {},
                                const http::fields& headers      = http::fields());
 
     response_result send_chunked_request(http::verb method,
                                          std::string_view path,
-                                         chunk_body_generator generator,
+                                         chunked_write_handler_type handler,
                                          const html::query_params& params = {},
                                          const http::fields& headers      = http::fields());
 

@@ -2,6 +2,7 @@
 #include "httplib/body/json_body.hpp"
 #include "httplib/body/query_params_body.hpp"
 #include "httplib/body/string_body.hpp"
+#include "httplib/client/chunk_reader.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/ws_client.hpp"
@@ -379,11 +380,17 @@ static void run_http_client_demo(net::any_io_executor ex, std::string host, uint
 
     // Stream with chunk handler
     {
-        client.set_chunk_handler([](std::string_view chunk, boost::system::error_code&) {
-            spdlog::info("  chunk: {}", chunk.substr(0, chunk.size() - 1));
-        });
+        client.set_chunked_read_handler(
+            [](httplib::client::chunk_reader& reader, httplib::client::http_client::response&) -> net::awaitable<void> {
+                while (true) {
+                    auto chunk = co_await reader.read_chunk();
+                    if (chunk.empty())
+                        break;
+                    spdlog::info("  chunk: {}", chunk.substr(0, chunk.size() - 1));
+                }
+            });
         auto r = client.get("/api/stream");
-        client.set_chunk_handler(nullptr);
+        client.set_chunked_read_handler(nullptr);
         if (r)
             spdlog::info("GET /api/stream -> {}", r.value().result_int());
     }

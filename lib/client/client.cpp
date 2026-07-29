@@ -218,25 +218,25 @@ http_client::async_send_file(http::verb method,
 net::awaitable<http_client::response_result>
 http_client::async_send_chunked_request(http::verb method,
                                         std::string_view path,
-                                        chunk_body_generator generator,
+                                        chunked_write_handler_type handler,
                                         const html::query_params& params,
                                         const http::fields& headers)
 {
     auto req = impl_->make_http_request(method, path, headers);
     req.set(http::field::transfer_encoding, "chunked");
     req.chunked(true);
-    co_return co_await impl_->async_send_request_with_redirect(req, nullptr, generator);
+    co_return co_await impl_->async_send_request_with_redirect(req, nullptr, std::move(handler));
 }
 
 http_client::response_result http_client::send_chunked_request(http::verb method,
                                                                std::string_view path,
-                                                               chunk_body_generator generator,
+                                                               chunked_write_handler_type handler,
                                                                const html::query_params& params,
                                                                const http::fields& headers)
 {
     auto future = net::co_spawn(
         impl_->executor_,
-        async_send_chunked_request(method, path, std::move(generator), params, headers),
+        async_send_chunked_request(method, path, std::move(handler), params, headers),
         net::use_future);
     return future.get();
 }
@@ -644,9 +644,9 @@ bool http_client::is_open() const
     return impl_->is_open();
 }
 
-void http_client::set_chunk_handler(chunk_handler_type&& handler)
+void http_client::set_chunked_read_handler(chunked_read_handler_type&& handler)
 {
-    impl_->set_chunk_handler(std::move(handler));
+    impl_->set_chunked_read_handler(std::move(handler));
 }
 
 void http_client::set_max_redirects(int n)

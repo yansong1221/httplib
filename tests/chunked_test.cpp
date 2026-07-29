@@ -1,4 +1,5 @@
 #include "httplib/body/string_body.hpp"
+#include "httplib/client/chunk_writer.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/server/middleware/cors.hpp"
 #include "httplib/server/request.hpp"
@@ -6,7 +7,6 @@
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
 #include <boost/asio/io_context.hpp>
-#include <boost/beast/core/flat_buffer.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
 #include <spdlog/sinks/null_sink.h>
@@ -369,15 +369,9 @@ TEST_CASE("Chunked: chunked handler does not affect path that only has regular h
 static auto chunk_vec_generator(std::vector<std::string> chunks)
 {
     return [chunks = std::move(chunks),
-            idx = std::make_shared<size_t>(0)](beast::flat_buffer& buf,
-                                              boost::system::error_code& /*ec*/) -> net::awaitable<bool> {
-        if (*idx >= chunks.size()) {
-            co_return false;
-        }
-        auto& chunk = chunks[(*idx)++];
-        net::buffer_copy(buf.prepare(chunk.size()), net::buffer(chunk));
-        buf.commit(chunk.size());
-        co_return *idx < chunks.size();
+            idx = std::make_shared<size_t>(0)](httplib::client::chunk_writer& writer) -> net::awaitable<void> {
+        for (const auto& chunk : chunks)
+            co_await writer.write_chunk(chunk);
     };
 }
 

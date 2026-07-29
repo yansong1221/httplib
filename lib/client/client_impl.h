@@ -10,7 +10,7 @@ namespace httplib::client {
 class http_client::impl
 {
 public:
-    using body_setup_fn = std::function<void(body::any_body::value_type&)>;
+    using body_setup_fn = std::function<void(http_client::response&)>;
 
     impl(const net::any_io_executor& ex, std::string_view host, uint16_t port, bool ssl);
     ~impl();
@@ -23,7 +23,7 @@ public:
                                            std::string_view path,
                                            const http::fields& headers);
 
-    void set_chunk_handler(chunk_handler_type&& handler);
+    void set_chunked_read_handler(chunked_read_handler_type&& handler);
 
     void set_max_redirects(int n) { max_redirects_ = n; }
 
@@ -37,13 +37,13 @@ public:
     net::awaitable<http_client::response_result>
     async_send_request(http_client::request& req,
                        const body_setup_fn& body_setup,
-                       const chunk_body_generator& body_write,
+                       const chunked_write_handler_type& body_write,
                        bool retry) noexcept;
 
     net::awaitable<http_client::response_result>
     async_send_request_with_redirect(http_client::request& req,
                                      const body_setup_fn& body_setup,
-                                     const chunk_body_generator& body_write);
+                                     chunked_write_handler_type body_write);
 
 
     net::awaitable<http_client::response_result> async_download(http_client::request& req,
@@ -61,7 +61,7 @@ private:
     net::awaitable<http_client::response>
     async_send_request_impl(http_client::request& req,
                             const body_setup_fn& body_setup,
-                            const chunk_body_generator& body_write);
+                            const chunked_write_handler_type& body_write);
 
 public:
     net::any_io_executor executor_;
@@ -76,8 +76,8 @@ public:
     mutable std::recursive_mutex stream_mutex_;
     beast::flat_buffer buffer_;
 
-    std::function<std::size_t(std::uint64_t, std::string_view, boost::system::error_code&)>
-        chunk_handler_;
+
+    chunked_read_handler_type chunked_read_handler_;
     int max_redirects_ = 0;
 
     std::shared_ptr<spdlog::logger> default_logger_;

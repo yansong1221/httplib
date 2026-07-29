@@ -1,6 +1,7 @@
 #include "httplib/body/string_body.hpp"
 #include "httplib/body/json_body.hpp"
 #include "httplib/body/file_body.hpp"
+#include "httplib/client/chunk_reader.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
@@ -155,14 +156,22 @@ TEST_CASE("Response: set_stream_content with multiple chunks", "[response]")
     ts.start();
 
     std::string streamed;
-    ts.client->set_chunk_handler(
-        [&](std::string_view chunk, boost::system::error_code&) { streamed += chunk; });
+    ts.client->set_chunked_read_handler(
+        [&](httplib::client::chunk_reader& reader,
+            httplib::client::http_client::response&) -> net::awaitable<void> {
+            while (true) {
+                auto chunk = co_await reader.read_chunk();
+                if (chunk.empty())
+                    break;
+                streamed += chunk;
+            }
+        });
 
     auto resp = UNWRAP(ts.client->get("/stream"));
     REQUIRE(resp.result() == http::status::ok);
     REQUIRE(streamed == "ABC");
 
-    ts.client->set_chunk_handler(nullptr);
+    ts.client->set_chunked_read_handler(nullptr);
 }
 
 TEST_CASE("Response: set_form_data_content", "[response]")

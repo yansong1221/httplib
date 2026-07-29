@@ -42,22 +42,8 @@ public:
     {
     }
 
-    impl& operator=(impl&& other) noexcept
-    {
-        if (this == std::addressof(other))
-            return *this;
-
-        http::request<body::any_body>::operator=(std::move(other));
-        decoded_path_    = std::move(other.decoded_path_);
-        query_params_    = std::move(other.query_params_);
-        local_endpoint_  = std::move(other.local_endpoint_);
-        remote_endpoint_ = std::move(other.remote_endpoint_);
-        path_params_     = std::move(other.path_params_);
-        custom_data_     = std::move(other.custom_data_);
-        session_         = std::move(other.session_);
-        return *this;
-    }
-    impl(impl&& other) noexcept { impl::operator=(std::move(other)); }
+    impl& operator=(impl&& other) noexcept = default;
+    impl(impl&& other) noexcept = default;
 
     std::string_view path() const
     {

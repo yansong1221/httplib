@@ -1,4 +1,5 @@
 #include "httplib/body/string_body.hpp"
+#include "httplib/client/chunk_reader.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/server/request.hpp"
@@ -21,6 +22,7 @@
 using namespace std::string_view_literals;
 namespace http  = httplib::http;
 namespace net   = httplib::net;
+namespace beast = httplib::beast;
 
 namespace {
 
@@ -241,28 +243,39 @@ TEST_CASE("Client: custom chunk handler", "[client]")
     ts.router().set_http_handler<http::verb::get>(
         "/chunked",
         [](httplib::server::request&, httplib::server::response& resp) {
-            // Use set_empty_content to avoid content_length → forces chunked encoding
-            resp.set(http::field::content_type, "text/plain");
-            resp.set_string_content(std::string(10000, 'X'), "text/plain");
+            auto counter = std::make_shared<int>(0);
+            resp.set_stream_content(
+                [counter](beast::flat_buffer& buf, beast::error_code& ec) -> net::awaitable<bool> {
+                    std::string chunk = "Chunk" + std::to_string((*counter)++);
+                    net::buffer_copy(buf.prepare(chunk.size()), net::buffer(chunk));
+                    buf.commit(chunk.size());
+                    ec.clear();
+                    co_return *counter < 5;
+                },
+                "text/plain");
         });
     ts.start_with_routes();
 
     std::vector<std::string> chunks;
     auto client = ts.make_client();
-    client->set_chunk_handler([&](std::string_view data, auto&) {
-        chunks.emplace_back(data);
-    });
+    client->set_chunked_read_handler(
+        [&](httplib::client::chunk_reader& reader,
+            httplib::client::http_client::response& resp) -> net::awaitable<void> {
+            while (true) {
+                auto chunk = co_await reader.read_chunk();
+                if (chunk.empty())
+                    break;
+                chunks.push_back(std::string(chunk));
+            }
+        });
     auto resp = UNWRAP(client->get("/chunked"));
     REQUIRE(resp.result() == http::status::ok);
-    // When content_length is set, body arrives via string_body parser, not chunk handler.
-    // The chunk handler is designed for truly chunked (Transfer-Encoding: chunked) responses.
-    // Here we verify the total body is correct.
-    if (chunks.empty()) {
-        REQUIRE(as_string(resp) == std::string(10000, 'X'));
-    }
-    else {
-        REQUIRE(chunks.size() > 1);
-    }
+    REQUIRE(chunks.size() == 5);
+    REQUIRE(chunks[0] == "Chunk0");
+    REQUIRE(chunks[1] == "Chunk1");
+    REQUIRE(chunks[2] == "Chunk2");
+    REQUIRE(chunks[3] == "Chunk3");
+    REQUIRE(chunks[4] == "Chunk4");
 }
 
 TEST_CASE("Client host and port", "[client]")

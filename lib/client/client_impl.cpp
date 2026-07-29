@@ -1,5 +1,7 @@
 #include "client_impl.h"
 #include "body/compressor.hpp"
+#include "chunk_reader_impl.hpp"
+#include "chunk_writer_impl.hpp"
 #include "helper.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include <boost/algorithm/string/join.hpp>
@@ -54,7 +56,7 @@ http_client::request http_client::impl::make_http_request(http::verb method,
     req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
     req.set(http::field::accept, "*/*");
 
-    if (!chunk_handler_) {
+    if (!chunked_read_handler_) {
         const auto& encoding = body::compressor_factory::instance().supported_encoding();
         if (!encoding.empty())
             req.set(http::field::accept_encoding, boost::join(encoding, ","));
@@ -98,7 +100,7 @@ void http_client::impl::set_logger(std::shared_ptr<spdlog::logger> logger)
 net::awaitable<http_client::response_result>
 http_client::impl::async_send_request(http_client::request& req,
                                       const body_setup_fn& body_setup,
-                                      const chunk_body_generator& body_write,
+                                      const chunked_write_handler_type& body_write,
                                       bool retry) noexcept
 {
     boost::system::error_code ec;
@@ -134,7 +136,7 @@ http_client::impl::async_send_request(http_client::request& req,
 net::awaitable<http_client::response_result>
 http_client::impl::async_send_request_with_redirect(http_client::request& req,
                                                     const body_setup_fn& body_setup,
-                                                    const chunk_body_generator& body_write)
+                                                    chunked_write_handler_type body_write)
 {
     if (max_redirects_ <= 0)
         co_return co_await async_send_request(req, body_setup, body_write, true);
@@ -162,22 +164,22 @@ http_client::impl::async_send_request_with_redirect(http_client::request& req,
                 auto scheme_end = loc.find("://");
                 auto path_start = loc.find('/', scheme_end + 3);
                 auto host_port  = path_start == std::string_view::npos
-                                    ? loc.substr(scheme_end + 3)
-                                    : loc.substr(scheme_end + 3, path_start - scheme_end - 3);
+                                      ? loc.substr(scheme_end + 3)
+                                      : loc.substr(scheme_end + 3, path_start - scheme_end - 3);
 
-                auto colon     = host_port.find(':');
-                auto new_host  = colon == std::string_view::npos
-                                     ? std::string(host_port)
-                                     : std::string(host_port.substr(0, colon));
-                auto new_ssl   = loc.starts_with("https://");
+                auto colon        = host_port.find(':');
+                auto new_host     = colon == std::string_view::npos
+                                        ? std::string(host_port)
+                                        : std::string(host_port.substr(0, colon));
+                auto new_ssl      = loc.starts_with("https://");
                 uint16_t new_port = new_ssl ? 443 : 80;
                 if (colon != std::string_view::npos)
                     new_port =
                         static_cast<uint16_t>(std::stoul(std::string(host_port.substr(colon + 1))));
 
                 auto new_target = path_start == std::string_view::npos
-                                    ? std::string("/")
-                                    : std::string(loc.substr(path_start));
+                                      ? std::string("/")
+                                      : std::string(loc.substr(path_start));
 
                 req.target(std::move(new_target));
                 req.set(http::field::host, new_host);
@@ -186,7 +188,7 @@ http_client::impl::async_send_request_with_redirect(http_client::request& req,
                 new_impl->timeout_policy_ = timeout_policy_;
                 new_impl->timeout_        = timeout_;
                 new_impl->set_logger(logger());
-                new_impl->max_redirects_  = max_redirects_ - r - 1;
+                new_impl->max_redirects_ = max_redirects_ - r - 1;
 
                 co_return co_await new_impl->async_send_request(req, body_setup, body_write, true);
             }
@@ -258,8 +260,7 @@ net::awaitable<void> http_client::impl::co_write_request(http::request<body::any
                                                          bool headers_only)
 {
     http::request_serializer<body::any_body> serializer(req);
-    if (headers_only)
-        serializer.split(true);
+    serializer.split(headers_only);
 
     while (headers_only ? !serializer.is_header_done() : !serializer.is_done()) {
         expires_after();
@@ -271,65 +272,35 @@ net::awaitable<void> http_client::impl::co_write_request(http::request<body::any
 net::awaitable<http_client::response> http_client::impl::co_read_response(
     const body_setup_fn& body_setup /*= {}*/, bool is_head /*= false*/)
 {
-    if (is_head) {
-        http::response_parser<http::empty_body> parser;
-        parser.skip(true);
-        parser.header_limit(std::numeric_limits<std::uint32_t>::max());
-        parser.body_limit(std::numeric_limits<std::uint64_t>::max());
-
-        while (!parser.is_done()) {
-            expires_after();
-            co_await http::async_read_some(*stream_, buffer_, parser);
-        }
-
-        stream_->expires_never();
-        if (!parser.keep_alive())
-            close();
-
-        auto hr = parser.release();
-        http_client::response response;
-        response.version(hr.version());
-        response.result(hr.result());
-        response.keep_alive(hr.keep_alive());
-        for (const auto& field : hr)
-            response.set(field.name_string(), field.value());
-        co_return response;
-    }
-
     http::response_parser<body::any_body> parser;
+    parser.skip(is_head);
+    parser.eager(false);
     parser.header_limit(std::numeric_limits<std::uint32_t>::max());
     parser.body_limit(std::numeric_limits<std::uint64_t>::max());
-
-    if (body_setup)
-        body_setup(parser.get().body());
-
-    if (chunk_handler_)
-        parser.on_chunk_body(chunk_handler_);
 
     while (!parser.is_header_done()) {
         expires_after();
         co_await http::async_read_some(*stream_, buffer_, parser);
     }
 
-    const auto status = parser.get().result();
-    if (status == http::status::no_content || status == http::status::not_modified) {
-        stream_->expires_never();
-        if (!parser.keep_alive())
-            close();
+    if (!parser.is_done()) {
+        if (parser.chunked() && chunked_read_handler_) {
+            auto& resp       = parser.get();
+            auto reader_impl = std::make_unique<chunk_reader::impl>();
+            reader_impl->setup(*stream_, buffer_, parser, timeout_);
+            chunk_reader reader(std::move(reader_impl));
 
-        const auto& hr = parser.get();
-        http_client::response response;
-        response.version(hr.version());
-        response.result(hr.result());
-        response.keep_alive(hr.keep_alive());
-        for (const auto& field : hr)
-            response.set(field.name_string(), field.value());
-        co_return response;
-    }
+            co_await chunked_read_handler_(reader, resp);
+        }
+        else {
+            if (body_setup)
+                body_setup(parser.get());
 
-    while (!parser.is_done()) {
-        expires_after();
-        co_await http::async_read_some(*stream_, buffer_, parser);
+            while (!parser.is_done()) {
+                expires_after();
+                co_await http::async_read_some(*stream_, buffer_, parser);
+            }
+        }
     }
 
     stream_->expires_never();
@@ -341,61 +312,38 @@ net::awaitable<http_client::response> http_client::impl::co_read_response(
 net::awaitable<http_client::response>
 http_client::impl::async_send_request_impl(http_client::request& req,
                                            const body_setup_fn& body_setup,
-                                           const chunk_body_generator& chunk_body_write)
+                                           const chunked_write_handler_type& chunk_body_write)
 {
     co_await co_connect();
     co_await co_write_request(req, chunk_body_write != nullptr);
 
     if (chunk_body_write) {
-        for (boost::system::error_code ec;;) {
-            expires_after();
-            buffer_.consume(buffer_.size());
-            bool has_more = co_await chunk_body_write(buffer_, ec);
-            if (ec) {
-                throw boost::system::system_error(ec);
-            }
-            if (buffer_.size() != 0) {
-                http::chunk_body chunk_b(buffer_.data());
-                expires_after();
-                co_await net::async_write(*stream_, chunk_b, boost::asio::use_awaitable);
-            }
-            if (!has_more) {
-                http::chunk_last last_chunk;
-                expires_after();
-                co_await net::async_write(*stream_, last_chunk, boost::asio::use_awaitable);
-                break;
-            }
-        }
-        buffer_.consume(buffer_.size());
+        auto writer_impl = std::make_unique<chunk_writer::impl>(*stream_, timeout_);
+        chunk_writer writer(std::move(writer_impl));
+        co_await chunk_body_write(writer);
+        co_await writer.close();
     }
 
     co_return co_await co_read_response(body_setup, req.method() == http::verb::head);
 }
 
-void http_client::impl::set_chunk_handler(chunk_handler_type&& handler)
+
+void http_client::impl::set_chunked_read_handler(chunked_read_handler_type&& handler)
 {
-    if (!handler) {
-        chunk_handler_ = nullptr;
-        return;
-    }
-    chunk_handler_ = [handler = std::move(handler)](std::uint64_t remain,
-                                                    std::string_view body,
-                                                    boost::system::error_code& ec) -> std::size_t {
-        handler(body, ec);
-        return body.size();
-    };
+    chunked_read_handler_ = std::move(handler);
 }
 
 net::awaitable<http_client::response_result>
 http_client::impl::async_download(http_client::request& req, const fs::path& save_path)
 {
-    auto setup = [save_path](body::any_body::value_type& body) {
-        body     = body::file_body::value_type {};
-        auto& fb = std::get<body::file_body::value_type>(body);
+    auto setup = [save_path](response& resp) {
+        body::file_body::value_type fb;
         fb.open(save_path, std::ios::out | std::ios::binary | std::ios::trunc);
         if (!fb.is_open())
             throw boost::system::system_error(
                 boost::system::errc::make_error_code(boost::system::errc::permission_denied));
+
+        resp.body() = std::move(fb);
     };
     auto result = co_await async_send_request_with_redirect(req, setup, nullptr);
 
