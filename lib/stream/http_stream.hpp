@@ -1,4 +1,5 @@
 #pragma once
+#include <variant>
 #ifdef HTTPLIB_ENABLED_SSL
 #include "ssl_stream.hpp"
 #endif

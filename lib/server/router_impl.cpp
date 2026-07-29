@@ -50,7 +50,6 @@ router_impl::Node* router_impl::insert(Node* parent,
         if (!parent->wildcard_children) {
             auto node                 = std::make_unique<Node>();
             node->key                 = seg;
-            node->type                = Node::node_type::wildcard_node;
             parent->wildcard_children = std::move(node);
         }
         return insert(parent->wildcard_children.get(), segments, index + 1);
@@ -65,7 +64,6 @@ router_impl::Node* router_impl::insert(Node* parent,
 
         auto node        = std::make_unique<Node>();
         node->key        = seg;
-        node->type       = Node::node_type::param_node;
         node->param_name = seg.substr(1);
 
         parent->param_children.push_back(std::move(node));
@@ -85,7 +83,6 @@ router_impl::Node* router_impl::insert(Node* parent,
 
         auto node        = std::make_unique<Node>();
         node->key        = seg;
-        node->type       = Node::node_type::regex_node;
         node->param_name = inside.substr(0, pos);
         node->regex      = std::regex(key.begin(), key.end());
 
@@ -96,64 +93,37 @@ router_impl::Node* router_impl::insert(Node* parent,
     if (inserted) {
         iter->second       = std::make_unique<Node>();
         iter->second->key  = seg;
-        iter->second->type = Node::node_type::static_node;
     }
     return insert(iter->second.get(), segments, index + 1);
 }
 
 
 // ---------------- 匹配路由 ----------------
-net::awaitable<void> router_impl::process_routing(request& req, response& resp) const
+net::awaitable<void>
+router_impl::process_routing(const route_match& match, request& req, response& resp) const
 {
-    std::shared_lock lock(mutex_);
-
-    auto segments = detail::split_segments(req.path());
-
-    std::set<std::string> allows;
-    bool is_chunked_handler     = req.is_chunked_handler();
-    bool is_buffer_body_handler = req.is_buffer_body_handler();
-
-    auto pred = [&](const Node* node) {
-        collect_allows(allows, node, true);
-        if (is_chunked_handler) {
-            return node->chunked_handlers.find(req.method()) != node->chunked_handlers.end();
-        }
-        if (is_buffer_body_handler) {
-            return node->buffer_body_handlers.find(req.method()) !=
-                   node->buffer_body_handlers.end();
-        }
-        return node->handlers.find(req.method()) != node->handlers.end();
-    };
-
-    std::unordered_map<std::string, std::string> params;
-    auto node = match_nodes(root_.get(), segments, 0, params, pred);
-
-    if (node) {
-        req.set_path_param(std::move(params));
-        if (is_chunked_handler) {
-            auto iter = node->chunked_handlers.find(req.method());
-            if (iter != node->chunked_handlers.end()) {
-                co_await iter->second(req, resp);
-                co_return;
-            }
-        }
-        else if (is_buffer_body_handler) {
-            auto iter = node->buffer_body_handlers.find(req.method());
-            if (iter != node->buffer_body_handlers.end()) {
-                co_await iter->second(req, resp);
-                co_return;
-            }
-        }
-        else {
-            auto iter = node->handlers.find(req.method());
-            if (iter != node->handlers.end()) {
-                co_await iter->second(req, resp);
-                co_return;
-            }
-        }
+    if (!match.node) {
+        write_error(resp, match.allows);
+        co_return;
     }
 
-    write_error(resp, allows);
+    req.set_path_param(std::unordered_map<std::string, std::string>(match.params));
+
+    if (match.body == body_kind::chunked) {
+        auto iter = match.node->chunked_handlers.find(req.method());
+        if (iter != match.node->chunked_handlers.end())
+            co_await iter->second(req, resp);
+    }
+    else if (match.body == body_kind::buffer_body) {
+        auto iter = match.node->buffer_body_handlers.find(req.method());
+        if (iter != match.node->buffer_body_handlers.end())
+            co_await iter->second(req, resp);
+    }
+    else {
+        auto iter = match.node->handlers.find(req.method());
+        if (iter != match.node->handlers.end())
+            co_await iter->second(req, resp);
+    }
 }
 
 void router_impl::set_not_found_handler_impl(coro_http_handler_type&& handler)
@@ -191,59 +161,58 @@ std::optional<router_impl::ws_handler_entry> router_impl::query_ws_handler(reque
 
     return node->ws_handler;
 }
-net::awaitable<bool> router_impl::pre_routing(request& req, response& resp) const
+net::awaitable<router_impl::route_match> router_impl::pre_routing(request& req) const
 {
-    switch (req.method()) {
-        case http::verb::get:
-        case http::verb::head:
-        case http::verb::trace:
-        case http::verb::connect:
-        case http::verb::options: co_return true; break;
-        default: {
-            auto segments = detail::split_segments(req.path());
+    route_match result;
 
-            std::unordered_map<std::string, std::string> params;
-            std::set<std::string> allows;
+    std::shared_lock lock(mutex_);
+    auto segments = detail::split_segments(req.path());
+    bool is_chunked_te = req.get_impl()->chunked();
 
-            auto node = match_nodes(root_.get(), segments, 0, params, [&](const Node* node) {
-                bool is_chunked_te = req.get_impl()->chunked();
-                collect_allows(allows, node, is_chunked_te);
+    auto node = match_nodes(root_.get(), segments, 0, result.params, [&](const Node* node) {
+        collect_allows(result.allows, node, is_chunked_te);
+        if (node->handlers.find(req.method()) != node->handlers.end())
+            return true;
+        if (is_chunked_te &&
+            node->chunked_handlers.find(req.method()) != node->chunked_handlers.end())
+            return true;
+        if (node->buffer_body_handlers.find(req.method()) != node->buffer_body_handlers.end())
+            return true;
+        return false;
+    });
 
-                if (node->handlers.find(req.method()) != node->handlers.end())
-                    return true;
-                if (is_chunked_te &&
-                    node->chunked_handlers.find(req.method()) != node->chunked_handlers.end())
-                    return true;
-                if (node->buffer_body_handlers.find(req.method()) !=
-                    node->buffer_body_handlers.end())
-                    return true;
-                return false;
-            });
-
-            if (node) {
-                if (node->handlers.find(req.method()) != node->handlers.end()) { co_return true; }
-                if (req.get_impl()->chunked() &&
-                    node->chunked_handlers.find(req.method()) != node->chunked_handlers.end())
-                {
-                    req.get_impl()->set_is_chunked_handler(true);
-                    co_return true;
-                }
-                if (node->buffer_body_handlers.find(req.method()) !=
-                    node->buffer_body_handlers.end())
-                {
-                    req.get_impl()->set_is_buffer_body_handler(true);
-                    co_return true;
-                }
-            }
-            resp.get_impl()->keep_alive(false);
-            write_error(resp, allows);
-            co_return false;
-
-        } break;
+    if (!node) {
+        co_return result;
     }
-    resp.get_impl()->keep_alive(false);
-    resp.set_error_content(httplib::http::status::not_found);
-    co_return false;
+
+    result.node = node;
+
+    switch (req.method()) {
+    case http::verb::get:
+    case http::verb::head:
+    case http::verb::trace:
+    case http::verb::connect:
+    case http::verb::options:
+        result.body = body_kind::none;
+        co_return result;
+    default:
+        break;
+    }
+
+    if (node->handlers.find(req.method()) != node->handlers.end()) {
+        result.body = body_kind::none;
+        co_return result;
+    }
+    if (is_chunked_te &&
+        node->chunked_handlers.find(req.method()) != node->chunked_handlers.end()) {
+        result.body = body_kind::chunked;
+        co_return result;
+    }
+    if (node->buffer_body_handlers.find(req.method()) != node->buffer_body_handlers.end()) {
+        result.body = body_kind::buffer_body;
+        co_return result;
+    }
+    co_return result;
 }
 
 const router_impl::Node*

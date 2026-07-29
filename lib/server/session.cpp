@@ -168,6 +168,41 @@ session::http_task::http_task(http_stream&& stream,
 {
 }
 
+static net::awaitable<bool>
+co_read_normal_body(http_stream& stream,
+                    beast::flat_buffer& buffer,
+                    http::request_parser<http::empty_body>&& header_parser,
+                    request& req,
+                    const http_server::impl& serv)
+{
+    boost::system::error_code ec;
+    http::request_parser<body::any_body> body_parser(std::move(header_parser));
+
+    if (!serv.upload_dir().empty()) {
+        auto ct = body_parser.get()[http::field::content_type];
+        if (ct.starts_with("multipart/form-data")) {
+            auto& body       = body_parser.get().body();
+            body             = body::form_data_body::value_type {};
+            auto& fd         = std::get<body::form_data_body::value_type>(body);
+            fd.save_dir      = serv.upload_dir();
+            fd.max_file_size = serv.upload_file_limit();
+        }
+    }
+
+    while (!body_parser.is_done()) {
+        stream.expires_after(serv.read_timeout());
+        co_await http::async_read_some(stream, buffer, body_parser, util::net_awaitable[ec]);
+        if (ec) {
+            stream.expires_never();
+            serv.logger()->trace("read http body failed: {}", ec.message());
+            co_return false;
+        }
+    }
+    stream.expires_never();
+    req.get_impl()->body() = std::move(body_parser.release().body());
+    co_return true;
+}
+
 net::awaitable<session::task::ptr> session::http_task::then()
 
 {
@@ -231,51 +266,35 @@ net::awaitable<session::task::ptr> session::http_task::then()
         };
 
         try {
-            if (co_await _router.pre_routing(req, resp)) {
+            auto match = co_await _router.pre_routing(req);
+            if (!match.node) {
+                resp.get_impl()->keep_alive(false);
+                _router.write_error(resp, match.allows);
+            }
+            else {
                 if (beast::iequals(header[http::field::expect], "100-continue")) {
-                    // send 100 response
-                    auto resp = response::impl::make_response(header.version(), true);
-                    resp.set_empty_content(http::status::continue_);
-                    if (!co_await async_write(req, resp))
+                    auto cont_resp = response::impl::make_response(header.version(), true);
+                    cont_resp.set_empty_content(http::status::continue_);
+                    if (!co_await async_write(req, cont_resp))
                         co_return nullptr;
                 }
 
-                if (req.get_impl()->is_buffer_body_handler()) {
+                if (match.body == router_impl::body_kind::buffer_body) {
                     req.get_impl()->setup_buffer_body_reading(
                         stream_, buffer_, std::move(header_parser), serv_.read_timeout());
                 }
-                else if (req.get_impl()->is_chunked_handler()) {
+                else if (match.body == router_impl::body_kind::chunked) {
                     req.get_impl()->setup_chunked_reading(
                         stream_, buffer_, std::move(header_parser), serv_.read_timeout());
                 }
                 else {
-                    http::request_parser<body::any_body> body_parser(std::move(header_parser));
-                    if (!serv_.upload_dir().empty()) {
-                        auto ct = body_parser.get()[http::field::content_type];
-                        if (ct.starts_with("multipart/form-data")) {
-                            auto& body       = body_parser.get().body();
-                            body             = body::form_data_body::value_type {};
-                            auto& fd         = std::get<body::form_data_body::value_type>(body);
-                            fd.save_dir      = serv_.upload_dir();
-                            fd.max_file_size = serv_.upload_file_limit();
-                        }
-                    }
-                    while (!body_parser.is_done()) {
-                        stream_.expires_after(serv_.read_timeout());
-                        co_await http::async_read_some(
-                            stream_, buffer_, body_parser, util::net_awaitable[ec]);
-                        if (ec) {
-                            stream_.expires_never();
-                            serv_.logger()->trace("read http body failed: {}", ec.message());
-                            co_return nullptr;
-                        }
-                    }
-                    stream_.expires_never();
-                    req.get_impl()->body() = std::move(body_parser.release().body());
+                    if (!co_await co_read_normal_body(
+                            stream_, buffer_, std::move(header_parser), req, serv_))
+                        co_return nullptr;
                 }
 
                 h_start = std::chrono::steady_clock::now();
-                co_await _router.process_routing(req, resp);
+                co_await _router.process_routing(match, req, resp);
                 handler_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now() - h_start);
             }

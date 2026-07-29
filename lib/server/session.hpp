@@ -1,7 +1,6 @@
 #pragma once
 #include "httplib/config.hpp"
 #include "httplib/server/request.hpp"
-#include "httplib/server/response.hpp"
 #include "httplib/server/server.hpp"
 #include "stream/http_stream.hpp"
 #include "stream/websocket_stream.hpp"
@@ -12,6 +11,8 @@
 #include <memory>
 
 namespace httplib::server {
+
+class response;
 
 class websocket_conn_impl;
 

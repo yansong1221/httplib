@@ -1,4 +1,5 @@
 #pragma once
+#include "util/buffer_body_reader.hpp"
 #include "util/chunk_reader_impl.hpp"
 #include "httplib/server/middleware/session.hpp"
 #include "httplib/server/request.hpp"
@@ -10,10 +11,7 @@
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/parser.hpp>
 #include <boost/beast/http/read.hpp>
-#include <boost/beast/http/string_body.hpp>
 #include <chrono>
-#include <deque>
-#include <functional>
 
 namespace httplib::server {
 
@@ -84,11 +82,7 @@ public:
     struct buffer_body_read_ctx
     {
         std::shared_ptr<http::request_parser<body::any_body>> parser;
-        beast::flat_buffer* buffer = nullptr;
-        std::vector<char> buf_data = std::vector<char>(8192);
-        http_stream* stream        = nullptr;
-        std::chrono::steady_clock::duration read_timeout {30};
-        std::string current_chunk;
+        detail::buffer_body_reader<true> reader;
     };
 
     void setup_buffer_body_reading(http_stream& stream,
@@ -100,23 +94,15 @@ public:
             std::make_shared<http::request_parser<body::any_body>>(std::move(header_parser));
         parser->get().body() = body::buffer_body::value_type {};
 
-        buffer_body_ctx_               = std::make_shared<buffer_body_read_ctx>();
-        buffer_body_ctx_->parser       = std::move(parser);
-        buffer_body_ctx_->buffer       = &buffer;
-        buffer_body_ctx_->stream       = &stream;
-        buffer_body_ctx_->read_timeout = read_timeout;
-
-        auto& body =
-            std::get<body::buffer_body::value_type>(buffer_body_ctx_->parser->get().body());
-        body.data = buffer_body_ctx_->buf_data.data();
-        body.size = buffer_body_ctx_->buf_data.size();
+        buffer_body_ctx_         = std::make_shared<buffer_body_read_ctx>();
+        buffer_body_ctx_->parser = std::move(parser);
+        buffer_body_ctx_->reader.setup(
+            stream, buffer, *buffer_body_ctx_->parser, read_timeout);
     }
 
-    void set_is_chunked_handler(bool v) { is_chunked_handler_ = v; }
-    bool is_chunked_handler() const { return is_chunked_handler_; }
+    bool is_chunked_handler() const { return chunk_reader_ != nullptr; }
 
-    void set_is_buffer_body_handler(bool v) { is_buffer_body_handler_ = v; }
-    bool is_buffer_body_handler() const { return is_buffer_body_handler_; }
+    bool is_buffer_body_handler() const { return buffer_body_ctx_ != nullptr; }
 
     void setup_chunked_reading(http_stream& stream,
                                beast::flat_buffer& buffer,
@@ -135,34 +121,7 @@ public:
     {
         if (!buffer_body_ctx_)
             co_return std::string_view {};
-
-        for (;;) {
-            if (buffer_body_ctx_->parser->is_done()) {
-                chunk_buf_.clear();
-                co_return std::string_view {};
-            }
-
-            boost::system::error_code ec;
-            buffer_body_ctx_->stream->expires_after(buffer_body_ctx_->read_timeout);
-            co_await http::async_read_some(*buffer_body_ctx_->stream,
-                                           *buffer_body_ctx_->buffer,
-                                           *buffer_body_ctx_->parser,
-                                           util::net_awaitable[ec]);
-            buffer_body_ctx_->stream->expires_never();
-            if (ec)
-                throw boost::system::system_error(ec);
-
-            auto& body =
-                std::get<body::buffer_body::value_type>(buffer_body_ctx_->parser->get().body());
-            auto consumed = buffer_body_ctx_->buf_data.size() - body.size;
-            if (consumed > 0) {
-                buffer_body_ctx_->current_chunk =
-                    std::string(buffer_body_ctx_->buf_data.data(), consumed);
-                body.data = buffer_body_ctx_->buf_data.data();
-                body.size = buffer_body_ctx_->buf_data.size();
-                co_return buffer_body_ctx_->current_chunk;
-            }
-        }
+        co_return co_await buffer_body_ctx_->reader.read_some();
     }
 
     std::string_view operator[](http::field name) const { return this->base()[name]; }
@@ -218,11 +177,8 @@ private:
     std::any custom_data_;
     std::shared_ptr<middleware::session> session_;
 
-    bool is_chunked_handler_     = false;
-    bool is_buffer_body_handler_ = false;
     std::shared_ptr<http::request_parser<body::any_body>> chunk_parser_;
     std::unique_ptr<chunk_reader> chunk_reader_;
     std::shared_ptr<buffer_body_read_ctx> buffer_body_ctx_;
-    std::string chunk_buf_;
 };
 } // namespace httplib::server

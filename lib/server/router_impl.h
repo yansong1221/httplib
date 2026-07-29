@@ -1,8 +1,6 @@
 #pragma once
-#include "httplib/server/request.hpp"
-#include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
-#include <boost/beast/http.hpp>
+#include <boost/beast/http/verb.hpp>
 #include <functional>
 #include <memory>
 #include <regex>
@@ -14,12 +12,31 @@
 
 namespace httplib::server {
 
+class request;
+class response;
+
 class router_impl : public router
 {
 public:
     router_impl();
 
-    net::awaitable<void> process_routing(request& req, response& resp) const;
+    struct Node;
+    enum class body_kind
+    {
+        none,
+        chunked,
+        buffer_body,
+    };
+
+    struct route_match
+    {
+        std::set<std::string> allows;
+        body_kind body = body_kind::none;
+        const Node* node = nullptr;
+        std::unordered_map<std::string, std::string> params;
+    };
+
+    net::awaitable<void> process_routing(const route_match& match, request& req, response& resp) const;
 
     struct ws_handler_entry
     {
@@ -29,7 +46,7 @@ public:
     };
     std::optional<ws_handler_entry> query_ws_handler(request& req) const;
 
-    net::awaitable<bool> pre_routing(request& req, response& resp) const;
+    net::awaitable<route_match> pre_routing(request& req) const;
     net::awaitable<void> post_routing(request& req, response& resp) const;
 
 protected:
@@ -49,28 +66,19 @@ protected:
                                       std::string_view key,
                                       coro_http_handler_type&& handler) override;
 
-private:
-    struct Node;
+public:
+    static void write_error(response& resp, const std::set<std::string>& allows);
 
+private:
     static void collect_allows(std::set<std::string>& allows,
                                const Node* node,
                                bool include_chunked);
-    static void write_error(response& resp, const std::set<std::string>& allows);
 
     struct Node
     {
-        enum class node_type
-        {
-            static_node,
-            param_node,
-            regex_node,
-            wildcard_node,
-        };
-
-        std::string key; // Radix key (静态路径段)
+        std::string key;
         std::string param_name;
         std::regex regex;
-        node_type type = node_type::static_node;
 
         std::unordered_map<http::verb, coro_http_handler_type> handlers;
         std::unordered_map<http::verb, coro_http_handler_type> chunked_handlers;
