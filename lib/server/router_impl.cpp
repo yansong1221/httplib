@@ -114,12 +114,7 @@ net::awaitable<void> router_impl::process_routing(request& req, response& resp) 
     bool is_buffer_body_handler = req.is_buffer_body_handler();
 
     auto pred = [&](const Node* node) {
-        for (const auto& v : node->handlers)
-            allows.insert(to_string(v.first));
-        for (const auto& v : node->chunked_handlers)
-            allows.insert(to_string(v.first));
-        for (const auto& v : node->buffer_body_handlers)
-            allows.insert(to_string(v.first));
+        collect_allows(allows, node, true);
         if (is_chunked_handler) {
             return node->chunked_handlers.find(req.method()) != node->chunked_handlers.end();
         }
@@ -158,12 +153,7 @@ net::awaitable<void> router_impl::process_routing(request& req, response& resp) 
         }
     }
 
-    if (!allows.empty()) {
-        resp.set(http::field::allow, boost::join(allows, ","));
-        resp.set_error_content(httplib::http::status::method_not_allowed);
-        co_return;
-    }
-    resp.set_error_content(httplib::http::status::not_found);
+    write_error(resp, allows);
 }
 
 void router_impl::set_not_found_handler_impl(coro_http_handler_type&& handler)
@@ -216,16 +206,8 @@ net::awaitable<bool> router_impl::pre_routing(request& req, response& resp) cons
             std::set<std::string> allows;
 
             auto node = match_nodes(root_.get(), segments, 0, params, [&](const Node* node) {
-                for (const auto& v : node->handlers)
-                    allows.insert(to_string(v.first));
-
                 bool is_chunked_te = req.get_impl()->chunked();
-                if (is_chunked_te) {
-                    for (const auto& v : node->chunked_handlers)
-                        allows.insert(to_string(v.first));
-                }
-                for (const auto& v : node->buffer_body_handlers)
-                    allows.insert(to_string(v.first));
+                collect_allows(allows, node, is_chunked_te);
 
                 if (node->handlers.find(req.method()) != node->handlers.end())
                     return true;
@@ -253,12 +235,9 @@ net::awaitable<bool> router_impl::pre_routing(request& req, response& resp) cons
                     co_return true;
                 }
             }
-            if (!allows.empty()) {
-                resp.get_impl()->keep_alive(false);
-                resp.set(http::field::allow, boost::join(allows, ","));
-                resp.set_error_content(httplib::http::status::method_not_allowed);
-                co_return false;
-            }
+            resp.get_impl()->keep_alive(false);
+            write_error(resp, allows);
+            co_return false;
 
         } break;
     }
@@ -366,5 +345,26 @@ void router_impl::set_buffer_body_http_handler_impl(http::verb method,
     node->buffer_body_handlers[method] = std::move(handler);
 }
 
+void router_impl::collect_allows(std::set<std::string>& allows, const Node* node, bool include_chunked)
+{
+    for (const auto& v : node->handlers)
+        allows.insert(to_string(v.first));
+    for (const auto& v : node->buffer_body_handlers)
+        allows.insert(to_string(v.first));
+    if (include_chunked) {
+        for (const auto& v : node->chunked_handlers)
+            allows.insert(to_string(v.first));
+    }
+}
+
+void router_impl::write_error(response& resp, const std::set<std::string>& allows)
+{
+    if (!allows.empty()) {
+        resp.set(http::field::allow, boost::join(allows, ","));
+        resp.set_error_content(httplib::http::status::method_not_allowed);
+        return;
+    }
+    resp.set_error_content(httplib::http::status::not_found);
+}
 
 } // namespace httplib::server

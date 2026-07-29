@@ -1,6 +1,6 @@
 #include "httplib/server/response.hpp"
 #include "html/html.h"
-#include "mime_types.hpp"
+#include "util/mime_types.hpp"
 #include "response_impl.hpp"
 #include <boost/beast/version.hpp>
 #include <fmt/format.h>

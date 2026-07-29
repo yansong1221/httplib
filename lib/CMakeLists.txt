@@ -1,4 +1,4 @@
-set(MOUDLE httplib)
+set(MODULE httplib)
 
 file(GLOB_RECURSE HTTPLIB_HEADER_FILES "${HTTPLIB_INCLUDE_DIR}/*.h" "${HTTPLIB_INCLUDE_DIR}/*.hpp" "${HTTPLIB_INCLUDE_DIR}/*.inl")
 source_group(TREE ${HTTPLIB_INCLUDE_DIR} PREFIX "include" FILES ${HTTPLIB_HEADER_FILES})
@@ -11,18 +11,18 @@ find_package(spdlog CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 
 if(HTTPLIB_SHARED_LIBRARY)
-    add_library(${MOUDLE} SHARED ${HTTPLIB_HEADER_FILES} ${HTTPLIB_SOURCE_FILES})
-    target_compile_definitions(${MOUDLE} PUBLIC HTTPLIB_SHARED_LIBRARY PRIVATE HTTPLIB_EXPORTS)
+    add_library(${MODULE} SHARED ${HTTPLIB_HEADER_FILES} ${HTTPLIB_SOURCE_FILES})
+    target_compile_definitions(${MODULE} PUBLIC HTTPLIB_SHARED_LIBRARY PRIVATE HTTPLIB_EXPORTS)
 else()
-    add_library(${MOUDLE} STATIC ${HTTPLIB_HEADER_FILES} ${HTTPLIB_SOURCE_FILES})
+    add_library(${MODULE} STATIC ${HTTPLIB_HEADER_FILES} ${HTTPLIB_SOURCE_FILES})
 endif()
 
-target_link_libraries(${MOUDLE} 
+target_link_libraries(${MODULE} 
 PUBLIC  Boost::beast Boost::json
 PUBLIC  spdlog::spdlog fmt::fmt
 )
 
-target_include_directories(${MOUDLE} 
+target_include_directories(${MODULE} 
     PUBLIC 
         $<BUILD_INTERFACE:${HTTPLIB_INCLUDE_DIR}>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
@@ -30,20 +30,20 @@ target_include_directories(${MOUDLE}
 )
 
 if (MSVC)
-    target_compile_options(${MOUDLE} PRIVATE /bigobj)
+    target_compile_options(${MODULE} PRIVATE /bigobj)
 endif()
 
 if(HTTPLIB_ENABLED_SSL)
     find_package(OpenSSL REQUIRED)
-    target_compile_definitions(${MOUDLE} PUBLIC HTTPLIB_ENABLED_SSL)
-    target_link_libraries(${MOUDLE} PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    target_compile_definitions(${MODULE} PUBLIC HTTPLIB_ENABLED_SSL)
+    target_link_libraries(${MODULE} PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 endif()
 if(HTTPLIB_ENABLED_COMPRESS)
     find_package(Boost REQUIRED COMPONENTS iostreams CONFIG)
     find_package(unofficial-brotli CONFIG REQUIRED)
 
-    target_compile_definitions(${MOUDLE} PUBLIC HTTPLIB_ENABLED_COMPRESS)
-    target_link_libraries(${MOUDLE} PRIVATE Boost::iostreams unofficial::brotli::brotlidec unofficial::brotli::brotlienc)
+    target_compile_definitions(${MODULE} PUBLIC HTTPLIB_ENABLED_COMPRESS)
+    target_link_libraries(${MODULE} PRIVATE Boost::iostreams unofficial::brotli::brotlidec unofficial::brotli::brotlienc)
 endif()
 
 
@@ -53,7 +53,7 @@ if (WIN32)
     get_WIN32_WINNT(winnt_version)
 
     target_compile_definitions(
-        ${MOUDLE}
+        ${MODULE}
         PUBLIC
             _WIN32_WINNT=${winnt_version}   # Keep this public so user's can't accidentally use conflicting versions
     )
@@ -61,7 +61,7 @@ endif()
 
 include(GNUInstallDirs)
 
-install(TARGETS ${MOUDLE}
+install(TARGETS ${MODULE}
     EXPORT httplib-targets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}

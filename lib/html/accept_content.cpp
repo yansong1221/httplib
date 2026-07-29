@@ -1,5 +1,5 @@
 #include "httplib/html/accept_content.hpp"
-#include "body/compressor.hpp"
+#include "util/compressor.hpp"
 #include "httplib/util/misc.hpp"
 
 namespace httplib::html {

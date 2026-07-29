@@ -1,5 +1,4 @@
 #include "ws_client_impl.h"
-#include "helper.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include <boost/asio/detached.hpp>

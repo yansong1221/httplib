@@ -6,6 +6,7 @@
 #include <functional>
 #include <memory>
 #include <regex>
+#include <set>
 #include <shared_mutex>
 #include <string>
 #include <unordered_map>
@@ -49,6 +50,13 @@ protected:
                                       coro_http_handler_type&& handler) override;
 
 private:
+    struct Node;
+
+    static void collect_allows(std::set<std::string>& allows,
+                               const Node* node,
+                               bool include_chunked);
+    static void write_error(response& resp, const std::set<std::string>& allows);
+
     struct Node
     {
         enum class node_type

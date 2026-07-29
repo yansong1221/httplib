@@ -1,5 +1,5 @@
 #include "session.hpp"
-#include "body/compressor.hpp"
+#include "util/compressor.hpp"
 #include "httplib/html/accept_content.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"

@@ -2,7 +2,7 @@
 #include "html/html.h"
 #include "httplib/chunk_writer.hpp"
 #include "httplib/server/response.hpp"
-#include "mime_types.hpp"
+#include "util/mime_types.hpp"
 #include <boost/beast/version.hpp>
 #include <fmt/format.h>
 

@@ -1,5 +1,5 @@
 #include "httplib/body/string_body.hpp"
-#include "httplib/client/chunk_writer.hpp"
+#include "httplib/chunk_writer.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/server/middleware/cors.hpp"
 #include "httplib/server/request.hpp"
@@ -350,7 +350,7 @@ TEST_CASE("Chunked: chunked handler does not affect path that only has regular h
 static auto chunk_vec_generator(std::vector<std::string> chunks)
 {
     return [chunks = std::move(chunks),
-            idx = std::make_shared<size_t>(0)](httplib::client::chunk_writer& writer) -> net::awaitable<void> {
+            idx = std::make_shared<size_t>(0)](httplib::chunk_writer& writer) -> net::awaitable<void> {
         for (const auto& chunk : chunks)
             co_await writer.write_chunk(chunk);
     };
