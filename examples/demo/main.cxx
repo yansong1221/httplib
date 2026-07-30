@@ -5,6 +5,10 @@
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/ws_client.hpp"
+#include "httplib/chunk_reader.hpp"
+#include "httplib/chunk_writer.hpp"
+#include "httplib/sse_reader.hpp"
+#include "httplib/sse_writer.hpp"
 #include "httplib/server/middleware/auth.hpp"
 #include "httplib/server/middleware/cors.hpp"
 #include "httplib/server/middleware/rate_limit.hpp"
@@ -13,6 +17,7 @@
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
+#include "httplib/version.hpp"
 #include <boost/asio/thread_pool.hpp>
 #include <boost/json.hpp>
 #include <cstdlib>
@@ -211,6 +216,22 @@ static void setup_http_routes(httplib::server::router& router)
                 "text/plain");
         });
 
+    // ---- SSE (Server-Sent Events) ----
+    router.set_http_handler<http::verb::get>(
+        "/api/sse", [](httplib::server::request&, httplib::server::response& resp) {
+            auto counter = std::make_shared<int>(0);
+            resp.set_sse_write_handler(
+                [counter](httplib::sse_writer& sse) -> net::awaitable<void> {
+                    while (*counter < 3) {
+                        ++(*counter);
+                        co_await sse.send_event(std::format("event #{}", *counter),
+                                                "tick",
+                                                std::to_string(*counter));
+                    }
+                    co_await sse.close();
+                });
+        });
+
     router.set_buffer_body_http_handler<http::verb::post>(
         "/api/buffer",
         [](httplib::server::request& req,
@@ -389,6 +410,25 @@ static void run_http_client_demo(net::any_io_executor ex, std::string host, uint
             spdlog::info("GET /api/stream -> {}", r.value().result_int());
     }
 
+    // SSE (Server-Sent Events)
+    {
+        client.set_sse_read_handler(
+            [](httplib::sse_reader& reader) -> net::awaitable<void> {
+                while (!reader.is_done()) {
+                    auto ev = co_await reader.read_event();
+                    if (ev.data.empty() && ev.event.empty() && ev.id.empty()
+                        && ev.retry == std::chrono::milliseconds {0})
+                        break;
+                    spdlog::info("  SSE event: id={} event={} data={}",
+                                 ev.id, ev.event, ev.data);
+                }
+            });
+        auto r = client.get("/api/sse");
+        client.set_sse_read_handler(nullptr);
+        if (r)
+            spdlog::info("GET /api/sse -> {}", r.value().result_int());
+    }
+
     // Auth: Basic (should fail without credentials)
     {
         auto r = client.get("/api/admin");
@@ -458,7 +498,7 @@ static void run_ws_client_demo(net::any_io_executor ex, std::string host, uint16
 
 static void print_usage()
 {
-    std::cout << R"(httplib Demo
+    std::cout << R"(httplib Demo v)" << httplib::version() << R"(
 
 Usage: examples [mode] [options]
 
@@ -514,7 +554,8 @@ int main(int argc, char** argv)
     }
 
     spdlog::set_level(spdlog::level::info);
-    spdlog::info("httplib demo | mode={} | host={} | port={} | ssl={}", mode, host, port, use_ssl);
+    spdlog::info("httplib demo v{} | mode={} | host={} | port={} | ssl={}",
+                 httplib::version(), mode, host, port, use_ssl);
 
     boost::asio::thread_pool pool(std::thread::hardware_concurrency());
     auto ex = pool.get_executor();

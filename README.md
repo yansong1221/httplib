@@ -12,6 +12,7 @@ A small, embeddable HTTP/1.1 & WebSocket server and client library for C++23, bu
 - **Multiple body types** — string, JSON (Boost.JSON), multipart form-data, URL-encoded forms, file serving, empty
 - **Static file serving** — mount directories with Range/Content-Range support, directory listing (HTML/JSON)
 - **Chunked streaming** — server streaming responses, client chunk handler
+- **SSE (Server-Sent Events)** — `resp.set_sse_write_handler()` for servers, `client.set_sse_read_handler()` for clients
 - **Redirects** — `resp.set_redirect(url)`
 - **Compression** — Brotli content-encoding (optional)
 - **SSL/TLS** — HTTPS and WSS support via OpenSSL (optional)
@@ -209,6 +210,56 @@ resp.set_chunked_write_handler(
     "text/plain");
 ```
 
+## SSE (Server-Sent Events)
+
+### Server
+
+```cpp
+router.set_http_handler<http::verb::get>(
+    "/api/sse", [](server::request&, server::response& resp) {
+        auto counter = std::make_shared<int>(0);
+        resp.set_sse_write_handler(
+            [counter](httplib::sse_writer& sse) -> net::awaitable<void> {
+                while (true) {
+                    ++(*counter);
+                    co_await sse.send_event(
+                        std::format("event #{}", *counter),
+                        "tick",                          // event type (optional)
+                        std::to_string(*counter));       // event id (optional)
+
+                    // or send a retry hint or keep-alive comment
+                    // co_await sse.send_retry(std::chrono::seconds(3));
+                    // co_await sse.send_comment("keep-alive");
+                }
+            });
+    });
+```
+
+`sse_writer` methods:
+| Method | SSE Protocol |
+|--------|-------------|
+| `send_event(data)` | `data: ...\n\n` |
+| `send_event(data, event)` | `event: ...\ndata: ...\n\n` |
+| `send_event(data, event, id)` | `id: ...\nevent: ...\ndata: ...\n\n` |
+| `send_retry(ms)` | `retry: ...\n\n` |
+| `send_comment(msg)` | `: msg\n\n` |
+| `close()` | terminates the stream |
+
+### Client
+
+```cpp
+client.set_sse_read_handler(
+    [](httplib::sse_reader& reader) -> net::awaitable<void> {
+        while (!reader.is_done()) {
+            auto ev = co_await reader.read_event();
+            // ev.id, ev.event, ev.data, ev.retry
+        }
+    });
+
+auto resp = client.get("/api/sse");   // returns after stream closes
+client.set_sse_read_handler(nullptr); // remove handler for subsequent requests
+```
+
 ## Body Types
 
 The request/response body is a type-safe variant (`any_body::value_type`). Access it with `.as<T>()`:
@@ -394,3 +445,16 @@ client::http_client client(ex, "example.com", 443, true);
 ## License
 
 This project is distributed under the Boost Software License, Version 1.0.
+
+## Version
+
+```cpp
+#include <httplib/version.hpp>
+
+// Compile-time
+static_assert(HTTPLIB_VERSION_MAJOR == 1);
+static_assert(HTTPLIB_VERSION_MINOR == 0);
+
+// Runtime
+std::string v = httplib::version();   // "1.0.0"
+```

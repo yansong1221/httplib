@@ -234,10 +234,10 @@ http_client::response_result http_client::send_chunked_request(http::verb method
                                                                const html::query_params& params,
                                                                const http::fields& headers)
 {
-    auto future = net::co_spawn(
-        impl_->executor_,
-        async_send_chunked_request(method, path, std::move(handler), params, headers),
-        net::use_future);
+    auto future =
+        net::co_spawn(impl_->executor_,
+                      async_send_chunked_request(method, path, std::move(handler), params, headers),
+                      net::use_future);
     return future.get();
 }
 
@@ -647,6 +647,11 @@ bool http_client::is_open() const
 void http_client::set_chunked_read_handler(chunked_read_handler_type&& handler)
 {
     impl_->set_chunked_read_handler(std::move(handler));
+}
+
+void http_client::set_sse_read_handler(sse_read_handler_type&& handler)
+{
+    impl_->set_sse_read_handler(std::move(handler));
 }
 
 void http_client::set_max_redirects(int n)

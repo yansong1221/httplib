@@ -1,8 +1,9 @@
 #include "client_impl.h"
+#include "httplib/util/use_awaitable.hpp"
 #include "util/chunk_reader_impl.hpp"
 #include "util/chunk_writer_impl.hpp"
 #include "util/compressor.hpp"
-#include "httplib/util/use_awaitable.hpp"
+#include "util/sse_reader_impl.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/write.hpp>
@@ -283,9 +284,21 @@ net::awaitable<http_client::response> http_client::impl::co_read_response(
     }
 
     if (!parser.is_done()) {
-        if (parser.chunked() && chunked_read_handler_) {
-            auto reader_impl = std::make_unique<chunk_reader_impl<false>>(
-                *stream_, buffer_, parser, timeout_);
+        auto ct     = parser.get()[http::field::content_type];
+        auto semi   = ct.find(';');
+        auto mime   = semi == std::string_view::npos ? ct : ct.substr(0, semi);
+        bool is_sse = beast::iequals(mime, "text/event-stream");
+
+        if (parser.chunked() && sse_read_handler_ && is_sse) {
+            auto reader_impl =
+                std::make_unique<chunk_reader_impl<false>>(*stream_, buffer_, parser, timeout_);
+
+            sse_reader_impl sse(*reader_impl);
+            co_await sse_read_handler_(sse);
+        }
+        else if (parser.chunked() && chunked_read_handler_) {
+            auto reader_impl =
+                std::make_unique<chunk_reader_impl<false>>(*stream_, buffer_, parser, timeout_);
 
             co_await chunked_read_handler_(*reader_impl, parser.get());
         }
@@ -327,6 +340,11 @@ http_client::impl::async_send_request_impl(http_client::request& req,
 void http_client::impl::set_chunked_read_handler(chunked_read_handler_type&& handler)
 {
     chunked_read_handler_ = std::move(handler);
+}
+
+void http_client::impl::set_sse_read_handler(sse_read_handler_type&& handler)
+{
+    sse_read_handler_ = std::move(handler);
 }
 
 net::awaitable<http_client::response_result>

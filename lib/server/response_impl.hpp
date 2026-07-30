@@ -177,13 +177,14 @@ public:
         this->set(http::field::location, url);
         set_empty_content(status);
     }
-    void set_chunked_write_handler(chunked_write_handler_type&& handler,
-                                    std::string_view content_type,
-                                    http::status status = http::status::ok)
+    void set_chunked_write_handler(response::chunked_write_handler_type&& handler,
+                                   std::string_view content_type,
+                                   http::status status = http::status::ok)
     {
         reset_content();
         chunked_write_handler_ = std::move(handler);
         this->set(http::field::content_type, content_type);
+        this->set(http::field::cache_control, "no-cache");
         this->result(status);
         this->body() = body::empty_body::value_type {};
     }
@@ -200,7 +201,7 @@ public:
         return response(std::move(_impl));
     }
 
-    chunked_write_handler_type chunked_write_handler_;
+    response::chunked_write_handler_type chunked_write_handler_;
 };
 
 } // namespace httplib::server

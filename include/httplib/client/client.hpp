@@ -3,6 +3,7 @@
 #include "httplib/chunk_reader.hpp"
 #include "httplib/chunk_writer.hpp"
 #include "httplib/config.hpp"
+#include "httplib/sse_reader.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <filesystem>
 #include <functional>
@@ -26,9 +27,11 @@ public:
     using request         = http::request<body::any_body>;
     using response_result = boost::system::result<response>;
 
-    using chunked_write_handler_type = httplib::chunked_write_handler_type;
+    using chunked_write_handler_type = std::function<net::awaitable<void>(chunk_writer&)>;
     using chunked_read_handler_type =
         std::function<net::awaitable<void>(chunk_reader& reader, response& resp)>;
+
+    using sse_read_handler_type = std::function<net::awaitable<void>(httplib::sse_reader& reader)>;
 
 public:
     explicit http_client(net::io_context& ex,
@@ -53,6 +56,8 @@ public:
     void set_logger(std::shared_ptr<spdlog::logger> logger);
 
     void set_chunked_read_handler(chunked_read_handler_type&& handler);
+
+    void set_sse_read_handler(sse_read_handler_type&& handler);
 
     void set_max_redirects(int n);
 

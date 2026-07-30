@@ -1,0 +1,17 @@
+#pragma once
+#include "httplib/config.hpp"
+#include <string>
+
+#define HTTPLIB_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define HTTPLIB_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define HTTPLIB_VERSION_PATCH @PROJECT_VERSION_PATCH@
+#define HTTPLIB_VERSION_STRING "@PROJECT_VERSION@"
+
+namespace httplib {
+
+inline std::string version()
+{
+    return HTTPLIB_VERSION_STRING;
+}
+
+} // namespace httplib

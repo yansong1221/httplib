@@ -5,6 +5,7 @@
 #include "httplib/html/form_data.hpp"
 #include "httplib/server/header_proxy.hpp"
 #include "httplib/server/helper.hpp"
+#include "httplib/sse_writer.hpp"
 #include "httplib/util/misc.hpp"
 #include <boost/beast/http/fields.hpp>
 #include <boost/beast/http/message.hpp>
@@ -20,10 +21,6 @@ namespace httplib::server {
 class HTTPLIB_API response
 {
 public:
-    class impl;
-    // using http::response<body::any_body>::message;
-
-
     ~response();
 
     http::fields& base();
@@ -70,9 +67,16 @@ public:
 
     void set_redirect(std::string_view url, http::status status = http::status::moved_permanently);
 
+
+    using chunked_write_handler_type = std::function<net::awaitable<void>(httplib::chunk_writer&)>;
     void set_chunked_write_handler(chunked_write_handler_type&& handler,
                                    std::string_view content_type,
                                    http::status status = http::status::ok);
+
+    using sse_write_handler_type = std::function<net::awaitable<void>(httplib::sse_writer&)>;
+    void set_sse_write_handler(sse_write_handler_type&& handler);
+
+    class impl;
 
     impl* get_impl();
     const impl* get_impl() const;

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
-project(httplib)
+project(httplib VERSION 1.0.0)
 
 get_directory_property(_HAS_PARENT PARENT_DIRECTORY)
 if(_HAS_PARENT)

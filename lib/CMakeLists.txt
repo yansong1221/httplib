@@ -1,5 +1,12 @@
 set(MODULE httplib)
 
+set(GENERATED_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
+configure_file(
+    ${HTTPLIB_INCLUDE_DIR}/httplib/version.hpp.in
+    ${GENERATED_INCLUDE_DIR}/httplib/version.hpp
+    @ONLY
+)
+
 file(GLOB_RECURSE HTTPLIB_HEADER_FILES "${HTTPLIB_INCLUDE_DIR}/*.h" "${HTTPLIB_INCLUDE_DIR}/*.hpp" "${HTTPLIB_INCLUDE_DIR}/*.inl")
 source_group(TREE ${HTTPLIB_INCLUDE_DIR} PREFIX "include" FILES ${HTTPLIB_HEADER_FILES})
 
@@ -17,6 +24,16 @@ else()
     add_library(${MODULE} STATIC ${HTTPLIB_HEADER_FILES} ${HTTPLIB_SOURCE_FILES})
 endif()
 
+if(WIN32 AND HTTPLIB_SHARED_LIBRARY)
+    set(RC_FILE ${GENERATED_INCLUDE_DIR}/win32_version.rc)
+    configure_file(
+        ${HTTPLIB_LIB_DIR}/win32_version.rc.in
+        ${RC_FILE}
+        @ONLY
+    )
+    target_sources(${MODULE} PRIVATE ${RC_FILE})
+endif()
+
 target_link_libraries(${MODULE} 
 PUBLIC  Boost::beast Boost::json
 PUBLIC  spdlog::spdlog fmt::fmt
@@ -25,6 +42,7 @@ PUBLIC  spdlog::spdlog fmt::fmt
 target_include_directories(${MODULE} 
     PUBLIC 
         $<BUILD_INTERFACE:${HTTPLIB_INCLUDE_DIR}>
+        $<BUILD_INTERFACE:${GENERATED_INCLUDE_DIR}>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE ${HTTPLIB_LIB_DIR}
 )
@@ -70,6 +88,9 @@ install(TARGETS ${MODULE}
 
 install(DIRECTORY ${HTTPLIB_INCLUDE_DIR}/httplib
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+install(FILES ${GENERATED_INCLUDE_DIR}/httplib/version.hpp
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/httplib
 )
 
 install(EXPORT httplib-targets

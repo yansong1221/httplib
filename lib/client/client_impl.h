@@ -2,6 +2,7 @@
 
 #include "httplib/chunk_reader.hpp"
 #include "httplib/client/client.hpp"
+#include "httplib/sse_reader.hpp"
 #include "stream/http_stream.hpp"
 #include <functional>
 #include <spdlog/spdlog.h>
@@ -25,6 +26,8 @@ public:
                                            const http::fields& headers);
 
     void set_chunked_read_handler(chunked_read_handler_type&& handler);
+
+    void set_sse_read_handler(sse_read_handler_type&& handler);
 
     void set_max_redirects(int n) { max_redirects_ = n; }
 
@@ -79,6 +82,7 @@ public:
 
 
     chunked_read_handler_type chunked_read_handler_;
+    sse_read_handler_type sse_read_handler_;
     int max_redirects_ = 0;
 
     std::shared_ptr<spdlog::logger> default_logger_;
