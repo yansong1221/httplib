@@ -47,6 +47,8 @@ target_include_directories(${MODULE}
     PRIVATE ${HTTPLIB_LIB_DIR}
 )
 
+target_precompile_headers(${MODULE} PRIVATE pch.hpp)
+
 if (MSVC)
     target_compile_options(${MODULE} PRIVATE /bigobj)
 endif()

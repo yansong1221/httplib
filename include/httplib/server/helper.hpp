@@ -1,11 +1,9 @@
 #pragma once
+#include "httplib/server/server_fwd.hpp"
 #include "httplib/util/type_traits.h"
 #include <boost/asio/awaitable.hpp>
 
 namespace httplib::server {
-
-class request;
-class response;
 
 namespace helper {
 

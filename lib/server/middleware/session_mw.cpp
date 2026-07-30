@@ -1,5 +1,7 @@
 #include "html/cookie.hpp"
 #include "httplib/server/middleware/session.hpp"
+#include "httplib/server/request.hpp"
+#include "httplib/server/response.hpp"
 #include "memory_store.hpp"
 #include <atomic>
 #include <mutex>

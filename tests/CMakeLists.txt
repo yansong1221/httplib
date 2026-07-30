@@ -14,6 +14,8 @@ PRIVATE Catch2::Catch2WithMain
 
 target_include_directories(${MOUDLE} PRIVATE ${HTTPLIB_LIB_DIR})
 
+target_precompile_headers(${MOUDLE} REUSE_FROM httplib)
+
 if (MSVC)
     target_compile_options(${MOUDLE} PRIVATE /bigobj)
 endif()

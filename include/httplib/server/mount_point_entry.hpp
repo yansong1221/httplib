@@ -1,12 +1,11 @@
 #pragma once
 #include "httplib/config.hpp"
 #include "httplib/server/helper.hpp"
+#include "httplib/server/server_fwd.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <filesystem>
 
 namespace httplib::server {
-class request;
-class response;
 
 class HTTPLIB_API mount_point_entry
 {

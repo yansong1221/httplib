@@ -34,6 +34,16 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+option(HTTPLIB_ENABLED_UNITY_BUILD "Enable unity/jumbo builds (CI recommended, slower incremental)" OFF)
+if(HTTPLIB_ENABLED_UNITY_BUILD)
+    set(CMAKE_UNITY_BUILD ON)
+    set(CMAKE_UNITY_BUILD_BATCH_SIZE 8)
+endif()
+
+if(MSVC)
+    add_compile_options(/MP)
+endif()
+
 set(HTTPLIB_INCLUDE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(HTTPLIB_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lib)
 

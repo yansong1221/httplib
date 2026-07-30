@@ -1,4 +1,6 @@
 #include "httplib/server/middleware/cors.hpp"
+#include "httplib/server/request.hpp"
+#include "httplib/server/response.hpp"
 #include <algorithm>
 
 namespace httplib::server::middleware {

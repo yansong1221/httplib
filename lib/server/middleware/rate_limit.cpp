@@ -1,4 +1,6 @@
 #include "httplib/server/middleware/rate_limit.hpp"
+#include "httplib/server/request.hpp"
+#include "httplib/server/response.hpp"
 #include <mutex>
 #include <unordered_map>
 

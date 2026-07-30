@@ -1,12 +1,12 @@
 #pragma once
 #include "httplib/config.hpp"
+#include "httplib/server/server_fwd.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <functional>
 #include <memory>
 #include <string_view>
 
 namespace httplib::server {
-class request;
 class HTTPLIB_API websocket_conn : public std::enable_shared_from_this<websocket_conn>
 {
 public:

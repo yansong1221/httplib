@@ -2,6 +2,7 @@
 #include "httplib/config.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/server.hpp"
+#include "httplib/server/server_fwd.hpp"
 #include "stream/http_stream.hpp"
 #include "stream/websocket_stream.hpp"
 #include <boost/asio/awaitable.hpp>
@@ -11,8 +12,6 @@
 #include <memory>
 
 namespace httplib::server {
-
-class response;
 
 class websocket_conn_impl;
 

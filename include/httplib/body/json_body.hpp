@@ -18,8 +18,8 @@
 
 #include "httplib/config.hpp"
 #include <boost/beast/http/fields.hpp>
-#include <boost/json/serializer.hpp>
-#include <boost/json/stream_parser.hpp>
+#include <boost/json/value.hpp>
+#include <memory>
 
 namespace httplib::body {
 
@@ -34,20 +34,26 @@ struct json_body
         using const_buffers_type = net::const_buffer;
 
         writer(const http::fields&, value_type const& body);
+        ~writer();
+        writer(writer&&) noexcept;
+        writer& operator=(writer&&) noexcept;
 
         void init(boost::system::error_code& ec);
 
         boost::optional<std::pair<const_buffers_type, bool>> get(boost::system::error_code& ec);
 
     private:
-        json::serializer serializer;
-        // half of the probable networking buffer, let's leave some space for headers
-        char buffer[32768];
+        class impl;
+        std::unique_ptr<impl> impl_;
     };
 
     struct reader
     {
         reader(const http::fields&, value_type& body);
+        ~reader();
+        reader(reader&&) noexcept;
+        reader& operator=(reader&&) noexcept;
+
         void init(boost::optional<std::uint64_t> const& content_length,
                   boost::system::error_code& ec);
 
@@ -56,8 +62,8 @@ struct json_body
         void finish(boost::system::error_code& ec);
 
     private:
-        json::stream_parser parser;
-        value_type& body;
+        class impl;
+        std::unique_ptr<impl> impl_;
     };
 };
 } // namespace httplib::body

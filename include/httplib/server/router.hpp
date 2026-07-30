@@ -1,8 +1,8 @@
 #pragma once
 #include "httplib/server/mount_point_entry.hpp"
+#include "httplib/server/server_fwd.hpp"
 #include "httplib/server/websocket_conn.hpp"
 #include <algorithm>
-#include <boost/asio/detached.hpp>
 #include <boost/beast/http/fields.hpp>
 #include <filesystem>
 #include <list>
@@ -10,9 +10,6 @@
 #include <string_view>
 
 namespace httplib::server {
-
-class request;
-class response;
 
 class HTTPLIB_API router
 {

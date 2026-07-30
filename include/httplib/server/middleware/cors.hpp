@@ -1,7 +1,6 @@
 #pragma once
 #include "httplib/config.hpp"
-#include "httplib/server/request.hpp"
-#include "httplib/server/response.hpp"
+#include "httplib/server/server_fwd.hpp"
 #include <memory>
 #include <string>
 #include <string_view>

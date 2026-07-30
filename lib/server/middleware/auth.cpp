@@ -1,4 +1,6 @@
 #include "httplib/server/middleware/auth.hpp"
+#include "httplib/server/request.hpp"
+#include "httplib/server/response.hpp"
 
 namespace httplib::server::middleware {
 
