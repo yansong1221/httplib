@@ -1,7 +1,7 @@
 #include "compress/compressor.hpp"
 
 #ifdef HTTPLIB_ENABLED_COMPRESS
-#include "brotli.hpp"
+#include "compress/brotli.hpp"
 #include <boost/asio/streambuf.hpp>
 #include <boost/iostreams/filter/gzip.hpp>
 #include <boost/iostreams/filter/zlib.hpp>
@@ -9,7 +9,7 @@
 #include <boost/iostreams/filtering_stream.hpp>
 #endif
 
-namespace httplib::body {
+namespace httplib::compress {
 #ifdef HTTPLIB_ENABLED_COMPRESS
 namespace io = boost::iostreams;
 
@@ -140,4 +140,4 @@ bool compressor_factory::is_supported_encoding(std::string_view encoding) const
     return iter != creators_.end();
 }
 
-} // namespace httplib::body
+} // namespace httplib::compress

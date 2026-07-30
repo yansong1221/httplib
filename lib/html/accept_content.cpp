@@ -50,7 +50,7 @@ basic_accept_content ::parse_element(std::string_view element_str)
 std::string accept_encoding_content::server_apply_encoding() const
 {
     for (const auto& elem : elements_) {
-        if (httplib::body::compressor_factory::instance().is_supported_encoding(elem.value)) {
+        if (httplib::compress::compressor_factory::instance().is_supported_encoding(elem.value)) {
             return elem.value;
         }
     }

@@ -4,7 +4,7 @@
 #include <functional>
 #include <unordered_map>
 
-namespace httplib::body {
+namespace httplib::compress {
 class compressor
 {
 public:
@@ -44,4 +44,4 @@ private:
     void register_compressor(const std::string& encoding, create_function&& func);
     std::unordered_map<std::string, create_function> creators_;
 };
-} // namespace httplib::body
+} // namespace httplib::compress

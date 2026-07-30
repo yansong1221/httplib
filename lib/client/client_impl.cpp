@@ -58,7 +58,7 @@ http_client::request http_client::impl::make_http_request(http::verb method,
     req.set(http::field::accept, "*/*");
 
     if (!chunked_read_handler_) {
-        const auto& encoding = body::compressor_factory::instance().supported_encoding();
+        const auto& encoding = compress::compressor_factory::instance().supported_encoding();
         if (!encoding.empty())
             req.set(http::field::accept_encoding, boost::join(encoding, ","));
     }

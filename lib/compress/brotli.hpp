@@ -9,7 +9,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace httplib::body {
+namespace httplib::compress {
 
 
 namespace detail {
@@ -171,4 +171,4 @@ BOOST_IOSTREAMS_PIPABLE(basic_brotli_decompressor, 1)
 
 typedef basic_brotli_decompressor<> brotli_decompressor;
 
-} // namespace httplib::body
+} // namespace httplib::compress
