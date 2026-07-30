@@ -86,6 +86,12 @@ public:
         detail::buffer_body_reader<true> reader;
     };
 
+    struct chunk_read_ctx
+    {
+        std::shared_ptr<http::request_parser<body::any_body>> parser;
+        std::unique_ptr<chunk_reader> reader;
+    };
+
     void setup_buffer_body_reading(http_stream& stream,
                                    beast::flat_buffer& buffer,
                                    http::request_parser<http::empty_body>&& header_parser,
@@ -100,7 +106,7 @@ public:
             stream, buffer, *buffer_body_ctx_->parser, read_timeout);
     }
 
-    bool is_chunked_handler() const { return chunk_reader_ != nullptr; }
+    bool is_chunked_handler() const { return chunk_ctx_ != nullptr; }
 
     bool is_buffer_body_handler() const { return buffer_body_ctx_ != nullptr; }
 
@@ -109,13 +115,17 @@ public:
                                http::request_parser<http::empty_body>&& header_parser,
                                std::chrono::steady_clock::duration read_timeout)
     {
-        chunk_parser_ =
+        auto parser =
             std::make_shared<http::request_parser<body::any_body>>(std::move(header_parser));
-        chunk_reader_ = std::make_unique<chunk_reader_impl<true>>(
-            stream, buffer, *chunk_parser_, read_timeout);
+        auto reader = std::make_unique<chunk_reader_impl<true>>(
+            stream, buffer, *parser, read_timeout);
+
+        chunk_ctx_         = std::make_shared<chunk_read_ctx>();
+        chunk_ctx_->parser = std::move(parser);
+        chunk_ctx_->reader = std::move(reader);
     }
 
-    httplib::chunk_reader& get_chunk_reader() { return *chunk_reader_; }
+    httplib::chunk_reader& get_chunk_reader() { return *chunk_ctx_->reader; }
 
     net::awaitable<std::string_view> read_buffer_body_some()
     {
@@ -177,8 +187,7 @@ private:
     std::any custom_data_;
     std::shared_ptr<middleware::session> session_;
 
-    std::shared_ptr<http::request_parser<body::any_body>> chunk_parser_;
-    std::unique_ptr<chunk_reader> chunk_reader_;
+    std::shared_ptr<chunk_read_ctx> chunk_ctx_;
     std::shared_ptr<buffer_body_read_ctx> buffer_body_ctx_;
 };
 } // namespace httplib::server
