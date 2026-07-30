@@ -1,15 +1,15 @@
 #pragma once
-#include "httplib/chunk_writer.hpp"
-#include "httplib/ndjson_writer.hpp"
+#include "httplib/streaming/chunk_writer.hpp"
+#include "httplib/streaming/ndjson_writer.hpp"
 #include <boost/json/serialize.hpp>
 #include <string>
 
-namespace httplib {
+namespace httplib::streaming {
 
-class ndjson_writer_impl : public ndjson_writer
+class ndjson_writer_impl : public httplib::ndjson_writer
 {
 public:
-    explicit ndjson_writer_impl(chunk_writer& cw)
+    explicit ndjson_writer_impl(httplib::chunk_writer& cw)
         : cw_(cw)
     {
     }
@@ -27,7 +27,7 @@ public:
     }
 
 private:
-    chunk_writer& cw_;
+    httplib::chunk_writer& cw_;
 };
 
-} // namespace httplib
+} // namespace httplib::streaming

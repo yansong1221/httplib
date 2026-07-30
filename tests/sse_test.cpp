@@ -1,11 +1,11 @@
-#include "httplib/chunk_writer.hpp"
+#include "httplib/streaming/chunk_writer.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
-#include "httplib/sse_reader.hpp"
-#include "httplib/sse_writer.hpp"
+#include "httplib/streaming/sse_reader.hpp"
+#include "httplib/streaming/sse_writer.hpp"
 #include <boost/asio/io_context.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <memory>

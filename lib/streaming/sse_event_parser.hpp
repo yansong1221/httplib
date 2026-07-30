@@ -1,10 +1,10 @@
 #pragma once
-#include "httplib/sse_reader.hpp"
+#include "httplib/streaming/sse_reader.hpp"
 #include <deque>
 #include <string>
 #include <string_view>
 
-namespace httplib::detail {
+namespace httplib::streaming::detail {
 
 class sse_event_parser
 {
@@ -99,4 +99,4 @@ private:
     std::chrono::milliseconds retry_ {0};
 };
 
-} // namespace httplib::detail
+} // namespace httplib::streaming::detail

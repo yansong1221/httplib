@@ -11,7 +11,7 @@
 #include <memory>
 #include <string>
 
-namespace httplib::detail {
+namespace httplib::streaming {
 
 template<bool isRequest>
 class chunk_reader_core
@@ -88,4 +88,4 @@ private:
     std::string current_chunk_;
 };
 
-} // namespace httplib::detail
+} // namespace httplib::streaming

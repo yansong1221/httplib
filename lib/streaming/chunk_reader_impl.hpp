@@ -1,16 +1,16 @@
 #pragma once
-#include "chunk_reader_core.hpp"
-#include "httplib/chunk_reader.hpp"
+#include "streaming/chunk_reader_core.hpp"
+#include "httplib/streaming/chunk_reader.hpp"
 #include "stream/http_stream.hpp"
 #include <boost/beast/http/parser.hpp>
 #include <chrono>
 
-namespace httplib {
+namespace httplib::streaming {
 
 template<bool isRequest>
-class chunk_reader_impl : public chunk_reader, public detail::chunk_reader_core<isRequest>
+class chunk_reader_impl : public httplib::chunk_reader, public chunk_reader_core<isRequest>
 {
-    using core_type = detail::chunk_reader_core<isRequest>;
+    using core_type = chunk_reader_core<isRequest>;
 
 public:
     chunk_reader_impl(http_stream& stream,
@@ -32,4 +32,4 @@ public:
     }
 };
 
-} // namespace httplib
+} // namespace httplib::streaming

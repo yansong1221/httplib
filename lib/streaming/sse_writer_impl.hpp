@@ -1,14 +1,14 @@
 #pragma once
-#include "httplib/chunk_writer.hpp"
-#include "httplib/sse_writer.hpp"
+#include "httplib/streaming/chunk_writer.hpp"
+#include "httplib/streaming/sse_writer.hpp"
 #include <string>
 
-namespace httplib {
+namespace httplib::streaming {
 
-class sse_writer_impl : public sse_writer
+class sse_writer_impl : public httplib::sse_writer
 {
 public:
-    explicit sse_writer_impl(chunk_writer& cw)
+    explicit sse_writer_impl(httplib::chunk_writer& cw)
         : cw_(cw)
     {
     }
@@ -74,7 +74,7 @@ public:
     net::awaitable<void> close() override { co_await cw_.close(); }
 
 private:
-    chunk_writer& cw_;
+    httplib::chunk_writer& cw_;
 };
 
-} // namespace httplib
+} // namespace httplib::streaming

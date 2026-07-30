@@ -6,7 +6,7 @@
 #include "httplib/server/server.hpp"
 #include "request_impl.hpp"
 #include "response_impl.hpp"
-#include "util/chunk_writer_impl.hpp"
+#include "streaming/chunk_writer_impl.hpp"
 #include "websocket_conn_impl.hpp"
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/write.hpp>
@@ -396,7 +396,7 @@ net::awaitable<bool> session::http_task::async_write(const request& req, respons
     }
 
     if (auto handler = resp.get_impl()->chunked_write_handler_; handler) {
-        auto writer = std::make_unique<chunk_writer_impl>(stream_, serv_.write_timeout());
+        auto writer = std::make_unique<streaming::chunk_writer_impl>(stream_, serv_.write_timeout());
         co_await handler(*writer);
         co_await writer->close();
     }

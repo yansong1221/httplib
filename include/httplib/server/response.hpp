@@ -1,12 +1,12 @@
 #pragma once
 #include "httplib/body/any_body.hpp"
-#include "httplib/chunk_writer.hpp"
+#include "httplib/streaming/chunk_writer.hpp"
 #include "httplib/config.hpp"
 #include "httplib/html/form_data.hpp"
 #include "httplib/server/header_proxy.hpp"
 #include "httplib/server/helper.hpp"
-#include "httplib/ndjson_writer.hpp"
-#include "httplib/sse_writer.hpp"
+#include "httplib/streaming/ndjson_writer.hpp"
+#include "httplib/streaming/sse_writer.hpp"
 #include "httplib/util/misc.hpp"
 #include <boost/beast/http/fields.hpp>
 #include <boost/beast/http/message.hpp>

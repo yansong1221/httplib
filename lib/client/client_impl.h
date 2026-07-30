@@ -1,9 +1,9 @@
 #pragma once
 
-#include "httplib/chunk_reader.hpp"
+#include "httplib/streaming/chunk_reader.hpp"
 #include "httplib/client/client.hpp"
-#include "httplib/ndjson_reader.hpp"
-#include "httplib/sse_reader.hpp"
+#include "httplib/streaming/ndjson_reader.hpp"
+#include "httplib/streaming/sse_reader.hpp"
 #include "stream/http_stream.hpp"
 #include <functional>
 #include <spdlog/spdlog.h>

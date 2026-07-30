@@ -1,6 +1,6 @@
 #pragma once
 #include "util/buffer_body_reader.hpp"
-#include "util/chunk_reader_impl.hpp"
+#include "streaming/chunk_reader_impl.hpp"
 #include "httplib/server/middleware/session.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/util/misc.hpp"
@@ -117,7 +117,7 @@ public:
     {
         auto parser =
             std::make_shared<http::request_parser<body::any_body>>(std::move(header_parser));
-        auto reader = std::make_unique<chunk_reader_impl<true>>(
+        auto reader = std::make_unique<streaming::chunk_reader_impl<true>>(
             stream, buffer, *parser, read_timeout);
 
         chunk_ctx_         = std::make_shared<chunk_read_ctx>();

@@ -1,15 +1,15 @@
 #pragma once
-#include "httplib/chunk_reader.hpp"
-#include "httplib/ndjson_reader.hpp"
+#include "httplib/streaming/chunk_reader.hpp"
+#include "httplib/streaming/ndjson_reader.hpp"
 #include <boost/json/parse.hpp>
 #include <string>
 
-namespace httplib {
+namespace httplib::streaming {
 
-class ndjson_reader_impl : public ndjson_reader
+class ndjson_reader_impl : public httplib::ndjson_reader
 {
 public:
-    explicit ndjson_reader_impl(chunk_reader& reader)
+    explicit ndjson_reader_impl(httplib::chunk_reader& reader)
         : reader_(reader)
     {
     }
@@ -46,8 +46,8 @@ public:
     }
 
 private:
-    chunk_reader& reader_;
+    httplib::chunk_reader& reader_;
     std::string buf_;
 };
 
-} // namespace httplib
+} // namespace httplib::streaming

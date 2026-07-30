@@ -1,6 +1,6 @@
 #pragma once
 #include "html/html.h"
-#include "httplib/chunk_writer.hpp"
+#include "httplib/streaming/chunk_writer.hpp"
 #include "httplib/server/response.hpp"
 #include "util/mime_types.hpp"
 #include <boost/beast/version.hpp>

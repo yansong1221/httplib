@@ -1,14 +1,14 @@
 #pragma once
-#include "httplib/chunk_reader.hpp"
-#include "httplib/sse_reader.hpp"
-#include "util/sse_event_parser.hpp"
+#include "httplib/streaming/chunk_reader.hpp"
+#include "httplib/streaming/sse_reader.hpp"
+#include "streaming/sse_event_parser.hpp"
 
-namespace httplib {
+namespace httplib::streaming {
 
-class sse_reader_impl : public sse_reader
+class sse_reader_impl : public httplib::sse_reader
 {
 public:
-    explicit sse_reader_impl(chunk_reader& reader)
+    explicit sse_reader_impl(httplib::chunk_reader& reader)
         : reader_(reader)
     {
     }
@@ -29,8 +29,8 @@ public:
     bool is_done() const override { return reader_.is_done() && !parser_.has_event(); }
 
 private:
-    chunk_reader& reader_;
+    httplib::chunk_reader& reader_;
     detail::sse_event_parser parser_;
 };
 
-} // namespace httplib
+} // namespace httplib::streaming

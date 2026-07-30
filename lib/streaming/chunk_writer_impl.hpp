@@ -1,5 +1,5 @@
 #pragma once
-#include "httplib/chunk_writer.hpp"
+#include "httplib/streaming/chunk_writer.hpp"
 #include "stream/http_stream.hpp"
 #include <atomic>
 #include <boost/asio/write.hpp>
@@ -8,9 +8,9 @@
 #include <memory>
 #include <string>
 
-namespace httplib {
+namespace httplib::streaming {
 
-class chunk_writer_impl : public chunk_writer
+class chunk_writer_impl : public httplib::chunk_writer
 {
 public:
     chunk_writer_impl(http_stream& stream, std::chrono::steady_clock::duration write_timeout)
@@ -44,4 +44,4 @@ private:
     std::atomic<bool> closed_ = false;
 };
 
-} // namespace httplib
+} // namespace httplib::streaming

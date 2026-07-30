@@ -1,6 +1,6 @@
 #pragma once
 #include "httplib/body/any_body.hpp"
-#include "httplib/chunk_reader.hpp"
+#include "httplib/streaming/chunk_reader.hpp"
 #include "httplib/config.hpp"
 #include "httplib/server/header_proxy.hpp"
 #include <any>

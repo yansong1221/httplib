@@ -1,12 +1,12 @@
-#include "httplib/chunk_writer.hpp"
+#include "httplib/streaming/chunk_writer.hpp"
 #include "httplib/client/client.hpp"
-#include "httplib/ndjson_reader.hpp"
-#include "httplib/ndjson_writer.hpp"
+#include "httplib/streaming/ndjson_reader.hpp"
+#include "httplib/streaming/ndjson_writer.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
-#include "util/ndjson_reader_impl.hpp"
+#include "streaming/ndjson_reader_impl.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/system_executor.hpp>
@@ -222,7 +222,7 @@ TEST_CASE("NDJSON: single line split across chunks", "[ndjson]")
     mock_chunk_reader mock;
     mock.chunks = {"{\"a\":", "1}\n"};
 
-    httplib::ndjson_reader_impl reader(mock);
+    httplib::streaming::ndjson_reader_impl reader(mock);
 
     auto f1 = boost::asio::co_spawn(
         boost::asio::system_executor {},
@@ -239,7 +239,7 @@ TEST_CASE("NDJSON: multiple lines in one chunk", "[ndjson]")
     mock_chunk_reader mock;
     mock.chunks = {"{\"a\":1}\n{\"b\":2}\n"};
 
-    httplib::ndjson_reader_impl reader(mock);
+    httplib::streaming::ndjson_reader_impl reader(mock);
 
     auto f1 = boost::asio::co_spawn(
         boost::asio::system_executor {},
@@ -265,7 +265,7 @@ TEST_CASE("NDJSON: mixed: partial line in first chunk, rest in second", "[ndjson
     mock_chunk_reader mock;
     mock.chunks = {"{\"x\":100}\n{\"y\":", "200}\n"};
 
-    httplib::ndjson_reader_impl reader(mock);
+    httplib::streaming::ndjson_reader_impl reader(mock);
 
     auto f1 = boost::asio::co_spawn(
         boost::asio::system_executor {},

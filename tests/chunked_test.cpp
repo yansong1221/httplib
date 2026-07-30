@@ -1,5 +1,5 @@
 #include "httplib/body/string_body.hpp"
-#include "httplib/chunk_writer.hpp"
+#include "httplib/streaming/chunk_writer.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/server/middleware/cors.hpp"
 #include "httplib/server/request.hpp"
