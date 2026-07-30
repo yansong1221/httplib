@@ -2,7 +2,7 @@
 #include "httplib/util/use_awaitable.hpp"
 #include "util/chunk_reader_impl.hpp"
 #include "util/chunk_writer_impl.hpp"
-#include "util/compressor.hpp"
+#include "compress/compressor.hpp"
 #include "util/ndjson_reader_impl.hpp"
 #include "util/sse_reader_impl.hpp"
 #include <boost/algorithm/string/join.hpp>

@@ -1,5 +1,5 @@
 #include "httplib/body/any_body.hpp"
-#include "util/compressor.hpp"
+#include "compress/compressor.hpp"
 
 namespace httplib::body {
 namespace detail {

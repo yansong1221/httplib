@@ -1,4 +1,4 @@
-#include "compressor.hpp"
+#include "compress/compressor.hpp"
 
 #ifdef HTTPLIB_ENABLED_COMPRESS
 #include "brotli.hpp"
