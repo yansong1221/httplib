@@ -2,6 +2,7 @@
 
 #include "httplib/chunk_reader.hpp"
 #include "httplib/client/client.hpp"
+#include "httplib/ndjson_reader.hpp"
 #include "httplib/sse_reader.hpp"
 #include "stream/http_stream.hpp"
 #include <functional>
@@ -28,6 +29,7 @@ public:
     void set_chunked_read_handler(chunked_read_handler_type&& handler);
 
     void set_sse_read_handler(sse_read_handler_type&& handler);
+    void set_ndjson_read_handler(ndjson_read_handler_type&& handler);
 
     void set_max_redirects(int n) { max_redirects_ = n; }
 
@@ -83,6 +85,7 @@ public:
 
     chunked_read_handler_type chunked_read_handler_;
     sse_read_handler_type sse_read_handler_;
+    ndjson_read_handler_type ndjson_read_handler_;
     int max_redirects_ = 0;
 
     std::shared_ptr<spdlog::logger> default_logger_;

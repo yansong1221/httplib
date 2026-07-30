@@ -13,6 +13,7 @@ A small, embeddable HTTP/1.1 & WebSocket server and client library for C++23, bu
 - **Static file serving** — mount directories with Range/Content-Range support, directory listing (HTML/JSON)
 - **Chunked streaming** — server streaming responses, client chunk handler
 - **SSE (Server-Sent Events)** — `resp.set_sse_write_handler()` for servers, `client.set_sse_read_handler()` for clients
+- **NDJSON** — `resp.set_ndjson_write_handler()` / `client.set_ndjson_read_handler()` for newline-delimited JSON streaming
 - **Redirects** — `resp.set_redirect(url)`
 - **Compression** — Brotli content-encoding (optional)
 - **SSL/TLS** — HTTPS and WSS support via OpenSSL (optional)
@@ -258,6 +259,34 @@ client.set_sse_read_handler(
 
 auto resp = client.get("/api/sse");   // returns after stream closes
 client.set_sse_read_handler(nullptr); // remove handler for subsequent requests
+```
+
+## NDJSON (Newline Delimited JSON)
+
+### Server
+
+```cpp
+resp.set_ndjson_write_handler(
+    [](httplib::ndjson_writer& w) -> net::awaitable<void> {
+        co_await w.write({{"seq", 1}, {"msg", "hello"}});
+        co_await w.write({{"seq", 2}, {"msg", "world"}});
+        co_await w.close();
+    });
+```
+
+### Client
+
+```cpp
+client.set_ndjson_read_handler(
+    [](httplib::ndjson_reader& reader) -> net::awaitable<void> {
+        while (!reader.is_done()) {
+            auto val = co_await reader.read();
+            if (val.is_null()) break;  // empty = stream ended
+        }
+    });
+
+auto resp = client.get("/api/ndjson");
+client.set_ndjson_read_handler(nullptr);
 ```
 
 ## Body Types

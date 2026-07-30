@@ -654,6 +654,11 @@ void http_client::set_sse_read_handler(sse_read_handler_type&& handler)
     impl_->set_sse_read_handler(std::move(handler));
 }
 
+void http_client::set_ndjson_read_handler(ndjson_read_handler_type&& handler)
+{
+    impl_->set_ndjson_read_handler(std::move(handler));
+}
+
 void http_client::set_max_redirects(int n)
 {
     impl_->set_max_redirects(n);

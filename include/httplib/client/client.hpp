@@ -3,6 +3,7 @@
 #include "httplib/chunk_reader.hpp"
 #include "httplib/chunk_writer.hpp"
 #include "httplib/config.hpp"
+#include "httplib/ndjson_reader.hpp"
 #include "httplib/sse_reader.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <filesystem>
@@ -32,6 +33,8 @@ public:
         std::function<net::awaitable<void>(chunk_reader& reader, response& resp)>;
 
     using sse_read_handler_type = std::function<net::awaitable<void>(httplib::sse_reader& reader)>;
+    using ndjson_read_handler_type =
+        std::function<net::awaitable<void>(httplib::ndjson_reader& reader)>;
 
 public:
     explicit http_client(net::io_context& ex,
@@ -58,6 +61,8 @@ public:
     void set_chunked_read_handler(chunked_read_handler_type&& handler);
 
     void set_sse_read_handler(sse_read_handler_type&& handler);
+
+    void set_ndjson_read_handler(ndjson_read_handler_type&& handler);
 
     void set_max_redirects(int n);
 

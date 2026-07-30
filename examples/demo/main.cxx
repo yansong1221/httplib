@@ -7,6 +7,8 @@
 #include "httplib/client/ws_client.hpp"
 #include "httplib/chunk_reader.hpp"
 #include "httplib/chunk_writer.hpp"
+#include "httplib/ndjson_reader.hpp"
+#include "httplib/ndjson_writer.hpp"
 #include "httplib/sse_reader.hpp"
 #include "httplib/sse_writer.hpp"
 #include "httplib/server/middleware/auth.hpp"
@@ -232,6 +234,20 @@ static void setup_http_routes(httplib::server::router& router)
                 });
         });
 
+    // ---- NDJSON (Newline Delimited JSON) ----
+    router.set_http_handler<http::verb::get>(
+        "/api/ndjson", [](httplib::server::request&, httplib::server::response& resp) {
+            auto counter = std::make_shared<int>(0);
+            resp.set_ndjson_write_handler(
+                [counter](httplib::ndjson_writer& w) -> net::awaitable<void> {
+                    while (*counter < 5) {
+                        ++(*counter);
+                        co_await w.write({{"seq", *counter}, {"msg", "hello"}});
+                    }
+                    co_await w.close();
+                });
+        });
+
     router.set_buffer_body_http_handler<http::verb::post>(
         "/api/buffer",
         [](httplib::server::request& req,
@@ -427,6 +443,23 @@ static void run_http_client_demo(net::any_io_executor ex, std::string host, uint
         client.set_sse_read_handler(nullptr);
         if (r)
             spdlog::info("GET /api/sse -> {}", r.value().result_int());
+    }
+
+    // NDJSON (Newline Delimited JSON)
+    {
+        client.set_ndjson_read_handler(
+            [](httplib::ndjson_reader& reader) -> net::awaitable<void> {
+                while (!reader.is_done()) {
+                    auto val = co_await reader.read();
+                    if (val.is_null())
+                        break;
+                    spdlog::info("  NDJSON line: {}", boost::json::serialize(val));
+                }
+            });
+        auto r = client.get("/api/ndjson");
+        client.set_ndjson_read_handler(nullptr);
+        if (r)
+            spdlog::info("GET /api/ndjson -> {}", r.value().result_int());
     }
 
     // Auth: Basic (should fail without credentials)

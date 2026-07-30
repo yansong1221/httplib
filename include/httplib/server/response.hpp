@@ -5,6 +5,7 @@
 #include "httplib/html/form_data.hpp"
 #include "httplib/server/header_proxy.hpp"
 #include "httplib/server/helper.hpp"
+#include "httplib/ndjson_writer.hpp"
 #include "httplib/sse_writer.hpp"
 #include "httplib/util/misc.hpp"
 #include <boost/beast/http/fields.hpp>
@@ -67,6 +68,7 @@ public:
 
     void set_redirect(std::string_view url, http::status status = http::status::moved_permanently);
 
+    class impl;
 
     using chunked_write_handler_type = std::function<net::awaitable<void>(httplib::chunk_writer&)>;
     void set_chunked_write_handler(chunked_write_handler_type&& handler,
@@ -76,7 +78,8 @@ public:
     using sse_write_handler_type = std::function<net::awaitable<void>(httplib::sse_writer&)>;
     void set_sse_write_handler(sse_write_handler_type&& handler);
 
-    class impl;
+    using ndjson_write_handler_type = std::function<net::awaitable<void>(httplib::ndjson_writer&)>;
+    void set_ndjson_write_handler(ndjson_write_handler_type&& handler);
 
     impl* get_impl();
     const impl* get_impl() const;

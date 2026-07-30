@@ -3,6 +3,7 @@
 #include "util/chunk_reader_impl.hpp"
 #include "util/chunk_writer_impl.hpp"
 #include "util/compressor.hpp"
+#include "util/ndjson_reader_impl.hpp"
 #include "util/sse_reader_impl.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
@@ -288,6 +289,7 @@ net::awaitable<http_client::response> http_client::impl::co_read_response(
         auto semi   = ct.find(';');
         auto mime   = semi == std::string_view::npos ? ct : ct.substr(0, semi);
         bool is_sse = beast::iequals(mime, "text/event-stream");
+        bool is_ndjson = beast::iequals(mime, "application/x-ndjson");
 
         if (parser.chunked() && sse_read_handler_ && is_sse) {
             auto reader_impl =
@@ -295,6 +297,13 @@ net::awaitable<http_client::response> http_client::impl::co_read_response(
 
             sse_reader_impl sse(*reader_impl);
             co_await sse_read_handler_(sse);
+        }
+        else if (parser.chunked() && ndjson_read_handler_ && is_ndjson) {
+            auto reader_impl = std::make_unique<chunk_reader_impl<false>>(
+                *stream_, buffer_, parser, timeout_);
+
+            ndjson_reader_impl ndjson(*reader_impl);
+            co_await ndjson_read_handler_(ndjson);
         }
         else if (parser.chunked() && chunked_read_handler_) {
             auto reader_impl =
@@ -345,6 +354,11 @@ void http_client::impl::set_chunked_read_handler(chunked_read_handler_type&& han
 void http_client::impl::set_sse_read_handler(sse_read_handler_type&& handler)
 {
     sse_read_handler_ = std::move(handler);
+}
+
+void http_client::impl::set_ndjson_read_handler(ndjson_read_handler_type&& handler)
+{
+    ndjson_read_handler_ = std::move(handler);
 }
 
 net::awaitable<http_client::response_result>
