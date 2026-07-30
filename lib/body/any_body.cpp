@@ -4,6 +4,23 @@
 namespace httplib::body {
 namespace detail {
 
+template<typename T, typename... Bodies>
+struct match_body;
+
+template<typename T, typename Body, typename... Bodies>
+struct match_body<T, Body, Bodies...>
+{
+    using type = std::conditional_t<std::is_same_v<T, typename Body::value_type>,
+                                    Body,
+                                    typename match_body<T, Bodies...>::type>;
+};
+
+template<typename T>
+struct match_body<T>
+{
+    using type = void;
+};
+
 class proxy_writer
 {
 public:
@@ -128,7 +145,7 @@ private:
         return std::visit(
             [&](auto& t) -> detail::proxy_writer::ptr {
                 using value_type = std::decay_t<decltype(t)>;
-                using body_type  = typename any_body::match_body<value_type, Bodies...>::type;
+                using body_type  = typename detail::match_body<value_type, Bodies...>::type;
                 static_assert(!std::is_void_v<body_type>, "No matching Body type found");
 
                 using T = detail::proxy_writer_impl<body_type>;
