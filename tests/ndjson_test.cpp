@@ -6,7 +6,11 @@
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
+#include "util/ndjson_reader_impl.hpp"
+#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/system_executor.hpp>
+#include <boost/asio/use_future.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
 #include <spdlog/sinks/null_sink.h>
@@ -189,4 +193,104 @@ TEST_CASE("NDJSON: reader stops early", "[ndjson]")
     auto resp = UNWRAP(ts.client->get("/ndjson"));
     REQUIRE(resp.result() == http::status::ok);
     REQUIRE(items.size() == 2);
+}
+
+namespace {
+
+struct mock_chunk_reader : public httplib::chunk_reader
+{
+    std::vector<std::string> chunks;
+    size_t idx = 0;
+
+    httplib::net::awaitable<std::string_view> read_chunk() override
+    {
+        if (idx >= chunks.size())
+            co_return std::string_view {};
+        co_return chunks[idx++];
+    }
+
+    bool is_done() const override
+    {
+        return idx >= chunks.size();
+    }
+};
+
+} // namespace
+
+TEST_CASE("NDJSON: single line split across chunks", "[ndjson]")
+{
+    mock_chunk_reader mock;
+    mock.chunks = {"{\"a\":", "1}\n"};
+
+    httplib::ndjson_reader_impl reader(mock);
+
+    auto f1 = boost::asio::co_spawn(
+        boost::asio::system_executor {},
+        [&]() -> httplib::net::awaitable<boost::json::value> {
+            co_return co_await reader.read();
+        },
+        boost::asio::use_future);
+    f1.wait();
+    REQUIRE(f1.get().at("a") == 1);
+}
+
+TEST_CASE("NDJSON: multiple lines in one chunk", "[ndjson]")
+{
+    mock_chunk_reader mock;
+    mock.chunks = {"{\"a\":1}\n{\"b\":2}\n"};
+
+    httplib::ndjson_reader_impl reader(mock);
+
+    auto f1 = boost::asio::co_spawn(
+        boost::asio::system_executor {},
+        [&]() -> httplib::net::awaitable<boost::json::value> {
+            co_return co_await reader.read();
+        },
+        boost::asio::use_future);
+    f1.wait();
+    REQUIRE(f1.get().at("a") == 1);
+
+    auto f2 = boost::asio::co_spawn(
+        boost::asio::system_executor {},
+        [&]() -> httplib::net::awaitable<boost::json::value> {
+            co_return co_await reader.read();
+        },
+        boost::asio::use_future);
+    f2.wait();
+    REQUIRE(f2.get().at("b") == 2);
+}
+
+TEST_CASE("NDJSON: mixed: partial line in first chunk, rest in second", "[ndjson]")
+{
+    mock_chunk_reader mock;
+    mock.chunks = {"{\"x\":100}\n{\"y\":", "200}\n"};
+
+    httplib::ndjson_reader_impl reader(mock);
+
+    auto f1 = boost::asio::co_spawn(
+        boost::asio::system_executor {},
+        [&]() -> httplib::net::awaitable<boost::json::value> {
+            co_return co_await reader.read();
+        },
+        boost::asio::use_future);
+    f1.wait();
+    REQUIRE(f1.get().at("x") == 100);
+
+    auto f2 = boost::asio::co_spawn(
+        boost::asio::system_executor {},
+        [&]() -> httplib::net::awaitable<boost::json::value> {
+            co_return co_await reader.read();
+        },
+        boost::asio::use_future);
+    f2.wait();
+    REQUIRE(f2.get().at("y") == 200);
+
+    auto f3 = boost::asio::co_spawn(
+        boost::asio::system_executor {},
+        [&]() -> httplib::net::awaitable<boost::json::value> {
+            co_return co_await reader.read();
+        },
+        boost::asio::use_future);
+    f3.wait();
+    REQUIRE(f3.get().is_null());
 }

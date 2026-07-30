@@ -16,29 +16,38 @@ public:
 
     net::awaitable<boost::json::value> read() override
     {
-        if (reader_.is_done())
-            co_return boost::json::value {};
+        for (;;) {
+            auto lf = buf_.find('\n');
+            if (lf == std::string::npos) {
+                if (reader_.is_done())
+                    co_return boost::json::value {};
+                auto chunk = co_await reader_.read_chunk();
+                if (chunk.empty())
+                    co_return boost::json::value {};
+                buf_.append(chunk);
+                continue;
+            }
 
-        auto chunk = co_await reader_.read_chunk();
-        if (chunk.empty())
-            co_return boost::json::value {};
+            auto line = buf_.substr(0, lf);
+            if (!line.empty() && line.back() == '\r')
+                line.pop_back();
+            buf_.erase(0, lf + 1);
 
-        auto sv = std::string_view(chunk);
-        if (sv.back() == '\n')
-            sv.remove_suffix(1);
-        if (!sv.empty() && sv.back() == '\r')
-            sv.remove_suffix(1);
+            if (line.empty())
+                continue;
 
-        co_return boost::json::parse(sv);
+            co_return boost::json::parse(line);
+        }
     }
 
     bool is_done() const override
     {
-        return reader_.is_done();
+        return reader_.is_done() && buf_.find('\n') == std::string::npos;
     }
 
 private:
     chunk_reader& reader_;
+    std::string buf_;
 };
 
 } // namespace httplib
