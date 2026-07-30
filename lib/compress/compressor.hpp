@@ -5,7 +5,7 @@
 #include <unordered_map>
 
 namespace httplib::compress {
-class compressor
+class HTTPLIB_API compressor
 {
 public:
     using ptr = std::unique_ptr<compressor>;
@@ -25,7 +25,7 @@ public:
     virtual void consume(std::size_t bytes)                               = 0;
 };
 
-class compressor_factory
+class HTTPLIB_API compressor_factory
 {
 public:
     using create_function = std::function<compressor::ptr()>;
