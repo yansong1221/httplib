@@ -36,6 +36,7 @@ struct stress_config
     int duration_sec  = 10;
     int request_count = 0;
     int timeout_sec   = 10;
+    std::vector<std::string> headers;
 };
 
 struct conn_stats
@@ -203,14 +204,16 @@ static void print_report(const stress_config& cfg,
                              format_size(total_bytes));
 
     if (total_err > 0) {
-        int64_t e_conn = 0, e_timeout = 0;
+        int64_t e_conn = 0, e_timeout = 0, e_other = 0;
         for (auto& cs : conns) {
             e_conn += cs.err_connect;
             e_timeout += cs.err_timeout;
+            e_other += cs.err_other;
         }
-        std::cout << std::format("  Socket errors: connect {}, read 0, write 0, timeout {}\n",
+        std::cout << std::format("  Socket errors: connect {}, read 0, write 0, timeout {}, other {}\n",
                                  e_conn,
-                                 e_timeout);
+                                 e_timeout,
+                                 e_other);
     }
 
     std::cout << std::format("Requests/sec: {:>8.2f}\n", rps);
@@ -238,7 +241,9 @@ int main(int argc, char** argv)
         ("requests,n", po::value<int>(&cfg.request_count)->default_value(0),
          "Total requests (overrides --duration when > 0)")                                  //
         ("timeout", po::value<int>(&cfg.timeout_sec)->default_value(10),
-         "Request timeout in seconds");
+         "Request timeout in seconds")
+        ("header,H", po::value<std::vector<std::string>>(&cfg.headers)->multitoken(),
+         "Add header (e.g. -H \"Content-Type: application/json\")");
 
     po::variables_map vm;
     try {
@@ -261,11 +266,22 @@ int main(int argc, char** argv)
     for (auto& c : upper)
         c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
     cfg.verb = http::string_to_verb(upper);
-
     if (cfg.threads <= 0)
         cfg.threads = 1;
     if (cfg.connections <= 0)
         cfg.connections = cfg.threads;
+
+    http::fields req_headers;
+    for (auto& h : cfg.headers) {
+        auto pos = h.find(':');
+        if (pos != std::string::npos) {
+            auto name  = h.substr(0, pos);
+            auto value = h.substr(pos + 1);
+            if (!value.empty() && value.front() == ' ')
+                value.erase(0, 1);
+            req_headers.set(name, value);
+        }
+    }
     if (cfg.connections < cfg.threads)
         cfg.connections = cfg.threads;
 
@@ -308,9 +324,9 @@ int main(int argc, char** argv)
 
                     httplib::client::http_client::response_result result;
                     if (cfg.body.empty())
-                        result = co_await client.async_send_request(cfg.verb, cfg.path);
+                        result = co_await client.async_send_request(cfg.verb, cfg.path, req_headers);
                     else
-                        result = co_await client.async_send_request(cfg.verb, cfg.path, cfg.body);
+                        result = co_await client.async_send_request(cfg.verb, cfg.path, cfg.body, req_headers);
 
                     auto t1       = std::chrono::steady_clock::now();
                     double lat_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
@@ -331,8 +347,14 @@ int main(int argc, char** argv)
                                  || ec == boost::system::errc::not_connected
                                  || ec == boost::system::errc::host_unreachable)
                             cs.err_connect++;
-                        else
+                        else {
                             cs.err_other++;
+                            if (cs.err_other == 1)
+                                std::cerr << std::format("err: {} value={} msg={}\n",
+                                                         ec.category().name(),
+                                                         ec.value(),
+                                                         ec.message());
+                        }
                     }
 
                     cs.latencies.push_back(lat_ms);

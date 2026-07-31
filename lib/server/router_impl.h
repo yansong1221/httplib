@@ -65,8 +65,6 @@ protected:
                                            std::string_view key,
                                            coro_http_handler_type&& handler) override;
 
-public:
-    static void write_error(response& resp, const std::set<std::string>& allows);
 
 private:
     static void collect_allows(std::set<std::string>& allows,

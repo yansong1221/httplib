@@ -1,9 +1,9 @@
 #include "httplib/server/response.hpp"
 #include "html/html.h"
 #include "response_impl.hpp"
-#include "util/mime_types.hpp"
 #include "streaming/ndjson_writer_impl.hpp"
 #include "streaming/sse_writer_impl.hpp"
+#include "util/mime_types.hpp"
 #include <boost/beast/version.hpp>
 #include <fmt/format.h>
 
@@ -143,7 +143,6 @@ void response::set_sse_write_handler(sse_write_handler_type&& handler)
 
 void response::set_ndjson_write_handler(ndjson_write_handler_type&& handler)
 {
-    impl_->set(http::field::cache_control, "no-cache");
     impl_->set_chunked_write_handler(
         [handler = std::move(handler)](chunk_writer& cw) -> net::awaitable<void> {
             streaming::ndjson_writer_impl ndjson(cw);

@@ -91,19 +91,19 @@ router_impl::Node* router_impl::insert(Node* parent,
     }
     auto [iter, inserted] = parent->static_children.try_emplace(std::string(seg), nullptr);
     if (inserted) {
-        iter->second       = std::make_unique<Node>();
-        iter->second->key  = seg;
+        iter->second      = std::make_unique<Node>();
+        iter->second->key = seg;
     }
     return insert(iter->second.get(), segments, index + 1);
 }
 
 
 // ---------------- 匹配路由 ----------------
-net::awaitable<void>
-router_impl::process_routing(const route_match& match, request& req, response& resp) const
+net::awaitable<void> router_impl::process_routing(const route_match& match,
+                                                  request& req,
+                                                  response& resp) const
 {
     if (!match.node) {
-        write_error(resp, match.allows);
         co_return;
     }
 
@@ -127,7 +127,9 @@ router_impl::process_routing(const route_match& match, request& req, response& r
 }
 
 void router_impl::set_not_found_handler_impl(coro_http_handler_type&& handler)
-{ not_found_handler_ = std::move(handler); }
+{
+    not_found_handler_ = std::move(handler);
+}
 
 void router_impl::set_ws_handler_impl(std::string_view path,
                                       websocket_conn::coro_open_handler_type&& open_handler,
@@ -166,10 +168,10 @@ net::awaitable<router_impl::route_match> router_impl::pre_routing(request& req) 
     route_match result;
 
     std::shared_lock lock(mutex_);
-    auto segments = detail::split_segments(req.path());
+    auto segments      = detail::split_segments(req.path());
     bool is_chunked_te = req.get_impl()->chunked();
 
-    auto node = match_nodes(root_.get(), segments, 0, result.params, [&](const Node* node) {
+    result.node = match_nodes(root_.get(), segments, 0, result.params, [&](const Node* node) {
         collect_allows(result.allows, node, is_chunked_te);
         if (node->handlers.find(req.method()) != node->handlers.end())
             return true;
@@ -181,34 +183,23 @@ net::awaitable<router_impl::route_match> router_impl::pre_routing(request& req) 
         return false;
     });
 
-    if (!node) {
+    if (!result.node) {
         co_return result;
     }
 
-    result.node = node;
-
-    switch (req.method()) {
-    case http::verb::get:
-    case http::verb::head:
-    case http::verb::trace:
-    case http::verb::connect:
-    case http::verb::options:
-        result.body = body_kind::none;
-        co_return result;
-    default:
-        break;
-    }
-
-    if (node->handlers.find(req.method()) != node->handlers.end()) {
+    if (result.node->handlers.find(req.method()) != result.node->handlers.end()) {
         result.body = body_kind::none;
         co_return result;
     }
     if (is_chunked_te &&
-        node->chunked_handlers.find(req.method()) != node->chunked_handlers.end()) {
+        result.node->chunked_handlers.find(req.method()) != result.node->chunked_handlers.end())
+    {
         result.body = body_kind::chunked;
         co_return result;
     }
-    if (node->buffer_body_handlers.find(req.method()) != node->buffer_body_handlers.end()) {
+    if (result.node->buffer_body_handlers.find(req.method()) !=
+        result.node->buffer_body_handlers.end())
+    {
         result.body = body_kind::buffer_body;
         co_return result;
     }
@@ -292,7 +283,9 @@ net::awaitable<void> router_impl::post_routing(request& req, response& resp) con
 }
 
 void router_impl::set_post_routing_handler_impl(coro_http_handler_type&& handler)
-{ post_routing_handler_ = std::move(handler); }
+{
+    post_routing_handler_ = std::move(handler);
+}
 
 void router_impl::set_chunked_http_handler_impl(http::verb method,
                                                 std::string_view key,
@@ -305,8 +298,8 @@ void router_impl::set_chunked_http_handler_impl(http::verb method,
 }
 
 void router_impl::set_buffer_body_http_handler_impl(http::verb method,
-                                               std::string_view key,
-                                               coro_http_handler_type&& handler)
+                                                    std::string_view key,
+                                                    coro_http_handler_type&& handler)
 {
     std::unique_lock lock(mutex_);
     auto segments                      = detail::split_segments(key);
@@ -314,7 +307,9 @@ void router_impl::set_buffer_body_http_handler_impl(http::verb method,
     node->buffer_body_handlers[method] = std::move(handler);
 }
 
-void router_impl::collect_allows(std::set<std::string>& allows, const Node* node, bool include_chunked)
+void router_impl::collect_allows(std::set<std::string>& allows,
+                                 const Node* node,
+                                 bool include_chunked)
 {
     for (const auto& v : node->handlers)
         allows.insert(to_string(v.first));
@@ -324,16 +319,6 @@ void router_impl::collect_allows(std::set<std::string>& allows, const Node* node
         for (const auto& v : node->chunked_handlers)
             allows.insert(to_string(v.first));
     }
-}
-
-void router_impl::write_error(response& resp, const std::set<std::string>& allows)
-{
-    if (!allows.empty()) {
-        resp.set(http::field::allow, boost::join(allows, ","));
-        resp.set_error_content(httplib::http::status::method_not_allowed);
-        return;
-    }
-    resp.set_error_content(httplib::http::status::not_found);
 }
 
 } // namespace httplib::server

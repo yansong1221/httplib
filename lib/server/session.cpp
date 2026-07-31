@@ -258,18 +258,18 @@ net::awaitable<session::task::ptr> session::http_task::then()
         auto h_start    = std::chrono::steady_clock::time_point {};
         auto handler_ms = std::chrono::milliseconds::zero();
 
-        auto record_handler_time = [&] {
-            if (handler_ms == std::chrono::milliseconds::zero() &&
-                h_start != std::chrono::steady_clock::time_point {})
-                handler_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - h_start);
-        };
-
         try {
             auto match = co_await _router.pre_routing(req);
             if (!match.node) {
+                h_start = std::chrono::steady_clock::now();
                 resp.get_impl()->keep_alive(false);
-                _router.write_error(resp, match.allows);
+                if (!match.allows.empty()) {
+                    resp.set(http::field::allow, boost::join(match.allows, ","));
+                    resp.set_error_content(httplib::http::status::method_not_allowed);
+                }
+                else {
+                    resp.set_error_content(httplib::http::status::not_found);
+                }
             }
             else {
                 if (beast::iequals(header[http::field::expect], "100-continue")) {
@@ -301,13 +301,11 @@ net::awaitable<session::task::ptr> session::http_task::then()
             co_await _router.post_routing(req, resp);
         }
         catch (const std::exception& e) {
-            record_handler_time();
             serv_.logger()->warn("exception in business function, reason: {}", e.what());
             resp.set_string_content(
                 std::string(e.what()), "text/plain", http::status::internal_server_error);
         }
         catch (...) {
-            record_handler_time();
             using namespace std::string_view_literals;
             serv_.logger()->warn("unknown exception in business function");
             resp.set_string_content(std::string("unknown exception"),
@@ -350,7 +348,9 @@ void session::http_task::abort()
 
 net::awaitable<bool> session::http_task::async_write(const request& req, response& resp)
 {
-    if (resp.get_impl()->chunked_write_handler_) {
+    auto& chunked_write_handler = resp.get_impl()->chunked_write_handler_;
+
+    if (chunked_write_handler) {
         resp.get_impl()->chunked(true);
     }
     else {
@@ -376,28 +376,32 @@ net::awaitable<bool> session::http_task::async_write(const request& req, respons
 
     boost::system::error_code ec;
     http::response_serializer<body::any_body> serializer((*resp.get_impl()));
-    {
-        auto has_body_handler = resp.get_impl()->chunked_write_handler_ != nullptr;
-        if (has_body_handler)
-            serializer.split(true);
 
-        while (has_body_handler ? !serializer.is_header_done() : !serializer.is_done()) {
-            stream_.expires_after(serv_.write_timeout());
-            co_await http::async_write_some(stream_, serializer, util::net_awaitable[ec]);
-            if (ec) {
-                stream_.expires_never();
-                serv_.logger()->trace("write http body failed: {}", ec.message());
-                co_return false;
-            }
-        }
+    auto send_chunk = [&]() -> net::awaitable<bool> {
+        stream_.expires_after(serv_.write_timeout());
+        co_await http::async_write_some(stream_, serializer, util::net_awaitable[ec]);
         stream_.expires_never();
-    }
+        if (ec) {
+            serv_.logger()->trace("write http body failed: {}", ec.message());
+            co_return false;
+        }
+        co_return true;
+    };
 
-    if (auto handler = resp.get_impl()->chunked_write_handler_; handler) {
-        auto writer =
-            std::make_unique<streaming::chunk_writer_impl>(stream_, serv_.write_timeout());
-        co_await handler(*writer);
-        co_await writer->close();
+    if (chunked_write_handler) {
+        serializer.split(true);
+        while (!serializer.is_header_done())
+            if (!co_await send_chunk())
+                co_return false;
+
+        streaming::chunk_writer_impl writer(stream_, serv_.write_timeout());
+        co_await chunked_write_handler(writer);
+        co_await writer.close();
+    }
+    else {
+        while (!serializer.is_done())
+            if (!co_await send_chunk())
+                co_return false;
     }
     co_return true;
 }

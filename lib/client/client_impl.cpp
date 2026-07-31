@@ -1,8 +1,8 @@
 #include "client_impl.h"
+#include "compress/compressor.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "streaming/chunk_reader_impl.hpp"
 #include "streaming/chunk_writer_impl.hpp"
-#include "compress/compressor.hpp"
 #include "streaming/ndjson_reader_impl.hpp"
 #include "streaming/sse_reader_impl.hpp"
 #include <boost/algorithm/string/join.hpp>
@@ -285,31 +285,28 @@ net::awaitable<http_client::response> http_client::impl::co_read_response(
     }
 
     if (!parser.is_done()) {
-        auto ct     = parser.get()[http::field::content_type];
-        auto semi   = ct.find(';');
-        auto mime   = semi == std::string_view::npos ? ct : ct.substr(0, semi);
-        bool is_sse = beast::iequals(mime, "text/event-stream");
+        auto ct        = parser.get()[http::field::content_type];
+        auto semi      = ct.find(';');
+        auto mime      = semi == std::string_view::npos ? ct : ct.substr(0, semi);
+        bool is_sse    = beast::iequals(mime, "text/event-stream");
         bool is_ndjson = beast::iequals(mime, "application/x-ndjson");
 
         if (parser.chunked() && sse_read_handler_ && is_sse) {
-            auto reader_impl =
-                std::make_unique<streaming::chunk_reader_impl<false>>(*stream_, buffer_, parser, timeout_);
+            streaming::chunk_reader_impl<false> reader_impl(*stream_, buffer_, parser, timeout_);
 
-            streaming::sse_reader_impl sse(*reader_impl);
+            streaming::sse_reader_impl sse(reader_impl);
             co_await sse_read_handler_(sse);
         }
         else if (parser.chunked() && ndjson_read_handler_ && is_ndjson) {
-            auto reader_impl = std::make_unique<streaming::chunk_reader_impl<false>>(
-                *stream_, buffer_, parser, timeout_);
+            streaming::chunk_reader_impl<false> reader_impl(*stream_, buffer_, parser, timeout_);
 
-            streaming::ndjson_reader_impl ndjson(*reader_impl);
+            streaming::ndjson_reader_impl ndjson(reader_impl);
             co_await ndjson_read_handler_(ndjson);
         }
         else if (parser.chunked() && chunked_read_handler_) {
-            auto reader_impl =
-                std::make_unique<streaming::chunk_reader_impl<false>>(*stream_, buffer_, parser, timeout_);
+            streaming::chunk_reader_impl<false> reader_impl(*stream_, buffer_, parser, timeout_);
 
-            co_await chunked_read_handler_(*reader_impl, parser.get());
+            co_await chunked_read_handler_(reader_impl, parser.get());
         }
         else {
             if (body_setup)
