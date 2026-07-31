@@ -8,7 +8,9 @@
 #include <boost/algorithm/string/join.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/write.hpp>
+#include <boost/beast/http/buffer_body.hpp>
 #include <boost/beast/http/empty_body.hpp>
+#include <boost/beast/http/message.hpp>
 #include <boost/beast/http/parser.hpp>
 #include <boost/beast/http/read.hpp>
 #include <boost/beast/http/serializer.hpp>
@@ -16,10 +18,182 @@
 #include <boost/beast/http/write.hpp>
 #include <boost/beast/version.hpp>
 #include <fmt/format.h>
+#include <limits>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
 namespace httplib::client {
+namespace {
+
+std::string make_host_value(std::string_view host, uint16_t port, bool ssl)
+{
+    if ((ssl && port != 443) || (!ssl && port != 80))
+        return fmt::format("{}:{}", host, port);
+    return std::string(host);
+}
+
+const http::field hop_by_hop_fields[] = {
+    http::field::connection,
+    http::field::keep_alive,
+    http::field::transfer_encoding,
+    http::field::te,
+    http::field::trailer,
+    http::field::proxy_authorization,
+    http::field::proxy_authenticate,
+    http::field::upgrade,
+};
+
+bool is_hop_by_hop(http::field f)
+{
+    for (auto hf : hop_by_hop_fields) {
+        if (f == hf)
+            return true;
+    }
+    return false;
+}
+
+} // namespace
+
+class relay_impl final : public relay_session
+{
+public:
+    relay_impl(http_stream& stream,
+               beast::flat_buffer& buffer,
+               std::string_view host_value,
+               std::chrono::steady_clock::duration timeout,
+               http::verb method,
+               std::string_view path,
+               const http::fields& headers)
+        : stream_(&stream)
+        , buffer_(&buffer)
+        , timeout_(timeout)
+        , req_msg_(method, path, 11)
+        , req_sr_(req_msg_)
+    {
+        req_msg_.set(http::field::host, host_value);
+        req_msg_.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
+        req_msg_.keep_alive(true);
+        for (const auto& f : headers) {
+            if (!is_hop_by_hop(f.name()))
+                req_msg_.set(f.name_string(), f.value());
+        }
+    }
+
+    net::awaitable<void> write_header()
+    {
+        boost::system::error_code ec;
+        stream_->expires_after(timeout_);
+        while (!ec && !req_sr_.is_header_done())
+            co_await http::async_write_some(
+                *stream_, req_sr_, util::net_awaitable[ec]);
+        stream_->expires_never();
+        if (ec == http::error::need_buffer)
+            ec = {};
+        if (ec)
+            throw boost::system::system_error(ec);
+    }
+
+private:
+    net::awaitable<void> write_body(std::string_view data) override
+    {
+        auto& body = req_msg_.body();
+        body.data  = const_cast<char*>(data.data());
+        body.size  = data.size();
+        body.more  = true;
+
+        boost::system::error_code ec;
+        stream_->expires_after(timeout_);
+        co_await http::async_write_some(*stream_, req_sr_, util::net_awaitable[ec]);
+        stream_->expires_never();
+        if (ec == http::error::need_buffer)
+            ec = {};
+        if (ec)
+            throw boost::system::system_error(ec);
+    }
+
+    net::awaitable<void> close_body() override
+    {
+        req_msg_.body().more = false;
+
+        boost::system::error_code ec;
+        stream_->expires_after(timeout_);
+        while (!req_sr_.is_done()) {
+            co_await http::async_write_some(*stream_, req_sr_, util::net_awaitable[ec]);
+            if (ec == http::error::need_buffer)
+                ec = {};
+            else if (ec)
+                break;
+        }
+        stream_->expires_never();
+        if (ec)
+            throw boost::system::system_error(ec);
+    }
+
+    net::awaitable<void> read_header() override
+    {
+        resp_parser_.emplace();
+        resp_parser_->eager(false);
+        resp_parser_->body_limit((std::numeric_limits<std::uint64_t>::max)());
+
+        boost::system::error_code ec;
+        stream_->expires_after(timeout_);
+        while (!ec && !resp_parser_->is_header_done())
+            co_await http::async_read_some(
+                *stream_, *buffer_, *resp_parser_, util::net_awaitable[ec]);
+        stream_->expires_never();
+        if (ec)
+            throw boost::system::system_error(ec);
+    }
+
+    http::status result() const override
+    {
+        return resp_parser_->get().result();
+    }
+
+    const http::fields& headers() const override
+    {
+        return resp_parser_->get();
+    }
+
+    net::awaitable<std::string_view> read_some_body() override
+    {
+        for (;;) {
+            if (resp_parser_->is_done())
+                co_return std::string_view{};
+
+            auto& body = resp_parser_->get().body();
+            body.data  = buf_;
+            body.size  = sizeof(buf_);
+
+            boost::system::error_code ec;
+            stream_->expires_after(timeout_);
+            co_await http::async_read_some(
+                *stream_, *buffer_, *resp_parser_, util::net_awaitable[ec]);
+            stream_->expires_never();
+            if (ec)
+                throw boost::system::system_error(ec);
+
+            auto consumed = sizeof(buf_) - body.size;
+            if (consumed > 0)
+                co_return std::string_view(buf_, consumed);
+        }
+    }
+
+    bool is_body_done() const override
+    {
+        return resp_parser_.has_value() && resp_parser_->is_done();
+    }
+
+    http_stream* stream_;
+    beast::flat_buffer* buffer_;
+    std::chrono::steady_clock::duration timeout_;
+    char buf_[4096];
+
+    http::request<http::buffer_body> req_msg_;
+    http::request_serializer<http::buffer_body> req_sr_;
+
+    std::optional<http::response_parser<http::buffer_body>> resp_parser_;
+};
 
 http_client::impl::impl(const net::any_io_executor& ex,
                         std::string_view host,
@@ -29,6 +203,7 @@ http_client::impl::impl(const net::any_io_executor& ex,
     : executor_(ex)
     , resolver_(ex)
     , host_(host)
+    , host_value_(make_host_value(host, port, ssl))
     , port_(port)
     , use_ssl_(ssl)
 {
@@ -44,16 +219,10 @@ http_client::impl::~impl()
 
 http_client::request http_client::impl::make_http_request(http::verb method,
                                                           std::string_view path,
-                                                          const http::fields& headers)
+                                                          const http::fields& headers) const
 {
-    std::string host;
-    if ((use_ssl_ && port_ != 443) || (!use_ssl_ && port_ != 80))
-        host += fmt::format("{}:{}", host_, port_);
-    else
-        host = host_;
-
     http_client::request req(method, path, 11);
-    req.set(http::field::host, host);
+    req.set(http::field::host, host_value_);
     req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
     req.set(http::field::accept, "*/*");
 
@@ -160,7 +329,7 @@ http_client::impl::async_send_request_with_redirect(http_client::request& req,
 
             logger()->trace("redirect {} -> {}", req.target(), std::string_view(loc));
 
-            // Full URL (cross-domain) → create new impl
+            // Full URL (cross-domain) �?create new impl
             if (loc.starts_with("http://") || loc.starts_with("https://")) {
                 auto scheme_end = loc.find("://");
                 auto path_start = loc.find('/', scheme_end + 3);
@@ -334,9 +503,9 @@ http_client::impl::async_send_request_impl(http_client::request& req,
     co_await co_write_request(req, chunked_write_handler != nullptr);
 
     if (chunked_write_handler) {
-        auto writer = std::make_unique<streaming::chunk_writer_impl>(*stream_, timeout_);
-        co_await chunked_write_handler(*writer);
-        co_await writer->close();
+        streaming::chunk_writer_impl writer(*stream_, timeout_);
+        co_await chunked_write_handler(writer);
+        co_await writer.close();
     }
 
     co_return co_await co_read_response(body_setup, req.method() == http::verb::head);
@@ -379,6 +548,42 @@ http_client::impl::async_download(http_client::request& req, const fs::path& sav
         fs::remove(save_path, ec);
     }
     co_return result;
+}
+
+net::awaitable<std::unique_ptr<relay_session>>
+http_client::impl::co_begin_relay(http::verb method,
+                                  std::string_view path,
+                                  const http::fields& headers,
+                                  bool retry)
+{
+    boost::system::error_code ec;
+    try {
+        co_await co_connect();
+
+        auto session = std::make_unique<relay_impl>(
+            *stream_, buffer_, host_value_, timeout_, method, path, headers);
+        co_await session->write_header();
+
+        co_return session;
+    }
+    catch (const boost::system::system_error& e) {
+        ec = e.code();
+    }
+    catch (const std::exception&) {
+        ec = boost::system::errc::make_error_code(boost::system::errc::protocol_error);
+    }
+    catch (...) {
+        ec = boost::system::errc::make_error_code(boost::system::errc::protocol_error);
+    }
+    close();
+
+    if (retry && (ec == boost::asio::error::connection_aborted ||
+                  ec == boost::asio::error::connection_reset ||
+                  ec == http::error::end_of_stream))
+    {
+        co_return co_await co_begin_relay(method, path, headers, false);
+    }
+    throw boost::system::system_error(ec);
 }
 
 } // namespace httplib::client

@@ -2,6 +2,7 @@
 #include "httplib/body/any_body.hpp"
 #include "httplib/streaming/chunk_reader.hpp"
 #include "httplib/streaming/chunk_writer.hpp"
+#include "httplib/client/relay_session.hpp"
 #include "httplib/config.hpp"
 #include "httplib/streaming/ndjson_reader.hpp"
 #include "httplib/streaming/sse_reader.hpp"
@@ -265,6 +266,11 @@ public:
                                          chunked_write_handler_type handler,
                                          const html::query_params& params = {},
                                          const http::fields& headers      = http::fields());
+
+    net::awaitable<std::unique_ptr<relay_session>>
+    async_begin_relay(http::verb method,
+                      std::string_view path,
+                      const http::fields& headers = http::fields());
 
     // ---- send_request (sync, body-type overloads) ----
 

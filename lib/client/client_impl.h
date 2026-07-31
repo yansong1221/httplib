@@ -24,7 +24,7 @@ public:
 
     http_client::request make_http_request(http::verb method,
                                            std::string_view path,
-                                           const http::fields& headers);
+                                           const http::fields& headers) const;
 
     void set_chunked_read_handler(chunked_read_handler_type&& handler);
 
@@ -53,14 +53,18 @@ public:
 
 
     net::awaitable<http_client::response_result> async_download(http_client::request& req,
-                                                                const fs::path& save_path);
+                                                                  const fs::path& save_path);
+
+    net::awaitable<std::unique_ptr<relay_session>>
+    co_begin_relay(http::verb method, std::string_view path, const http::fields& headers,
+                   bool retry = true);
 
 
 private:
     net::awaitable<void> co_connect();
     net::awaitable<void> co_write_request(http::request<body::any_body>& req, bool headers_only);
     net::awaitable<http_client::response> co_read_response(const body_setup_fn& body_setup = {},
-                                                           bool is_head                    = false);
+                                                            bool is_head                    = false);
 
     void expires_after(bool first = false);
 
@@ -75,6 +79,7 @@ public:
     timeout_policy timeout_policy_               = timeout_policy::overall;
     std::chrono::steady_clock::duration timeout_ = std::chrono::seconds(30);
     std::string host_;
+    std::string host_value_;
     uint16_t port_ = 0;
     bool use_ssl_  = false;
 

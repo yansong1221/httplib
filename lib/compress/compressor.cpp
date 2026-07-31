@@ -97,6 +97,7 @@ protected:
 
 compressor_factory::compressor_factory()
 {
+    register_compressor("identity", []() { return nullptr; });
 #ifdef HTTPLIB_ENABLED_COMPRESS
     register_compressor("gzip", []() { return std::make_unique<gzip_compressor_adapter>(); });
     register_compressor("deflate", []() { return std::make_unique<zlib_compressor_adapter>(); });

@@ -189,10 +189,23 @@ public:
         this->body() = body::empty_body::value_type {};
     }
 
+    void set_buffer_body_write_handler(response::buffer_body_write_handler_type&& handler,
+                                       const http::fields& headers,
+                                       http::status status = http::status::ok)
+    {
+        reset_content();
+        buffer_body_write_handler_ = std::move(handler);
+        for (const auto& f : headers)
+            this->set(f.name_string(), f.value());
+        this->result(status);
+        this->body() = body::empty_body::value_type {};
+    }
+
     void reset_content()
     {
-        chunked_write_handler_ = nullptr;
-        this->body()           = body::empty_body::value_type {};
+        chunked_write_handler_     = nullptr;
+        buffer_body_write_handler_ = nullptr;
+        this->body()               = body::empty_body::value_type {};
     }
 
     static response make_response(unsigned int version, bool keep_alive)
@@ -202,6 +215,7 @@ public:
     }
 
     response::chunked_write_handler_type chunked_write_handler_;
+    response::buffer_body_write_handler_type buffer_body_write_handler_;
 };
 
 } // namespace httplib::server

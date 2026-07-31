@@ -16,12 +16,16 @@
 #include <string_view>
 #include <unordered_set>
 
+namespace httplib::client {
+class http_client_pool;
+}
+
 namespace httplib::server {
 class http_server::impl : public std::enable_shared_from_this<impl>
 {
 public:
     explicit impl(const net::any_io_executor& ex);
-    ~impl() = default;
+    ~impl();
 
 public:
     net::any_io_executor get_executor() noexcept;
@@ -57,6 +61,11 @@ public:
     const fs::path& upload_dir() const { return upload_dir_; }
     uint64_t upload_file_limit() const { return upload_file_limit_; }
 
+    void set_reverse_proxy(std::string_view key,
+                           std::string_view upstream_host,
+                           uint16_t upstream_port,
+                           bool upstream_ssl);
+
     void use_ssl(const net::const_buffer& cert_file,
                  const net::const_buffer& key_file,
                  std::string passwd = {});
@@ -87,6 +96,8 @@ private:
 
     fs::path upload_dir_;
     std::uint64_t upload_file_limit_ = 10 * 1024 * 1024;
+
+    std::unique_ptr<client::http_client_pool> proxy_pool_;
 
 #ifdef HTTPLIB_ENABLED_SSL
     std::shared_ptr<ssl::context> ssl_context_;

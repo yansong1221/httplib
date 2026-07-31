@@ -110,8 +110,8 @@ protected:
                                                coro_http_handler_type&& handler) = 0;
 
     virtual void set_buffer_body_http_handler_impl(http::verb method,
-                                              std::string_view key,
-                                              coro_http_handler_type&& handler) = 0;
+                                               std::string_view key,
+                                               coro_http_handler_type&& handler) = 0;
 };
 
 } // namespace httplib::server

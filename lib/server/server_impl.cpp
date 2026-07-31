@@ -1,6 +1,9 @@
 #include "server_impl.h"
 #include "httplib/util/use_awaitable.hpp"
 #include "httplib/util/when_all.hpp"
+#include "httplib/client/client_pool.hpp"
+#include "request_impl.hpp"
+#include "response_impl.hpp"
 #include <boost/asio/use_future.hpp>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
@@ -21,6 +24,8 @@ http_server::impl::impl(const net::any_io_executor& ex)
     default_logger_ = std::make_shared<spdlog::logger>("httplib.server", sink_list);
     default_logger_->set_level(spdlog::level::info);
 }
+
+http_server::impl::~impl() = default;
 
 void http_server::impl::listen(std::string_view host,
                                uint16_t port,
@@ -258,6 +263,86 @@ void http_server::impl::use_ssl(const net::const_buffer& cert_file,
     throw boost::system::system_error(
         boost::system::errc::make_error_code(boost::system::errc::protocol_not_supported));
 #endif
+}
+
+void http_server::impl::set_reverse_proxy(std::string_view key,
+                                           std::string_view upstream_host,
+                                           uint16_t upstream_port,
+                                           bool upstream_ssl)
+{
+    if (!proxy_pool_)
+        proxy_pool_ = std::make_unique<client::http_client_pool>(ex_);
+
+    std::string prefix(key);
+    if (prefix.ends_with('*'))
+        prefix.pop_back();
+    if (prefix.ends_with('/'))
+        prefix.pop_back();
+
+    auto handler = [this, upstream_host = std::string(upstream_host), upstream_port, upstream_ssl, prefix](
+            request& req, response& resp) -> net::awaitable<void> {
+            auto target = std::string(req.path());
+            if (target.starts_with(prefix))
+                target = target.substr(prefix.size());
+            if (target.empty() || target[0] != '/')
+                target.insert(0, 1, '/');
+
+            http::fields upstream_headers;
+            auto& req_impl = *req.get_impl();
+            for (const auto& f : req_impl) {
+                if (f.name() != http::field::host)
+                    upstream_headers.set(f.name_string(), f.value());
+            }
+
+            auto client_ip = req.get_client_ip().to_string();
+            auto xff       = req_impl["X-Forwarded-For"];
+            if (!xff.empty()) {
+                std::string xf(xff);
+                client_ip = xf + ", " + client_ip;
+            }
+            upstream_headers.set("X-Forwarded-For", client_ip);
+
+            auto client  = co_await proxy_pool_->async_acquire(
+                upstream_host, upstream_port, upstream_ssl);
+            auto session = co_await client->async_begin_relay(
+                req.method(), target, upstream_headers);
+
+            while (true) {
+                auto chunk = co_await req.read_buffer_body_some();
+                if (chunk.empty())
+                    break;
+                co_await session->write_body(chunk);
+            }
+            co_await session->close_body();
+
+            co_await session->read_header();
+
+            std::string body;
+            while (true) {
+                auto chunk = co_await session->read_some_body();
+                if (chunk.empty())
+                    break;
+                body.append(chunk);
+            }
+
+            auto ct = session->headers()["Content-Type"];
+            resp.set_string_content(body, ct, session->result());
+
+            for (const auto& f : session->headers()) {
+                auto fn = f.name_string();
+                if (fn != "Content-Type" && fn != "Content-Length" &&
+                    fn != "Transfer-Encoding" && fn != "Connection")
+                    resp.set(f.name_string(), f.value());
+            }
+        };
+
+    router_.set_buffer_body_http_handler(http::verb::get, key, handler);
+    router_.set_buffer_body_http_handler(http::verb::head, key, handler);
+    router_.set_buffer_body_http_handler(http::verb::post, key, handler);
+    router_.set_buffer_body_http_handler(http::verb::put, key, handler);
+    router_.set_buffer_body_http_handler(http::verb::patch, key, handler);
+    router_.set_buffer_body_http_handler(http::verb::delete_, key, handler);
+    router_.set_buffer_body_http_handler(http::verb::options, key, handler);
 }
 
 

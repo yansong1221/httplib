@@ -56,6 +56,12 @@ public:
 
     void set_upload_dir(const fs::path& dir);
     void set_upload_file_limit(std::uint64_t max_bytes);
+
+    void set_reverse_proxy(std::string_view key,
+                           std::string_view upstream_host,
+                           uint16_t upstream_port,
+                           bool upstream_ssl = false);
+
     void set_ssl(const std::span<const char>& cert_file,
                   const std::span<const char>& key_file,
                   std::string passwd = {});
