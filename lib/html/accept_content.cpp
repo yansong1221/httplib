@@ -1,4 +1,4 @@
-#include "httplib/html/accept_content.hpp"
+#include "accept_content.hpp"
 #include "compress/compressor.hpp"
 #include "httplib/util/misc.hpp"
 #include <boost/algorithm/string/trim.hpp>

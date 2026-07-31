@@ -1,6 +1,6 @@
 #include "session.hpp"
 #include "compress/compressor.hpp"
-#include "httplib/html/accept_content.hpp"
+#include "html/accept_content.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
@@ -381,9 +381,7 @@ net::awaitable<bool> session::http_task::async_write(const request& req, respons
         if (has_body_handler)
             serializer.split(true);
 
-        while (has_body_handler ? !serializer.is_header_done()
-                                : !serializer.is_done())
-        {
+        while (has_body_handler ? !serializer.is_header_done() : !serializer.is_done()) {
             stream_.expires_after(serv_.write_timeout());
             co_await http::async_write_some(stream_, serializer, util::net_awaitable[ec]);
             if (ec) {
@@ -396,7 +394,8 @@ net::awaitable<bool> session::http_task::async_write(const request& req, respons
     }
 
     if (auto handler = resp.get_impl()->chunked_write_handler_; handler) {
-        auto writer = std::make_unique<streaming::chunk_writer_impl>(stream_, serv_.write_timeout());
+        auto writer =
+            std::make_unique<streaming::chunk_writer_impl>(stream_, serv_.write_timeout());
         co_await handler(*writer);
         co_await writer->close();
     }
