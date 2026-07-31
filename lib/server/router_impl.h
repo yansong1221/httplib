@@ -12,9 +12,6 @@
 
 namespace httplib::server {
 
-class request;
-class response;
-
 class router_impl : public router
 {
 public:
@@ -31,12 +28,14 @@ public:
     struct route_match
     {
         std::set<std::string> allows;
-        body_kind body = body_kind::none;
+        body_kind body   = body_kind::none;
         const Node* node = nullptr;
         std::unordered_map<std::string, std::string> params;
     };
 
-    net::awaitable<void> process_routing(const route_match& match, request& req, response& resp) const;
+    net::awaitable<void> process_routing(const route_match& match,
+                                         request& req,
+                                         response& resp) const;
 
     struct ws_handler_entry
     {
@@ -63,8 +62,8 @@ protected:
                                        std::string_view key,
                                        coro_http_handler_type&& handler) override;
     void set_buffer_body_http_handler_impl(http::verb method,
-                                      std::string_view key,
-                                      coro_http_handler_type&& handler) override;
+                                           std::string_view key,
+                                           coro_http_handler_type&& handler) override;
 
 public:
     static void write_error(response& resp, const std::set<std::string>& allows);

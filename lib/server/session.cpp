@@ -417,7 +417,7 @@ httplib::net::awaitable<session::task::ptr> session::websocket_task::then()
 
 void session::websocket_task::abort()
 {
-    conn_->close();
+    conn_->close("abort");
 }
 
 session::http_proxy_task::http_proxy_task(http_stream&& stream,
