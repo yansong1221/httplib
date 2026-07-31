@@ -1,6 +1,5 @@
 #pragma once
 #include "httplib/config.hpp"
-#include "httplib/server/helper.hpp"
 #include "httplib/util/misc.hpp"
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>

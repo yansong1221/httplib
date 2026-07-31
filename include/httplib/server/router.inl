@@ -1,8 +1,73 @@
 #pragma once
-#include "helper.hpp"
+#include "httplib/server/server_fwd.hpp"
 #include "httplib/util/misc.hpp"
 
 namespace httplib::server {
+
+namespace helper {
+
+template<class, class = void>
+struct has_before : std::false_type
+{
+};
+
+template<class T>
+struct has_before<T,
+                  std::void_t<decltype(std::declval<T>().before(
+                      std::declval<request&>(), std::declval<response&>()))>> : std::true_type
+{
+};
+
+template<class, class = void>
+struct has_after : std::false_type
+{
+};
+
+template<class T>
+struct has_after<T,
+                 std::void_t<decltype(std::declval<T>().after(
+                     std::declval<request&>(), std::declval<response&>()))>> : std::true_type
+{
+};
+
+template<class T>
+constexpr bool has_before_v = has_before<T>::value;
+
+template<class T>
+constexpr bool has_after_v = has_after<T>::value;
+
+template<typename T>
+net::awaitable<void> do_before(T& aspect, request& req, response& resp, bool& ok)
+{
+    if constexpr (has_before_v<T>) {
+        if (!ok) {
+            co_return;
+        }
+        using return_type = std::decay_t<decltype(aspect.before(req, resp))>;
+        if constexpr (util::is_awaitable_v<return_type>)
+            ok = co_await aspect.before(req, resp);
+        else
+            ok = aspect.before(req, resp);
+    }
+    co_return;
+}
+
+template<typename T>
+net::awaitable<void> do_after(T& aspect, request& req, response& resp, bool& ok)
+{
+    if constexpr (has_after_v<T>) {
+        if (!ok) {
+            co_return;
+        }
+        using return_type = std::decay_t<decltype(aspect.after(req, resp))>;
+        if constexpr (util::is_awaitable_v<return_type>)
+            ok = co_await aspect.after(req, resp);
+        else
+            ok = aspect.after(req, resp);
+    }
+    co_return;
+}
+} // namespace helper
 
 template<typename Func, typename... Aspects>
 router::coro_http_handler_type router::make_coro_http_handler(Func&& handler, Aspects&&... asps)

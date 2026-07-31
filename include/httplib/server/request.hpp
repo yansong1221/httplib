@@ -2,7 +2,6 @@
 #include "httplib/body/any_body.hpp"
 #include "httplib/streaming/chunk_reader.hpp"
 #include "httplib/config.hpp"
-#include "httplib/server/header_proxy.hpp"
 #include <any>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -41,8 +40,6 @@ public:
 
     std::string_view operator[](http::field name) const;
     std::string_view operator[](std::string_view name) const;
-    header_proxy operator[](http::field name);
-    header_proxy operator[](std::string_view name);
     std::string_view at(http::field name) const;
     std::string_view at(std::string_view name) const;
 

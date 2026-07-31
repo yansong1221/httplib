@@ -3,8 +3,6 @@
 #include "httplib/streaming/chunk_writer.hpp"
 #include "httplib/config.hpp"
 #include "httplib/html/form_data.hpp"
-#include "httplib/server/header_proxy.hpp"
-#include "httplib/server/helper.hpp"
 #include "httplib/streaming/ndjson_writer.hpp"
 #include "httplib/streaming/sse_writer.hpp"
 #include "httplib/util/misc.hpp"
@@ -29,8 +27,6 @@ public:
 
     std::string_view operator[](http::field name) const;
     std::string_view operator[](std::string_view name) const;
-    header_proxy operator[](http::field name);
-    header_proxy operator[](std::string_view name);
     std::string_view at(http::field name) const;
     std::string_view at(std::string_view name) const;
 

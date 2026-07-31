@@ -55,16 +55,6 @@ std::string_view request::operator[](std::string_view name) const
     return (*impl_)[name];
 }
 
-header_proxy request::operator[](http::field name)
-{
-    return header_proxy(base(), name);
-}
-
-header_proxy request::operator[](std::string_view name)
-{
-    return header_proxy(base(), name);
-}
-
 std::string_view request::at(http::field name) const
 {
     return impl_->at(name);

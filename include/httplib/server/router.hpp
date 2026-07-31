@@ -2,6 +2,7 @@
 #include "httplib/server/mount_point_entry.hpp"
 #include "httplib/server/server_fwd.hpp"
 #include "httplib/server/websocket_conn.hpp"
+#include "httplib/util/type_traits.h"
 #include <algorithm>
 #include <boost/beast/http/fields.hpp>
 #include <filesystem>
