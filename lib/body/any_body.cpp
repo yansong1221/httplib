@@ -1,5 +1,7 @@
 #include "httplib/body/any_body.hpp"
 #include "compress/compressor.hpp"
+#include <tuple>
+#include <variant>
 
 using namespace httplib::compress;
 
@@ -23,77 +25,98 @@ struct match_body<T>
     using type = void;
 };
 
-class proxy_writer
-{
-public:
-    using ptr = std::unique_ptr<proxy_writer>;
 
-    virtual ~proxy_writer()                          = default;
-    virtual void init(boost::system::error_code& ec) = 0;
-    virtual inline boost::optional<std::pair<any_body::writer::const_buffers_type, bool>>
-    get(boost::system::error_code& ec) = 0;
-};
-class proxy_reader
-{
-public:
-    using ptr = std::unique_ptr<proxy_reader>;
+template<typename... Bodies>
+struct variant_from_tuple;
 
-    virtual ~proxy_reader()                                = default;
-    virtual void init(boost::optional<std::uint64_t> const& content_length,
-                      boost::system::error_code& ec)       = 0;
-    virtual std::size_t put(any_body::reader::const_buffers_type const& buffers,
-                            boost::system::error_code& ec) = 0;
-    virtual void finish(boost::system::error_code& ec)     = 0;
+template<typename... Bodies>
+struct variant_from_tuple<std::tuple<Bodies...>>
+{
+    using writer_t = std::variant<std::monostate, typename Bodies::writer...>;
+    using reader_t = std::variant<std::monostate, typename Bodies::reader...>;
 };
 
-
-template<class Body>
-class proxy_writer_impl : public proxy_writer
-{
-public:
-    proxy_writer_impl(http::fields& h, typename Body::value_type& b)
-        : writer_(h, b)
-    {
-    }
-    void init(boost::system::error_code& ec) override { writer_.init(ec); };
-    boost::optional<std::pair<any_body::writer::const_buffers_type, bool>>
-    get(boost::system::error_code& ec) override
-    {
-        return writer_.get(ec);
-    };
-
-private:
-    typename Body::writer writer_;
-};
-
-
-template<class Body>
-class proxy_reader_impl : public proxy_reader
-{
-public:
-    proxy_reader_impl(http::fields& h, typename Body::value_type& b)
-        : reader_(h, b)
-    {
-    }
-    void init(boost::optional<std::uint64_t> const& content_length,
-              boost::system::error_code& ec) override
-    {
-        reader_.init(content_length, ec);
-    }
-    std::size_t put(any_body::reader::const_buffers_type const& buffers,
-                    boost::system::error_code& ec) override
-    {
-        return reader_.put(buffers, ec);
-    }
-    void finish(boost::system::error_code& ec) override { reader_.finish(ec); }
-
-private:
-    typename Body::reader reader_;
-};
-
+using writer_variant = variant_from_tuple<any_body::body_types>::writer_t;
+using reader_variant = variant_from_tuple<any_body::body_types>::reader_t;
 
 } // namespace detail
 
+
+struct writer_holder
+{
+    detail::writer_variant v;
+
+    void init(boost::system::error_code& ec)
+    {
+        std::visit(
+            [&](auto& w) {
+                if constexpr (!std::is_same_v<std::decay_t<decltype(w)>, std::monostate>)
+                    w.init(ec);
+            },
+            v);
+    }
+
+    boost::optional<std::pair<any_body::writer::const_buffers_type, bool>>
+    get(boost::system::error_code& ec)
+    {
+        return std::visit(
+            [&](auto& w) -> boost::optional<std::pair<any_body::writer::const_buffers_type, bool>> {
+                if constexpr (!std::is_same_v<std::decay_t<decltype(w)>, std::monostate>)
+                    return w.get(ec);
+                return boost::none;
+            },
+            v);
+    }
+
+    template<typename Body>
+    void emplace(http::fields& h, typename Body::value_type& b)
+    {
+        v.template emplace<typename Body::writer>(h, b);
+    }
+};
+
+struct reader_holder
+{
+    detail::reader_variant v;
+
+    void init(boost::optional<std::uint64_t> const& content_length, boost::system::error_code& ec)
+    {
+        std::visit(
+            [&](auto& r) {
+                if constexpr (!std::is_same_v<std::decay_t<decltype(r)>, std::monostate>)
+                    r.init(content_length, ec);
+            },
+            v);
+    }
+
+    std::size_t put(any_body::reader::const_buffers_type const& buffers,
+                    boost::system::error_code& ec)
+    {
+        return std::visit(
+            [&](auto& r) {
+                if constexpr (!std::is_same_v<std::decay_t<decltype(r)>, std::monostate>)
+                    return r.put(buffers, ec);
+                return std::size_t(0);
+            },
+            v);
+    }
+
+    void finish(boost::system::error_code& ec)
+    {
+        std::visit(
+            [&](auto& r) {
+                if constexpr (!std::is_same_v<std::decay_t<decltype(r)>, std::monostate>)
+                    r.finish(ec);
+            },
+            v);
+    }
+
+    template<typename Body>
+    void emplace(http::fields& h, typename Body::value_type& b)
+    {
+        v.template emplace<typename Body::reader>(h, b);
+    }
+};
 
 class any_body::writer::impl
 {
@@ -103,26 +126,28 @@ public:
         , body_(body)
     {
     }
+
     void init(boost::system::error_code& ec)
     {
         auto content_encoding = header_[http::field::content_encoding];
 
-        proxy_      = create_proxy_writer(header_, body_);
+        create_writer(header_, body_);
         compressor_ = compressor_factory::instance().create(content_encoding);
 
         if (compressor_)
             compressor_->init(compressor::mode::encode);
-        proxy_->init(ec);
+        proxy_.init(ec);
     }
+
     boost::optional<std::pair<any_body::writer::const_buffers_type, bool>>
     get(boost::system::error_code& ec)
     {
         if (!compressor_)
-            return proxy_->get(ec);
+            return proxy_.get(ec);
 
         compressor_->consume_all();
         for (;;) {
-            auto result = proxy_->get(ec);
+            auto result = proxy_.get(ec);
             if (ec)
                 return boost::none;
             if (!result) {
@@ -142,17 +167,15 @@ public:
 
 private:
     template<typename... Bodies>
-    auto create_proxy_writer(http::fields& h, any_body::variant_value<Bodies...>& body)
+    void create_writer(http::fields& h, any_body::variant_value<Bodies...>& body)
     {
-        return std::visit(
-            [&](auto& t) -> detail::proxy_writer::ptr {
+        std::visit(
+            [&](auto& t) {
                 using value_type = std::decay_t<decltype(t)>;
                 using body_type  = typename detail::match_body<value_type, Bodies...>::type;
                 static_assert(!std::is_void_v<body_type>, "No matching Body type found");
 
-                using T = detail::proxy_writer_impl<body_type>;
-
-                return std::make_unique<T>(h, t);
+                proxy_.template emplace<body_type>(h, t);
             },
             body);
     }
@@ -161,7 +184,7 @@ private:
     http::fields& header_;
     any_body::value_type& body_;
 
-    detail::proxy_writer::ptr proxy_;
+    writer_holder proxy_;
     compressor::ptr compressor_;
 };
 
@@ -172,43 +195,44 @@ public:
         : header_(header)
         , body_(body)
     {
-        proxy_ = create_proxy_reader<empty_body>(header_, body_);
     }
+
     void init(boost::optional<std::uint64_t> const& content_length, boost::system::error_code& ec)
     {
         auto content_type     = header_[http::field::content_type];
         auto content_encoding = header_[http::field::content_encoding];
 
         if (std::holds_alternative<body::file_body::value_type>(body_)) {
-            proxy_ = create_proxy_reader<body::file_body>(header_, body_);
+            create_reader<body::file_body>();
         }
         else if (content_type.starts_with("multipart/form-data")) {
-            proxy_ = create_proxy_reader<form_data_body>(header_, body_);
+            create_reader<form_data_body>();
         }
         else if (content_type.starts_with("application/json")) {
-            proxy_ = create_proxy_reader<json_body>(header_, body_);
+            create_reader<json_body>();
         }
         else if (content_type.starts_with("application/x-www-form-urlencoded")) {
-            proxy_ = create_proxy_reader<query_params_body>(header_, body_);
+            create_reader<query_params_body>();
         }
         else {
-            proxy_ = create_proxy_reader<string_body>(header_, body_);
+            create_reader<string_body>();
         }
         compressor_ = compressor_factory::instance().create(content_encoding);
         if (compressor_)
             compressor_->init(compressor::mode::decode);
-        proxy_->init(content_length, ec);
+        proxy_.init(content_length, ec);
     }
+
     std::size_t put(const_buffers_type const& buffers, boost::system::error_code& ec)
     {
         if (!compressor_)
-            return proxy_->put(buffers, ec);
+            return proxy_.put(buffers, ec);
 
         compressor_->write(buffers);
 
         auto decoded_buffer = compressor_->buffer();
         while (decoded_buffer.size() != 0 && !ec) {
-            auto bytes = proxy_->put(decoded_buffer, ec);
+            auto bytes = proxy_.put(decoded_buffer, ec);
             compressor_->consume(bytes);
             if (ec == http::error::need_more && bytes > 0) {
                 ec             = {};
@@ -219,15 +243,16 @@ public:
         }
         return buffers.size();
     }
+
     void finish(boost::system::error_code& ec)
     {
         if (!compressor_)
-            return proxy_->finish(ec);
+            return proxy_.finish(ec);
 
         compressor_->finish();
         auto decoded_buffer = compressor_->buffer();
         while (decoded_buffer.size() != 0 && !ec) {
-            auto bytes = proxy_->put(decoded_buffer, ec);
+            auto bytes = proxy_.put(decoded_buffer, ec);
             if (ec == http::error::need_more) {
                 ec = {};
                 decoded_buffer =
@@ -239,25 +264,24 @@ public:
                 net::const_buffer(static_cast<const char*>(decoded_buffer.data()) + bytes,
                                   decoded_buffer.size() - bytes);
         }
-        proxy_->finish(ec);
+        proxy_.finish(ec);
     }
 
 private:
     template<class Body>
-    auto create_proxy_reader(http::fields& h, any_body::value_type& b)
+    void create_reader()
     {
-        if (!std::holds_alternative<typename Body::value_type>(b))
-            b = typename Body::value_type {};
+        if (!std::holds_alternative<typename Body::value_type>(body_))
+            body_ = typename Body::value_type {};
 
-        using T = detail::proxy_reader_impl<Body>;
-        return std::make_unique<T>(h, std::get<typename Body::value_type>(b));
+        proxy_.template emplace<Body>(header_, std::get<typename Body::value_type>(body_));
     }
 
 private:
     http::fields& header_;
     any_body::value_type& body_;
 
-    detail::proxy_reader::ptr proxy_;
+    reader_holder proxy_;
     compressor::ptr compressor_;
 };
 

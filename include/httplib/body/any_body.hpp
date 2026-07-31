@@ -5,6 +5,7 @@
 #include "httplib/body/json_body.hpp"
 #include "httplib/body/query_params_body.hpp"
 #include "httplib/body/string_body.hpp"
+#include <tuple>
 
 namespace httplib::body {
 struct any_body
@@ -34,12 +35,25 @@ struct any_body
         }
     };
 
-    using value_type = variant_value<empty_body,
-                                     string_body,
-                                     json_body,
-                                     form_data_body,
-                                     file_body,
-                                     query_params_body>;
+    // clang-format off
+    using body_types = std::tuple<empty_body,
+                                  string_body,
+                                  json_body,
+                                  form_data_body,
+                                  file_body,
+                                  query_params_body>;
+    // clang-format on
+
+    template<typename>
+    struct value_from_tuple;
+
+    template<typename... Bodies>
+    struct value_from_tuple<std::tuple<Bodies...>>
+    {
+        using value_t = variant_value<Bodies...>;
+    };
+
+    using value_type = value_from_tuple<body_types>::value_t;
 
     class writer
     {
