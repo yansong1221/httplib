@@ -10,9 +10,11 @@
 
 namespace httplib::client {
 
-class http_client::impl
+class http_client::impl : public std::enable_shared_from_this<http_client::impl>
 {
 public:
+    class relay_impl;
+
     using body_setup_fn = std::function<void(http_client::response&)>;
 
     impl(const net::any_io_executor& ex, std::string_view host, uint16_t port, bool ssl);

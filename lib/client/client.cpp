@@ -35,7 +35,7 @@ http_client::http_client(const net::any_io_executor& ex,
                          std::string_view host,
                          uint16_t port,
                          bool ssl)
-    : impl_(std::make_unique<http_client::impl>(ex, host, port, ssl))
+    : impl_(std::make_shared<http_client::impl>(ex, host, port, ssl))
 {
 }
 
@@ -228,10 +228,8 @@ http_client::async_send_chunked_request(http::verb method,
     co_return co_await impl_->async_send_request_with_redirect(req, nullptr, std::move(handler));
 }
 
-net::awaitable<std::shared_ptr<relay_session>>
-http_client::async_begin_relay(http::verb method,
-                               std::string_view target,
-                               const http::fields& headers)
+net::awaitable<std::shared_ptr<relay_session>> http_client::async_begin_relay(
+    http::verb method, std::string_view target, const http::fields& headers)
 {
     co_return co_await impl_->co_begin_relay(method, target, headers);
 }

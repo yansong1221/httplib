@@ -273,9 +273,6 @@ void http_server::impl::set_reverse_proxy(std::string_view key,
                                           uint16_t upstream_port,
                                           bool upstream_ssl)
 {
-    if (!proxy_pool_)
-        proxy_pool_ = std::make_unique<client::http_client_pool>(ex_);
-
     std::string prefix(key);
     if (prefix.ends_with('*'))
         prefix.pop_back();
@@ -319,7 +316,7 @@ void http_server::impl::set_reverse_proxy(std::string_view key,
 
         auto client =
             co_await proxy_pool_->async_acquire(upstream_host, upstream_port, upstream_ssl);
-        // client->close();
+
 
         auto session = co_await client->async_begin_relay(req.method(), target, upstream_headers);
         co_await session->write_body(net::buffer(body), false);
@@ -335,8 +332,6 @@ void http_server::impl::set_reverse_proxy(std::string_view key,
                 newbody.append(relay_buf.data(), bytes);
             }
         }
-        if (!session->keep_alive())
-            client->close();
 
         resp.set_string_content(
             newbody, session->headers().at(httplib::http::field::content_type), session->result());

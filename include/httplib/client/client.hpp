@@ -1,9 +1,9 @@
 #pragma once
 #include "httplib/body/any_body.hpp"
-#include "httplib/streaming/chunk_reader.hpp"
-#include "httplib/streaming/chunk_writer.hpp"
 #include "httplib/client/relay_session.hpp"
 #include "httplib/config.hpp"
+#include "httplib/streaming/chunk_reader.hpp"
+#include "httplib/streaming/chunk_writer.hpp"
 #include "httplib/streaming/ndjson_reader.hpp"
 #include "httplib/streaming/sse_reader.hpp"
 #include <boost/asio/awaitable.hpp>
@@ -267,10 +267,8 @@ public:
                                          const html::query_params& params = {},
                                          const http::fields& headers      = http::fields());
 
-    net::awaitable<std::shared_ptr<relay_session>>
-    async_begin_relay(http::verb method,
-                      std::string_view target,
-                      const http::fields& headers = http::fields());
+    net::awaitable<std::shared_ptr<relay_session>> async_begin_relay(
+        http::verb method, std::string_view target, const http::fields& headers = http::fields());
 
     // ---- send_request (sync, body-type overloads) ----
 
@@ -354,7 +352,10 @@ public:
     bool is_open() const;
 
 private:
+    http_client(const http_client&)            = delete;
+    http_client& operator=(const http_client&) = delete;
+
     class impl;
-    std::unique_ptr<impl> impl_;
+    std::shared_ptr<impl> impl_;
 };
 } // namespace httplib::client

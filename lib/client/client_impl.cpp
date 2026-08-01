@@ -23,7 +23,7 @@
 #include <spdlog/spdlog.h>
 
 namespace httplib::client {
-namespace {
+namespace detail {
 
 std::string make_host_value(std::string_view host, uint16_t port, bool ssl)
 {
@@ -52,24 +52,19 @@ bool is_hop_by_hop(http::field f)
     return false;
 }
 
-} // namespace
+} // namespace detail
 
-class relay_impl final : public relay_session
+class http_client::impl::relay_impl final : public relay_session
 {
 public:
-    relay_impl(http_stream& stream,
-               beast::flat_buffer& buffer,
-               std::string_view host_value,
-               std::chrono::steady_clock::duration timeout,
+    relay_impl(std::shared_ptr<http_client::impl> client,
                http::verb method,
                std::string_view target)
-        : stream_(&stream)
-        , buffer_(&buffer)
-        , timeout_(timeout)
+        : client_(client)
         , req_msg_(method, target, 11)
         , req_sr_(req_msg_)
     {
-        req_msg_.set(http::field::host, host_value);
+        req_msg_.set(http::field::host, client_->host_value_);
         req_msg_.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
         req_msg_.keep_alive(true);
 
@@ -80,14 +75,13 @@ public:
     net::awaitable<void> write_header(const http::fields& headers)
     {
         for (const auto& f : headers) {
-            if (!is_hop_by_hop(f.name()))
+            if (!detail::is_hop_by_hop(f.name()))
                 req_msg_.set(f.name_string(), f.value());
         }
 
         boost::system::error_code ec;
-        stream_->expires_after(timeout_);
-        co_await http::async_write_header(*stream_, req_sr_, util::net_awaitable[ec]);
-        stream_->expires_never();
+        client_->expires_after(true);
+        co_await http::async_write_header(*client_->stream_, req_sr_, util::net_awaitable[ec]);
         if (ec == http::error::need_buffer)
             ec = {};
         if (ec)
@@ -103,9 +97,8 @@ private:
         body.more  = more;
 
         boost::system::error_code ec;
-        stream_->expires_after(timeout_);
-        co_await http::async_write(*stream_, req_sr_, util::net_awaitable[ec]);
-        stream_->expires_never();
+        client_->expires_after();
+        co_await http::async_write(*client_->stream_, req_sr_, util::net_awaitable[ec]);
         if (ec == http::error::need_buffer) {
             ec = {};
         }
@@ -116,9 +109,9 @@ private:
     net::awaitable<void> read_header() override
     {
         boost::system::error_code ec;
-        stream_->expires_after(timeout_);
-        co_await http::async_read_header(*stream_, *buffer_, resp_parser_, util::net_awaitable[ec]);
-        stream_->expires_never();
+        client_->expires_after();
+        co_await http::async_read_header(
+            *client_->stream_, client_->buffer_, resp_parser_, util::net_awaitable[ec]);
         if (ec)
             throw boost::system::system_error(ec);
     }
@@ -138,9 +131,10 @@ private:
             body.size  = buffer.size();
 
             boost::system::error_code ec;
-            stream_->expires_after(timeout_);
-            co_await http::async_read(*stream_, *buffer_, resp_parser_, util::net_awaitable[ec]);
-            stream_->expires_never();
+            client_->expires_after();
+            co_await http::async_read(
+                *client_->stream_, client_->buffer_, resp_parser_, util::net_awaitable[ec]);
+
             if (ec == http::error::need_buffer)
                 ec = {};
             if (ec)
@@ -151,6 +145,9 @@ private:
                 co_return consumed;
 
             if (resp_parser_.is_done()) {
+                if (!resp_parser_.keep_alive()) {
+                    client_->close();
+                }
                 co_return 0;
             }
         }
@@ -164,9 +161,7 @@ private:
         return resp_parser_.keep_alive();
     }
 
-    http_stream* stream_;
-    beast::flat_buffer* buffer_;
-    std::chrono::steady_clock::duration timeout_;
+    std::shared_ptr<http_client::impl> client_;
 
     http::request<http::buffer_body> req_msg_;
     http::request_serializer<http::buffer_body> req_sr_;
@@ -182,7 +177,7 @@ http_client::impl::impl(const net::any_io_executor& ex,
     : executor_(ex)
     , resolver_(ex)
     , host_(host)
-    , host_value_(make_host_value(host, port, ssl))
+    , host_value_(detail::make_host_value(host, port, ssl))
     , port_(port)
     , use_ssl_(ssl)
 {
@@ -538,10 +533,8 @@ net::awaitable<std::shared_ptr<relay_session>> http_client::impl::co_begin_relay
     try {
         co_await co_connect();
 
-        auto session =
-            std::make_shared<relay_impl>(*stream_, buffer_, host_value_, timeout_, method, target);
+        auto session = std::make_shared<relay_impl>(shared_from_this(), method, target);
         co_await session->write_header(headers);
-
         co_return session;
     }
     catch (const boost::system::system_error& e) {
