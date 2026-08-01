@@ -334,7 +334,7 @@ void http_server::impl::set_reverse_proxy(std::string_view key,
         }
 
         resp.set_string_content(
-            newbody, session->headers().at(httplib::http::field::content_type), session->result());
+            newbody, session->headers()[httplib::http::field::content_type], session->result());
     };
 
     router_.set_buffer_body_http_handler(http::verb::get, key, handler);

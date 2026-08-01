@@ -242,38 +242,28 @@ void http_client::impl::set_logger(std::shared_ptr<spdlog::logger> logger)
     custom_logger_ = std::move(logger);
 }
 
-net::awaitable<http_client::response_result>
-http_client::impl::async_send_request(http_client::request& req,
-                                      const body_setup_fn& body_setup,
-                                      const chunked_write_handler_type& body_write,
-                                      bool retry) noexcept
+net::awaitable<http_client::response_result> http_client::impl::async_send_request(
+    http_client::request& req,
+    const body_setup_fn& body_setup,
+    const chunked_write_handler_type& chunked_write_handler) noexcept
 {
-    boost::system::error_code ec;
+    http::request_serializer<body::any_body> serializer(req);
+    auto ec = co_await async_write(serializer, chunked_write_handler != nullptr);
+    if (ec) {
+        co_return ec;
+    }
+
     try {
-        http_client::response resp = co_await async_send_request_impl(req, body_setup, body_write);
-        co_return resp;
-    }
-    catch (const boost::system::system_error& error) {
-        ec = error.code();
-        logger()->warn("{} {} {}: {}", host_, std::to_string(port_), error.what(), ec.message());
-    }
-    catch (const std::exception& e) {
-        ec = boost::system::errc::make_error_code(boost::system::errc::protocol_error);
-        logger()->warn("{} {}: {}", host_, std::to_string(port_), e.what());
+        if (chunked_write_handler) {
+            streaming::chunk_writer_impl writer(*stream_, timeout_);
+            co_await chunked_write_handler(writer);
+            co_await writer.close();
+        }
+
+        co_return co_await co_read_response(body_setup, req.method() == http::verb::head);
     }
     catch (...) {
-        ec = boost::system::errc::make_error_code(boost::system::errc::protocol_error);
-        logger()->warn("{} {}: unknown exception", host_, std::to_string(port_));
-    }
-    close();
-
-    if (ec == boost::asio::error::connection_aborted ||
-        ec == boost::asio::error::connection_reset || ec == http::error::end_of_stream)
-    {
-        if (retry) {
-            logger()->trace("retrying request...");
-            co_return co_await async_send_request(req, body_setup, body_write, false);
-        }
+        ec = handle_exception(std::current_exception());
     }
     co_return ec;
 }
@@ -284,10 +274,10 @@ http_client::impl::async_send_request_with_redirect(http_client::request& req,
                                                     chunked_write_handler_type body_write)
 {
     if (max_redirects_ <= 0)
-        co_return co_await async_send_request(req, body_setup, body_write, true);
+        co_return co_await async_send_request(req, body_setup, body_write);
 
     for (int r = 0; r <= max_redirects_; ++r) {
-        auto result = co_await async_send_request(req, body_setup, body_write, true);
+        auto result = co_await async_send_request(req, body_setup, body_write);
         if (result.has_error()) {
             co_return result;
         }
@@ -304,7 +294,7 @@ http_client::impl::async_send_request_with_redirect(http_client::request& req,
 
             logger()->trace("redirect {} -> {}", req.target(), std::string_view(loc));
 
-            // Full URL (cross-domain) �?create new impl
+            // Full URL (cross-domain) create new impl
             if (loc.starts_with("http://") || loc.starts_with("https://")) {
                 auto scheme_end = loc.find("://");
                 auto path_start = loc.find('/', scheme_end + 3);
@@ -335,7 +325,7 @@ http_client::impl::async_send_request_with_redirect(http_client::request& req,
                 new_impl->set_logger(logger());
                 new_impl->max_redirects_ = max_redirects_ - r - 1;
 
-                co_return co_await new_impl->async_send_request(req, body_setup, body_write, true);
+                co_return co_await new_impl->async_send_request(req, body_setup, body_write);
             }
 
             if (s == http::status::see_other ||
@@ -402,19 +392,6 @@ net::awaitable<void> http_client::impl::co_connect()
     expires_after();
 }
 
-net::awaitable<void> http_client::impl::co_write_request(http::request<body::any_body>& req,
-                                                         bool headers_only)
-{
-    http::request_serializer<body::any_body> serializer(req);
-    serializer.split(headers_only);
-
-    while (headers_only ? !serializer.is_header_done() : !serializer.is_done()) {
-        expires_after();
-        co_await http::async_write_some(*stream_, serializer, boost::asio::use_awaitable);
-    }
-    expires_after();
-}
-
 net::awaitable<http_client::response> http_client::impl::co_read_response(
     const body_setup_fn& body_setup /*= {}*/, bool is_head /*= false*/)
 {
@@ -470,24 +447,6 @@ net::awaitable<http_client::response> http_client::impl::co_read_response(
     co_return parser.release();
 }
 
-net::awaitable<http_client::response>
-http_client::impl::async_send_request_impl(http_client::request& req,
-                                           const body_setup_fn& body_setup,
-                                           const chunked_write_handler_type& chunked_write_handler)
-{
-    co_await co_connect();
-    co_await co_write_request(req, chunked_write_handler != nullptr);
-
-    if (chunked_write_handler) {
-        streaming::chunk_writer_impl writer(*stream_, timeout_);
-        co_await chunked_write_handler(writer);
-        co_await writer.close();
-    }
-
-    co_return co_await co_read_response(body_setup, req.method() == http::verb::head);
-}
-
-
 void http_client::impl::set_chunked_read_handler(chunked_read_handler_type&& handler)
 {
     chunked_read_handler_ = std::move(handler);
@@ -537,22 +496,13 @@ net::awaitable<std::shared_ptr<relay_session>> http_client::impl::co_begin_relay
         co_await session->write_header(headers);
         co_return session;
     }
-    catch (const boost::system::system_error& e) {
-        ec = e.code();
-    }
-    catch (const std::exception&) {
-        ec = boost::system::errc::make_error_code(boost::system::errc::protocol_error);
-    }
     catch (...) {
-        ec = boost::system::errc::make_error_code(boost::system::errc::protocol_error);
+        ec = handle_exception(std::current_exception());
     }
-    close();
 
-    if (retry && (ec == boost::asio::error::connection_aborted ||
-                  ec == boost::asio::error::connection_reset || ec == http::error::end_of_stream))
-    {
+    if (is_retryable(ec) && retry)
         co_return co_await co_begin_relay(method, target, headers, false);
-    }
+
     throw boost::system::system_error(ec);
 }
 
