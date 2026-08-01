@@ -396,11 +396,11 @@ net::awaitable<bool> session::http_task::async_write(const request& req, respons
     }
     else if (buffer_body_handler) {
         http::response<http::buffer_body> relay_msg(*resp.get_impl());
-        for (const auto& f : (*resp.get_impl()))
-            relay_msg.set(f.name_string(), f.value());
-        relay_msg.result(resp.get_impl()->result());
-        relay_msg.keep_alive(resp.get_impl()->keep_alive());
-        relay_msg.version(resp.get_impl()->version());
+        //for (const auto& f : (*resp.get_impl()))
+        //    relay_msg.set(f.name_string(), f.value());
+        //relay_msg.result(resp.get_impl()->result());
+        //relay_msg.keep_alive(resp.get_impl()->keep_alive());
+        //relay_msg.version(resp.get_impl()->version());
 
         http::response_serializer<http::buffer_body> relay_sr(relay_msg);
 

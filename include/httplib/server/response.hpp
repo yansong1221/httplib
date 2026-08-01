@@ -1,9 +1,9 @@
 #pragma once
 #include "httplib/body/any_body.hpp"
-#include "httplib/streaming/buffer_body_writer.hpp"
-#include "httplib/streaming/chunk_writer.hpp"
 #include "httplib/config.hpp"
 #include "httplib/html/form_data.hpp"
+#include "httplib/streaming/buffer_body_writer.hpp"
+#include "httplib/streaming/chunk_writer.hpp"
 #include "httplib/streaming/ndjson_writer.hpp"
 #include "httplib/streaming/sse_writer.hpp"
 #include "httplib/util/misc.hpp"
@@ -73,7 +73,7 @@ public:
                                    http::status status = http::status::ok);
 
     using buffer_body_write_handler_type =
-        std::function<net::awaitable<void>(httplib::streaming::buffer_body_writer&)>;
+        std::move_only_function<net::awaitable<void>(httplib::streaming::buffer_body_writer&)>;
     void set_buffer_body_write_handler(buffer_body_write_handler_type&& handler,
                                        const http::fields& headers,
                                        http::status status = http::status::ok);

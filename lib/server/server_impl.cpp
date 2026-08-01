@@ -51,9 +51,7 @@ void http_server::impl::listen(std::string_view host,
 }
 
 net::any_io_executor http_server::impl::get_executor() noexcept
-{
-    return ex_;
-}
+{ return ex_; }
 
 std::shared_future<boost::system::error_code> http_server::impl::run()
 {
@@ -106,9 +104,7 @@ httplib::net::awaitable<void> http_server::impl::async_stop()
 }
 
 router_impl& http_server::impl::router()
-{
-    return router_;
-}
+{ return router_; }
 
 net::awaitable<boost::system::error_code> http_server::impl::async_run()
 {
@@ -181,24 +177,16 @@ net::awaitable<void> http_server::impl::handle_accept(tcp::socket sock)
 }
 
 void http_server::impl::set_read_timeout(const std::chrono::steady_clock::duration& dur)
-{
-    read_timeout_ = dur;
-}
+{ read_timeout_ = dur; }
 
 void http_server::impl::set_write_timeout(const std::chrono::steady_clock::duration& dur)
-{
-    write_timeout_ = dur;
-}
+{ write_timeout_ = dur; }
 
 std::chrono::steady_clock::duration http_server::impl::read_timeout() const
-{
-    return read_timeout_;
-}
+{ return read_timeout_; }
 
 std::chrono::steady_clock::duration http_server::impl::write_timeout() const
-{
-    return write_timeout_;
-}
+{ return write_timeout_; }
 
 tcp::endpoint http_server::impl::local_endpoint() const
 {
@@ -214,14 +202,10 @@ std::shared_ptr<spdlog::logger> http_server::impl::logger() const
 }
 
 void http_server::impl::set_logger(std::shared_ptr<spdlog::logger> logger)
-{
-    custom_logger_ = logger;
-}
+{ custom_logger_ = logger; }
 
 void http_server::impl::set_compress_content_types(std::function<bool(std::string_view)> predicate)
-{
-    compress_content_type_predicate_ = std::move(predicate);
-}
+{ compress_content_type_predicate_ = std::move(predicate); }
 
 static bool default_compress_content_type(std::string_view content_type)
 {
@@ -310,40 +294,51 @@ void http_server::impl::set_reverse_proxy(std::string_view key,
             }
             upstream_headers.set("X-Forwarded-For", client_ip);
 
-            std::string body;
+            auto client =
+                co_await proxy_pool_->async_acquire(upstream_host, upstream_port, upstream_ssl);
+
+            co_await client->relay().write_header(req.method(), target, upstream_headers);
+
             std::array<char, 8192> relay_buf {};
             {
                 while (true) {
                     auto bytes = co_await req.read_buffer_body_some(net::buffer(relay_buf));
+                    co_await client->relay().write_body(net::buffer(relay_buf, bytes), bytes != 0);
                     if (bytes == 0)
                         break;
-                    body.append(relay_buf.data(), bytes);
                 }
             }
 
-            auto client =
-                co_await proxy_pool_->async_acquire(upstream_host, upstream_port, upstream_ssl);
+            co_await client->relay().read_header();
 
-
-            auto& session = client->relay();
-            co_await session.write_header(req.method(), target, upstream_headers);
-            co_await session.write_body(net::buffer(body), false);
-            co_await session.read_header();
-
-            const auto& headers = session.headers();
+            const auto& headers = client->relay().headers();
+            const auto result   = client->relay().result();
 
             std::string newbody;
             {
                 while (true) {
-                    auto bytes = co_await session.read_body(net::buffer(relay_buf));
+                    auto bytes = co_await client->relay().read_body(net::buffer(relay_buf));
                     if (bytes == 0)
                         break;
                     newbody.append(relay_buf.data(), bytes);
                 }
             }
 
-            resp.set_string_content(
-                newbody, session.headers()[httplib::http::field::content_type], session.result());
+            resp.set_string_content(newbody, headers[httplib::http::field::content_type], result);
+
+            // resp.set_buffer_body_write_handler(
+            //     [client = std::move(client), relay_buf = std::move(relay_buf)](
+            //         httplib::streaming::buffer_body_writer& writer) mutable
+            //         -> net::awaitable<void> {
+            //         while (true) {
+            //             auto bytes = co_await client->relay().read_body(net::buffer(relay_buf));
+            //             co_await writer.write(net::buffer(relay_buf, bytes), bytes != 0);
+            //             if (bytes == 0)
+            //                 break;
+            //         }
+            //     },
+            //     headers,
+            //     result);
         });
 }
 

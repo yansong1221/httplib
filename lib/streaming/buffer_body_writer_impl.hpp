@@ -33,22 +33,13 @@ public:
 
         boost::system::error_code ec;
         stream_->expires_after(write_timeout_);
-        while (!sr_->is_done()) {
-            co_await http::async_write_some(*stream_, *sr_, util::net_awaitable[ec]);
-            if (ec == http::error::need_buffer) {
-                ec = {};
-                break;
-            }
-            if (ec)
-                break;
-        }
+        co_await http::async_write(*stream_, *sr_, util::net_awaitable[ec]);
         stream_->expires_never();
+        if (ec == http::error::need_buffer) {
+            ec = {};
+        }
         if (ec)
             throw boost::system::system_error(ec);
-
-        if (!more) {
-            assert(sr_->is_done());
-        }
     }
 
 private:
