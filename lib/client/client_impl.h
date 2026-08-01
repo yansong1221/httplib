@@ -4,7 +4,9 @@
 #include "httplib/streaming/chunk_reader.hpp"
 #include "httplib/streaming/ndjson_reader.hpp"
 #include "httplib/streaming/sse_reader.hpp"
+#include "httplib/util/use_awaitable.hpp"
 #include "stream/http_stream.hpp"
+#include <boost/beast/http/read.hpp>
 #include <exception>
 #include <functional>
 #include <spdlog/spdlog.h>
@@ -110,7 +112,9 @@ private:
             serializer.split(headers_only);
             while (headers_only ? !serializer.is_header_done() : !serializer.is_done()) {
                 expires_after();
-                co_await http::async_write_some(*stream_, serializer, boost::asio::use_awaitable);
+                co_await http::async_write_some(*stream_, serializer, util::net_awaitable[ec]);
+                if (ec)
+                    break;
             }
             co_return ec;
         }
@@ -121,6 +125,20 @@ private:
         if (is_retryable(ec) && retry) {
             logger()->trace("retrying request...");
             co_return co_await async_write(serializer, headers_only, false);
+        }
+        co_return ec;
+    }
+    template<typename Body>
+    net::awaitable<boost::system::error_code> async_read(http::response_parser<Body>& parser,
+                                                         bool headers_only)
+    {
+        boost::system::error_code ec;
+        parser.eager(!headers_only);
+        while (headers_only ? !parser.is_header_done() : !parser.is_done()) {
+            expires_after();
+            co_await http::async_read_some(*stream_, buffer_, parser, util::net_awaitable[ec]);
+            if (ec)
+                break;
         }
         co_return ec;
     }

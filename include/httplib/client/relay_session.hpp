@@ -15,7 +15,6 @@ public:
     virtual net::awaitable<void> read_header()                                        = 0;
     virtual http::status result() const                                               = 0;
     virtual const http::fields& headers() const                                       = 0;
-    virtual bool keep_alive() const                                                   = 0;
     virtual net::awaitable<std::size_t> read_body(const net::mutable_buffer& buffer)  = 0;
 };
 

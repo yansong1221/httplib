@@ -79,11 +79,7 @@ public:
                 req_msg_.set(f.name_string(), f.value());
         }
 
-        boost::system::error_code ec;
-        client_->expires_after(true);
-        co_await http::async_write_header(*client_->stream_, req_sr_, util::net_awaitable[ec]);
-        if (ec == http::error::need_buffer)
-            ec = {};
+        auto ec = co_await client_->async_write(req_sr_, true);
         if (ec)
             throw boost::system::system_error(ec);
     }
@@ -96,9 +92,7 @@ private:
         body.size  = data.size();
         body.more  = more;
 
-        boost::system::error_code ec;
-        client_->expires_after();
-        co_await http::async_write(*client_->stream_, req_sr_, util::net_awaitable[ec]);
+        auto ec = co_await client_->async_write(req_sr_, false, false);
         if (ec == http::error::need_buffer) {
             ec = {};
         }
@@ -108,10 +102,7 @@ private:
 
     net::awaitable<void> read_header() override
     {
-        boost::system::error_code ec;
-        client_->expires_after();
-        co_await http::async_read_header(
-            *client_->stream_, client_->buffer_, resp_parser_, util::net_awaitable[ec]);
+        auto ec = co_await client_->async_read(resp_parser_, true);
         if (ec)
             throw boost::system::system_error(ec);
     }
@@ -130,11 +121,7 @@ private:
             body.data  = buffer.data();
             body.size  = buffer.size();
 
-            boost::system::error_code ec;
-            client_->expires_after();
-            co_await http::async_read(
-                *client_->stream_, client_->buffer_, resp_parser_, util::net_awaitable[ec]);
-
+            auto ec = co_await client_->async_read(resp_parser_, false);
             if (ec == http::error::need_buffer)
                 ec = {};
             if (ec)
@@ -151,14 +138,6 @@ private:
                 co_return 0;
             }
         }
-    }
-
-    bool keep_alive() const override
-    {
-        if (!resp_parser_.is_header_done())
-            return false;
-
-        return resp_parser_.keep_alive();
     }
 
     std::shared_ptr<http_client::impl> client_;
