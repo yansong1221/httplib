@@ -279,71 +279,72 @@ void http_server::impl::set_reverse_proxy(std::string_view key,
     if (prefix.ends_with('/'))
         prefix.pop_back();
 
-    auto handler =
+    router_.set_buffer_body_http_handler<http::verb::get,
+                                         http::verb::head,
+                                         http::verb::post,
+                                         http::verb::put,
+                                         http::verb::patch,
+                                         http::verb::delete_,
+                                         http::verb::options>(
+        key,
         [this, upstream_host = std::string(upstream_host), upstream_port, upstream_ssl, prefix](
             request& req, response& resp) -> net::awaitable<void> {
-        auto target = std::string(req.target());
-        if (target.starts_with(prefix))
-            target = target.substr(prefix.size());
-        if (target.empty() || target[0] != '/')
-            target.insert(0, 1, '/');
+            auto target = std::string(req.target());
+            if (target.starts_with(prefix))
+                target = target.substr(prefix.size());
+            if (target.empty() || target[0] != '/')
+                target.insert(0, 1, '/');
 
-        http::fields upstream_headers;
-        auto& req_impl = *req.get_impl();
-        for (const auto& f : req_impl) {
-            if (f.name() != http::field::host)
-                upstream_headers.set(f.name_string(), f.value());
-        }
-
-        auto client_ip = req.get_client_ip().to_string();
-        auto xff       = req_impl["X-Forwarded-For"];
-        if (!xff.empty()) {
-            std::string xf(xff);
-            client_ip = xf + ", " + client_ip;
-        }
-        upstream_headers.set("X-Forwarded-For", client_ip);
-
-        std::string body;
-        std::array<char, 8192> relay_buf {};
-        {
-            while (true) {
-                auto bytes = co_await req.read_buffer_body_some(net::buffer(relay_buf));
-                if (bytes == 0)
-                    break;
-                body.append(relay_buf.data(), bytes);
+            http::fields upstream_headers;
+            auto& req_impl = *req.get_impl();
+            for (const auto& f : req_impl) {
+                if (f.name() != http::field::host)
+                    upstream_headers.set(f.name_string(), f.value());
             }
-        }
 
-        auto client =
-            co_await proxy_pool_->async_acquire(upstream_host, upstream_port, upstream_ssl);
-
-
-        auto session = co_await client->async_begin_relay(req.method(), target, upstream_headers);
-        co_await session->write_body(net::buffer(body), false);
-        co_await session->read_header();
-        const auto& headers = session->headers();
-
-        std::string newbody;
-        {
-            while (true) {
-                auto bytes = co_await session->read_body(net::buffer(relay_buf));
-                if (bytes == 0)
-                    break;
-                newbody.append(relay_buf.data(), bytes);
+            auto client_ip = req.get_client_ip().to_string();
+            auto xff       = req_impl["X-Forwarded-For"];
+            if (!xff.empty()) {
+                std::string xf(xff);
+                client_ip = xf + ", " + client_ip;
             }
-        }
+            upstream_headers.set("X-Forwarded-For", client_ip);
 
-        resp.set_string_content(
-            newbody, session->headers()[httplib::http::field::content_type], session->result());
-    };
+            std::string body;
+            std::array<char, 8192> relay_buf {};
+            {
+                while (true) {
+                    auto bytes = co_await req.read_buffer_body_some(net::buffer(relay_buf));
+                    if (bytes == 0)
+                        break;
+                    body.append(relay_buf.data(), bytes);
+                }
+            }
 
-    router_.set_buffer_body_http_handler(http::verb::get, key, handler);
-    router_.set_buffer_body_http_handler(http::verb::head, key, handler);
-    router_.set_buffer_body_http_handler(http::verb::post, key, handler);
-    router_.set_buffer_body_http_handler(http::verb::put, key, handler);
-    router_.set_buffer_body_http_handler(http::verb::patch, key, handler);
-    router_.set_buffer_body_http_handler(http::verb::delete_, key, handler);
-    router_.set_buffer_body_http_handler(http::verb::options, key, handler);
+            auto client =
+                co_await proxy_pool_->async_acquire(upstream_host, upstream_port, upstream_ssl);
+
+
+            auto& session = client->relay();
+            co_await session.write_header(req.method(), target, upstream_headers);
+            co_await session.write_body(net::buffer(body), false);
+            co_await session.read_header();
+
+            const auto& headers = session.headers();
+
+            std::string newbody;
+            {
+                while (true) {
+                    auto bytes = co_await session.read_body(net::buffer(relay_buf));
+                    if (bytes == 0)
+                        break;
+                    newbody.append(relay_buf.data(), bytes);
+                }
+            }
+
+            resp.set_string_content(
+                newbody, session.headers()[httplib::http::field::content_type], session.result());
+        });
 }
 
 

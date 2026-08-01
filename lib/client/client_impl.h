@@ -13,7 +13,7 @@
 
 namespace httplib::client {
 
-class http_client::impl : public std::enable_shared_from_this<http_client::impl>
+class http_client::impl
 {
 public:
     class relay_impl;
@@ -59,10 +59,7 @@ public:
     net::awaitable<http_client::response_result> async_download(http_client::request& req,
                                                                 const fs::path& save_path);
 
-    net::awaitable<std::shared_ptr<relay_session>> co_begin_relay(http::verb method,
-                                                                  std::string_view target,
-                                                                  const http::fields& headers,
-                                                                  bool retry = true);
+    relay_session& session();
 
 
 private:
@@ -156,6 +153,7 @@ public:
     std::unique_ptr<http_stream> stream_;
     mutable std::recursive_mutex stream_mutex_;
     beast::flat_buffer buffer_;
+    std::unique_ptr<relay_impl> relay_;
 
 
     chunked_read_handler_type chunked_read_handler_;

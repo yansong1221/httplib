@@ -19,6 +19,7 @@
 #include <boost/beast/version.hpp>
 #include <fmt/format.h>
 #include <limits>
+#include <optional>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
@@ -57,29 +58,28 @@ bool is_hop_by_hop(http::field f)
 class http_client::impl::relay_impl final : public relay_session
 {
 public:
-    relay_impl(std::shared_ptr<http_client::impl> client,
-               http::verb method,
-               std::string_view target)
-        : client_(client)
-        , req_msg_(method, target, 11)
-        , req_sr_(req_msg_)
-    {
-        req_msg_.set(http::field::host, client_->host_value_);
-        req_msg_.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
-        req_msg_.keep_alive(true);
+    explicit relay_impl(http_client::impl& parent) : parent_(parent) {}
 
-        resp_parser_.body_limit((std::numeric_limits<std::uint64_t>::max)());
-        resp_parser_.header_limit((std::numeric_limits<std::uint32_t>::max)());
-    }
-
-    net::awaitable<void> write_header(const http::fields& headers)
+    net::awaitable<void> write_header(http::verb method,
+                                        std::string_view target,
+                                        const http::fields& headers) override
     {
+        req_msg_ = std::make_unique<http::request<http::buffer_body>>(method, target, 11);
+        req_sr_  = std::make_unique<http::request_serializer<http::buffer_body>>(*req_msg_);
+        req_msg_->set(http::field::host, parent_.host_value_);
+        req_msg_->set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
+        req_msg_->keep_alive(true);
+
+        resp_parser_.emplace();
+        resp_parser_->body_limit((std::numeric_limits<std::uint64_t>::max)());
+        resp_parser_->header_limit((std::numeric_limits<std::uint32_t>::max)());
+
         for (const auto& f : headers) {
             if (!detail::is_hop_by_hop(f.name()))
-                req_msg_.set(f.name_string(), f.value());
+                req_msg_->set(f.name_string(), f.value());
         }
 
-        auto ec = co_await client_->async_write(req_sr_, true);
+        auto ec = co_await parent_.async_write(*req_sr_, true);
         if (ec)
             throw boost::system::system_error(ec);
     }
@@ -87,12 +87,12 @@ public:
 private:
     net::awaitable<void> write_body(const net::const_buffer& data, bool more) override
     {
-        auto& body = req_msg_.body();
+        auto& body = req_msg_->body();
         body.data  = (void*)data.data();
         body.size  = data.size();
         body.more  = more;
 
-        auto ec = co_await client_->async_write(req_sr_, false, false);
+        auto ec = co_await parent_.async_write(*req_sr_, false, false);
         if (ec == http::error::need_buffer) {
             ec = {};
         }
@@ -102,26 +102,26 @@ private:
 
     net::awaitable<void> read_header() override
     {
-        auto ec = co_await client_->async_read(resp_parser_, true);
+        auto ec = co_await parent_.async_read(*resp_parser_, true);
         if (ec)
             throw boost::system::system_error(ec);
     }
 
-    http::status result() const override { return resp_parser_.get().result(); }
+    http::status result() const override { return resp_parser_->get().result(); }
 
-    const http::fields& headers() const override { return resp_parser_.get(); }
+    const http::fields& headers() const override { return resp_parser_->get(); }
 
     net::awaitable<std::size_t> read_body(const net::mutable_buffer& buffer) override
     {
-        if (!resp_parser_.is_header_done())
+        if (!resp_parser_->is_header_done())
             co_return 0;
 
         for (;;) {
-            auto& body = resp_parser_.get().body();
+            auto& body = resp_parser_->get().body();
             body.data  = buffer.data();
             body.size  = buffer.size();
 
-            auto ec = co_await client_->async_read(resp_parser_, false);
+            auto ec = co_await parent_.async_read(*resp_parser_, false);
             if (ec == http::error::need_buffer)
                 ec = {};
             if (ec)
@@ -131,21 +131,19 @@ private:
             if (consumed > 0)
                 co_return consumed;
 
-            if (resp_parser_.is_done()) {
-                if (!resp_parser_.keep_alive()) {
-                    client_->close();
+            if (resp_parser_->is_done()) {
+                if (!resp_parser_->keep_alive()) {
+                    parent_.close();
                 }
                 co_return 0;
             }
         }
     }
 
-    std::shared_ptr<http_client::impl> client_;
-
-    http::request<http::buffer_body> req_msg_;
-    http::request_serializer<http::buffer_body> req_sr_;
-
-    http::response_parser<http::buffer_body> resp_parser_;
+    http_client::impl& parent_;
+    std::unique_ptr<http::request<http::buffer_body>> req_msg_;
+    std::unique_ptr<http::request_serializer<http::buffer_body>> req_sr_;
+    std::optional<http::response_parser<http::buffer_body>> resp_parser_;
 };
 
 http_client::impl::impl(const net::any_io_executor& ex,
@@ -159,6 +157,7 @@ http_client::impl::impl(const net::any_io_executor& ex,
     , host_value_(detail::make_host_value(host, port, ssl))
     , port_(port)
     , use_ssl_(ssl)
+    , relay_(std::make_unique<relay_impl>(*this))
 {
     auto console_sink                 = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
     spdlog::sinks_init_list sink_list = {console_sink};
@@ -464,25 +463,9 @@ http_client::impl::async_download(http_client::request& req, const fs::path& sav
     co_return result;
 }
 
-net::awaitable<std::shared_ptr<relay_session>> http_client::impl::co_begin_relay(
-    http::verb method, std::string_view target, const http::fields& headers, bool retry)
+relay_session& http_client::impl::session()
 {
-    boost::system::error_code ec;
-    try {
-        co_await co_connect();
-
-        auto session = std::make_shared<relay_impl>(shared_from_this(), method, target);
-        co_await session->write_header(headers);
-        co_return session;
-    }
-    catch (...) {
-        ec = handle_exception(std::current_exception());
-    }
-
-    if (is_retryable(ec) && retry)
-        co_return co_await co_begin_relay(method, target, headers, false);
-
-    throw boost::system::system_error(ec);
+    return *relay_;
 }
 
 } // namespace httplib::client

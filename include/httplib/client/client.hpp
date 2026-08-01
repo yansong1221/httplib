@@ -267,8 +267,7 @@ public:
                                          const html::query_params& params = {},
                                          const http::fields& headers      = http::fields());
 
-    net::awaitable<std::shared_ptr<relay_session>> async_begin_relay(
-        http::verb method, std::string_view target, const http::fields& headers = http::fields());
+    relay_session& relay();
 
     // ---- send_request (sync, body-type overloads) ----
 
