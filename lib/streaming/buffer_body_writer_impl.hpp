@@ -15,7 +15,7 @@ class buffer_body_writer_impl : public buffer_body_writer
 {
 public:
     buffer_body_writer_impl(http_stream& stream,
-                            http::message<false, http::buffer_body>& msg,
+                            http::response<http::buffer_body>& msg,
                             http::response_serializer<http::buffer_body>& sr,
                             std::chrono::steady_clock::duration write_timeout)
         : stream_(&stream)
@@ -25,46 +25,25 @@ public:
     {
     }
 
-    net::awaitable<void> write(std::string_view data) override
+    net::awaitable<void> write(const net::const_buffer& data, bool more) override
     {
-        msg_->body().data = const_cast<char*>(data.data());
+        msg_->body().data = (void*)data.data();
         msg_->body().size = data.size();
-        msg_->body().more = true;
+        msg_->body().more = more;
 
         boost::system::error_code ec;
         stream_->expires_after(write_timeout_);
-        co_await http::async_write_some(*stream_, *sr_, util::net_awaitable[ec]);
-        stream_->expires_never();
+        co_await http::async_write(*stream_, *sr_, util::net_awaitable[ec]);
         if (ec == http::error::need_buffer)
             ec = {};
+        stream_->expires_never();
         if (ec)
             throw boost::system::system_error(ec);
     }
 
-    net::awaitable<void> close() override
-    {
-        if (closed_.exchange(true))
-            co_return;
-
-        msg_->body().data = nullptr;
-        msg_->body().size = 0;
-        msg_->body().more = false;
-
-        boost::system::error_code ec;
-        stream_->expires_after(write_timeout_);
-        while (!sr_->is_done()) {
-            co_await http::async_write_some(*stream_, *sr_, util::net_awaitable[ec]);
-            if (ec == http::error::need_buffer)
-                ec = {};
-            else if (ec)
-                throw boost::system::system_error(ec);
-        }
-        stream_->expires_never();
-    }
-
 private:
     http_stream* stream_;
-    http::message<false, http::buffer_body>* msg_;
+    http::response<http::buffer_body>* msg_;
     http::response_serializer<http::buffer_body>* sr_;
     std::chrono::steady_clock::duration write_timeout_;
     std::atomic<bool> closed_ = false;

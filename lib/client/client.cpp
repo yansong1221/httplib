@@ -228,7 +228,7 @@ http_client::async_send_chunked_request(http::verb method,
     co_return co_await impl_->async_send_request_with_redirect(req, nullptr, std::move(handler));
 }
 
-net::awaitable<std::unique_ptr<relay_session>>
+net::awaitable<std::shared_ptr<relay_session>>
 http_client::async_begin_relay(http::verb method,
                                std::string_view path,
                                const http::fields& headers)

@@ -5,12 +5,6 @@
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/ws_client.hpp"
-#include "httplib/streaming/chunk_reader.hpp"
-#include "httplib/streaming/chunk_writer.hpp"
-#include "httplib/streaming/ndjson_reader.hpp"
-#include "httplib/streaming/ndjson_writer.hpp"
-#include "httplib/streaming/sse_reader.hpp"
-#include "httplib/streaming/sse_writer.hpp"
 #include "httplib/server/middleware/auth.hpp"
 #include "httplib/server/middleware/cors.hpp"
 #include "httplib/server/middleware/rate_limit.hpp"
@@ -19,6 +13,12 @@
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
+#include "httplib/streaming/chunk_reader.hpp"
+#include "httplib/streaming/chunk_writer.hpp"
+#include "httplib/streaming/ndjson_reader.hpp"
+#include "httplib/streaming/ndjson_writer.hpp"
+#include "httplib/streaming/sse_reader.hpp"
+#include "httplib/streaming/sse_writer.hpp"
 #include "httplib/version.hpp"
 #include <boost/asio/thread_pool.hpp>
 #include <boost/json.hpp>
@@ -222,16 +222,14 @@ static void setup_http_routes(httplib::server::router& router)
     router.set_http_handler<http::verb::get>(
         "/api/sse", [](httplib::server::request&, httplib::server::response& resp) {
             auto counter = std::make_shared<int>(0);
-            resp.set_sse_write_handler(
-                [counter](httplib::sse_writer& sse) -> net::awaitable<void> {
-                    while (*counter < 3) {
-                        ++(*counter);
-                        co_await sse.send_event(std::format("event #{}", *counter),
-                                                "tick",
-                                                std::to_string(*counter));
-                    }
-                    co_await sse.close();
-                });
+            resp.set_sse_write_handler([counter](httplib::sse_writer& sse) -> net::awaitable<void> {
+                while (*counter < 3) {
+                    ++(*counter);
+                    co_await sse.send_event(
+                        std::format("event #{}", *counter), "tick", std::to_string(*counter));
+                }
+                co_await sse.close();
+            });
         });
 
     // ---- NDJSON (Newline Delimited JSON) ----
@@ -253,11 +251,12 @@ static void setup_http_routes(httplib::server::router& router)
         [](httplib::server::request& req,
            httplib::server::response& resp) -> httplib::net::awaitable<void> {
             std::string all;
+            std::array<char, 1024> buffer;
             for (;;) {
-                auto tunck = co_await req.read_buffer_body_some();
-                if (tunck.empty())
+                auto bytes = co_await req.read_buffer_body_some(httplib::net::buffer(buffer));
+                if (bytes == 0)
                     break;
-                all.append(tunck);
+                all.append(buffer.data(), bytes);
             }
             resp.set_string_content(all, "text/plain");
             co_return;
@@ -412,7 +411,8 @@ static void run_http_client_demo(net::any_io_executor ex, std::string host, uint
     // Stream with chunk handler
     {
         client.set_chunked_read_handler(
-            [](httplib::chunk_reader& reader, httplib::client::http_client::response&) -> net::awaitable<void> {
+            [](httplib::chunk_reader& reader,
+               httplib::client::http_client::response&) -> net::awaitable<void> {
                 while (true) {
                     auto chunk = co_await reader.read_chunk();
                     if (chunk.empty())
@@ -428,17 +428,15 @@ static void run_http_client_demo(net::any_io_executor ex, std::string host, uint
 
     // SSE (Server-Sent Events)
     {
-        client.set_sse_read_handler(
-            [](httplib::sse_reader& reader) -> net::awaitable<void> {
-                while (!reader.is_done()) {
-                    auto ev = co_await reader.read_event();
-                    if (ev.data.empty() && ev.event.empty() && ev.id.empty()
-                        && ev.retry == std::chrono::milliseconds {0})
-                        break;
-                    spdlog::info("  SSE event: id={} event={} data={}",
-                                 ev.id, ev.event, ev.data);
-                }
-            });
+        client.set_sse_read_handler([](httplib::sse_reader& reader) -> net::awaitable<void> {
+            while (!reader.is_done()) {
+                auto ev = co_await reader.read_event();
+                if (ev.data.empty() && ev.event.empty() && ev.id.empty() &&
+                    ev.retry == std::chrono::milliseconds {0})
+                    break;
+                spdlog::info("  SSE event: id={} event={} data={}", ev.id, ev.event, ev.data);
+            }
+        });
         auto r = client.get("/api/sse");
         client.set_sse_read_handler(nullptr);
         if (r)
@@ -447,15 +445,14 @@ static void run_http_client_demo(net::any_io_executor ex, std::string host, uint
 
     // NDJSON (Newline Delimited JSON)
     {
-        client.set_ndjson_read_handler(
-            [](httplib::ndjson_reader& reader) -> net::awaitable<void> {
-                while (!reader.is_done()) {
-                    auto val = co_await reader.read();
-                    if (val.is_null())
-                        break;
-                    spdlog::info("  NDJSON line: {}", boost::json::serialize(val));
-                }
-            });
+        client.set_ndjson_read_handler([](httplib::ndjson_reader& reader) -> net::awaitable<void> {
+            while (!reader.is_done()) {
+                auto val = co_await reader.read();
+                if (val.is_null())
+                    break;
+                spdlog::info("  NDJSON line: {}", boost::json::serialize(val));
+            }
+        });
         auto r = client.get("/api/ndjson");
         client.set_ndjson_read_handler(nullptr);
         if (r)
@@ -588,7 +585,11 @@ int main(int argc, char** argv)
 
     spdlog::set_level(spdlog::level::info);
     spdlog::info("httplib demo v{} | mode={} | host={} | port={} | ssl={}",
-                 httplib::version(), mode, host, port, use_ssl);
+                 httplib::version(),
+                 mode,
+                 host,
+                 port,
+                 use_ssl);
 
     boost::asio::thread_pool pool(std::thread::hardware_concurrency());
     auto ex = pool.get_executor();
@@ -628,6 +629,8 @@ int main(int argc, char** argv)
         setup_ws(router);
         setup_static_files(router);
 
+        svr.set_reverse_proxy("/*", "192.168.31.1", 80, false);
+
         router.set_http_handler<http::verb::post>(
             "/api/shutdown", [&](httplib::server::request&, httplib::server::response& resp) {
                 resp.set_json_content({{"message", "shutting down"}});
@@ -644,6 +647,7 @@ int main(int argc, char** argv)
 
         pool.wait();
     }
+
 
     return 0;
 }

@@ -55,7 +55,7 @@ public:
     net::awaitable<http_client::response_result> async_download(http_client::request& req,
                                                                   const fs::path& save_path);
 
-    net::awaitable<std::unique_ptr<relay_session>>
+    net::awaitable<std::shared_ptr<relay_session>>
     co_begin_relay(http::verb method, std::string_view path, const http::fields& headers,
                    bool retry = true);
 

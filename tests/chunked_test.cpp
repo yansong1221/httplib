@@ -6,8 +6,10 @@
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
+#include "httplib/streaming/buffer_body_writer.hpp"
 #include <boost/asio/io_context.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <array>
 #include <memory>
 #include <spdlog/sinks/null_sink.h>
 #include <spdlog/spdlog.h>
@@ -627,11 +629,12 @@ TEST_CASE("BufferBody: read_buffer_body_some() receives body incrementally", "[b
         [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void> {
             REQUIRE(req.is_buffer_body_handler());
             std::string accumulated;
+            std::array<char, 8192> buf;
             for (;;) {
-                auto chunk = co_await req.read_buffer_body_some();
-                if (chunk.empty())
+                auto bytes = co_await req.read_buffer_body_some(net::buffer(buf));
+                if (bytes == 0)
                     break;
-                accumulated.append(chunk);
+                accumulated.append(buf.data(), bytes);
             }
             resp.set_string_content(accumulated, "text/plain");
         });
@@ -651,9 +654,10 @@ TEST_CASE("BufferBody: read_buffer_body_some() with empty body", "[buffer_body]"
         [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void> {
             REQUIRE(req.is_buffer_body_handler());
             int count = 0;
+            std::array<char, 8192> buf;
             for (;;) {
-                auto chunk = co_await req.read_buffer_body_some();
-                if (chunk.empty())
+                auto bytes = co_await req.read_buffer_body_some(net::buffer(buf));
+                if (bytes == 0)
                     break;
                 ++count;
             }
@@ -675,11 +679,12 @@ TEST_CASE("BufferBody: read_buffer_body_some() with large body", "[buffer_body]"
         [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void> {
             REQUIRE(req.is_buffer_body_handler());
             std::string accumulated;
+            std::array<char, 8192> buf;
             for (;;) {
-                auto chunk = co_await req.read_buffer_body_some();
-                if (chunk.empty())
+                auto bytes = co_await req.read_buffer_body_some(net::buffer(buf));
+                if (bytes == 0)
                     break;
-                accumulated.append(chunk);
+                accumulated.append(buf.data(), bytes);
             }
             resp.set_string_content(std::to_string(accumulated.size()), "text/plain");
         });
@@ -699,9 +704,10 @@ TEST_CASE("BufferBody: is_buffer_body_handler() is true", "[buffer_body]")
         "/buffer/is-handler",
         [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void> {
             bool was_buffer = req.is_buffer_body_handler();
-            auto chunk      = co_await req.read_buffer_body_some();
+            std::array<char, 8192> buf;
+            auto bytes      = co_await req.read_buffer_body_some(net::buffer(buf));
             resp.set_string_content(std::string(was_buffer ? "yes:" : "no:") +
-                                        std::string(chunk),
+                                        std::string(buf.data(), bytes),
                                     "text/plain");
         });
     ts.start();
@@ -719,8 +725,9 @@ TEST_CASE("BufferBody: read_buffer_body_some() returns empty when not set up", "
         "/buffer/noctx",
         [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void> {
             REQUIRE(!req.is_buffer_body_handler());
-            auto chunk = co_await req.read_buffer_body_some();
-            REQUIRE(chunk.empty());
+            std::array<char, 1024> buf;
+            auto bytes = co_await req.read_buffer_body_some(net::buffer(buf));
+            REQUIRE(bytes == 0);
             resp.set_string_content("ok"sv, "text/plain");
         });
     ts.start();
@@ -740,11 +747,12 @@ TEST_CASE("BufferBody: with path parameters", "[buffer_body]")
             REQUIRE(req.is_buffer_body_handler());
             auto id = std::string(req.path_param("id"));
             std::string accumulated;
+            std::array<char, 8192> buf;
             for (;;) {
-                auto chunk = co_await req.read_buffer_body_some();
-                if (chunk.empty())
+                auto bytes = co_await req.read_buffer_body_some(net::buffer(buf));
+                if (bytes == 0)
                     break;
-                accumulated.append(chunk);
+                accumulated.append(buf.data(), bytes);
             }
             resp.set_string_content(id + ":" + accumulated, "text/plain");
         });
@@ -765,11 +773,12 @@ TEST_CASE("BufferBody: with wildcard path", "[buffer_body]")
             REQUIRE(req.is_buffer_body_handler());
             auto wild = std::string(req.path_param("*"));
             std::string accumulated;
+            std::array<char, 8192> buf;
             for (;;) {
-                auto chunk = co_await req.read_buffer_body_some();
-                if (chunk.empty())
+                auto bytes = co_await req.read_buffer_body_some(net::buffer(buf));
+                if (bytes == 0)
                     break;
-                accumulated.append(chunk);
+                accumulated.append(buf.data(), bytes);
             }
             resp.set_string_content(wild + ":" + accumulated, "text/plain");
         });
@@ -789,11 +798,12 @@ TEST_CASE("BufferBody: multi-verb registration", "[buffer_body]")
         [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void> {
             REQUIRE(req.is_buffer_body_handler());
             std::string accumulated;
+            std::array<char, 8192> buf;
             for (;;) {
-                auto chunk = co_await req.read_buffer_body_some();
-                if (chunk.empty())
+                auto bytes = co_await req.read_buffer_body_some(net::buffer(buf));
+                if (bytes == 0)
                     break;
-                accumulated.append(chunk);
+                accumulated.append(buf.data(), bytes);
             }
             auto method = std::string(req.method_string());
             resp.set_string_content(method + ":" + accumulated, "text/plain");
@@ -850,11 +860,12 @@ TEST_CASE("BufferBody: Content-Length POST does NOT hit chunked handler on same 
         [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void> {
             REQUIRE(req.is_buffer_body_handler());
             std::string accumulated;
+            std::array<char, 8192> buf;
             for (;;) {
-                auto chunk = co_await req.read_buffer_body_some();
-                if (chunk.empty())
+                auto bytes = co_await req.read_buffer_body_some(net::buffer(buf));
+                if (bytes == 0)
                     break;
-                accumulated.append(chunk);
+                accumulated.append(buf.data(), bytes);
             }
             resp.set_string_content("buffer-" + accumulated, "text/plain");
         });
@@ -874,11 +885,12 @@ TEST_CASE("BufferBody: via PUT method", "[buffer_body]")
         [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void> {
             REQUIRE(req.is_buffer_body_handler());
             std::string accumulated;
+            std::array<char, 8192> buf;
             for (;;) {
-                auto chunk = co_await req.read_buffer_body_some();
-                if (chunk.empty())
+                auto bytes = co_await req.read_buffer_body_some(net::buffer(buf));
+                if (bytes == 0)
                     break;
-                accumulated.append(chunk);
+                accumulated.append(buf.data(), bytes);
             }
             resp.set_string_content("PUT:" + accumulated, "text/plain");
         });

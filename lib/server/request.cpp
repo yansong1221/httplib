@@ -194,9 +194,9 @@ httplib::chunk_reader& request::get_chunk_reader()
     return impl_->get_chunk_reader();
 }
 
-net::awaitable<std::string_view> request::read_buffer_body_some()
+net::awaitable<std::size_t> request::read_buffer_body_some(const net::mutable_buffer& buffer)
 {
-    co_return co_await impl_->read_buffer_body_some();
+    co_return co_await impl_->read_buffer_body_some(buffer);
 }
 
 } // namespace httplib::server

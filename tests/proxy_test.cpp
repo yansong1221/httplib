@@ -37,12 +37,12 @@ struct test_scaffold
         proxy_server.run();
         worker = std::thread([this] { ioc.run(); });
 
-        upstream_client = std::make_unique<client::http_client>(
-            ioc.get_executor(), upstream_host, upstream_port);
+        upstream_client =
+            std::make_unique<client::http_client>(ioc.get_executor(), upstream_host, upstream_port);
         upstream_client->set_timeout(std::chrono::seconds(5));
 
-        proxy_client = std::make_unique<client::http_client>(
-            ioc.get_executor(), "127.0.0.1", proxy_port);
+        proxy_client =
+            std::make_unique<client::http_client>(ioc.get_executor(), "127.0.0.1", proxy_port);
         proxy_client->set_timeout(std::chrono::seconds(10));
     }
 
@@ -56,10 +56,10 @@ struct test_scaffold
     }
 };
 
-#define UNWRAP(result)                      \
-    [&](auto&& r) {                         \
-        REQUIRE(r.has_value());             \
-        return std::move(std::move(r).value()); \
+#define UNWRAP(result)                                                                             \
+    [&](auto&& r) {                                                                                \
+        REQUIRE(r.has_value());                                                                    \
+        return std::move(std::move(r).value());                                                    \
     }(result)
 
 std::string as_string(auto& msg)
@@ -83,39 +83,34 @@ TEST_CASE("reverse-proxy", "[proxy]")
     ts.proxy_port = ts.proxy_server.local_endpoint().port();
 
     ts.upstream_server.router()
-        .set_http_handler<http::verb::get, http::verb::post, http::verb::put, http::verb::patch,
-                          http::verb::delete_>(
-            "/echo",
-            [](server::request& req, server::response& resp) {
-                auto body = as_string(req);
-                resp.set_string_content(body, "text/plain");
-            });
+        .set_http_handler<http::verb::get,
+                          http::verb::post,
+                          http::verb::put,
+                          http::verb::patch,
+                          http::verb::delete_>("/echo",
+                                               [](server::request& req, server::response& resp) {
+                                                   auto body = as_string(req);
+                                                   resp.set_string_content(body, "text/plain");
+                                               });
 
-    ts.upstream_server.router()
-        .set_http_handler<http::verb::get>(
-            "/status/:code",
-            [](server::request& req, server::response& resp) {
-                auto code = std::stoi(std::string(req.path_param("code")));
-                resp.set_empty_content(static_cast<http::status>(code));
-            });
+    ts.upstream_server.router().set_http_handler<http::verb::get>(
+        "/status/:code", [](server::request& req, server::response& resp) {
+            auto code = std::stoi(std::string(req.path_param("code")));
+            resp.set_empty_content(static_cast<http::status>(code));
+        });
 
-    ts.upstream_server.router()
-        .set_http_handler<http::verb::get>(
-            "/headers",
-            [](server::request& req, server::response& resp) {
-                auto xff = req["X-Forwarded-For"];
-                resp.set_string_content(std::string(xff), "text/plain");
-            });
+    ts.upstream_server.router().set_http_handler<http::verb::get>(
+        "/headers", [](server::request& req, server::response& resp) {
+            auto xff = req["X-Forwarded-For"];
+            resp.set_string_content(std::string(xff), "text/plain");
+        });
 
-    ts.upstream_server.router()
-        .set_http_handler<http::verb::get>(
-            "/resource",
-            [](server::request&, server::response& resp) {
-                resp.set_string_content(std::string("upstream-resource"), "text/plain");
-            });
+    ts.upstream_server.router().set_http_handler<http::verb::get>(
+        "/resource", [](server::request&, server::response& resp) {
+            resp.set_string_content(std::string("upstream-resource"), "text/plain");
+        });
 
-    ts.proxy_server.set_reverse_proxy(
-        "/api/*", ts.upstream_host, ts.upstream_port);
+    ts.proxy_server.set_reverse_proxy("/api/*", ts.upstream_host, ts.upstream_port);
 
     ts.start();
 
@@ -124,13 +119,6 @@ TEST_CASE("reverse-proxy", "[proxy]")
         auto resp = UNWRAP(ts.proxy_client->get("/api/resource"));
         REQUIRE(resp.result() == http::status::ok);
         REQUIRE(as_string(resp) == "upstream-resource");
-    }
-
-    SECTION("GET /api/echo → upstream /echo (empty body)")
-    {
-        auto resp = UNWRAP(ts.proxy_client->get("/api/echo"));
-        REQUIRE(resp.result() == http::status::ok);
-        REQUIRE(as_string(resp).empty());
     }
 
     SECTION("POST /api/echo with body → upstream /echo")
@@ -144,6 +132,19 @@ TEST_CASE("reverse-proxy", "[proxy]")
         REQUIRE(resp.result() == http::status::ok);
         REQUIRE(as_string(resp) == "hello-proxy");
     }
+
+    SECTION("GET /api/echo → upstream /echo (empty body)")
+    {
+        // verify upstream handles GET directly
+        auto direct = UNWRAP(ts.upstream_client->get("/echo"));
+        REQUIRE(direct.result() == http::status::ok);
+        REQUIRE(as_string(direct).empty());
+
+        auto resp = UNWRAP(ts.proxy_client->get("/api/echo"));
+        REQUIRE(resp.result() == http::status::ok);
+        REQUIRE(as_string(resp).empty());
+    }
+
 
     SECTION("GET /api/status/201 → upstream /status/201")
     {

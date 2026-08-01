@@ -343,8 +343,8 @@ void session::http_task::abort()
 
 net::awaitable<bool> session::http_task::async_write(const request& req, response& resp)
 {
-    auto& chunked_write_handler   = resp.get_impl()->chunked_write_handler_;
-    auto& buffer_body_handler     = resp.get_impl()->buffer_body_write_handler_;
+    auto& chunked_write_handler = resp.get_impl()->chunked_write_handler_;
+    auto& buffer_body_handler   = resp.get_impl()->buffer_body_write_handler_;
 
     if (chunked_write_handler) {
         resp.get_impl()->chunked(true);
@@ -395,7 +395,7 @@ net::awaitable<bool> session::http_task::async_write(const request& req, respons
         co_await writer.close();
     }
     else if (buffer_body_handler) {
-        http::message<false, http::buffer_body> relay_msg;
+        http::response<http::buffer_body> relay_msg(*resp.get_impl());
         for (const auto& f : (*resp.get_impl()))
             relay_msg.set(f.name_string(), f.value());
         relay_msg.result(resp.get_impl()->result());
@@ -405,21 +405,16 @@ net::awaitable<bool> session::http_task::async_write(const request& req, respons
         http::response_serializer<http::buffer_body> relay_sr(relay_msg);
 
         stream_.expires_after(serv_.write_timeout());
-        while (!relay_sr.is_header_done())
-            co_await http::async_write_some(stream_, relay_sr, util::net_awaitable[ec]);
+        co_await http::async_write_header(stream_, relay_sr, util::net_awaitable[ec]);
         stream_.expires_never();
-        if (ec == http::error::need_buffer)
-            ec = {};
         if (ec) {
             serv_.logger()->trace("write http header failed: {}", ec.message());
             co_return false;
         }
-        stream_.expires_after(serv_.write_timeout());
+
         streaming::buffer_body_writer_impl writer(
             stream_, relay_msg, relay_sr, serv_.write_timeout());
         co_await buffer_body_handler(writer);
-        co_await writer.close();
-        stream_.expires_never();
     }
     else {
         while (!serializer.is_done())

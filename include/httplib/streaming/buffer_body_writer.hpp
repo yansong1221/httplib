@@ -8,9 +8,8 @@ namespace httplib::streaming {
 class HTTPLIB_API buffer_body_writer
 {
 public:
-    virtual ~buffer_body_writer()                           = default;
-    virtual net::awaitable<void> write(std::string_view data) = 0;
-    virtual net::awaitable<void> close()                      = 0;
+    virtual ~buffer_body_writer()                                                = default;
+    virtual net::awaitable<void> write(const net::const_buffer& data, bool more) = 0;
 };
 
 } // namespace httplib::streaming

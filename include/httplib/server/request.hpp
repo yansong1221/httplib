@@ -1,7 +1,7 @@
 #pragma once
 #include "httplib/body/any_body.hpp"
-#include "httplib/streaming/chunk_reader.hpp"
 #include "httplib/config.hpp"
+#include "httplib/streaming/chunk_reader.hpp"
 #include <any>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -80,7 +80,7 @@ public:
     bool is_chunked_handler() const;
     bool is_buffer_body_handler() const;
 
-    net::awaitable<std::string_view> read_buffer_body_some();
+    net::awaitable<std::size_t> read_buffer_body_some(const net::mutable_buffer& buffer);
 
     httplib::chunk_reader& get_chunk_reader();
 

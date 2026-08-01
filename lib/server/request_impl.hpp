@@ -1,11 +1,11 @@
 #pragma once
-#include "util/buffer_body_reader.hpp"
-#include "streaming/chunk_reader_impl.hpp"
 #include "httplib/server/middleware/session.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "stream/http_stream.hpp"
+#include "streaming/chunk_reader_impl.hpp"
+#include "util/buffer_body_reader.hpp"
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/buffer_body.hpp>
@@ -102,8 +102,7 @@ public:
 
         buffer_body_ctx_         = std::make_shared<buffer_body_read_ctx>();
         buffer_body_ctx_->parser = std::move(parser);
-        buffer_body_ctx_->reader.setup(
-            stream, buffer, *buffer_body_ctx_->parser, read_timeout);
+        buffer_body_ctx_->reader.setup(stream, buffer, *buffer_body_ctx_->parser, read_timeout);
     }
 
     bool is_chunked_handler() const { return chunk_ctx_ != nullptr; }
@@ -127,11 +126,11 @@ public:
 
     httplib::chunk_reader& get_chunk_reader() { return *chunk_ctx_->reader; }
 
-    net::awaitable<std::string_view> read_buffer_body_some()
+    net::awaitable<std::size_t> read_buffer_body_some(const net::mutable_buffer& buffer)
     {
         if (!buffer_body_ctx_)
-            co_return std::string_view {};
-        co_return co_await buffer_body_ctx_->reader.read_some();
+            co_return 0;
+        co_return co_await buffer_body_ctx_->reader.read_some(buffer);
     }
 
     std::string_view operator[](http::field name) const { return this->base()[name]; }

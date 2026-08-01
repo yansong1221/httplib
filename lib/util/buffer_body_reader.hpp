@@ -24,18 +24,17 @@ public:
         buffer_       = &buffer;
         parser_       = &parser;
         read_timeout_ = read_timeout;
-        buf_data_     = std::vector<char>(8192);
-
-        auto& b = parser_->get().body();
-        b.data  = buf_data_.data();
-        b.size  = buf_data_.size();
     }
 
-    net::awaitable<std::string_view> read_some()
+    net::awaitable<std::size_t> read_some(const net::mutable_buffer& buffer)
     {
+        if (parser_->is_done())
+            co_return 0;
+
         for (;;) {
-            if (parser_->is_done())
-                co_return std::string_view {};
+            auto& b = parser_->get().body();
+            b.data  = buffer.data();
+            b.size  = buffer.size();
 
             boost::system::error_code ec;
             stream_->expires_after(read_timeout_);
@@ -45,11 +44,9 @@ public:
                 throw boost::system::system_error(ec);
 
             auto& body    = parser_->get().body();
-            auto consumed = buf_data_.size() - body.size;
+            auto consumed = buffer.size() - body.size;
             if (consumed > 0) {
-                body.data = buf_data_.data();
-                body.size = buf_data_.size();
-                co_return std::string_view(buf_data_.data(), consumed);
+                co_return consumed;
             }
         }
     }
@@ -58,10 +55,9 @@ public:
 
 private:
     http::parser<isRequest, http::buffer_body>* parser_ = nullptr;
-    http_stream* stream_                               = nullptr;
-    beast::flat_buffer* buffer_                        = nullptr;
+    http_stream* stream_                                = nullptr;
+    beast::flat_buffer* buffer_                         = nullptr;
     std::chrono::steady_clock::duration read_timeout_ {30};
-    std::vector<char> buf_data_;
 };
 
 } // namespace httplib::detail

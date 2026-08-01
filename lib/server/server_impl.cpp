@@ -1,7 +1,7 @@
 #include "server_impl.h"
+#include "httplib/client/client_pool.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "httplib/util/when_all.hpp"
-#include "httplib/client/client_pool.hpp"
 #include "request_impl.hpp"
 #include "response_impl.hpp"
 #include <boost/asio/use_future.hpp>
@@ -221,8 +221,7 @@ void http_server::impl::set_compress_content_types(std::function<bool(std::strin
 
 static bool default_compress_content_type(std::string_view content_type)
 {
-    return content_type.starts_with("text/") ||
-           content_type.starts_with("application/json") ||
+    return content_type.starts_with("text/") || content_type.starts_with("application/json") ||
            content_type.starts_with("application/javascript") ||
            content_type.starts_with("application/xml") ||
            content_type.starts_with("application/xhtml+xml") ||
@@ -266,9 +265,9 @@ void http_server::impl::use_ssl(const net::const_buffer& cert_file,
 }
 
 void http_server::impl::set_reverse_proxy(std::string_view key,
-                                           std::string_view upstream_host,
-                                           uint16_t upstream_port,
-                                           bool upstream_ssl)
+                                          std::string_view upstream_host,
+                                          uint16_t upstream_port,
+                                          bool upstream_ssl)
 {
     if (!proxy_pool_)
         proxy_pool_ = std::make_unique<client::http_client_pool>(ex_);
@@ -279,62 +278,61 @@ void http_server::impl::set_reverse_proxy(std::string_view key,
     if (prefix.ends_with('/'))
         prefix.pop_back();
 
-    auto handler = [this, upstream_host = std::string(upstream_host), upstream_port, upstream_ssl, prefix](
+    auto handler =
+        [this, upstream_host = std::string(upstream_host), upstream_port, upstream_ssl, prefix](
             request& req, response& resp) -> net::awaitable<void> {
-            auto target = std::string(req.path());
-            if (target.starts_with(prefix))
-                target = target.substr(prefix.size());
-            if (target.empty() || target[0] != '/')
-                target.insert(0, 1, '/');
+        auto target = std::string(req.path());
+        if (target.starts_with(prefix))
+            target = target.substr(prefix.size());
+        if (target.empty() || target[0] != '/')
+            target.insert(0, 1, '/');
 
-            http::fields upstream_headers;
-            auto& req_impl = *req.get_impl();
-            for (const auto& f : req_impl) {
-                if (f.name() != http::field::host)
-                    upstream_headers.set(f.name_string(), f.value());
-            }
+        http::fields upstream_headers;
+        auto& req_impl = *req.get_impl();
+        for (const auto& f : req_impl) {
+            if (f.name() != http::field::host)
+                upstream_headers.set(f.name_string(), f.value());
+        }
 
-            auto client_ip = req.get_client_ip().to_string();
-            auto xff       = req_impl["X-Forwarded-For"];
-            if (!xff.empty()) {
-                std::string xf(xff);
-                client_ip = xf + ", " + client_ip;
-            }
-            upstream_headers.set("X-Forwarded-For", client_ip);
+        auto client_ip = req.get_client_ip().to_string();
+        auto xff       = req_impl["X-Forwarded-For"];
+        if (!xff.empty()) {
+            std::string xf(xff);
+            client_ip = xf + ", " + client_ip;
+        }
+        upstream_headers.set("X-Forwarded-For", client_ip);
 
-            auto client  = co_await proxy_pool_->async_acquire(
-                upstream_host, upstream_port, upstream_ssl);
-            auto session = co_await client->async_begin_relay(
-                req.method(), target, upstream_headers);
+        auto client =
+            co_await proxy_pool_->async_acquire(upstream_host, upstream_port, upstream_ssl);
+        auto session = co_await client->async_begin_relay(req.method(), target, upstream_headers);
 
-            while (true) {
-                auto chunk = co_await req.read_buffer_body_some();
-                if (chunk.empty())
-                    break;
-                co_await session->write_body(chunk);
-            }
-            co_await session->close_body();
+        std::array<char, 1024> buffer;
+        while (true) {
+            auto bytes = co_await req.read_buffer_body_some(net::buffer(buffer));
+            co_await session->write_body(net::buffer(buffer, bytes), bytes != 0);
+            if (bytes == 0)
+                break;
+        }
 
-            co_await session->read_header();
+        co_await session->read_header();
 
-            std::string body;
-            while (true) {
-                auto chunk = co_await session->read_some_body();
-                if (chunk.empty())
-                    break;
-                body.append(chunk);
-            }
 
-            auto ct = session->headers()["Content-Type"];
-            resp.set_string_content(body, ct, session->result());
+        auto client_ptr =
+            std::make_shared<client::http_client_pool::client_handle>(std::move(client));
 
-            for (const auto& f : session->headers()) {
-                auto fn = f.name_string();
-                if (fn != "Content-Type" && fn != "Content-Length" &&
-                    fn != "Transfer-Encoding" && fn != "Connection")
-                    resp.set(f.name_string(), f.value());
-            }
-        };
+        resp.set_buffer_body_write_handler(
+            [client_ptr, session](streaming::buffer_body_writer& w) -> net::awaitable<void> {
+                std::array<char, 1024> buffer;
+                while (true) {
+                    auto bytes = co_await session->read_body(net::buffer(buffer));
+                    co_await w.write(net::buffer(buffer, bytes), bytes != 0);
+                    if (bytes == 0)
+                        break;
+                }
+            },
+            session->headers(),
+            session->result());
+    };
 
     router_.set_buffer_body_http_handler(http::verb::get, key, handler);
     router_.set_buffer_body_http_handler(http::verb::head, key, handler);
