@@ -230,10 +230,10 @@ http_client::async_send_chunked_request(http::verb method,
 
 net::awaitable<std::shared_ptr<relay_session>>
 http_client::async_begin_relay(http::verb method,
-                               std::string_view path,
+                               std::string_view target,
                                const http::fields& headers)
 {
-    co_return co_await impl_->co_begin_relay(method, path, headers);
+    co_return co_await impl_->co_begin_relay(method, target, headers);
 }
 
 http_client::response_result http_client::send_chunked_request(http::verb method,

@@ -269,7 +269,7 @@ public:
 
     net::awaitable<std::shared_ptr<relay_session>>
     async_begin_relay(http::verb method,
-                      std::string_view path,
+                      std::string_view target,
                       const http::fields& headers = http::fields());
 
     // ---- send_request (sync, body-type overloads) ----

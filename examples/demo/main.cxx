@@ -603,7 +603,7 @@ int main(int argc, char** argv)
     }
     else {
         httplib::server::http_server svr(ex);
-        svr.logger()->set_level(spdlog::level::info);
+        svr.logger()->set_level(spdlog::level::debug);
 
 #ifdef HTTPLIB_ENABLED_SSL
         if (use_ssl)
@@ -629,7 +629,7 @@ int main(int argc, char** argv)
         setup_ws(router);
         setup_static_files(router);
 
-        svr.set_reverse_proxy("/*", "192.168.31.1", 80, false);
+        svr.set_reverse_proxy("/*", "192.168.1.1", 80, false);
 
         router.set_http_handler<http::verb::post>(
             "/api/shutdown", [&](httplib::server::request&, httplib::server::response& resp) {

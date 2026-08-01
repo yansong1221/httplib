@@ -19,6 +19,8 @@ http_server::impl::impl(const net::any_io_executor& ex)
     : ex_(ex)
     , acceptor_(ex)
 {
+    proxy_pool_ = std::make_unique<client::http_client_pool>(ex_);
+
     auto console_sink                 = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
     spdlog::sinks_init_list sink_list = {console_sink};
     default_logger_ = std::make_shared<spdlog::logger>("httplib.server", sink_list);
@@ -84,6 +86,8 @@ httplib::net::awaitable<void> http_server::impl::async_stop()
         for (const auto& v : sessions_)
             v->abort();
     }
+    proxy_pool_->stop();
+
     boost::system::error_code ec;
     boost::asio::steady_timer wait_timer(ex_);
 
@@ -281,7 +285,7 @@ void http_server::impl::set_reverse_proxy(std::string_view key,
     auto handler =
         [this, upstream_host = std::string(upstream_host), upstream_port, upstream_ssl, prefix](
             request& req, response& resp) -> net::awaitable<void> {
-        auto target = std::string(req.path());
+        auto target = std::string(req.target());
         if (target.starts_with(prefix))
             target = target.substr(prefix.size());
         if (target.empty() || target[0] != '/')
@@ -302,36 +306,40 @@ void http_server::impl::set_reverse_proxy(std::string_view key,
         }
         upstream_headers.set("X-Forwarded-For", client_ip);
 
-        auto client =
-            co_await proxy_pool_->async_acquire(upstream_host, upstream_port, upstream_ssl);
-        auto session = co_await client->async_begin_relay(req.method(), target, upstream_headers);
-
-        std::array<char, 1024> buffer;
-        while (true) {
-            auto bytes = co_await req.read_buffer_body_some(net::buffer(buffer));
-            co_await session->write_body(net::buffer(buffer, bytes), bytes != 0);
-            if (bytes == 0)
-                break;
+        std::string body;
+        std::array<char, 8192> relay_buf {};
+        {
+            while (true) {
+                auto bytes = co_await req.read_buffer_body_some(net::buffer(relay_buf));
+                if (bytes == 0)
+                    break;
+                body.append(relay_buf.data(), bytes);
+            }
         }
 
+        auto client =
+            co_await proxy_pool_->async_acquire(upstream_host, upstream_port, upstream_ssl);
+        // client->close();
+
+        auto session = co_await client->async_begin_relay(req.method(), target, upstream_headers);
+        co_await session->write_body(net::buffer(body), false);
         co_await session->read_header();
+        const auto& headers = session->headers();
 
+        std::string newbody;
+        {
+            while (true) {
+                auto bytes = co_await session->read_body(net::buffer(relay_buf));
+                if (bytes == 0)
+                    break;
+                newbody.append(relay_buf.data(), bytes);
+            }
+        }
+        if (!session->keep_alive())
+            client->close();
 
-        auto client_ptr =
-            std::make_shared<client::http_client_pool::client_handle>(std::move(client));
-
-        resp.set_buffer_body_write_handler(
-            [client_ptr, session](streaming::buffer_body_writer& w) -> net::awaitable<void> {
-                std::array<char, 1024> buffer;
-                while (true) {
-                    auto bytes = co_await session->read_body(net::buffer(buffer));
-                    co_await w.write(net::buffer(buffer, bytes), bytes != 0);
-                    if (bytes == 0)
-                        break;
-                }
-            },
-            session->headers(),
-            session->result());
+        resp.set_string_content(
+            newbody, session->headers().at(httplib::http::field::content_type), session->result());
     };
 
     router_.set_buffer_body_http_handler(http::verb::get, key, handler);
