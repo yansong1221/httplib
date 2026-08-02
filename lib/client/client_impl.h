@@ -67,7 +67,10 @@ private:
     net::awaitable<http_client::response> co_read_response(const body_setup_fn& body_setup = {},
                                                            bool is_head                    = false);
 
-    void expires_after(bool first = false);
+
+    void begin_io(bool first = false);
+    void end_io();
+    void finish_io();
 
     static bool is_retryable(boost::system::error_code ec)
     {
@@ -111,10 +114,11 @@ private:
 
         serializer.split(headers_only);
         while (headers_only ? !serializer.is_header_done() : !serializer.is_done()) {
-            expires_after();
+            begin_io();
             co_await http::async_write_some(*stream_, serializer, util::net_awaitable[ec]);
             if (ec)
                 break;
+            end_io();
         }
         co_return ec;
 
@@ -132,10 +136,11 @@ private:
         boost::system::error_code ec;
         parser.eager(!headers_only);
         while (headers_only ? !parser.is_header_done() : !parser.is_done()) {
-            expires_after();
+            begin_io();
             co_await http::async_read_some(*stream_, buffer_, parser, util::net_awaitable[ec]);
             if (ec)
                 break;
+            end_io();
         }
         co_return ec;
     }

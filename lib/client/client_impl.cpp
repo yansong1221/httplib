@@ -26,14 +26,14 @@
 namespace httplib::client {
 namespace detail {
 
-std::string make_host_value(std::string_view host, uint16_t port, bool ssl)
+static std::string make_host_value(std::string_view host, uint16_t port, bool ssl)
 {
     if ((ssl && port != 443) || (!ssl && port != 80))
         return fmt::format("{}:{}", host, port);
     return std::string(host);
 }
 
-const http::field hop_by_hop_fields[] = {
+static const http::field hop_by_hop_fields[] = {
     http::field::connection,
     http::field::keep_alive,
     http::field::transfer_encoding,
@@ -44,7 +44,7 @@ const http::field hop_by_hop_fields[] = {
     http::field::upgrade,
 };
 
-bool is_hop_by_hop(http::field f)
+static bool is_hop_by_hop(http::field f)
 {
     for (auto hf : hop_by_hop_fields) {
         if (f == hf)
@@ -135,6 +135,7 @@ private:
                 co_return consumed;
 
             if (resp_parser_->is_done()) {
+                parent_.finish_io();
                 if (!resp_parser_->keep_alive()) {
                     parent_.close();
                 }
@@ -331,8 +332,7 @@ http_client::impl::async_send_request_with_redirect(http_client::request& req,
     co_return boost::system::errc::make_error_code(
         boost::system::errc::too_many_symbolic_link_levels);
 }
-
-void http_client::impl::expires_after(bool first /*= false*/)
+void http_client::impl::begin_io(bool first)
 {
     std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
     if (!stream_)
@@ -349,9 +349,32 @@ void http_client::impl::expires_after(bool first /*= false*/)
     }
 }
 
+void http_client::impl::end_io()
+{
+    std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
+    if (!stream_)
+        return;
+
+    switch (timeout_policy_) {
+        case http_client::timeout_policy::step:
+        case http_client::timeout_policy::never: stream_->expires_never(); break;
+        default: break;
+    }
+}
+
+void http_client::impl::finish_io()
+{
+    std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
+    if (!stream_)
+        return;
+
+    stream_->expires_never();
+}
+
 net::awaitable<boost::system::error_code> http_client::impl::co_connect()
 {
     try {
+        begin_io(true);
         std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
         if (!is_open()) {
             close();
@@ -361,20 +384,19 @@ net::awaitable<boost::system::error_code> http_client::impl::co_connect()
             boost::system::error_code ec;
             auto addr = net::ip::make_address(host_, ec);
             if (!ec) {
-                expires_after(true);
                 co_await stream_->async_connect(tcp::endpoint(addr, port_));
             }
             else {
                 auto endpoints = co_await resolver_.async_resolve(
                     host_, std::to_string(port_), net::use_awaitable);
-                expires_after(true);
                 co_await stream_->async_connect(endpoints);
             }
         }
-        expires_after();
+        end_io();
         co_return boost::system::error_code {};
     }
     catch (const boost::system::system_error& e) {
+        finish_io();
         co_return e.code();
     }
 }
@@ -389,8 +411,9 @@ net::awaitable<http_client::response> http_client::impl::co_read_response(
     parser.body_limit(std::numeric_limits<std::uint64_t>::max());
 
     while (!parser.is_header_done()) {
-        expires_after();
+        begin_io();
         co_await http::async_read_some(*stream_, buffer_, parser);
+        end_io();
     }
 
     if (!parser.is_done()) {
@@ -422,13 +445,14 @@ net::awaitable<http_client::response> http_client::impl::co_read_response(
                 body_setup(parser.get());
 
             while (!parser.is_done()) {
-                expires_after();
+                begin_io();
                 co_await http::async_read_some(*stream_, buffer_, parser);
+                end_io();
             }
         }
     }
 
-    stream_->expires_never();
+    finish_io();
     if (!parser.keep_alive())
         close();
     co_return parser.release();
@@ -476,5 +500,6 @@ relay_session& http_client::impl::session()
 {
     return *relay_;
 }
+
 
 } // namespace httplib::client
