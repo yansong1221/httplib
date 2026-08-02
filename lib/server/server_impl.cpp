@@ -348,7 +348,11 @@ void http_server::impl::set_reverse_proxy(std::string_view key,
             const auto& headers = client->relay().headers();
             const auto result   = client->relay().result();
 
-            co_await resp.relay().write_header(result, headers);
+            rel_ec = co_await resp.relay().write_header(result, headers);
+            if (rel_ec) {
+                logger()->warn("relay resp write_header failed: {}", rel_ec.message());
+                co_return;
+            }
 
             {
                 while (true) {
@@ -357,7 +361,12 @@ void http_server::impl::set_reverse_proxy(std::string_view key,
                     if (bytes_result.has_error())
                         break;
                     auto bytes = bytes_result.value();
-                    co_await resp.relay().write_body(net::buffer(relay_buf, bytes), bytes != 0);
+                    rel_ec = co_await resp.relay().write_body(net::buffer(relay_buf, bytes),
+                                                              bytes != 0);
+                    if (rel_ec) {
+                        logger()->warn("relay resp write_body failed: {}", rel_ec.message());
+                        co_return;
+                    }
                     if (bytes == 0)
                         break;
                 }

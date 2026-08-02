@@ -22,9 +22,9 @@ public:
     {
     }
 
-    net::awaitable<void> write_header(http::status status, const http::fields& headers) override
+    net::awaitable<boost::system::error_code> write_header(http::status status,
+                                                            const http::fields& headers) override
     {
-        resp_->relay_used_ = true;
         resp_->result(status);
         for (const auto& f : headers)
             resp_->set(f.name_string(), f.value());
@@ -37,11 +37,13 @@ public:
         stream_->expires_after(write_timeout_);
         co_await http::async_write_header(*stream_, *sr_, util::net_awaitable[ec]);
         stream_->expires_never();
-        if (ec)
-            throw boost::system::system_error(ec);
+        if (!ec)
+            resp_->relay_used_ = true;
+        co_return ec;
     }
 
-    net::awaitable<void> write_body(const net::const_buffer& data, bool more) override
+    net::awaitable<boost::system::error_code> write_body(const net::const_buffer& data,
+                                                          bool more) override
     {
         msg_->body().data = (void*)data.data();
         msg_->body().size = data.size();
@@ -54,8 +56,7 @@ public:
         if (ec == http::error::need_buffer) {
             ec = {};
         }
-        if (ec)
-            throw boost::system::system_error(ec);
+        co_return ec;
     }
 
 private:
