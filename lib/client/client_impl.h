@@ -62,9 +62,9 @@ public:
 
 
 private:
-    [[nodiscard]] net::awaitable<boost::system::error_code> co_connect();
-    net::awaitable<http_client::response_result> co_read_response(const body_setup_fn& body_setup = {},
-                                                                  bool is_head                    = false);
+    net::awaitable<boost::system::error_code> co_connect();
+    net::awaitable<http_client::response_result>
+    co_read_response(const body_setup_fn& body_setup = {}, bool is_head = false);
 
 
     void begin_io(bool first = false);
@@ -96,11 +96,6 @@ private:
                 break;
             end_io();
         }
-        if (ec && ec != http::error::need_buffer) {
-            close();
-        }
-        co_return ec;
-
 
         if (is_retryable(ec) && retry) {
             logger()->trace("retrying request...");
@@ -120,9 +115,6 @@ private:
             if (ec)
                 break;
             end_io();
-        }
-        if (ec && ec != http::error::need_buffer) {
-            close();
         }
         co_return ec;
     }

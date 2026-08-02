@@ -73,10 +73,6 @@ public:
         req_msg_->set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
         req_msg_->keep_alive(true);
 
-        resp_parser_.emplace();
-        resp_parser_->body_limit((std::numeric_limits<std::uint64_t>::max)());
-        resp_parser_->header_limit((std::numeric_limits<std::uint32_t>::max)());
-
         for (const auto& f : headers) {
             if (!detail::is_hop_by_hop(f.name()))
                 req_msg_->set(f.name_string(), f.value());
@@ -103,6 +99,11 @@ private:
 
     net::awaitable<boost::system::error_code> read_header() override
     {
+        resp_parser_ = std::make_unique<http::response_parser<http::buffer_body>>();
+        resp_parser_->body_limit((std::numeric_limits<std::uint64_t>::max)());
+        resp_parser_->header_limit((std::numeric_limits<std::uint32_t>::max)());
+
+        parent_.buffer_.clear();
         co_return co_await parent_.async_read(*resp_parser_, true);
     }
 
@@ -133,7 +134,6 @@ private:
 
             if (resp_parser_->is_done()) {
                 parent_.finish_io();
-                parent_.buffer_.clear();
                 if (!resp_parser_->keep_alive()) {
                     parent_.close();
                 }
@@ -145,7 +145,7 @@ private:
     http_client::impl& parent_;
     std::unique_ptr<http::request<http::buffer_body>> req_msg_;
     std::unique_ptr<http::request_serializer<http::buffer_body>> req_sr_;
-    std::optional<http::response_parser<http::buffer_body>> resp_parser_;
+    std::unique_ptr<http::response_parser<http::buffer_body>> resp_parser_;
 };
 
 http_client::impl::impl(const net::any_io_executor& ex,
@@ -239,6 +239,7 @@ net::awaitable<http_client::response_result> http_client::impl::async_send_reque
         co_await writer.close();
     }
 
+    buffer_.clear();
     co_return co_await co_read_response(body_setup, req.method() == http::verb::head);
 }
 
@@ -409,11 +410,11 @@ net::awaitable<http_client::response_result> http_client::impl::co_read_response
     while (!parser.is_header_done()) {
         begin_io();
         co_await http::async_read_some(*stream_, buffer_, parser, util::net_awaitable[ec]);
-        end_io();
         if (ec) {
             close();
             co_return ec;
         }
+        end_io();
     }
 
     if (!parser.is_done()) {
@@ -447,11 +448,11 @@ net::awaitable<http_client::response_result> http_client::impl::co_read_response
             while (!parser.is_done()) {
                 begin_io();
                 co_await http::async_read_some(*stream_, buffer_, parser, util::net_awaitable[ec]);
-                end_io();
                 if (ec) {
                     close();
                     co_return ec;
                 }
+                end_io();
             }
         }
     }
