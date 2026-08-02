@@ -54,6 +54,7 @@ namespace httplib::client
       public:
         void close();
         bool is_open() const;
+        bool has_active_session() const;
 
         std::shared_ptr<spdlog::logger> logger() const;
         void set_logger(std::shared_ptr<spdlog::logger> logger);
@@ -71,7 +72,7 @@ namespace httplib::client
         net::awaitable<http_client::response_result> async_download(http_client::request& req,
                                                                     fs::path const& save_path);
 
-        write_session& write_session();
+        std::shared_ptr<write_session> write_session();
         std::shared_ptr<read_session> read_session();
 
       private:

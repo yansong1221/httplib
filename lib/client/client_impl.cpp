@@ -104,6 +104,12 @@ namespace httplib::client
         return stream_ && stream_->is_open();
     }
 
+    bool
+    http_client::impl::has_active_session() const
+    {
+        return !read_impl_.expired() || !write_impl_.expired();
+    }
+
     std::shared_ptr<spdlog::logger>
     http_client::impl::logger() const
     {
@@ -453,7 +459,7 @@ namespace httplib::client
         co_return result;
     }
 
-    write_session&
+    std::shared_ptr<write_session>
     http_client::impl::write_session()
     {
         auto sp = write_impl_.lock();
@@ -461,7 +467,7 @@ namespace httplib::client
             sp = std::make_shared<write_session_impl>(*this);
             write_impl_ = sp;
         }
-        return *sp;
+        return sp;
     }
 
     std::shared_ptr<read_session>

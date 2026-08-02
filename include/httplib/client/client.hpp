@@ -251,7 +251,7 @@ namespace httplib::client
                                              html::query_params const& params = {},
                                              http::fields const& headers = http::fields());
 
-        write_session& writer();
+        std::shared_ptr<write_session> writer();
         std::shared_ptr<read_session> reader();
 
         // ---- send_request (sync, body-type overloads) ----
@@ -334,6 +334,7 @@ namespace httplib::client
 
         void close();
         bool is_open() const;
+        bool has_active_session() const;
 
       private:
         http_client(http_client const&) = delete;

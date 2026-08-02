@@ -237,7 +237,7 @@ namespace httplib::client
         co_return co_await impl_->async_send_request_with_redirect(req, nullptr, std::move(handler));
     }
 
-    write_session&
+    std::shared_ptr<write_session>
     http_client::writer()
     {
         return impl_->write_session();
@@ -652,6 +652,12 @@ namespace httplib::client
     http_client::is_open() const
     {
         return impl_->is_open();
+    }
+
+    bool
+    http_client::has_active_session() const
+    {
+        return impl_->has_active_session();
     }
 
     void

@@ -142,7 +142,10 @@ namespace httplib::client
         release(std::unique_ptr<http_client> conn)
         {
             if (!conn)
-            {
+                return;
+
+            if (conn->has_active_session()) {
+                conn->close();
                 return;
             }
 
