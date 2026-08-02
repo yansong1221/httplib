@@ -39,6 +39,8 @@ public:
         stream_->expires_never();
         if (!ec)
             resp_->relay_used_ = true;
+        else
+            resp_->keep_alive(false);
         co_return ec;
     }
 
@@ -56,6 +58,8 @@ public:
         if (ec == http::error::need_buffer) {
             ec = {};
         }
+        else if (ec)
+            resp_->keep_alive(false);
         co_return ec;
     }
 
