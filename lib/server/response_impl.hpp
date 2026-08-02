@@ -7,204 +7,223 @@
 #include <boost/beast/version.hpp>
 #include <fmt/format.h>
 
-namespace httplib::server {
-namespace detail {
-static std::string get_current_gmt_date()
+namespace httplib::server
 {
-    static thread_local std::time_t last_time = 0;
-    static thread_local std::string cache;
+    namespace detail
+    {
+        static std::string
+        get_current_gmt_date()
+        {
+            static thread_local std::time_t last_time = 0;
+            static thread_local std::string cache;
 
-    auto now = time(nullptr);
-    if (last_time != now) {
-        cache     = html::format_http_gmt_date(now);
-        last_time = now;
-    }
-    return cache;
-}
-} // namespace detail
+            auto now = time(nullptr);
+            if (last_time != now)
+            {
+                cache = html::format_http_gmt_date(now);
+                last_time = now;
+            }
+            return cache;
+        }
+    } // namespace detail
 
-class response::impl : public http::response<body::any_body>
-{
-public:
-    impl(unsigned int version, bool keep_alive)
+    class response::impl : public http::response<body::any_body>
     {
-        this->result(http::status::not_found);
-        this->version(version);
-        this->set(http::field::server, BOOST_BEAST_VERSION_STRING);
-        this->set(http::field::date, detail::get_current_gmt_date());
-        this->keep_alive(keep_alive);
-    }
-    void set_empty_content(http::status status)
-    {
-        reset_content();
-        this->result(status);
-        this->body() = body::empty_body::value_type {};
-        this->content_length(0);
-    }
-    void set_error_content(http::status status)
-    {
-        auto content = fmt::format(
-            R"(<html>
+      public:
+        impl(unsigned int version, bool keep_alive)
+        {
+            this->result(http::status::not_found);
+            this->version(version);
+            this->set(http::field::server, BOOST_BEAST_VERSION_STRING);
+            this->set(http::field::date, detail::get_current_gmt_date());
+            this->keep_alive(keep_alive);
+        }
+        void
+        set_empty_content(http::status status)
+        {
+            reset_content();
+            this->result(status);
+            this->body() = body::empty_body::value_type {};
+            this->content_length(0);
+        }
+        void
+        set_error_content(http::status status)
+        {
+            auto content = fmt::format(
+                R"(<html>
 <head><title>{0} {1}</title></head>
 <body bgcolor="white">
 <center><h1>{0} {1}</h1></center>
 <hr><center>{2}</center>
 </body>
 </html>)",
-            (int)status,
-            http::obsolete_reason(status),
-            this->at(http::field::server));
+                (int)status,
+                http::obsolete_reason(status),
+                this->at(http::field::server));
 
-        this->set_string_content(std::move(content), "text/html; charset=utf-8", status);
-    }
-
-    void set_string_content(std::string_view data,
-                            std::string_view content_type,
-                            http::status status = http::status::ok)
-    {
-        set_string_content(std::string(data), content_type, status);
-    }
-    void set_string_content(std::string&& data,
-                            std::string_view content_type,
-                            http::status status = http::status::ok)
-    {
-        reset_content();
-        this->content_length(data.size());
-        this->set(http::field::content_type, content_type);
-        this->result(status);
-        this->body() = std::move(data);
-    }
-
-    void set_json_content(const boost::json::value& data, http::status status = http::status::ok)
-    {
-        set_json_content(boost::json::value(data), status);
-    }
-    void set_json_content(boost::json::value&& data, http::status status = http::status::ok)
-    {
-        reset_content();
-        this->result(status);
-        this->set(http::field::content_type, "application/json; charset=utf-8");
-        this->set(http::field::cache_control, "no-store");
-        this->body() = std::move(data);
-    }
-    void set_file_content(const fs::path& path, const http::fields& req_header = {})
-    {
-        reset_content();
-        std::error_code ec;
-        auto file_size = fs::file_size(path, ec);
-        if (ec) {
-            set_error_content(http::status::not_found);
-            return;
-        }
-        auto file_write_time = html::file_last_write_time(path, ec);
-        if (ec) {
-            set_error_content(http::status::not_found);
-            return;
+            this->set_string_content(std::move(content), "text/html; charset=utf-8", status);
         }
 
-        html::http_ranges ranges;
-        if (!ranges.parse(req_header[http::field::range], file_size)) {
-            this->set(http::field::content_range, fmt::format("bytes */{}", file_size));
-            set_empty_content(http::status::range_not_satisfiable);
-            return;
+        void
+        set_string_content(std::string_view data, std::string_view content_type, http::status status = http::status::ok)
+        {
+            set_string_content(std::string(data), content_type, status);
         }
-        // etag
-        auto file_etag_str = fmt::format("W/{}-{}", file_size, file_write_time);
-        if (req_header[http::field::if_none_match] == file_etag_str) {
-            set_empty_content(http::status::not_modified);
-            return;
-        }
-        // last modified
-        auto file_gmt_date_str = html::format_http_gmt_date(file_write_time);
-        if (req_header[http::field::if_modified_since] == file_gmt_date_str) {
-            set_empty_content(http::status::not_modified);
-            return;
+        void
+        set_string_content(std::string&& data, std::string_view content_type, http::status status = http::status::ok)
+        {
+            reset_content();
+            this->content_length(data.size());
+            this->set(http::field::content_type, content_type);
+            this->result(status);
+            this->body() = std::move(data);
         }
 
-        body::file_body::value_type file;
-        file.open(path, std::ios::in | std::ios::binary);
-        if (!file.is_open()) {
-            set_error_content(http::status::forbidden);
-            return;
+        void
+        set_json_content(boost::json::value const& data, http::status status = http::status::ok)
+        {
+            set_json_content(boost::json::value(data), status);
         }
+        void
+        set_json_content(boost::json::value&& data, http::status status = http::status::ok)
+        {
+            reset_content();
+            this->result(status);
+            this->set(http::field::content_type, "application/json; charset=utf-8");
+            this->set(http::field::cache_control, "no-store");
+            this->body() = std::move(data);
+        }
+        void
+        set_file_content(fs::path const& path, http::fields const& req_header = {})
+        {
+            reset_content();
+            std::error_code ec;
+            auto file_size = fs::file_size(path, ec);
+            if (ec)
+            {
+                set_error_content(http::status::not_found);
+                return;
+            }
+            auto file_write_time = html::file_last_write_time(path, ec);
+            if (ec)
+            {
+                set_error_content(http::status::not_found);
+                return;
+            }
 
-        file.content_type = mime::get_mime_type(path.extension().string());
-        file.ranges       = std::move(ranges);
+            html::http_ranges ranges;
+            if (!ranges.parse(req_header[http::field::range], file_size))
+            {
+                this->set(http::field::content_range, fmt::format("bytes */{}", file_size));
+                set_empty_content(http::status::range_not_satisfiable);
+                return;
+            }
+            // etag
+            auto file_etag_str = fmt::format("W/{}-{}", file_size, file_write_time);
+            if (req_header[http::field::if_none_match] == file_etag_str)
+            {
+                set_empty_content(http::status::not_modified);
+                return;
+            }
+            // last modified
+            auto file_gmt_date_str = html::format_http_gmt_date(file_write_time);
+            if (req_header[http::field::if_modified_since] == file_gmt_date_str)
+            {
+                set_empty_content(http::status::not_modified);
+                return;
+            }
 
-        this->set(http::field::etag, file_etag_str);
-        this->set(http::field::last_modified, file_gmt_date_str);
+            body::file_body::value_type file;
+            file.open(path, std::ios::in | std::ios::binary);
+            if (!file.is_open())
+            {
+                set_error_content(http::status::forbidden);
+                return;
+            }
 
-        if (file.ranges.empty()) {
-            this->set(http::field::accept_ranges, "bytes");
-            this->set(http::field::content_type, file.content_type);
-            // set(http::field::content_disposition,
-            //     fmt::format("attachment;filename={}", (const
-            //     char*)path.filename().u8string().c_str()));
+            file.content_type = mime::get_mime_type(path.extension().string());
+            file.ranges = std::move(ranges);
+
+            this->set(http::field::etag, file_etag_str);
+            this->set(http::field::last_modified, file_gmt_date_str);
+
+            if (file.ranges.empty())
+            {
+                this->set(http::field::accept_ranges, "bytes");
+                this->set(http::field::content_type, file.content_type);
+                // set(http::field::content_disposition,
+                //     fmt::format("attachment;filename={}", (const
+                //     char*)path.filename().u8string().c_str()));
+                this->result(http::status::ok);
+                this->content_length(file_size);
+            }
+            else if (file.ranges.size() == 1)
+            {
+                auto const& range = file.ranges.front();
+                size_t part_size = range.second + 1 - range.first;
+                this->set(http::field::content_range,
+                          fmt::format("bytes {}-{}/{}", range.first, range.second, file_size));
+                this->set(http::field::content_type, file.content_type);
+                this->result(http::status::partial_content);
+                this->content_length(part_size);
+            }
+            else
+            {
+                file.boundary = html::generate_boundary();
+                this->set(http::field::content_type, fmt::format("multipart/byteranges; boundary={}", file.boundary));
+                this->result(http::status::partial_content);
+            }
+            body() = std::move(file);
+        }
+        void
+        set_form_data_content(std::vector<html::form_data::field>&& data)
+        {
+            reset_content();
+            body::form_data_body::value_type value;
+            value.boundary = html::generate_boundary();
+            value.fields = std::move(data);
+
             this->result(http::status::ok);
-            this->content_length(file_size);
+            this->set(http::field::content_type, fmt::format("multipart/form-data; boundary={}", value.boundary));
+            this->body() = std::move(value);
         }
-        else if (file.ranges.size() == 1) {
-            const auto& range = file.ranges.front();
-            size_t part_size  = range.second + 1 - range.first;
-            this->set(http::field::content_range,
-                      fmt::format("bytes {}-{}/{}", range.first, range.second, file_size));
-            this->set(http::field::content_type, file.content_type);
-            this->result(http::status::partial_content);
-            this->content_length(part_size);
+
+        void
+        set_redirect(std::string_view url, http::status status = http::status::moved_permanently)
+        {
+            this->set(http::field::location, url);
+            set_empty_content(status);
         }
-        else {
-            file.boundary = html::generate_boundary();
-            this->set(http::field::content_type,
-                      fmt::format("multipart/byteranges; boundary={}", file.boundary));
-            this->result(http::status::partial_content);
+        void
+        set_chunked_write_handler(response::chunked_write_handler_type&& handler,
+                                  std::string_view content_type,
+                                  http::status status = http::status::ok)
+        {
+            reset_content();
+            chunked_write_handler_ = std::move(handler);
+            this->set(http::field::content_type, content_type);
+            this->set(http::field::cache_control, "no-cache");
+            this->result(status);
+            this->body() = body::empty_body::value_type {};
         }
-        body() = std::move(file);
-    }
-    void set_form_data_content(std::vector<html::form_data::field>&& data)
-    {
-        reset_content();
-        body::form_data_body::value_type value;
-        value.boundary = html::generate_boundary();
-        value.fields   = std::move(data);
 
-        this->result(http::status::ok);
-        this->set(http::field::content_type,
-                  fmt::format("multipart/form-data; boundary={}", value.boundary));
-        this->body() = std::move(value);
-    }
+        void
+        reset_content()
+        {
+            chunked_write_handler_ = nullptr;
+            this->body() = body::empty_body::value_type {};
+        }
 
-    void set_redirect(std::string_view url, http::status status = http::status::moved_permanently)
-    {
-        this->set(http::field::location, url);
-        set_empty_content(status);
-    }
-    void set_chunked_write_handler(response::chunked_write_handler_type&& handler,
-                                   std::string_view content_type,
-                                   http::status status = http::status::ok)
-    {
-        reset_content();
-        chunked_write_handler_ = std::move(handler);
-        this->set(http::field::content_type, content_type);
-        this->set(http::field::cache_control, "no-cache");
-        this->result(status);
-        this->body() = body::empty_body::value_type {};
-    }
+        static response
+        make_response(unsigned int version, bool keep_alive)
+        {
+            auto _impl = std::make_unique<response::impl>(version, keep_alive);
+            return response(std::move(_impl));
+        }
 
-    void reset_content()
-    {
-        chunked_write_handler_ = nullptr;
-        this->body()           = body::empty_body::value_type {};
-    }
-
-    static response make_response(unsigned int version, bool keep_alive)
-    {
-        auto _impl = std::make_unique<response::impl>(version, keep_alive);
-        return response(std::move(_impl));
-    }
-
-    response::chunked_write_handler_type chunked_write_handler_;
-    std::unique_ptr<relay_writer> relay_writer_;
-    bool relay_used_ = false;
-};
+        response::chunked_write_handler_type chunked_write_handler_;
+        std::unique_ptr<relay_writer> relay_writer_;
+        bool relay_used_ = false;
+    };
 
 } // namespace httplib::server

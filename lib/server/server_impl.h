@@ -16,95 +16,113 @@
 #include <string_view>
 #include <unordered_set>
 
-namespace httplib::client {
-class http_client_pool;
+namespace httplib::client
+{
+    class http_client_pool;
 }
 
-namespace httplib::server {
-class http_server::impl : public std::enable_shared_from_this<impl>
+namespace httplib::server
 {
-public:
-    explicit impl(const net::any_io_executor& ex);
-    ~impl();
+    class http_server::impl : public std::enable_shared_from_this<impl>
+    {
+      public:
+        explicit impl(net::any_io_executor const& ex);
+        ~impl();
 
-public:
-    net::any_io_executor get_executor() noexcept;
+      public:
+        net::any_io_executor get_executor() noexcept;
 
-    void listen(std::string_view host,
-                uint16_t port,
-                int backlog = net::socket_base::max_listen_connections);
+        void listen(std::string_view host, uint16_t port, int backlog = net::socket_base::max_listen_connections);
 
-    std::shared_future<boost::system::error_code> run();
-    net::awaitable<boost::system::error_code> async_run();
+        std::shared_future<boost::system::error_code> run();
+        net::awaitable<boost::system::error_code> async_run();
 
-    std::shared_future<void> stop();
-    net::awaitable<void> async_stop();
+        std::shared_future<void> stop();
+        net::awaitable<void> async_stop();
 
-    router_impl& router();
+        router_impl& router();
 
-    void set_read_timeout(const std::chrono::steady_clock::duration& dur);
-    void set_write_timeout(const std::chrono::steady_clock::duration& dur);
+        void set_read_timeout(std::chrono::steady_clock::duration const& dur);
+        void set_write_timeout(std::chrono::steady_clock::duration const& dur);
 
-    std::chrono::steady_clock::duration read_timeout() const;
-    std::chrono::steady_clock::duration write_timeout() const;
+        std::chrono::steady_clock::duration read_timeout() const;
+        std::chrono::steady_clock::duration write_timeout() const;
 
-    tcp::endpoint local_endpoint() const;
+        tcp::endpoint local_endpoint() const;
 
-    std::shared_ptr<spdlog::logger> logger() const;
-    void set_logger(std::shared_ptr<spdlog::logger> logger);
+        std::shared_ptr<spdlog::logger> logger() const;
+        void set_logger(std::shared_ptr<spdlog::logger> logger);
 
-    void set_compress_content_types(std::function<bool(std::string_view)> predicate);
-    bool should_compress_content_type(std::string_view content_type) const;
+        void set_compress_content_types(std::function<bool(std::string_view)> predicate);
+        bool should_compress_content_type(std::string_view content_type) const;
 
-    void set_upload_dir(const fs::path& dir) { upload_dir_ = dir; }
-    void set_upload_file_limit(std::uint64_t max_bytes) { upload_file_limit_ = max_bytes; }
-    const fs::path& upload_dir() const { return upload_dir_; }
-    uint64_t upload_file_limit() const { return upload_file_limit_; }
+        void
+        set_upload_dir(fs::path const& dir)
+        {
+            upload_dir_ = dir;
+        }
+        void
+        set_upload_file_limit(std::uint64_t max_bytes)
+        {
+            upload_file_limit_ = max_bytes;
+        }
+        fs::path const&
+        upload_dir() const
+        {
+            return upload_dir_;
+        }
+        uint64_t
+        upload_file_limit() const
+        {
+            return upload_file_limit_;
+        }
 
-    void set_reverse_proxy(std::string_view key,
-                           std::string_view upstream_host,
-                           uint16_t upstream_port,
-                           bool upstream_ssl);
+        void set_reverse_proxy(std::string_view key,
+                               std::string_view upstream_host,
+                               uint16_t upstream_port,
+                               bool upstream_ssl);
 
-    void use_ssl(const net::const_buffer& cert_file,
-                 const net::const_buffer& key_file,
-                 std::string passwd = {});
+        void use_ssl(net::const_buffer const& cert_file, net::const_buffer const& key_file, std::string passwd = {});
 #ifdef HTTPLIB_ENABLED_SSL
-    const std::shared_ptr<ssl::context>& ssl_context() const { return ssl_context_; }
+        const std::shared_ptr<ssl::context>&
+        ssl_context() const
+        {
+            return ssl_context_;
+        }
 #endif
 
-private:
-    net::awaitable<boost::system::error_code> co_accept();
-    net::awaitable<void> handle_accept(tcp::socket sock);
+      private:
+        net::awaitable<boost::system::error_code> co_accept();
+        net::awaitable<void> handle_accept(tcp::socket sock);
 
-private:
-    net::any_io_executor ex_;
+      private:
+        net::any_io_executor ex_;
 
-    router_impl router_;
-    tcp::acceptor acceptor_;
+        router_impl router_;
+        tcp::acceptor acceptor_;
 
-    std::mutex session_mutex_;
-    std::unordered_set<std::shared_ptr<session>> sessions_;
+        std::mutex session_mutex_;
+        std::unordered_set<std::shared_ptr<session>> sessions_;
 
-    std::chrono::steady_clock::duration read_timeout_  = std::chrono::seconds(30);
-    std::chrono::steady_clock::duration write_timeout_ = std::chrono::seconds(30);
+        std::chrono::steady_clock::duration read_timeout_ = std::chrono::seconds(30);
+        std::chrono::steady_clock::duration write_timeout_ = std::chrono::seconds(30);
 
-    std::shared_ptr<spdlog::logger> default_logger_;
-    std::shared_ptr<spdlog::logger> custom_logger_;
+        std::shared_ptr<spdlog::logger> default_logger_;
+        std::shared_ptr<spdlog::logger> custom_logger_;
 
-    std::function<bool(std::string_view)> compress_content_type_predicate_;
+        std::function<bool(std::string_view)> compress_content_type_predicate_;
 
-    fs::path upload_dir_;
-    std::uint64_t upload_file_limit_ = 10 * 1024 * 1024;
+        fs::path upload_dir_;
+        std::uint64_t upload_file_limit_ = 10 * 1024 * 1024;
 
-    std::unique_ptr<client::http_client_pool> proxy_pool_;
+        std::unique_ptr<client::http_client_pool> proxy_pool_;
 
 #ifdef HTTPLIB_ENABLED_SSL
-    std::shared_ptr<ssl::context> ssl_context_;
+        std::shared_ptr<ssl::context> ssl_context_;
 #endif
 
-    friend class websocket_conn_impl;
-    friend class session;
-};
+        friend class websocket_conn_impl;
+        friend class session;
+    };
 
 } // namespace httplib::server

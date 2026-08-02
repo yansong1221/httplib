@@ -20,15 +20,15 @@
 #include <vector>
 
 // Boost
+#include <boost/algorithm/string/join.hpp>
 #include <boost/asio.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/beast.hpp>
 #include <boost/json.hpp>
-#include <boost/algorithm/string/join.hpp>
 
 // Logging
-#include <spdlog/spdlog.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/spdlog.h>
 
 // Formatting
 #include <fmt/format.h>

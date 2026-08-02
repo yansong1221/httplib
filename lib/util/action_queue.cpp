@@ -3,32 +3,33 @@
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/use_future.hpp>
 
-namespace httplib::util {
-
-action_queue::action_queue(const net::any_io_executor& executor)
-    : impl_(std::make_shared<impl>(executor))
+namespace httplib::util
 {
-}
 
+    action_queue::action_queue(net::any_io_executor const& executor) : impl_(std::make_shared<impl>(executor)) {}
 
-void action_queue::push(act_t&& handler)
-{
-    impl_->push(std::move(handler));
-}
+    void
+    action_queue::push(act_t&& handler)
+    {
+        impl_->push(std::move(handler));
+    }
 
-void action_queue::clear()
-{
-    impl_->clear();
-}
+    void
+    action_queue::clear()
+    {
+        impl_->clear();
+    }
 
-httplib::net::awaitable<void> action_queue::async_shutdown(bool cancel_signal /*= true*/)
-{
-    co_return co_await impl_->async_shutdown(cancel_signal);
-}
+    httplib::net::awaitable<void>
+    action_queue::async_shutdown(bool cancel_signal /*= true*/)
+    {
+        co_return co_await impl_->async_shutdown(cancel_signal);
+    }
 
-std::shared_future<void> action_queue::shutdown(bool cancel_signal /*= true*/)
-{
-    return impl_->shutdown(cancel_signal);
-}
+    std::shared_future<void>
+    action_queue::shutdown(bool cancel_signal /*= true*/)
+    {
+        return impl_->shutdown(cancel_signal);
+    }
 
 } // namespace httplib::util

@@ -14,69 +14,91 @@
 #include <thread>
 
 using namespace std::string_view_literals;
-namespace http  = httplib::http;
-namespace net   = httplib::net;
+namespace http = httplib::http;
+namespace net = httplib::net;
 
-namespace {
+namespace
+{
 
-struct test_scaffold {
-    net::io_context ioc;
-    httplib::server::http_server server;
-    httplib::tcp::endpoint endpoint;
-    std::thread thread;
-    std::unique_ptr<httplib::client::http_client> client;
-    bool started_ = false;
-
-    test_scaffold() : server(ioc)
+    struct test_scaffold
     {
-        auto null_sink = std::make_shared<spdlog::sinks::null_sink_mt>();
-        server.set_logger(std::make_shared<spdlog::logger>("httplib.tests", null_sink));
-    }
+        net::io_context ioc;
+        httplib::server::http_server server;
+        httplib::tcp::endpoint endpoint;
+        std::thread thread;
+        std::unique_ptr<httplib::client::http_client> client;
+        bool started_ = false;
 
-    ~test_scaffold()
-    {
-        if (started_) {
-            server.stop().wait();
-            ioc.stop();
-            if (thread.joinable())
-                thread.join();
+        test_scaffold() : server(ioc)
+        {
+            auto null_sink = std::make_shared<spdlog::sinks::null_sink_mt>();
+            server.set_logger(std::make_shared<spdlog::logger>("httplib.tests", null_sink));
         }
-    }
 
-    void start()
+        ~test_scaffold()
+        {
+            if (started_)
+            {
+                server.stop().wait();
+                ioc.stop();
+                if (thread.joinable())
+                {
+                    thread.join();
+                }
+            }
+        }
+
+        void
+        start()
+        {
+            server.listen("127.0.0.1", 0);
+            endpoint = server.local_endpoint();
+            server.run();
+            thread = std::thread([this] { ioc.run(); });
+            started_ = true;
+
+            client = std::make_unique<httplib::client::http_client>(ioc.get_executor(),
+                                                                    endpoint.address().to_string(),
+                                                                    endpoint.port());
+            client->set_timeout(std::chrono::seconds(5));
+        }
+
+        auto&
+        router()
+        {
+            return server.router();
+        }
+
+        std::string
+        host() const
+        {
+            return endpoint.address().to_string();
+        }
+        uint16_t
+        port() const
+        {
+            return endpoint.port();
+        }
+    };
+
+    std::string
+    as_string(httplib::client::http_client::response const& resp)
     {
-        server.listen("127.0.0.1", 0);
-        endpoint = server.local_endpoint();
-        server.run();
-        thread = std::thread([this] { ioc.run(); });
-        started_ = true;
-
-        client = std::make_unique<httplib::client::http_client>(
-            ioc.get_executor(), endpoint.address().to_string(), endpoint.port());
-        client->set_timeout(std::chrono::seconds(5));
+        return resp.body().as<httplib::body::string_body>();
     }
 
-    auto& router() { return server.router(); }
+    void
+    set_text(httplib::server::response& resp,
+             std::string_view body,
+             httplib::http::status status = httplib::http::status::ok)
+    {
+        resp.set_string_content(body, "text/plain"sv, status);
+    }
 
-    std::string host() const { return endpoint.address().to_string(); }
-    uint16_t port() const { return endpoint.port(); }
-};
-
-std::string as_string(const httplib::client::http_client::response& resp)
-{
-    return resp.body().as<httplib::body::string_body>();
-}
-
-void set_text(httplib::server::response& resp,
-              std::string_view body,
-              httplib::http::status status = httplib::http::status::ok)
-{
-    resp.set_string_content(body, "text/plain"sv, status);
-}
-
-#define UNWRAP(result)              \
-    [&](auto&& r) {                 \
-        REQUIRE(r.has_value());     \
+#define UNWRAP(result)               \
+    [&](auto&& r)                    \
+    {                                \
+        REQUIRE(r.has_value());      \
         return std::move(r).value(); \
     }(result)
 
@@ -85,13 +107,13 @@ void set_text(httplib::server::response& resp,
 TEST_CASE("Router: named path parameter :name", "[router]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/users/:id",
-        [](httplib::server::request& req, httplib::server::response& resp) {
-            auto id = req.path_param("id");
-            REQUIRE(id == "42");
-            set_text(resp, "user-" + std::string(id));
-        });
+    ts.router().set_http_handler<http::verb::get>("/users/:id",
+                                                  [](httplib::server::request& req, httplib::server::response& resp)
+                                                  {
+                                                      auto id = req.path_param("id");
+                                                      REQUIRE(id == "42");
+                                                      set_text(resp, "user-" + std::string(id));
+                                                  });
     ts.start();
 
     auto resp = UNWRAP(ts.client->get("/users/42"));
@@ -102,11 +124,9 @@ TEST_CASE("Router: named path parameter :name", "[router]")
 TEST_CASE("Router: regex path parameter {name:pattern}", "[router]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/regex/{id:^\\d+$}",
-        [](httplib::server::request& req, httplib::server::response& resp) {
-            set_text(resp, "regex-" + std::string(req.path_param("id")));
-        });
+    ts.router().set_http_handler<http::verb::get>("/regex/{id:^\\d+$}",
+                                                  [](httplib::server::request& req, httplib::server::response& resp)
+                                                  { set_text(resp, "regex-" + std::string(req.path_param("id"))); });
     ts.start();
 
     auto resp = UNWRAP(ts.client->get("/regex/12345"));
@@ -117,15 +137,11 @@ TEST_CASE("Router: regex path parameter {name:pattern}", "[router]")
 TEST_CASE("Router: regex path parameter rejects non-matching input", "[router]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/regex/{id:^\\d+$}",
-        [](httplib::server::request&, httplib::server::response& resp) {
-            set_text(resp, "should-not-match");
-        });
-    ts.router().set_http_not_found_handler(
-        [](httplib::server::request&, httplib::server::response& resp) {
-            set_text(resp, "not-found", http::status::not_found);
-        });
+    ts.router().set_http_handler<http::verb::get>("/regex/{id:^\\d+$}",
+                                                  [](httplib::server::request&, httplib::server::response& resp)
+                                                  { set_text(resp, "should-not-match"); });
+    ts.router().set_http_not_found_handler([](httplib::server::request&, httplib::server::response& resp)
+                                           { set_text(resp, "not-found", http::status::not_found); });
     ts.start();
 
     auto resp = UNWRAP(ts.client->get("/regex/abc"));
@@ -136,13 +152,13 @@ TEST_CASE("Router: regex path parameter rejects non-matching input", "[router]")
 TEST_CASE("Router: wildcard path *", "[router]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/files/*",
-        [](httplib::server::request& req, httplib::server::response& resp) {
-            auto rest = req.path_param("*");
-            REQUIRE(rest == "sub/deep/file.txt");
-            set_text(resp, rest);
-        });
+    ts.router().set_http_handler<http::verb::get>("/files/*",
+                                                  [](httplib::server::request& req, httplib::server::response& resp)
+                                                  {
+                                                      auto rest = req.path_param("*");
+                                                      REQUIRE(rest == "sub/deep/file.txt");
+                                                      set_text(resp, rest);
+                                                  });
     ts.start();
 
     auto resp = UNWRAP(ts.client->get("/files/sub/deep/file.txt"));
@@ -155,11 +171,16 @@ TEST_CASE("Router: multiple HTTP verbs on one route", "[router]")
     test_scaffold ts;
     ts.router().set_http_handler<http::verb::get, http::verb::post>(
         "/multi-verb",
-        [](httplib::server::request& req, httplib::server::response& resp) {
+        [](httplib::server::request& req, httplib::server::response& resp)
+        {
             if (req.method() == http::verb::get)
+            {
                 set_text(resp, "get-response");
+            }
             else
+            {
                 set_text(resp, "post-response");
+            }
         });
     ts.start();
 
@@ -175,17 +196,17 @@ TEST_CASE("Router: multiple HTTP verbs on one route", "[router]")
 TEST_CASE("Router: multiple named parameters", "[router]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/blog/:year/:month/:slug",
-        [](httplib::server::request& req, httplib::server::response& resp) {
-            auto y = req.path_param("year");
-            auto m = req.path_param("month");
-            auto s = req.path_param("slug");
-            REQUIRE(y == "2024");
-            REQUIRE(m == "12");
-            REQUIRE(s == "hello-world");
-            set_text(resp, "ok");
-        });
+    ts.router().set_http_handler<http::verb::get>("/blog/:year/:month/:slug",
+                                                  [](httplib::server::request& req, httplib::server::response& resp)
+                                                  {
+                                                      auto y = req.path_param("year");
+                                                      auto m = req.path_param("month");
+                                                      auto s = req.path_param("slug");
+                                                      REQUIRE(y == "2024");
+                                                      REQUIRE(m == "12");
+                                                      REQUIRE(s == "hello-world");
+                                                      set_text(resp, "ok");
+                                                  });
     ts.start();
 
     auto resp = UNWRAP(ts.client->get("/blog/2024/12/hello-world"));
@@ -195,23 +216,22 @@ TEST_CASE("Router: multiple named parameters", "[router]")
 TEST_CASE("Router: set_post_routing_handler for CORS", "[router]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::options>(
-        "/*",
-        [](httplib::server::request&, httplib::server::response& resp) {
-            resp.set("Access-Control-Allow-Origin", "*");
-            resp.set("Access-Control-Allow-Methods", "GET, POST");
-            resp.set_empty_content(http::status::no_content);
-        });
+    ts.router().set_http_handler<http::verb::options>("/*",
+                                                      [](httplib::server::request&, httplib::server::response& resp)
+                                                      {
+                                                          resp.set("Access-Control-Allow-Origin", "*");
+                                                          resp.set("Access-Control-Allow-Methods", "GET, POST");
+                                                          resp.set_empty_content(http::status::no_content);
+                                                      });
     ts.router().set_post_routing_handler(
-        [](httplib::server::request&, httplib::server::response& resp) {
+        [](httplib::server::request&, httplib::server::response& resp)
+        {
             resp.set("Access-Control-Allow-Origin", "*");
             resp.set("Access-Control-Allow-Methods", "GET, POST");
         });
-    ts.router().set_http_handler<http::verb::post>(
-        "/api/data",
-        [](httplib::server::request&, httplib::server::response& resp) {
-            set_text(resp, "data-ok");
-        });
+    ts.router().set_http_handler<http::verb::post>("/api/data",
+                                                   [](httplib::server::request&, httplib::server::response& resp)
+                                                   { set_text(resp, "data-ok"); });
     ts.start();
 
     auto resp = UNWRAP(ts.client->post("/api/data", "{}"sv));
@@ -220,10 +240,12 @@ TEST_CASE("Router: set_post_routing_handler for CORS", "[router]")
     REQUIRE(as_string(resp) == "data-ok");
 }
 
-struct test_handler {
+struct test_handler
+{
     std::string prefix;
 
-    void handle(httplib::server::request& req, httplib::server::response& resp)
+    void
+    handle(httplib::server::request& req, httplib::server::response& resp)
     {
         set_text(resp, prefix + "-" + std::string(req.path_param("name")));
     }
@@ -232,9 +254,8 @@ struct test_handler {
 TEST_CASE("Router: member function handler", "[router]")
 {
     test_scaffold ts;
-    test_handler th{"member"};
-    ts.router().set_http_handler<http::verb::get>(
-        "/member/:name", &test_handler::handle, th);
+    test_handler th { "member" };
+    ts.router().set_http_handler<http::verb::get>("/member/:name", &test_handler::handle, th);
     ts.start();
 
     auto resp = UNWRAP(ts.client->get("/member/test"));
@@ -245,11 +266,9 @@ TEST_CASE("Router: member function handler", "[router]")
 TEST_CASE("Router: 405 Method Not Allowed", "[router]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/readonly",
-        [](httplib::server::request&, httplib::server::response& resp) {
-            set_text(resp, "get-only");
-        });
+    ts.router().set_http_handler<http::verb::get>("/readonly",
+                                                  [](httplib::server::request&, httplib::server::response& resp)
+                                                  { set_text(resp, "get-only"); });
     ts.start();
 
     auto resp = UNWRAP(ts.client->post("/readonly", ""sv));
@@ -260,16 +279,12 @@ TEST_CASE("Router: 405 Method Not Allowed", "[router]")
 TEST_CASE("Router: static path priority over param", "[router]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/users/all",
-        [](httplib::server::request&, httplib::server::response& resp) {
-            set_text(resp, "all-users");
-        });
-    ts.router().set_http_handler<http::verb::get>(
-        "/users/:id",
-        [](httplib::server::request& req, httplib::server::response& resp) {
-            set_text(resp, "user-" + std::string(req.path_param("id")));
-        });
+    ts.router().set_http_handler<http::verb::get>("/users/all",
+                                                  [](httplib::server::request&, httplib::server::response& resp)
+                                                  { set_text(resp, "all-users"); });
+    ts.router().set_http_handler<http::verb::get>("/users/:id",
+                                                  [](httplib::server::request& req, httplib::server::response& resp)
+                                                  { set_text(resp, "user-" + std::string(req.path_param("id"))); });
     ts.start();
 
     auto resp = UNWRAP(ts.client->get("/users/all"));
@@ -285,25 +300,20 @@ TEST_CASE("Router: regex param error in pre_routing", "[router]")
 {
     test_scaffold ts;
     REQUIRE_THROWS_AS(
-        ts.router().set_http_handler<http::verb::get>(
-            "/bad/{id:[}",
-            [](httplib::server::request&, httplib::server::response&) {}),
+        ts.router().set_http_handler<http::verb::get>("/bad/{id:[}",
+                                                      [](httplib::server::request&, httplib::server::response&) {}),
         std::regex_error);
 }
 
 TEST_CASE("Router: trailing slash exact match", "[router]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/page/",
-        [](httplib::server::request&, httplib::server::response& resp) {
-            set_text(resp, "slash");
-        });
-    ts.router().set_http_handler<http::verb::get>(
-        "/page",
-        [](httplib::server::request&, httplib::server::response& resp) {
-            set_text(resp, "no-slash");
-        });
+    ts.router().set_http_handler<http::verb::get>("/page/",
+                                                  [](httplib::server::request&, httplib::server::response& resp)
+                                                  { set_text(resp, "slash"); });
+    ts.router().set_http_handler<http::verb::get>("/page",
+                                                  [](httplib::server::request&, httplib::server::response& resp)
+                                                  { set_text(resp, "no-slash"); });
     ts.start();
 
     auto r1 = UNWRAP(ts.client->get("/page/"));

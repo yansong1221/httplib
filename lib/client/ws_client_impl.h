@@ -6,62 +6,62 @@
 #include <boost/system/result.hpp>
 #include <spdlog/spdlog.h>
 
-namespace httplib::client {
-class ws_client::impl : public std::enable_shared_from_this<impl>
+namespace httplib::client
 {
-public:
-    impl(const net::any_io_executor& ex, std::string_view host, uint16_t port, bool ssl);
+    class ws_client::impl : public std::enable_shared_from_this<impl>
+    {
+      public:
+        impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl);
 
-public:
-    net::awaitable<boost::system::error_code> async_connect(std::string_view path,
-                                                            const http::fields& headers = {});
-    net::awaitable<boost::system::error_code> async_send(std::string&& data, bool binary = false);
+      public:
+        net::awaitable<boost::system::error_code> async_connect(std::string_view path,
+                                                                http::fields const& headers = {});
+        net::awaitable<boost::system::error_code> async_send(std::string&& data, bool binary = false);
 
-    net::awaitable<boost::system::error_code> async_read();
+        net::awaitable<boost::system::error_code> async_read();
 
-    net::awaitable<boost::system::error_code> async_ping(std::string&& msg);
-    net::awaitable<boost::system::error_code> async_pong(std::string&& msg);
+        net::awaitable<boost::system::error_code> async_ping(std::string&& msg);
+        net::awaitable<boost::system::error_code> async_pong(std::string&& msg);
 
-    net::awaitable<boost::system::error_code> async_close();
+        net::awaitable<boost::system::error_code> async_close();
 
-    void run(std::string_view path, const http::fields& headers = {});
+        void run(std::string_view path, http::fields const& headers = {});
 
-    void send(std::string&& data, bool binary = false);
-    void ping(std::string&& msg = std::string());
-    void pong(std::string&& msg = std::string());
-    void close();
+        void send(std::string&& data, bool binary = false);
+        void ping(std::string&& msg = std::string());
+        void pong(std::string&& msg = std::string());
+        void close();
 
-    bool got_binary() const noexcept;
-    bool got_text() const noexcept;
-    std::string_view got_data() const noexcept;
+        bool got_binary() const noexcept;
+        bool got_text() const noexcept;
+        std::string_view got_data() const noexcept;
 
-    bool is_open() const;
+        bool is_open() const;
 
-    std::shared_ptr<spdlog::logger> logger() const;
-    void set_logger(std::shared_ptr<spdlog::logger> logger);
+        std::shared_ptr<spdlog::logger> logger() const;
+        void set_logger(std::shared_ptr<spdlog::logger> logger);
 
+        void set_handler_impl(coro_open_handler_type&& open_handler,
+                              coro_message_handler_type&& message_handler,
+                              coro_close_handler_type&& close_handler);
 
-    void set_handler_impl(coro_open_handler_type&& open_handler,
-                          coro_message_handler_type&& message_handler,
-                          coro_close_handler_type&& close_handler);
+      private:
+        net::any_io_executor executor_;
+        tcp::resolver resolver_;
+        std::string host_;
+        uint16_t port_ = 0;
+        bool use_ssl_ = false;
 
-private:
-    net::any_io_executor executor_;
-    tcp::resolver resolver_;
-    std::string host_;
-    uint16_t port_ = 0;
-    bool use_ssl_  = false;
+        std::shared_ptr<websocket_stream> stream_;
 
-    std::shared_ptr<websocket_stream> stream_;
+        beast::flat_buffer buffer_;
+        util::action_queue ac_que_;
 
-    beast::flat_buffer buffer_;
-    util::action_queue ac_que_;
+        ws_client::coro_open_handler_type open_handler_;
+        ws_client::coro_message_handler_type message_handler_;
+        ws_client::coro_close_handler_type close_handler_;
 
-    ws_client::coro_open_handler_type open_handler_;
-    ws_client::coro_message_handler_type message_handler_;
-    ws_client::coro_close_handler_type close_handler_;
-
-    std::shared_ptr<spdlog::logger> default_logger_;
-    std::shared_ptr<spdlog::logger> custom_logger_;
-};
+        std::shared_ptr<spdlog::logger> default_logger_;
+        std::shared_ptr<spdlog::logger> custom_logger_;
+    };
 } // namespace httplib::client

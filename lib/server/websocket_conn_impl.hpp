@@ -12,34 +12,39 @@
 #include <queue>
 #include <span>
 
-namespace httplib::server {
-
-class websocket_conn_impl : public websocket_conn
+namespace httplib::server
 {
-public:
-    websocket_conn_impl(http_server::impl& serv, websocket_stream&& stream, request&& req);
-    ~websocket_conn_impl();
 
-public:
-    void send(std::string&& msg, bool binary) override;
-    void ping(std::string&& msg) override;
-    void close(std::string_view reason) override;
-    bool is_open() const override;
+    class websocket_conn_impl : public websocket_conn
+    {
+      public:
+        websocket_conn_impl(http_server::impl& serv, websocket_stream&& stream, request&& req);
+        ~websocket_conn_impl();
 
-    const request& http_request() const override { return req_; }
+      public:
+        void send(std::string&& msg, bool binary) override;
+        void ping(std::string&& msg) override;
+        void close(std::string_view reason) override;
+        bool is_open() const override;
 
-public:
-    net::awaitable<void> run();
+        request const&
+        http_request() const override
+        {
+            return req_;
+        }
 
-private:
-    http_server::impl& serv_;
+      public:
+        net::awaitable<void> run();
 
-    request req_;
-    websocket_stream ws_;
-    beast::flat_buffer buffer_;
+      private:
+        http_server::impl& serv_;
 
-    util::action_queue ac_que_;
-    std::atomic_bool shutting_down_ {false};
-};
+        request req_;
+        websocket_stream ws_;
+        beast::flat_buffer buffer_;
+
+        util::action_queue ac_que_;
+        std::atomic_bool shutting_down_ { false };
+    };
 
 } // namespace httplib::server

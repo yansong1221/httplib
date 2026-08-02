@@ -3,94 +3,117 @@
 #include <boost/algorithm/string/join.hpp>
 #include <stdexcept>
 
-namespace httplib::html {
-std::string_view query_params::at(const std::string& key) const
+namespace httplib::html
 {
-    auto iter = params_.find(key);
-    if (iter == params_.end()) {
-        throw std::runtime_error("Key not found: " + key);
-    }
-    return iter->second;
-}
-
-std::vector<std::string_view> query_params::all(const std::string& key) const
-{
-    std::vector<std::string_view> values;
-    auto range = params_.equal_range(key);
-    for (auto it = range.first; it != range.second; ++it) {
-        values.push_back(it->second);
-    }
-    return values;
-}
-
-bool query_params::has(const std::string& key) const
-{
-    return params_.find(key) != params_.end();
-}
-
-bool query_params::decode(std::string_view content)
-{
-    params_.clear();
-    if (content.empty())
-        return true;
-
-    for (const auto& item : util::split(content, "&")) {
-        auto key_val = util::split(item, "=");
-
-        if (key_val.size() == 1) {
-            auto key = util::url_decode(key_val[0]);
-            params_.emplace(key, std::string {});
+    std::string_view
+    query_params::at(std::string const& key) const
+    {
+        auto iter = params_.find(key);
+        if (iter == params_.end())
+        {
+            throw std::runtime_error("Key not found: " + key);
         }
-        else if (key_val.size() == 2) {
-            auto key = util::url_decode(key_val[0]);
-            auto val = util::url_decode(key_val[1]);
-            params_.emplace(key, val);
+        return iter->second;
+    }
+
+    std::vector<std::string_view>
+    query_params::all(std::string const& key) const
+    {
+        std::vector<std::string_view> values;
+        auto range = params_.equal_range(key);
+        for (auto it = range.first; it != range.second; ++it)
+        {
+            values.push_back(it->second);
         }
+        return values;
     }
-    return true;
-}
 
-std::string query_params::encoded() const
-{
-    std::vector<std::string> tokens;
-    for (const auto& item : params_) {
-        auto token = util::url_encode(item.first);
-        token += "=";
-        token += util::url_encode(item.second);
-
-        tokens.push_back(token);
+    bool
+    query_params::has(std::string const& key) const
+    {
+        return params_.find(key) != params_.end();
     }
-    return boost::join(tokens, "&");
-}
 
-bool query_params::empty() const
-{
-    return params_.empty();
-}
+    bool
+    query_params::decode(std::string_view content)
+    {
+        params_.clear();
+        if (content.empty())
+        {
+            return true;
+        }
 
-const query_params::container_type& query_params::params() const
-{
-    return params_;
-}
+        for (auto const& item : util::split(content, "&"))
+        {
+            auto key_val = util::split(item, "=");
 
-void query_params::add(const std::string& key, const std::string& val)
-{
-    params_.emplace(key, val);
-}
-
-void query_params::add_bool(const std::string& key, bool val)
-{
-    params_.emplace(key, val ? "true" : "false");
-}
-
-bool query_params::at_bool(const std::string& key) const
-{
-    auto v = at(key);
-    if (v == "true" || v == "1")
+            if (key_val.size() == 1)
+            {
+                auto key = util::url_decode(key_val[0]);
+                params_.emplace(key, std::string {});
+            }
+            else if (key_val.size() == 2)
+            {
+                auto key = util::url_decode(key_val[0]);
+                auto val = util::url_decode(key_val[1]);
+                params_.emplace(key, val);
+            }
+        }
         return true;
-    if (v == "false" || v == "0")
-        return false;
-    throw std::runtime_error("invalid param: " + key);
-}
+    }
+
+    std::string
+    query_params::encoded() const
+    {
+        std::vector<std::string> tokens;
+        for (auto const& item : params_)
+        {
+            auto token = util::url_encode(item.first);
+            token += "=";
+            token += util::url_encode(item.second);
+
+            tokens.push_back(token);
+        }
+        return boost::join(tokens, "&");
+    }
+
+    bool
+    query_params::empty() const
+    {
+        return params_.empty();
+    }
+
+    query_params::container_type const&
+    query_params::params() const
+    {
+        return params_;
+    }
+
+    void
+    query_params::add(std::string const& key, std::string const& val)
+    {
+        params_.emplace(key, val);
+    }
+
+    void
+    query_params::add_bool(std::string const& key, bool val)
+    {
+        params_.emplace(key, val ? "true" : "false");
+    }
+
+    bool
+    query_params::at_bool(std::string const& key) const
+    {
+        auto v = at(key);
+        if (v == "true" || v == "1")
+        {
+            return true;
+        }
+        if (v == "false" || v == "0")
+        {
+            return false;
+        }
+        throw std::runtime_error("invalid param: " + key);
+    }
 
 } // namespace httplib::html

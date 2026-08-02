@@ -1,68 +1,44 @@
-# https://releases.llvm.org/7.0.0/tools/clang/docs/ClangFormatStyleOptions.html
-
 ---
-Language: Cpp
-
-BasedOnStyle: WebKit
-
-AlignAfterOpenBracket: Align
-AlignOperands: true
-AlignTrailingComments: true
-AllowAllParametersOfDeclarationOnNextLine: true
-AllowShortBlocksOnASingleLine: true
-AllowShortCaseLabelsOnASingleLine: true
-AllowShortFunctionsOnASingleLine: InlineOnly
-AllowShortIfStatementsOnASingleLine: false
-AllowShortLoopsOnASingleLine: false
-AlwaysBreakTemplateDeclarations: true
+BasedOnStyle: Microsoft
+AlignArrayOfStructures: Right
+AlignConsecutiveAssignments:
+  AcrossEmptyLines: true
+  AlignCompound: true
+AlignConsecutiveBitFields:
+  AlignCompound: true
+AlignConsecutiveDeclarations:
+  AlignCompound: true
+  PadOperators: true
+AlignConsecutiveMacros:
+  Enabled: true
+AlignEscapedNewlines: Left
+AllowAllArgumentsOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false
+AllowShortBlocksOnASingleLine: Always
+AllowShortFunctionsOnASingleLine: All
+AlwaysBreakAfterReturnType: AllDefinitions
+AlwaysBreakTemplateDeclarations: Yes
 BinPackArguments: false
 BinPackParameters: false
-BreakBeforeBinaryOperators: None
-
-BreakConstructorInitializersBeforeComma: true
-BreakConstructorInitializers: BeforeComma
-ConstructorInitializerAllOnOneLineOrOnePerLine: false
-ColumnLimit: 100
-Cpp11BracedListStyle: true
-FixNamespaceComments: true
-IncludeBlocks:  Preserve
-IncludeCategories:
-  - Regex:           '^["<](stdafx|pch)\.h[">]$'
-    Priority:        -1
-  - Regex:           '^<Windows\.h>$'
-    Priority:        3
-  - Regex:           '^<(WinIoCtl|winhttp|Shellapi)\.h>$'
-    Priority:        4
-  - Regex:           '.*'
-    Priority:        2
-IndentCaseLabels: true
-IndentWidth: 4
-KeepEmptyLinesAtTheStartOfBlocks: false
-MaxEmptyLinesToKeep: 2
-NamespaceIndentation: None
-PenaltyReturnTypeOnItsOwnLine: 80
-PointerAlignment: Left
-SpaceAfterTemplateKeyword: false
-Standard: Auto
-UseTab: Never
-
-AlignConsecutiveAssignments: true
-#AlwaysBreakAfterReturnType: All
-
-BreakBeforeBraces: Custom
 BraceWrapping:
-  AfterClass: true
-  AfterControlStatement: MultiLine
-  AfterEnum: true
-  AfterFunction: true
-  AfterNamespace: false
-  AfterStruct: true
+  AfterCaseLabel: true
+  AfterClass: false
   AfterUnion: true
-  AfterExternBlock: true
-  BeforeCatch: true
-  BeforeElse: true
-  BeforeLambdaBody: false
-  BeforeWhile: true
-  SplitEmptyFunction: true
-  SplitEmptyRecord: true
-  SplitEmptyNamespace: true
+  SplitEmptyFunction: false
+BreakBeforeBinaryOperators: All
+BreakBeforeBraces: Allman
+BreakConstructorInitializers: BeforeComma
+BreakInheritanceList: BeforeComma
+Cpp11BracedListStyle: false
+IndentCaseLabels: true
+IndentGotoLabels: false
+IndentPPDirectives: AfterHash
+InsertBraces: true
+NamespaceIndentation: All
+PackConstructorInitializers: CurrentLine
+PointerAlignment: Left
+QualifierAlignment: Right
+ReferenceAlignment: Left
+SpaceAroundPointerQualifiers: Before
+SpaceBeforeCpp11BracedList: true
+MaxEmptyLinesToKeep: 1

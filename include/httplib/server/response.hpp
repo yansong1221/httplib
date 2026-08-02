@@ -16,79 +16,79 @@
 #include <string_view>
 #include <vector>
 
-
-namespace httplib::server {
-
-class HTTPLIB_API response
+namespace httplib::server
 {
-public:
-    ~response();
 
-    http::fields& base();
-    const http::fields& base() const;
-
-    std::string_view operator[](http::field name) const;
-    std::string_view operator[](std::string_view name) const;
-    std::string_view at(http::field name) const;
-    std::string_view at(std::string_view name) const;
-
-    void set(http::field name, std::string_view value);
-    void set(std::string_view name, std::string_view value);
-
-    bool has(http::field name) const;
-    bool has(std::string_view name) const;
-    void erase(http::field name);
-    void erase(std::string_view name);
-
-    http::status result() const;
-    unsigned result_int() const;
-
-    void set_empty_content(http::status status);
-    void set_error_content(http::status status);
-
-    void set_string_content(std::string_view data,
-                            std::string_view content_type,
-                            http::status status = http::status::ok)
+    class HTTPLIB_API response
     {
-        set_string_content(std::string(data), content_type, status);
-    }
-    void set_string_content(std::string&& data,
-                            std::string_view content_type,
-                            http::status status = http::status::ok);
+      public:
+        ~response();
 
-    void set_json_content(const boost::json::value& data, http::status status = http::status::ok)
-    {
-        set_json_content(boost::json::value(data), status);
-    }
-    void set_json_content(boost::json::value&& data, http::status status = http::status::ok);
-    void set_file_content(const fs::path& path, const http::fields& req_header = {});
-    void set_form_data_content(std::vector<html::form_data::field>&& data);
+        http::fields& base();
+        http::fields const& base() const;
 
-    void set_redirect(std::string_view url, http::status status = http::status::moved_permanently);
+        std::string_view operator[](http::field name) const;
+        std::string_view operator[](std::string_view name) const;
+        std::string_view at(http::field name) const;
+        std::string_view at(std::string_view name) const;
 
-    class impl;
+        void set(http::field name, std::string_view value);
+        void set(std::string_view name, std::string_view value);
 
-    using chunked_write_handler_type = std::function<net::awaitable<void>(httplib::chunk_writer&)>;
-    void set_chunked_write_handler(chunked_write_handler_type&& handler,
-                                   std::string_view content_type,
-                                   http::status status = http::status::ok);
+        bool has(http::field name) const;
+        bool has(std::string_view name) const;
+        void erase(http::field name);
+        void erase(std::string_view name);
 
-    using sse_write_handler_type = std::function<net::awaitable<void>(httplib::sse_writer&)>;
-    void set_sse_write_handler(sse_write_handler_type&& handler);
+        http::status result() const;
+        unsigned result_int() const;
 
-    using ndjson_write_handler_type = std::function<net::awaitable<void>(httplib::ndjson_writer&)>;
-    void set_ndjson_write_handler(ndjson_write_handler_type&& handler);
+        void set_empty_content(http::status status);
+        void set_error_content(http::status status);
 
-    relay_writer& relay();
+        void
+        set_string_content(std::string_view data, std::string_view content_type, http::status status = http::status::ok)
+        {
+            set_string_content(std::string(data), content_type, status);
+        }
+        void set_string_content(std::string&& data,
+                                std::string_view content_type,
+                                http::status status = http::status::ok);
 
-    impl* get_impl();
-    const impl* get_impl() const;
+        void
+        set_json_content(boost::json::value const& data, http::status status = http::status::ok)
+        {
+            set_json_content(boost::json::value(data), status);
+        }
+        void set_json_content(boost::json::value&& data, http::status status = http::status::ok);
+        void set_file_content(fs::path const& path, http::fields const& req_header = {});
+        void set_form_data_content(std::vector<html::form_data::field>&& data);
 
-protected:
-    response(std::unique_ptr<impl>&& _impl);
+        void set_redirect(std::string_view url, http::status status = http::status::moved_permanently);
 
-private:
-    std::unique_ptr<impl> impl_;
-};
+        class impl;
+
+        using chunked_write_handler_type = std::function<net::awaitable<void>(httplib::chunk_writer&)>;
+        void set_chunked_write_handler(chunked_write_handler_type&& handler,
+                                       std::string_view content_type,
+                                       http::status status = http::status::ok);
+
+        using sse_write_handler_type = std::function<net::awaitable<void>(httplib::sse_writer&)>;
+        void set_sse_write_handler(sse_write_handler_type&& handler);
+
+        using ndjson_write_handler_type = std::function<net::awaitable<void>(httplib::ndjson_writer&)>;
+        void set_ndjson_write_handler(ndjson_write_handler_type&& handler);
+
+        relay_writer& relay();
+
+        impl* get_impl();
+        impl const* get_impl() const;
+
+      protected:
+        response(std::unique_ptr<impl>&& _impl);
+
+      private:
+        std::unique_ptr<impl> impl_;
+    };
 
 } // namespace httplib::server

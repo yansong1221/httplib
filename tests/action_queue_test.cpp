@@ -13,18 +13,24 @@ TEST_CASE("ActionQueue: push and execute", "[action_queue]")
     httplib::util::action_queue aq(ioc.get_executor());
 
     int count = 0;
-    aq.push([&]() -> httplib::net::awaitable<void> {
-        ++count;
-        co_return;
-    });
-    aq.push([&]() -> httplib::net::awaitable<void> {
-        ++count;
-        co_return;
-    });
-    aq.push([&]() -> httplib::net::awaitable<void> {
-        ++count;
-        co_return;
-    });
+    aq.push(
+        [&]() -> httplib::net::awaitable<void>
+        {
+            ++count;
+            co_return;
+        });
+    aq.push(
+        [&]() -> httplib::net::awaitable<void>
+        {
+            ++count;
+            co_return;
+        });
+    aq.push(
+        [&]() -> httplib::net::awaitable<void>
+        {
+            ++count;
+            co_return;
+        });
 
     auto f = aq.shutdown(false);
     ioc.run();
@@ -43,10 +49,12 @@ TEST_CASE("ActionQueue: push after shutdown is ignored", "[action_queue]")
     ioc.run();
     f.get();
 
-    aq.push([&]() -> httplib::net::awaitable<void> {
-        ++count;
-        co_return;
-    });
+    aq.push(
+        [&]() -> httplib::net::awaitable<void>
+        {
+            ++count;
+            co_return;
+        });
 
     ioc.poll();
     REQUIRE(count == 0);
@@ -58,14 +66,18 @@ TEST_CASE("ActionQueue: clear drops pending items", "[action_queue]")
     httplib::util::action_queue aq(ioc.get_executor());
 
     int count = 0;
-    aq.push([&]() -> httplib::net::awaitable<void> {
-        ++count;
-        co_return;
-    });
-    aq.push([&]() -> httplib::net::awaitable<void> {
-        ++count;
-        co_return;
-    });
+    aq.push(
+        [&]() -> httplib::net::awaitable<void>
+        {
+            ++count;
+            co_return;
+        });
+    aq.push(
+        [&]() -> httplib::net::awaitable<void>
+        {
+            ++count;
+            co_return;
+        });
     aq.clear();
 
     auto f = aq.shutdown(false);
@@ -97,14 +109,18 @@ TEST_CASE("ActionQueue: async_shutdown works", "[action_queue]")
     httplib::util::action_queue aq(ioc.get_executor());
 
     int count = 0;
-    aq.push([&]() -> httplib::net::awaitable<void> {
-        ++count;
-        co_return;
-    });
-    aq.push([&]() -> httplib::net::awaitable<void> {
-        ++count;
-        co_return;
-    });
+    aq.push(
+        [&]() -> httplib::net::awaitable<void>
+        {
+            ++count;
+            co_return;
+        });
+    aq.push(
+        [&]() -> httplib::net::awaitable<void>
+        {
+            ++count;
+            co_return;
+        });
 
     auto fut = aq.shutdown(false);
     ioc.run();
@@ -119,11 +135,14 @@ TEST_CASE("ActionQueue: order is preserved", "[action_queue]")
     httplib::util::action_queue aq(ioc.get_executor());
 
     std::vector<int> order;
-    for (int i = 0; i < 10; ++i) {
-        aq.push([&order, i]() -> httplib::net::awaitable<void> {
-            order.push_back(i);
-            co_return;
-        });
+    for (int i = 0; i < 10; ++i)
+    {
+        aq.push(
+            [&order, i]() -> httplib::net::awaitable<void>
+            {
+                order.push_back(i);
+                co_return;
+            });
     }
 
     auto f = aq.shutdown(false);
@@ -132,5 +151,7 @@ TEST_CASE("ActionQueue: order is preserved", "[action_queue]")
 
     REQUIRE(order.size() == 10);
     for (int i = 0; i < 10; ++i)
+    {
         REQUIRE(order[i] == i);
+    }
 }

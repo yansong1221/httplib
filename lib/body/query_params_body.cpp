@@ -1,53 +1,55 @@
 
 #include "httplib/body/query_params_body.hpp"
 #include "html/html.h"
-namespace httplib::body {
-
-query_params_body::writer::writer(const http::fields&, value_type const& body)
-    : body_(body)
+namespace httplib::body
 {
-}
 
-void query_params_body::writer::init(boost::system::error_code& ec)
-{
-    ec      = {};
-    buffer_ = body_.encoded();
-}
+    query_params_body::writer::writer(http::fields const&, value_type const& body) : body_(body) {}
 
-boost::optional<std::pair<query_params_body::writer::const_buffers_type, bool>>
-query_params_body::writer::get(boost::system::error_code& ec)
-{
-    ec = {};
-    return {{net::buffer(buffer_), false}};
-}
-
-query_params_body::reader::reader(const http::fields&, value_type& body)
-    : body_(body)
-{
-}
-
-void query_params_body::reader::init(boost::optional<std::uint64_t> const& content_length,
-                                     boost::system::error_code& ec)
-{
-    if (content_length)
-        buffer_.reserve(*content_length);
-    ec = {};
-}
-
-std::size_t query_params_body::reader::put(net::const_buffer const& buffers,
-                                           boost::system::error_code& ec)
-{
-    ec = {};
-    buffer_.append((const char*)buffers.data(), buffers.size());
-    return buffers.size();
-}
-
-void query_params_body::reader::finish(boost::system::error_code& ec)
-{
-    ec = {};
-    if (!body_.decode(buffer_)) {
-        ec = http::error::unexpected_body;
+    void
+    query_params_body::writer::init(boost::system::error_code& ec)
+    {
+        ec = {};
+        buffer_ = body_.encoded();
     }
-}
+
+    boost::optional<std::pair<query_params_body::writer::const_buffers_type, bool>>
+    query_params_body::writer::get(boost::system::error_code& ec)
+    {
+        ec = {};
+        return {
+            { net::buffer(buffer_), false }
+        };
+    }
+
+    query_params_body::reader::reader(http::fields const&, value_type& body) : body_(body) {}
+
+    void
+    query_params_body::reader::init(boost::optional<std::uint64_t> const& content_length, boost::system::error_code& ec)
+    {
+        if (content_length)
+        {
+            buffer_.reserve(*content_length);
+        }
+        ec = {};
+    }
+
+    std::size_t
+    query_params_body::reader::put(net::const_buffer const& buffers, boost::system::error_code& ec)
+    {
+        ec = {};
+        buffer_.append((char const*)buffers.data(), buffers.size());
+        return buffers.size();
+    }
+
+    void
+    query_params_body::reader::finish(boost::system::error_code& ec)
+    {
+        ec = {};
+        if (!body_.decode(buffer_))
+        {
+            ec = http::error::unexpected_body;
+        }
+    }
 
 } // namespace httplib::body

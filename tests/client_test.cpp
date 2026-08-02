@@ -19,76 +19,101 @@
 #include <thread>
 
 using namespace std::string_view_literals;
-namespace http  = httplib::http;
-namespace net   = httplib::net;
+namespace http = httplib::http;
+namespace net = httplib::net;
 namespace beast = httplib::beast;
 
-namespace {
-
-struct test_scaffold {
-    net::io_context ioc;
-    httplib::server::http_server server;
-    httplib::tcp::endpoint endpoint;
-    std::thread thread;
-
-    test_scaffold() : server(ioc)
-    {
-        auto null_sink = std::make_shared<spdlog::sinks::null_sink_mt>();
-        server.set_logger(std::make_shared<spdlog::logger>("httplib.tests", null_sink));
-    }
-
-    ~test_scaffold()
-    {
-        server.stop().wait();
-        ioc.stop();
-        if (thread.joinable())
-            thread.join();
-    }
-
-    void start_with_routes()
-    {
-        server.router().set_http_handler<http::verb::get>(
-            "/echo",
-            [](httplib::server::request& req, httplib::server::response& resp) {
-                auto msg = std::string(req.query_params().at("msg"));
-                resp.set_string_content(msg, "text/plain");
-            });
-        server.router().set_http_handler<http::verb::get>(
-            "/slow",
-            [](httplib::server::request&, httplib::server::response& resp) {
-                resp.set_string_content("done"sv, "text/plain"sv);
-            });
-
-        server.listen("127.0.0.1", 0);
-        endpoint = server.local_endpoint();
-        server.run();
-        thread = std::thread([this] { ioc.run(); });
-    }
-
-    std::unique_ptr<httplib::client::http_client> make_client()
-    {
-        auto c = std::make_unique<httplib::client::http_client>(
-            ioc.get_executor(), endpoint.address().to_string(), endpoint.port());
-        c->set_timeout(std::chrono::seconds(5));
-        return c;
-    }
-
-    auto& router() { return server.router(); }
-
-    std::string host() const { return endpoint.address().to_string(); }
-    uint16_t port() const { return endpoint.port(); }
-
-    net::any_io_executor executor() { return ioc.get_executor(); }
-};
-
-std::string as_string(const httplib::client::http_client::response& resp)
+namespace
 {
-    return resp.body().as<httplib::body::string_body>();
-}
 
-#define UNWRAP(result)              \
-    [&](auto&& r) {                 \
-        REQUIRE(r.has_value());     \
+    struct test_scaffold
+    {
+        net::io_context ioc;
+        httplib::server::http_server server;
+        httplib::tcp::endpoint endpoint;
+        std::thread thread;
+
+        test_scaffold() : server(ioc)
+        {
+            auto null_sink = std::make_shared<spdlog::sinks::null_sink_mt>();
+            server.set_logger(std::make_shared<spdlog::logger>("httplib.tests", null_sink));
+        }
+
+        ~test_scaffold()
+        {
+            server.stop().wait();
+            ioc.stop();
+            if (thread.joinable())
+            {
+                thread.join();
+            }
+        }
+
+        void
+        start_with_routes()
+        {
+            server.router().set_http_handler<http::verb::get>(
+                "/echo",
+                [](httplib::server::request& req, httplib::server::response& resp)
+                {
+                    auto msg = std::string(req.query_params().at("msg"));
+                    resp.set_string_content(msg, "text/plain");
+                });
+            server.router().set_http_handler<http::verb::get>(
+                "/slow",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("done"sv, "text/plain"sv); });
+
+            server.listen("127.0.0.1", 0);
+            endpoint = server.local_endpoint();
+            server.run();
+            thread = std::thread([this] { ioc.run(); });
+        }
+
+        std::unique_ptr<httplib::client::http_client>
+        make_client()
+        {
+            auto c = std::make_unique<httplib::client::http_client>(ioc.get_executor(),
+                                                                    endpoint.address().to_string(),
+                                                                    endpoint.port());
+            c->set_timeout(std::chrono::seconds(5));
+            return c;
+        }
+
+        auto&
+        router()
+        {
+            return server.router();
+        }
+
+        std::string
+        host() const
+        {
+            return endpoint.address().to_string();
+        }
+        uint16_t
+        port() const
+        {
+            return endpoint.port();
+        }
+
+        net::any_io_executor
+        executor()
+        {
+            return ioc.get_executor();
+        }
+    };
+
+    std::string
+    as_string(httplib::client::http_client::response const& resp)
+    {
+        return resp.body().as<httplib::body::string_body>();
+    }
+
+#define UNWRAP(result)               \
+    [&](auto&& r)                    \
+    {                                \
+        REQUIRE(r.has_value());      \
         return std::move(r).value(); \
     }(result)
 
@@ -113,7 +138,7 @@ TEST_CASE("Client pool: acquire and use a connection", "[client]")
 
     // Verify client is still usable after pool is gone
     auto client = ts.make_client();
-    auto resp   = UNWRAP(client->get("/echo", params));
+    auto resp = UNWRAP(client->get("/echo", params));
     REQUIRE(resp.result() == http::status::ok);
     REQUIRE(as_string(resp) == "hello");
 }
@@ -151,10 +176,11 @@ TEST_CASE("Client pool: connection reuse", "[client]")
     ts.start_with_routes();
 
     httplib::client::http_client_pool pool(ts.executor(), 4);
-    auto* raw = [&] {
-        auto h  = pool.acquire(ts.host(), ts.port()).get();
+    auto* raw = [&]
+    {
+        auto h = pool.acquire(ts.host(), ts.port()).get();
         return h.get();
-    }();  // handle destroyed, connection returned to pool
+    }(); // handle destroyed, connection returned to pool
 
     // Re-acquire should get the same connection back
     auto h2 = pool.acquire(ts.host(), ts.port()).get();
@@ -205,7 +231,8 @@ TEST_CASE("Client pool: closed connection still reusable", "[client]")
     ts.start_with_routes();
 
     httplib::client::http_client_pool pool(ts.executor(), 4);
-    auto* raw = [&] {
+    auto* raw = [&]
+    {
         auto h = pool.acquire(ts.host(), ts.port()).get();
         auto p = h.get();
         UNWRAP(h->get("/echo", params));
@@ -228,7 +255,7 @@ TEST_CASE("Client: close and is_open", "[client]")
     ts.start_with_routes();
 
     auto client = ts.make_client();
-    auto resp   = UNWRAP(client->get("/echo", params));
+    auto resp = UNWRAP(client->get("/echo", params));
     REQUIRE(resp.result() == http::status::ok);
     REQUIRE(as_string(resp) == "hello");
     REQUIRE(client->is_open());
@@ -241,11 +268,14 @@ TEST_CASE("Client: custom chunk handler", "[client]")
     test_scaffold ts;
     ts.router().set_http_handler<http::verb::get>(
         "/chunked",
-        [](httplib::server::request&, httplib::server::response& resp) {
+        [](httplib::server::request&, httplib::server::response& resp)
+        {
             auto counter = std::make_shared<int>(0);
             resp.set_chunked_write_handler(
-                [counter](httplib::chunk_writer& writer) -> net::awaitable<void> {
-                    while ((*counter) < 5) {
+                [counter](httplib::chunk_writer& writer) -> net::awaitable<void>
+                {
+                    while ((*counter) < 5)
+                    {
                         co_await writer.write_chunk("Chunk" + std::to_string((*counter)++));
                     }
                 },
@@ -256,12 +286,15 @@ TEST_CASE("Client: custom chunk handler", "[client]")
     std::vector<std::string> chunks;
     auto client = ts.make_client();
     client->set_chunked_read_handler(
-        [&](httplib::chunk_reader& reader,
-            httplib::client::http_client::response& resp) -> net::awaitable<void> {
-            while (true) {
+        [&](httplib::chunk_reader& reader, httplib::client::http_client::response& resp) -> net::awaitable<void>
+        {
+            while (true)
+            {
                 auto chunk = co_await reader.read_chunk();
                 if (chunk.empty())
+                {
                     break;
+                }
                 chunks.push_back(std::string(chunk));
             }
         });
@@ -315,17 +348,17 @@ TEST_CASE("Client: timeout_policy never", "[client]")
 TEST_CASE("Client: HEAD request", "[client]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::head>(
-        "/head-test",
-        [](httplib::server::request&, httplib::server::response& resp) {
-            resp.set(http::field::content_type, "text/plain");
-            resp.set(http::field::content_length, "4");
-            resp.set_empty_content(http::status::ok);
-        });
+    ts.router().set_http_handler<http::verb::head>("/head-test",
+                                                   [](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_type, "text/plain");
+                                                       resp.set(http::field::content_length, "4");
+                                                       resp.set_empty_content(http::status::ok);
+                                                   });
     ts.start_with_routes();
 
     auto client = ts.make_client();
-    auto resp   = UNWRAP(client->head("/head-test"));
+    auto resp = UNWRAP(client->head("/head-test"));
     REQUIRE(resp.result() == http::status::ok);
     REQUIRE(resp[http::field::content_type] == "text/plain");
 }
@@ -333,62 +366,53 @@ TEST_CASE("Client: HEAD request", "[client]")
 TEST_CASE("Client: 204 No Content response", "[client]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/empty-204",
-        [](httplib::server::request&, httplib::server::response& resp) {
-            resp.set_empty_content(http::status::no_content);
-        });
+    ts.router().set_http_handler<http::verb::get>("/empty-204",
+                                                  [](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_empty_content(http::status::no_content); });
     ts.start_with_routes();
 
     auto client = ts.make_client();
-    auto resp   = UNWRAP(client->get("/empty-204"));
+    auto resp = UNWRAP(client->get("/empty-204"));
     REQUIRE(resp.result() == http::status::no_content);
 }
 
 TEST_CASE("Client: 304 Not Modified response", "[client]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/not-modified",
-        [](httplib::server::request&, httplib::server::response& resp) {
-            resp.set_empty_content(http::status::not_modified);
-        });
+    ts.router().set_http_handler<http::verb::get>("/not-modified",
+                                                  [](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_empty_content(http::status::not_modified); });
     ts.start_with_routes();
 
     auto client = ts.make_client();
-    auto resp   = UNWRAP(client->get("/not-modified"));
+    auto resp = UNWRAP(client->get("/not-modified"));
     REQUIRE(resp.result() == http::status::not_modified);
 }
 
 TEST_CASE("Client: download saves response body to file", "[client]")
 {
-    auto server_path =
-        std::filesystem::temp_directory_path() / "httplib_dl_server.txt";
+    auto server_path = std::filesystem::temp_directory_path() / "httplib_dl_server.txt";
     {
         std::ofstream f(server_path, std::ios::binary);
         f << "download test content\n";
     }
 
-    auto dl_path =
-        std::filesystem::temp_directory_path() / "httplib_dl_output.bin";
+    auto dl_path = std::filesystem::temp_directory_path() / "httplib_dl_output.bin";
 
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/dl-file",
-        [&](httplib::server::request&, httplib::server::response& resp) {
-            resp.set_file_content(server_path);
-        });
+    ts.router().set_http_handler<http::verb::get>("/dl-file",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(server_path); });
     ts.start_with_routes();
 
     auto client = ts.make_client();
-    auto resp   = UNWRAP(client->download(http::verb::get, "/dl-file", dl_path));
+    auto resp = UNWRAP(client->download(http::verb::get, "/dl-file", dl_path));
     REQUIRE(resp.result() == http::status::ok);
 
     {
         std::ifstream dl_file(dl_path, std::ios::binary);
         REQUIRE(dl_file.is_open());
-        std::string content(
-            (std::istreambuf_iterator<char>(dl_file)), std::istreambuf_iterator<char>());
+        std::string content((std::istreambuf_iterator<char>(dl_file)), std::istreambuf_iterator<char>());
         REQUIRE(content == "download test content\n");
     }
 
@@ -402,39 +426,37 @@ TEST_CASE("Client: download randomized round-trip", "[client]")
     std::uniform_int_distribution<int> size_dist(0, 65536);
     std::uniform_int_distribution<int> byte_dist(0, 255);
 
-    for (int round = 0; round < 10; ++round) {
+    for (int round = 0; round < 10; ++round)
+    {
         int len = size_dist(rng);
         std::string sent;
         sent.reserve(len);
         for (int i = 0; i < len; ++i)
+        {
             sent.push_back(static_cast<char>(byte_dist(rng)));
+        }
 
-        auto server_path =
-            std::filesystem::temp_directory_path() / std::format("httplib_fuzz_srv_{}.bin", round);
+        auto server_path = std::filesystem::temp_directory_path() / std::format("httplib_fuzz_srv_{}.bin", round);
         {
             std::ofstream f(server_path, std::ios::binary);
             f.write(sent.data(), sent.size());
         }
 
-        auto dl_path =
-            std::filesystem::temp_directory_path() / std::format("httplib_fuzz_dl_{}.bin", round);
+        auto dl_path = std::filesystem::temp_directory_path() / std::format("httplib_fuzz_dl_{}.bin", round);
 
         test_scaffold ts;
-        ts.router().set_http_handler<http::verb::get>(
-            "/dl-fuzz",
-            [&](httplib::server::request&, httplib::server::response& resp) {
-                resp.set_file_content(server_path);
-            });
+        ts.router().set_http_handler<http::verb::get>("/dl-fuzz",
+                                                      [&](httplib::server::request&, httplib::server::response& resp)
+                                                      { resp.set_file_content(server_path); });
         ts.start_with_routes();
 
         auto client = ts.make_client();
-        auto resp   = UNWRAP(client->download(http::verb::get, "/dl-fuzz", dl_path));
+        auto resp = UNWRAP(client->download(http::verb::get, "/dl-fuzz", dl_path));
         REQUIRE(resp.result() == http::status::ok);
 
         {
             std::ifstream dl_file(dl_path, std::ios::binary);
-            std::string received(
-                (std::istreambuf_iterator<char>(dl_file)), std::istreambuf_iterator<char>());
+            std::string received((std::istreambuf_iterator<char>(dl_file)), std::istreambuf_iterator<char>());
             REQUIRE(received == sent);
         }
 
@@ -469,25 +491,21 @@ TEST_CASE("Client: unreachable host returns error", "[client]")
 
 TEST_CASE("Client: download with Range request", "[client]")
 {
-    auto server_path =
-        std::filesystem::temp_directory_path() / "httplib_dl_range_server.txt";
+    auto server_path = std::filesystem::temp_directory_path() / "httplib_dl_range_server.txt";
     {
         std::ofstream f(server_path, std::ios::binary);
         f << "0123456789";
     }
 
-    auto dl_path =
-        std::filesystem::temp_directory_path() / "httplib_dl_range_output.bin";
+    auto dl_path = std::filesystem::temp_directory_path() / "httplib_dl_range_output.bin";
 
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/dl-range",
-        [&](httplib::server::request& req, httplib::server::response& resp) {
-            resp.set_file_content(server_path, req.base());
-        });
+    ts.router().set_http_handler<http::verb::get>("/dl-range",
+                                                  [&](httplib::server::request& req, httplib::server::response& resp)
+                                                  { resp.set_file_content(server_path, req.base()); });
     ts.start_with_routes();
 
-    auto client  = ts.make_client();
+    auto client = ts.make_client();
     auto headers = httplib::http::fields();
     headers.set(http::field::range, "bytes=0-4");
 
@@ -497,8 +515,7 @@ TEST_CASE("Client: download with Range request", "[client]")
     {
         std::ifstream dl_file(dl_path, std::ios::binary);
         REQUIRE(dl_file.is_open());
-        std::string content(
-            (std::istreambuf_iterator<char>(dl_file)), std::istreambuf_iterator<char>());
+        std::string content((std::istreambuf_iterator<char>(dl_file)), std::istreambuf_iterator<char>());
         REQUIRE(content == "01234");
     }
 
@@ -509,21 +526,17 @@ TEST_CASE("Client: download with Range request", "[client]")
 TEST_CASE("Client: follows 302 redirect", "[client]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/redirect-me",
-        [](httplib::server::request&, httplib::server::response& resp) {
-            resp.set_redirect("/target", http::status::found);
-        });
-    ts.router().set_http_handler<http::verb::get>(
-        "/target",
-        [](httplib::server::request&, httplib::server::response& resp) {
-            resp.set_string_content("arrived"sv, "text/plain"sv);
-        });
+    ts.router().set_http_handler<http::verb::get>("/redirect-me",
+                                                  [](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_redirect("/target", http::status::found); });
+    ts.router().set_http_handler<http::verb::get>("/target",
+                                                  [](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_string_content("arrived"sv, "text/plain"sv); });
     ts.start_with_routes();
 
     auto client = ts.make_client();
     client->set_max_redirects(5);
-    auto resp   = UNWRAP(client->get("/redirect-me"));
+    auto resp = UNWRAP(client->get("/redirect-me"));
     REQUIRE(resp.result() == http::status::ok);
     REQUIRE(as_string(resp) == "arrived");
 }
@@ -531,11 +544,9 @@ TEST_CASE("Client: follows 302 redirect", "[client]")
 TEST_CASE("Client: redirect loop is limited", "[client]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/loop",
-        [](httplib::server::request&, httplib::server::response& resp) {
-            resp.set_redirect("/loop", http::status::found);
-        });
+    ts.router().set_http_handler<http::verb::get>("/loop",
+                                                  [](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_redirect("/loop", http::status::found); });
     ts.start_with_routes();
 
     auto client = ts.make_client();
@@ -549,23 +560,21 @@ TEST_CASE("Client: redirect full URL creates new impl", "[client]")
 {
     test_scaffold ts;
 
-    ts.router().set_http_handler<http::verb::get>(
-        "/ext-redirect",
-        [](httplib::server::request& req, httplib::server::response& resp) {
-            auto port = req.local_endpoint().port();
-            auto url  = std::format("http://127.0.0.1:{}/target-page", port);
-            resp.set_redirect(url, http::status::found);
-        });
-    ts.router().set_http_handler<http::verb::get>(
-        "/target-page",
-        [](httplib::server::request&, httplib::server::response& resp) {
-            resp.set_string_content("target-reached"sv, "text/plain");
-        });
+    ts.router().set_http_handler<http::verb::get>("/ext-redirect",
+                                                  [](httplib::server::request& req, httplib::server::response& resp)
+                                                  {
+                                                      auto port = req.local_endpoint().port();
+                                                      auto url = std::format("http://127.0.0.1:{}/target-page", port);
+                                                      resp.set_redirect(url, http::status::found);
+                                                  });
+    ts.router().set_http_handler<http::verb::get>("/target-page",
+                                                  [](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_string_content("target-reached"sv, "text/plain"); });
     ts.start_with_routes();
 
     auto client = ts.make_client();
     client->set_max_redirects(1);
-    auto resp   = client->get("/ext-redirect");
+    auto resp = client->get("/ext-redirect");
     REQUIRE(resp.has_value());
     REQUIRE(resp->result() == http::status::ok);
     REQUIRE(as_string(resp.value()) == "target-reached");

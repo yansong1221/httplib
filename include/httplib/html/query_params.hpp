@@ -6,63 +6,71 @@
 #include <unordered_map>
 #include <vector>
 
-namespace httplib::html {
-class HTTPLIB_API query_params
+namespace httplib::html
 {
-public:
-    using container_type = std::unordered_multimap<std::string, std::string>;
-
-    std::string_view at(const std::string& key) const;
-
-    template<typename T = int64_t>
-    T at_number(const std::string& key) const
+    class HTTPLIB_API query_params
     {
-        auto v = at(key);
+      public:
+        using container_type = std::unordered_multimap<std::string, std::string>;
 
-        T out {};
-        auto [p, ec] = std::from_chars(v.data(), v.data() + v.size(), out);
-        if (ec != std::errc {})
-            throw std::runtime_error("invalid param: " + key);
+        std::string_view at(std::string const& key) const;
 
-        return out;
-    }
+        template <typename T = int64_t>
+        T
+        at_number(std::string const& key) const
+        {
+            auto v = at(key);
 
-    bool at_bool(const std::string& key) const;
-
-
-    std::vector<std::string_view> all(const std::string& key) const;
-
-    template<typename T = int64_t>
-    std::vector<T> all_number(const std::string& key) const
-    {
-        std::vector<T> result {};
-        for (const auto& v : all(key)) {
             T out {};
             auto [p, ec] = std::from_chars(v.data(), v.data() + v.size(), out);
             if (ec != std::errc {})
+            {
                 throw std::runtime_error("invalid param: " + key);
+            }
 
-            result.push_back(out);
+            return out;
         }
 
-        return result;
-    }
-    void add(const std::string& key, const std::string& val);
-    template<typename T>
-    void add_number(const std::string& key, const T& val)
-    {
-        add(key, std::to_string(val));
-    }
-    void add_bool(const std::string& key, bool val);
+        bool at_bool(std::string const& key) const;
 
-    bool has(const std::string& key) const;
-    bool empty() const;
-    const container_type& params() const;
+        std::vector<std::string_view> all(std::string const& key) const;
 
-    bool decode(std::string_view content);
-    std::string encoded() const;
+        template <typename T = int64_t>
+        std::vector<T>
+        all_number(std::string const& key) const
+        {
+            std::vector<T> result {};
+            for (auto const& v : all(key))
+            {
+                T out {};
+                auto [p, ec] = std::from_chars(v.data(), v.data() + v.size(), out);
+                if (ec != std::errc {})
+                {
+                    throw std::runtime_error("invalid param: " + key);
+                }
 
-private:
-    container_type params_;
-};
+                result.push_back(out);
+            }
+
+            return result;
+        }
+        void add(std::string const& key, std::string const& val);
+        template <typename T>
+        void
+        add_number(std::string const& key, T const& val)
+        {
+            add(key, std::to_string(val));
+        }
+        void add_bool(std::string const& key, bool val);
+
+        bool has(std::string const& key) const;
+        bool empty() const;
+        container_type const& params() const;
+
+        bool decode(std::string_view content);
+        std::string encoded() const;
+
+      private:
+        container_type params_;
+    };
 } // namespace httplib::html

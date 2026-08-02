@@ -29,11 +29,11 @@
 #include <spdlog/spdlog.h>
 
 using namespace std::string_view_literals;
-namespace fs    = std::filesystem;
+namespace fs = std::filesystem;
 namespace beast = httplib::beast;
-namespace http  = httplib::http;
-namespace net   = httplib::net;
-namespace mw    = httplib::server::middleware;
+namespace http = httplib::http;
+namespace net = httplib::net;
+namespace mw = httplib::server::middleware;
 
 #ifdef HTTPLIB_ENABLED_SSL
 constexpr auto server_crt = R"(-----BEGIN CERTIFICATE-----
@@ -96,12 +96,14 @@ d6jDUgydraEmQvIPiKMpTE18rW+jierv2FlB8AGcwxm2VWxuM25wQ40J2YuZLY7k
 
 struct log_t
 {
-    bool before(httplib::server::request& req, httplib::server::response&)
+    bool
+    before(httplib::server::request& req, httplib::server::response&)
     {
         spdlog::info("[{}] {}", req.method_string(), req.path());
         return true;
     }
-    bool after(httplib::server::request& req, httplib::server::response&)
+    bool
+    after(httplib::server::request& req, httplib::server::response&)
     {
         spdlog::info("[{}] {} -> done", req.method_string(), req.path());
         return true;
@@ -110,7 +112,8 @@ struct log_t
 
 // ===== Server setup =====
 
-static void setup_http_routes(httplib::server::router& router)
+static void
+setup_http_routes(httplib::server::router& router)
 {
     // ---- Built-in middleware: CORS (applied per-route as an aspect) ----
     // CORS can also be set globally via the post_handler pattern (see setup_cors below)
@@ -118,144 +121,185 @@ static void setup_http_routes(httplib::server::router& router)
     // ---- Basic HTTP methods (with CORS) ----
     router.set_http_handler<http::verb::get>(
         "/api/hello",
-        [](httplib::server::request&, httplib::server::response& resp) {
-            resp.set_string_content("Hello, World!"sv, "text/plain"sv);
-        },
+        [](httplib::server::request&, httplib::server::response& resp)
+        { resp.set_string_content("Hello, World!"sv, "text/plain"sv); },
         mw::cors_middleware {});
 
-    router.set_http_handler<http::verb::get>(
-        "/api/greet/:name", [](httplib::server::request& req, httplib::server::response& resp) {
-            auto name = std::string(req.path_param("name"));
-            resp.set_string_content(std::format("Hello, {}!", name), "text/plain"sv);
-        });
+    router.set_http_handler<http::verb::get>("/api/greet/:name",
+                                             [](httplib::server::request& req, httplib::server::response& resp)
+                                             {
+                                                 auto name = std::string(req.path_param("name"));
+                                                 resp.set_string_content(std::format("Hello, {}!", name),
+                                                                         "text/plain"sv);
+                                             });
 
     // ---- JSON echo ----
-    router.set_http_handler<http::verb::post>(
-        "/api/echo-json", [](httplib::server::request& req, httplib::server::response& resp) {
-            resp.set_json_content(req.body().as<httplib::body::json_body>());
-        });
+    router.set_http_handler<http::verb::post>("/api/echo-json",
+                                              [](httplib::server::request& req, httplib::server::response& resp)
+                                              { resp.set_json_content(req.body().as<httplib::body::json_body>()); });
 
     // ---- URL-encoded form ----
-    router.set_http_handler<http::verb::post>(
-        "/api/form-urlencoded", [](httplib::server::request& req, httplib::server::response& resp) {
-            const auto& params = req.body().as<httplib::body::query_params_body>();
-            boost::json::object obj;
-            for (const auto& [k, v] : params.params())
-                obj[k] = v;
-            resp.set_json_content(std::move(obj));
-        });
+    router.set_http_handler<http::verb::post>("/api/form-urlencoded",
+                                              [](httplib::server::request& req, httplib::server::response& resp)
+                                              {
+                                                  auto const& params
+                                                      = req.body().as<httplib::body::query_params_body>();
+                                                  boost::json::object obj;
+                                                  for (auto const& [k, v] : params.params())
+                                                  {
+                                                      obj[k] = v;
+                                                  }
+                                                  resp.set_json_content(std::move(obj));
+                                              });
 
     // ---- Multipart form data ----
-    router.set_http_handler<http::verb::post>(
-        "/api/form-multipart", [](httplib::server::request& req, httplib::server::response& resp) {
-            const auto& fd = req.body().as<httplib::body::form_data_body>();
-            boost::json::object obj;
-            for (const auto& field : fd.fields) {
-                boost::json::object f;
-                f["name"]    = field.name;
-                f["size"]    = static_cast<int64_t>(field.content.size());
-                f["is_file"] = field.is_file();
-                if (!field.filename.empty())
-                    f["filename"] = field.filename;
-                obj[field.name] = std::move(f);
-            }
-            resp.set_json_content(std::move(obj));
-        });
+    router.set_http_handler<http::verb::post>("/api/form-multipart",
+                                              [](httplib::server::request& req, httplib::server::response& resp)
+                                              {
+                                                  auto const& fd = req.body().as<httplib::body::form_data_body>();
+                                                  boost::json::object obj;
+                                                  for (auto const& field : fd.fields)
+                                                  {
+                                                      boost::json::object f;
+                                                      f["name"] = field.name;
+                                                      f["size"] = static_cast<int64_t>(field.content.size());
+                                                      f["is_file"] = field.is_file();
+                                                      if (!field.filename.empty())
+                                                      {
+                                                          f["filename"] = field.filename;
+                                                      }
+                                                      obj[field.name] = std::move(f);
+                                                  }
+                                                  resp.set_json_content(std::move(obj));
+                                              });
 
     // ---- RESTful: PUT / PATCH / DELETE ----
-    router.set_http_handler<http::verb::put>(
-        "/api/resource/:id", [](httplib::server::request& req, httplib::server::response& resp) {
-            auto id = std::string(req.path_param("id"));
-            resp.set_json_content({{"updated", id}});
-        });
+    router.set_http_handler<http::verb::put>("/api/resource/:id",
+                                             [](httplib::server::request& req, httplib::server::response& resp)
+                                             {
+                                                 auto id = std::string(req.path_param("id"));
+                                                 resp.set_json_content({
+                                                     { "updated", id }
+                                                 });
+                                             });
 
-    router.set_http_handler<http::verb::patch>(
-        "/api/resource/:id", [](httplib::server::request& req, httplib::server::response& resp) {
-            auto id = std::string(req.path_param("id"));
-            resp.set_json_content({{"patched", id}});
-        });
+    router.set_http_handler<http::verb::patch>("/api/resource/:id",
+                                               [](httplib::server::request& req, httplib::server::response& resp)
+                                               {
+                                                   auto id = std::string(req.path_param("id"));
+                                                   resp.set_json_content({
+                                                       { "patched", id }
+                                                   });
+                                               });
 
-    router.set_http_handler<http::verb::delete_>(
-        "/api/resource/:id", [](httplib::server::request& req, httplib::server::response& resp) {
-            resp.set_json_content({{"deleted", std::string(req.path_param("id"))}});
-        });
+    router.set_http_handler<http::verb::delete_>("/api/resource/:id",
+                                                 [](httplib::server::request& req, httplib::server::response& resp)
+                                                 {
+                                                     resp.set_json_content({
+                                                         { "deleted", std::string(req.path_param("id")) }
+                                                     });
+                                                 });
 
     // ---- OPTIONS (CORS preflight handled by cors_middleware) ----
-    router.set_http_handler<http::verb::options>(
-        "/*", [](httplib::server::request&, httplib::server::response& resp) {
-            resp.set(http::field::allow, "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS");
-            resp.set_empty_content(http::status::no_content);
-        });
+    router.set_http_handler<http::verb::options>("/*",
+                                                 [](httplib::server::request&, httplib::server::response& resp)
+                                                 {
+                                                     resp.set(http::field::allow,
+                                                              "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS");
+                                                     resp.set_empty_content(http::status::no_content);
+                                                 });
 
     // ---- Regex path param ----
-    router.set_http_handler<http::verb::get>(
-        "/api/regex/{id:^\\d+$}",
-        [](httplib::server::request& req, httplib::server::response& resp) {
-            resp.set_json_content({{"id", std::string(req.path_param("id"))}});
-        });
+    router.set_http_handler<http::verb::get>("/api/regex/{id:^\\d+$}",
+                                             [](httplib::server::request& req, httplib::server::response& resp)
+                                             {
+                                                 resp.set_json_content({
+                                                     { "id", std::string(req.path_param("id")) }
+                                                 });
+                                             });
 
     // ---- Wildcard ----
-    router.set_http_handler<http::verb::get>(
-        "/api/files/*", [](httplib::server::request& req, httplib::server::response& resp) {
-            resp.set_json_content({{"path", std::string(req.path_param("*"))}});
-        });
+    router.set_http_handler<http::verb::get>("/api/files/*",
+                                             [](httplib::server::request& req, httplib::server::response& resp)
+                                             {
+                                                 resp.set_json_content({
+                                                     { "path", std::string(req.path_param("*")) }
+                                                 });
+                                             });
 
     // ---- Redirect ----
-    router.set_http_handler<http::verb::get>(
-        "/api/redirect", [](httplib::server::request&, httplib::server::response& resp) {
-            resp.set_redirect("/api/hello", http::status::moved_permanently);
-        });
+    router.set_http_handler<http::verb::get>("/api/redirect",
+                                             [](httplib::server::request&, httplib::server::response& resp)
+                                             { resp.set_redirect("/api/hello", http::status::moved_permanently); });
 
     // ---- Chunked streaming ----
-    router.set_http_handler<http::verb::get>(
-        "/api/stream", [](httplib::server::request&, httplib::server::response& resp) {
-            auto idx = std::make_shared<int>(0);
-            resp.set_chunked_write_handler(
-                [idx](httplib::chunk_writer& writer) -> net::awaitable<void> {
-                    while (*idx < 5)
-                        co_await writer.write_chunk(std::format("chunk #{}\n", (*idx)++));
-                },
-                "text/plain");
-        });
+    router.set_http_handler<http::verb::get>("/api/stream",
+                                             [](httplib::server::request&, httplib::server::response& resp)
+                                             {
+                                                 auto idx = std::make_shared<int>(0);
+                                                 resp.set_chunked_write_handler(
+                                                     [idx](httplib::chunk_writer& writer) -> net::awaitable<void>
+                                                     {
+                                                         while (*idx < 5)
+                                                         {
+                                                             co_await writer.write_chunk(
+                                                                 std::format("chunk #{}\n", (*idx)++));
+                                                         }
+                                                     },
+                                                     "text/plain");
+                                             });
 
     // ---- SSE (Server-Sent Events) ----
     router.set_http_handler<http::verb::get>(
-        "/api/sse", [](httplib::server::request&, httplib::server::response& resp) {
+        "/api/sse",
+        [](httplib::server::request&, httplib::server::response& resp)
+        {
             auto counter = std::make_shared<int>(0);
-            resp.set_sse_write_handler([counter](httplib::sse_writer& sse) -> net::awaitable<void> {
-                while (*counter < 3) {
-                    ++(*counter);
-                    co_await sse.send_event(
-                        std::format("event #{}", *counter), "tick", std::to_string(*counter));
-                }
-                co_await sse.close();
-            });
-        });
-
-    // ---- NDJSON (Newline Delimited JSON) ----
-    router.set_http_handler<http::verb::get>(
-        "/api/ndjson", [](httplib::server::request&, httplib::server::response& resp) {
-            auto counter = std::make_shared<int>(0);
-            resp.set_ndjson_write_handler(
-                [counter](httplib::ndjson_writer& w) -> net::awaitable<void> {
-                    while (*counter < 5) {
+            resp.set_sse_write_handler(
+                [counter](httplib::sse_writer& sse) -> net::awaitable<void>
+                {
+                    while (*counter < 3)
+                    {
                         ++(*counter);
-                        co_await w.write({{"seq", *counter}, {"msg", "hello"}});
+                        co_await sse.send_event(std::format("event #{}", *counter), "tick", std::to_string(*counter));
                     }
-                    co_await w.close();
+                    co_await sse.close();
                 });
         });
 
+    // ---- NDJSON (Newline Delimited JSON) ----
+    router.set_http_handler<http::verb::get>("/api/ndjson",
+                                             [](httplib::server::request&, httplib::server::response& resp)
+                                             {
+                                                 auto counter = std::make_shared<int>(0);
+                                                 resp.set_ndjson_write_handler(
+                                                     [counter](httplib::ndjson_writer& w) -> net::awaitable<void>
+                                                     {
+                                                         while (*counter < 5)
+                                                         {
+                                                             ++(*counter);
+                                                             co_await w.write({
+                                                                 { "seq", *counter },
+                                                                 { "msg",  "hello" }
+                                                             });
+                                                         }
+                                                         co_await w.close();
+                                                     });
+                                             });
+
     router.set_buffer_body_http_handler<http::verb::post>(
         "/api/buffer",
-        [](httplib::server::request& req,
-           httplib::server::response& resp) -> httplib::net::awaitable<void> {
+        [](httplib::server::request& req, httplib::server::response& resp) -> httplib::net::awaitable<void>
+        {
             std::string all;
             std::array<char, 1024> buffer;
-            for (;;) {
+            for (;;)
+            {
                 auto bytes = co_await req.read_buffer_body_some(httplib::net::buffer(buffer));
                 if (bytes == 0)
+                {
                     break;
+                }
                 all.append(buffer.data(), bytes);
             }
             resp.set_string_content(all, "text/plain");
@@ -265,94 +309,118 @@ static void setup_http_routes(httplib::server::router& router)
     // ---- Built-in middleware: Basic Auth ----
     router.set_http_handler<http::verb::get>(
         "/api/admin",
-        [](httplib::server::request&, httplib::server::response& resp) {
-            resp.set_json_content({{"secret", "admin data"}});
+        [](httplib::server::request&, httplib::server::response& resp)
+        {
+            resp.set_json_content({
+                { "secret", "admin data" }
+            });
         },
-        mw::basic_auth_middleware(
-            [](std::string_view user, std::string_view pass) {
-                return user == "admin" && pass == "secret";
-            },
-            "Admin Area"));
+        mw::basic_auth_middleware([](std::string_view user, std::string_view pass)
+                                  { return user == "admin" && pass == "secret"; },
+                                  "Admin Area"));
 
     // ---- Built-in middleware: Bearer Token Auth ----
     router.set_http_handler<http::verb::get>(
         "/api/token-protected",
-        [](httplib::server::request&, httplib::server::response& resp) {
-            resp.set_json_content({{"data", "token-gated content"}});
+        [](httplib::server::request&, httplib::server::response& resp)
+        {
+            resp.set_json_content({
+                { "data", "token-gated content" }
+            });
         },
-        mw::bearer_auth_middleware(
-            [](std::string_view token) { return token == "my-secret-token"; }));
+        mw::bearer_auth_middleware([](std::string_view token) { return token == "my-secret-token"; }));
 
     // ---- Built-in middleware: Rate Limit (10 req / 10 seconds per IP) ----
     auto rate_limiter = std::make_shared<mw::rate_limit_middleware>(10, std::chrono::seconds(10));
 
     router.set_http_handler<http::verb::get>(
         "/api/limited",
-        [](httplib::server::request&, httplib::server::response& resp) {
-            resp.set_json_content({{"message", "you are not rate-limited... yet"}});
+        [](httplib::server::request&, httplib::server::response& resp)
+        {
+            resp.set_json_content({
+                { "message", "you are not rate-limited... yet" }
+            });
         },
         *rate_limiter);
 
     // ---- Custom data on request (via custom aspect) ----
     router.set_http_handler<http::verb::get>(
         "/api/custom-data",
-        [](httplib::server::request& req, httplib::server::response& resp) {
+        [](httplib::server::request& req, httplib::server::response& resp)
+        {
             auto data = req.custom_data<std::string>();
-            resp.set_json_content({{"data", data}});
+            resp.set_json_content({
+                { "data", data }
+            });
         },
-        [](httplib::server::request& req, httplib::server::response&) {
+        [](httplib::server::request& req, httplib::server::response&)
+        {
             req.set_custom_data(std::any(std::string("computed-early")));
             return true;
         });
 
     // ---- 404 handler with log aspect ----
     router.set_http_not_found_handler(
-        [](httplib::server::request& req, httplib::server::response& resp) {
-            resp.set_json_content({{"error", "not found"}, {"path", std::string(req.path())}},
-                                  http::status::not_found);
+        [](httplib::server::request& req, httplib::server::response& resp)
+        {
+            resp.set_json_content(
+                {
+                    { "error",             "not found" },
+                    {  "path", std::string(req.path()) }
+            },
+                http::status::not_found);
         },
         log_t {});
 }
 
-static void setup_cors(httplib::server::router& router)
+static void
+setup_cors(httplib::server::router& router)
 {
     // Global CORS via post_handler (runs after every route handler)
-    router.set_post_routing_handler([](httplib::server::request&, httplib::server::response& resp) {
-        resp.set(std::string_view("Access-Control-Allow-Origin"), std::string_view("*"));
-        resp.set(std::string_view("Access-Control-Allow-Methods"),
-                 std::string_view("GET, POST, PUT, DELETE, OPTIONS"));
-        resp.set(std::string_view("Access-Control-Allow-Headers"),
-                 std::string_view("Origin, Content-Type, Authorization"));
-    });
+    router.set_post_routing_handler(
+        [](httplib::server::request&, httplib::server::response& resp)
+        {
+            resp.set(std::string_view("Access-Control-Allow-Origin"), std::string_view("*"));
+            resp.set(std::string_view("Access-Control-Allow-Methods"),
+                     std::string_view("GET, POST, PUT, DELETE, OPTIONS"));
+            resp.set(std::string_view("Access-Control-Allow-Headers"),
+                     std::string_view("Origin, Content-Type, Authorization"));
+        });
 }
 
-static void setup_ws(httplib::server::router& router)
+static void
+setup_ws(httplib::server::router& router)
 {
     router.set_ws_handler(
         "/ws",
-        [](httplib::server::websocket_conn::weak_ptr hdl) -> net::awaitable<void> {
+        [](httplib::server::websocket_conn::weak_ptr hdl) -> net::awaitable<void>
+        {
             auto conn = hdl.lock();
             if (conn)
+            {
                 conn->send("Welcome!"sv, false);
+            }
             co_return;
         },
-        [](httplib::server::websocket_conn::weak_ptr hdl,
-           std::string_view msg,
-           bool binary) -> net::awaitable<void> {
+        [](httplib::server::websocket_conn::weak_ptr hdl, std::string_view msg, bool binary) -> net::awaitable<void>
+        {
             auto conn = hdl.lock();
-            if (conn) {
+            if (conn)
+            {
                 spdlog::info("WS received: {} (binary={})", msg, binary);
                 conn->send(std::format("Echo: {}", msg), binary);
             }
             co_return;
         },
-        [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void> {
+        [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void>
+        {
             spdlog::info("WS closed");
             co_return;
         });
 }
 
-static void setup_static_files(httplib::server::router& router)
+static void
+setup_static_files(httplib::server::router& router)
 {
     auto mp = httplib::server::mount_point_entry("/static", fs::current_path());
     mp.set_directory_format(httplib::server::mount_point_entry::dir_format_type::html);
@@ -362,7 +430,8 @@ static void setup_static_files(httplib::server::router& router)
 
 // ===== Client demo =====
 
-static void run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
+static void
+run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 {
     httplib::client::http_client client(ex, host, port);
     client.set_timeout(std::chrono::seconds(5));
@@ -371,99 +440,134 @@ static void run_http_client_demo(net::any_io_executor ex, std::string host, uint
     {
         auto r = client.get("/api/greet/client");
         if (r)
+        {
             spdlog::info("GET  /api/greet/client -> {} [{}]",
                          r.value().result_int(),
                          r->body().as<httplib::body::string_body>());
+        }
     }
 
     // POST JSON
     {
-        auto r = client.post("/api/echo-json", {{"msg", "hello"}, {"count", 42}});
+        auto r = client.post("/api/echo-json",
+                             {
+                                 {   "msg", "hello" },
+                                 { "count",      42 }
+        });
         if (r)
+        {
             spdlog::info("POST /api/echo-json -> {}", r.value().result_int());
+        }
     }
 
     // DELETE
     {
         auto r = client.del("/api/resource/99");
         if (r)
+        {
             spdlog::info("DELETE /api/resource/99 -> {}", r.value().result_int());
+        }
     }
 
     // OPTIONS
     {
         auto r = client.options("/api/hello");
         if (r)
+        {
             spdlog::info("OPTIONS /api/hello -> {} Allow={}",
                          r.value().result_int(),
                          std::string(r.value()[http::field::allow]));
+        }
     }
 
     // Redirect
     {
         auto r = client.get("/api/redirect");
         if (r)
+        {
             spdlog::info("GET /api/redirect -> {} Location={}",
                          r.value().result_int(),
                          std::string(r.value()[http::field::location]));
+        }
     }
 
     // Stream with chunk handler
     {
         client.set_chunked_read_handler(
-            [](httplib::chunk_reader& reader,
-               httplib::client::http_client::response&) -> net::awaitable<void> {
-                while (true) {
+            [](httplib::chunk_reader& reader, httplib::client::http_client::response&) -> net::awaitable<void>
+            {
+                while (true)
+                {
                     auto chunk = co_await reader.read_chunk();
                     if (chunk.empty())
+                    {
                         break;
+                    }
                     spdlog::info("  chunk: {}", chunk.substr(0, chunk.size() - 1));
                 }
             });
         auto r = client.get("/api/stream");
         client.set_chunked_read_handler(nullptr);
         if (r)
+        {
             spdlog::info("GET /api/stream -> {}", r.value().result_int());
+        }
     }
 
     // SSE (Server-Sent Events)
     {
-        client.set_sse_read_handler([](httplib::sse_reader& reader) -> net::awaitable<void> {
-            while (!reader.is_done()) {
-                auto ev = co_await reader.read_event();
-                if (ev.data.empty() && ev.event.empty() && ev.id.empty() &&
-                    ev.retry == std::chrono::milliseconds {0})
-                    break;
-                spdlog::info("  SSE event: id={} event={} data={}", ev.id, ev.event, ev.data);
-            }
-        });
+        client.set_sse_read_handler(
+            [](httplib::sse_reader& reader) -> net::awaitable<void>
+            {
+                while (!reader.is_done())
+                {
+                    auto ev = co_await reader.read_event();
+                    if (ev.data.empty() && ev.event.empty() && ev.id.empty()
+                        && ev.retry == std::chrono::milliseconds { 0 })
+                    {
+                        break;
+                    }
+                    spdlog::info("  SSE event: id={} event={} data={}", ev.id, ev.event, ev.data);
+                }
+            });
         auto r = client.get("/api/sse");
         client.set_sse_read_handler(nullptr);
         if (r)
+        {
             spdlog::info("GET /api/sse -> {}", r.value().result_int());
+        }
     }
 
     // NDJSON (Newline Delimited JSON)
     {
-        client.set_ndjson_read_handler([](httplib::ndjson_reader& reader) -> net::awaitable<void> {
-            while (!reader.is_done()) {
-                auto val = co_await reader.read();
-                if (val.is_null())
-                    break;
-                spdlog::info("  NDJSON line: {}", boost::json::serialize(val));
-            }
-        });
+        client.set_ndjson_read_handler(
+            [](httplib::ndjson_reader& reader) -> net::awaitable<void>
+            {
+                while (!reader.is_done())
+                {
+                    auto val = co_await reader.read();
+                    if (val.is_null())
+                    {
+                        break;
+                    }
+                    spdlog::info("  NDJSON line: {}", boost::json::serialize(val));
+                }
+            });
         auto r = client.get("/api/ndjson");
         client.set_ndjson_read_handler(nullptr);
         if (r)
+        {
             spdlog::info("GET /api/ndjson -> {}", r.value().result_int());
+        }
     }
 
     // Auth: Basic (should fail without credentials)
     {
         auto r = client.get("/api/admin");
         if (r)
+        {
             spdlog::info("GET /api/admin (no auth) -> {}", r.value().result_int());
+        }
     }
 
     // Auth: Basic (with correct credentials)
@@ -472,51 +576,65 @@ static void run_http_client_demo(net::any_io_executor ex, std::string host, uint
         hdrs.set(http::field::authorization, "Basic YWRtaW46c2VjcmV0");
         auto r = client.send_request(http::verb::get, "/api/admin", hdrs);
         if (r)
+        {
             spdlog::info("GET /api/admin (with auth) -> {}", r.value().result_int());
+        }
     }
 
     // 404
     {
         auto r = client.get("/api/nonexistent");
         if (r)
+        {
             spdlog::info("GET /api/nonexistent -> {}", r.value().result_int());
-    }
-}
-
-static void run_http_client_pool_demo(net::any_io_executor ex, std::string host, uint16_t port)
-{
-    httplib::client::http_client_pool pool(ex, 4);
-    {
-        auto h = pool.acquire(host, port).get();
-        if (h) {
-            auto r = h->get("/api/hello");
-            if (r)
-                spdlog::info("Pool GET /api/hello -> {}", r.value().result_int());
         }
     }
 }
 
-static void run_ws_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
+static void
+run_http_client_pool_demo(net::any_io_executor ex, std::string host, uint16_t port)
+{
+    httplib::client::http_client_pool pool(ex, 4);
+    {
+        auto h = pool.acquire(host, port).get();
+        if (h)
+        {
+            auto r = h->get("/api/hello");
+            if (r)
+            {
+                spdlog::info("Pool GET /api/hello -> {}", r.value().result_int());
+            }
+        }
+    }
+}
+
+static void
+run_ws_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 {
     httplib::client::ws_client ws(ex, host, port);
 
     ws.set_handler(
-        [&](boost::system::error_code ec) -> net::awaitable<void> {
-            if (!ec) {
+        [&](boost::system::error_code ec) -> net::awaitable<void>
+        {
+            if (!ec)
+            {
                 spdlog::info("WS client connected");
                 ws.send("Hello from WS client");
             }
-            else {
+            else
+            {
                 spdlog::error("WS connect error: {}", ec.message());
             }
             co_return;
         },
-        [&](std::string_view msg, bool) -> net::awaitable<void> {
+        [&](std::string_view msg, bool) -> net::awaitable<void>
+        {
             spdlog::info("WS client received: {}", msg);
             ws.close();
             co_return;
         },
-        []() -> net::awaitable<void> {
+        []() -> net::awaitable<void>
+        {
             spdlog::info("WS client disconnected");
             co_return;
         });
@@ -526,7 +644,8 @@ static void run_ws_client_demo(net::any_io_executor ex, std::string host, uint16
 
 // ===== Main =====
 
-static void print_usage()
+static void
+print_usage()
 {
     std::cout << R"(httplib Demo v)" << httplib::version() << R"(
 
@@ -560,24 +679,35 @@ Press Ctrl+C to stop the server.
 )";
 }
 
-int main(int argc, char** argv)
+int
+main(int argc, char** argv)
 {
     std::string mode = "server";
     std::string host = "127.0.0.1";
-    uint16_t port    = 18808;
-    bool use_ssl     = true;
+    uint16_t port = 18808;
+    bool use_ssl = true;
 
-    for (int i = 1; i < argc; ++i) {
+    for (int i = 1; i < argc; ++i)
+    {
         std::string_view arg = argv[i];
         if (arg == "server" || arg == "client" || arg == "ws" || arg == "all")
+        {
             mode = arg;
+        }
         else if (arg == "--port" && i + 1 < argc)
+        {
             port = static_cast<uint16_t>(std::atoi(argv[++i]));
+        }
         else if (arg == "--host" && i + 1 < argc)
+        {
             host = argv[++i];
+        }
         else if (arg == "--no-ssl")
+        {
             use_ssl = false;
-        else if (arg == "--help" || arg == "-h") {
+        }
+        else if (arg == "--help" || arg == "-h")
+        {
             print_usage();
             return 0;
         }
@@ -594,20 +724,25 @@ int main(int argc, char** argv)
     boost::asio::thread_pool pool(std::thread::hardware_concurrency());
     auto ex = pool.get_executor();
 
-    if (mode == "client") {
+    if (mode == "client")
+    {
         run_http_client_demo(ex, host, port);
         run_http_client_pool_demo(ex, host, port);
     }
-    else if (mode == "ws") {
+    else if (mode == "ws")
+    {
         run_ws_client_demo(ex, host, port);
     }
-    else {
+    else
+    {
         httplib::server::http_server svr(ex);
         svr.logger()->set_level(spdlog::level::debug);
 
 #ifdef HTTPLIB_ENABLED_SSL
         if (use_ssl)
+        {
             svr.set_ssl(server_crt, server_key, "test");
+        }
 #else
         (void)use_ssl;
 #endif
@@ -631,23 +766,26 @@ int main(int argc, char** argv)
 
         svr.set_reverse_proxy("/*", "192.168.31.1", 80, false);
 
-        router.set_http_handler<http::verb::post>(
-            "/api/shutdown", [&](httplib::server::request&, httplib::server::response& resp) {
-                resp.set_json_content({{"message", "shutting down"}});
-                svr.stop();
-            });
+        router.set_http_handler<http::verb::post>("/api/shutdown",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  {
+                                                      resp.set_json_content({
+                                                          { "message", "shutting down" }
+                                                      });
+                                                      svr.stop();
+                                                  });
 
         spdlog::info("Server listening on {}:{}", host, port);
         svr.run();
 
-        if (mode == "all") {
+        if (mode == "all")
+        {
             run_http_client_demo(ex, host, port);
             run_http_client_pool_demo(ex, host, port);
         }
 
         pool.wait();
     }
-
 
     return 0;
 }

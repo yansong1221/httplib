@@ -11,105 +11,105 @@
 #include <boost/beast/http/empty_body.hpp>
 #include <memory>
 
-namespace httplib::server {
-
-class websocket_conn_impl;
-
-class session : public std::enable_shared_from_this<session>
+namespace httplib::server
 {
-public:
-    class task
+
+    class websocket_conn_impl;
+
+    class session : public std::enable_shared_from_this<session>
     {
-    public:
-        using ptr = std::unique_ptr<task>;
+      public:
+        class task
+        {
+          public:
+            using ptr = std::unique_ptr<task>;
 
-        virtual ~task()                          = default;
-        virtual net::awaitable<task::ptr> then() = 0;
-        virtual void abort()                     = 0;
+            virtual ~task() = default;
+            virtual net::awaitable<task::ptr> then() = 0;
+            virtual void abort() = 0;
+        };
+        class detect_ssl_task;
+        class ssl_handshake_task;
+        class http_task;
+        class http_proxy_task;
+        class websocket_task;
+
+        explicit session(tcp::socket&& stream, http_server::impl& serv);
+        ~session();
+
+      public:
+        void abort();
+        net::awaitable<void> run();
+
+      private:
+        task::ptr task_;
+
+        std::atomic_bool abort_ = false;
+        std::mutex task_mtx_;
     };
-    class detect_ssl_task;
-    class ssl_handshake_task;
-    class http_task;
-    class http_proxy_task;
-    class websocket_task;
 
-    explicit session(tcp::socket&& stream, http_server::impl& serv);
-    ~session();
+    class session::detect_ssl_task : public session::task
+    {
+      public:
+        explicit detect_ssl_task(tcp::socket&& stream, http_server::impl& serv);
+        ~detect_ssl_task();
 
-public:
-    void abort();
-    net::awaitable<void> run();
+      public:
+        void abort() override;
+        net::awaitable<task::ptr> then() override;
 
-private:
-    task::ptr task_;
+      private:
+        http_server::impl& serv_;
+        http_stream::plain_stream stream_;
+    };
 
-    std::atomic_bool abort_ = false;
-    std::mutex task_mtx_;
-};
+    class session::http_task : public session::task
+    {
+      public:
+        explicit http_task(http_stream&& stream, beast::flat_buffer&& buffer, http_server::impl& serv);
 
-class session::detect_ssl_task : public session::task
-{
-public:
-    explicit detect_ssl_task(tcp::socket&& stream, http_server::impl& serv);
-    ~detect_ssl_task();
+        net::awaitable<task::ptr> then() override;
+        void abort() override;
 
-public:
-    void abort() override;
-    net::awaitable<task::ptr> then() override;
+      private:
+        net::awaitable<bool> async_write(request const& req, response& resp);
 
-private:
-    http_server::impl& serv_;
-    http_stream::plain_stream stream_;
-};
+      private:
+        http_server::impl& serv_;
 
+        http_stream stream_;
+        beast::flat_buffer buffer_;
+    };
 
-class session::http_task : public session::task
-{
-public:
-    explicit http_task(http_stream&& stream, beast::flat_buffer&& buffer, http_server::impl& serv);
+    class session::websocket_task : public session::task
+    {
+      public:
+        explicit websocket_task(websocket_stream&& stream, request&& req, http_server::impl& serv);
 
-    net::awaitable<task::ptr> then() override;
-    void abort() override;
+      public:
+        net::awaitable<task::ptr> then() override;
+        void abort() override;
 
-private:
-    net::awaitable<bool> async_write(const request& req, response& resp);
+      private:
+        std::shared_ptr<websocket_conn_impl> conn_;
+    };
 
-private:
-    http_server::impl& serv_;
+    class session::http_proxy_task : public session::task
+    {
+      public:
+        explicit http_proxy_task(http_stream&& stream, request&& req, http_server::impl& serv);
 
-    http_stream stream_;
-    beast::flat_buffer buffer_;
-};
+      public:
+        net::awaitable<task::ptr> then() override;
+        void abort() override;
 
-class session::websocket_task : public session::task
-{
-public:
-    explicit websocket_task(websocket_stream&& stream, request&& req, http_server::impl& serv);
+      private:
+        http_stream stream_;
+        tcp::resolver resolver_;
+        tcp::socket proxy_socket_;
 
-public:
-    net::awaitable<task::ptr> then() override;
-    void abort() override;
-
-private:
-    std::shared_ptr<websocket_conn_impl> conn_;
-};
-
-class session::http_proxy_task : public session::task
-{
-public:
-    explicit http_proxy_task(http_stream&& stream, request&& req, http_server::impl& serv);
-
-public:
-    net::awaitable<task::ptr> then() override;
-    void abort() override;
-
-private:
-    http_stream stream_;
-    tcp::resolver resolver_;
-    tcp::socket proxy_socket_;
-
-    request req_;
-    http_server::impl& serv_;
-};
+        request req_;
+        http_server::impl& serv_;
+    };
 
 } // namespace httplib::server

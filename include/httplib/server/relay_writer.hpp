@@ -5,17 +5,17 @@
 #include <boost/beast/http/status.hpp>
 #include <boost/system/error_code.hpp>
 
-namespace httplib::server {
-
-class HTTPLIB_API relay_writer
+namespace httplib::server
 {
-public:
-    virtual ~relay_writer() = default;
 
-    virtual net::awaitable<boost::system::error_code> write_header(http::status status,
-                                                                    const http::fields& headers) = 0;
-    virtual net::awaitable<boost::system::error_code> write_body(const net::const_buffer& data,
-                                                                 bool more)                     = 0;
-};
+    class HTTPLIB_API relay_writer
+    {
+      public:
+        virtual ~relay_writer() = default;
+
+        virtual net::awaitable<boost::system::error_code> write_header(http::status status, http::fields const& headers)
+            = 0;
+        virtual net::awaitable<boost::system::error_code> write_body(net::const_buffer const& data, bool more) = 0;
+    };
 
 } // namespace httplib::server

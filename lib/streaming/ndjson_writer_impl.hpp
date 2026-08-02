@@ -4,30 +4,30 @@
 #include <boost/json/serialize.hpp>
 #include <string>
 
-namespace httplib::streaming {
-
-class ndjson_writer_impl : public httplib::ndjson_writer
+namespace httplib::streaming
 {
-public:
-    explicit ndjson_writer_impl(httplib::chunk_writer& cw)
-        : cw_(cw)
-    {
-    }
 
-    net::awaitable<void> write(const boost::json::value& value) override
+    class ndjson_writer_impl : public httplib::ndjson_writer
     {
-        auto line = boost::json::serialize(value);
-        line += "\n";
-        co_await cw_.write_chunk(std::move(line));
-    }
+      public:
+        explicit ndjson_writer_impl(httplib::chunk_writer& cw) : cw_(cw) {}
 
-    net::awaitable<void> close() override
-    {
-        co_await cw_.close();
-    }
+        net::awaitable<void>
+        write(boost::json::value const& value) override
+        {
+            auto line = boost::json::serialize(value);
+            line += "\n";
+            co_await cw_.write_chunk(std::move(line));
+        }
 
-private:
-    httplib::chunk_writer& cw_;
-};
+        net::awaitable<void>
+        close() override
+        {
+            co_await cw_.close();
+        }
+
+      private:
+        httplib::chunk_writer& cw_;
+    };
 
 } // namespace httplib::streaming

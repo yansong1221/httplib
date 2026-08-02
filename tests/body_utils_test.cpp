@@ -95,17 +95,17 @@ TEST_CASE("query_params: at_number throws on invalid input", "[body-utils]")
 TEST_CASE("form_data: field has_data and is_file", "[body-utils]")
 {
     httplib::html::form_data::field f;
-    f.name     = "username";
-    f.content  = "john";
+    f.name = "username";
+    f.content = "john";
     f.filename = "";
 
     REQUIRE(f.has_data());
     REQUIRE_FALSE(f.is_file());
 
     httplib::html::form_data::field f2;
-    f2.name     = "avatar";
+    f2.name = "avatar";
     f2.filename = "photo.png";
-    f2.content  = "binary-data";
+    f2.content = "binary-data";
     f2.content_type = "image/png";
 
     REQUIRE(f2.has_data());
@@ -115,8 +115,8 @@ TEST_CASE("form_data: field has_data and is_file", "[body-utils]")
 TEST_CASE("form_data: field_by_name lookup", "[body-utils]")
 {
     httplib::html::form_data fd;
-    fd.fields.push_back({"name", "", "text/plain", "Alice"});
-    fd.fields.push_back({"email", "", "text/plain", "alice@example.com"});
+    fd.fields.push_back({ "name", "", "text/plain", "Alice" });
+    fd.fields.push_back({ "email", "", "text/plain", "alice@example.com" });
 
     auto name_field = fd.field_by_name("name");
     REQUIRE(name_field.has_value());
@@ -133,8 +133,8 @@ TEST_CASE("form_data: field_by_name lookup", "[body-utils]")
 TEST_CASE("form_data: has_data and has_content", "[body-utils]")
 {
     httplib::html::form_data fd;
-    fd.fields.push_back({"key1", "", "", "value1"});
-    fd.fields.push_back({"key2", "f.txt", "", "file content"});
+    fd.fields.push_back({ "key1", "", "", "value1" });
+    fd.fields.push_back({ "key2", "f.txt", "", "file content" });
 
     REQUIRE(fd.has_data("key1"));
     REQUIRE(fd.has_content("key1"));
@@ -147,7 +147,7 @@ TEST_CASE("form_data: has_data and has_content", "[body-utils]")
 TEST_CASE("form_data: content retrieval", "[body-utils]")
 {
     httplib::html::form_data fd;
-    fd.fields.push_back({"greeting", "", "", "hello world"});
+    fd.fields.push_back({ "greeting", "", "", "hello world" });
 
     auto c = fd.content("greeting");
     REQUIRE(c.has_value());
@@ -160,8 +160,8 @@ TEST_CASE("form_data: content retrieval", "[body-utils]")
 TEST_CASE("form_data: dump", "[body-utils]")
 {
     httplib::html::form_data fd;
-    fd.fields.push_back({"key1", "", "", "val1"});
-    fd.fields.push_back({"key2", "file.txt", "text/plain", "content"});
+    fd.fields.push_back({ "key1", "", "", "val1" });
+    fd.fields.push_back({ "key2", "file.txt", "text/plain", "content" });
 
     auto d = fd.dump();
     REQUIRE(d.find("key1") != std::string::npos);
@@ -272,7 +272,7 @@ TEST_CASE("http_ranges: empty check", "[body-utils]")
 TEST_CASE("http_ranges: append", "[body-utils]")
 {
     httplib::html::http_ranges ranges;
-    ranges.add({0, 99});
-    ranges.add({200, 299});
+    ranges.add({ 0, 99 });
+    ranges.add({ 200, 299 });
     REQUIRE(ranges.size() == 2);
 }

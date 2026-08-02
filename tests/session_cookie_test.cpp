@@ -1,11 +1,11 @@
 #include "httplib/body/string_body.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/server/middleware/session.hpp"
-#include "server/middleware/memory_store.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
+#include "server/middleware/memory_store.hpp"
 #include <boost/asio/io_context.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
@@ -17,58 +17,68 @@
 
 using namespace std::string_view_literals;
 namespace http = httplib::http;
-namespace net  = httplib::net;
-namespace mw   = httplib::server::middleware;
+namespace net = httplib::net;
+namespace mw = httplib::server::middleware;
 
-namespace {
-
-struct test_scaffold
+namespace
 {
-    net::io_context ioc;
-    httplib::server::http_server server;
-    httplib::tcp::endpoint endpoint;
-    std::thread thread;
-    std::unique_ptr<httplib::client::http_client> client;
 
-    test_scaffold()
-        : server(ioc)
+    struct test_scaffold
     {
-        auto null_sink = std::make_shared<spdlog::sinks::null_sink_mt>();
-        server.set_logger(std::make_shared<spdlog::logger>("httplib.tests", null_sink));
+        net::io_context ioc;
+        httplib::server::http_server server;
+        httplib::tcp::endpoint endpoint;
+        std::thread thread;
+        std::unique_ptr<httplib::client::http_client> client;
+
+        test_scaffold() : server(ioc)
+        {
+            auto null_sink = std::make_shared<spdlog::sinks::null_sink_mt>();
+            server.set_logger(std::make_shared<spdlog::logger>("httplib.tests", null_sink));
+        }
+
+        ~test_scaffold()
+        {
+            server.stop().wait();
+            ioc.stop();
+            if (thread.joinable())
+            {
+                thread.join();
+            }
+        }
+
+        void
+        start()
+        {
+            server.listen("127.0.0.1", 0);
+            endpoint = server.local_endpoint();
+            server.run();
+            thread = std::thread([this] { ioc.run(); });
+
+            client = std::make_unique<httplib::client::http_client>(ioc.get_executor(),
+                                                                    endpoint.address().to_string(),
+                                                                    endpoint.port());
+            client->set_timeout(std::chrono::seconds(5));
+        }
+
+        auto&
+        router()
+        {
+            return server.router();
+        }
+    };
+
+    std::string
+    as_string(httplib::client::http_client::response const& resp)
+    {
+        return resp.body().as<httplib::body::string_body>();
     }
 
-    ~test_scaffold()
-    {
-        server.stop().wait();
-        ioc.stop();
-        if (thread.joinable())
-            thread.join();
-    }
-
-    void start()
-    {
-        server.listen("127.0.0.1", 0);
-        endpoint = server.local_endpoint();
-        server.run();
-        thread = std::thread([this] { ioc.run(); });
-
-        client = std::make_unique<httplib::client::http_client>(
-            ioc.get_executor(), endpoint.address().to_string(), endpoint.port());
-        client->set_timeout(std::chrono::seconds(5));
-    }
-
-    auto& router() { return server.router(); }
-};
-
-std::string as_string(const httplib::client::http_client::response& resp)
-{
-    return resp.body().as<httplib::body::string_body>();
-}
-
-#define UNWRAP(result)                                                                             \
-    [&](auto&& r) {                                                                                \
-        REQUIRE(r.has_value());                                                                    \
-        return std::move(r).value();                                                               \
+#define UNWRAP(result)               \
+    [&](auto&& r)                    \
+    {                                \
+        REQUIRE(r.has_value());      \
+        return std::move(r).value(); \
     }(result)
 
 } // namespace
@@ -82,7 +92,8 @@ TEST_CASE("Session: middleware creates new session ID", "[session]")
     test_scaffold ts;
     ts.router().set_http_handler<http::verb::get>(
         "/visit",
-        [](httplib::server::request& req, httplib::server::response& resp) {
+        [](httplib::server::request& req, httplib::server::response& resp)
+        {
             auto sess = req.session();
             REQUIRE(sess);
             REQUIRE_FALSE(sess->id().empty());
@@ -107,7 +118,8 @@ TEST_CASE("Session: middleware persists data across requests", "[session]")
 
     ts.router().set_http_handler<http::verb::post>(
         "/login",
-        [](httplib::server::request& req, httplib::server::response& resp) {
+        [](httplib::server::request& req, httplib::server::response& resp)
+        {
             auto sess = req.session();
             sess->set("user", "alice");
             resp.set_string_content("logged-in"sv, "text/plain"sv);
@@ -116,7 +128,8 @@ TEST_CASE("Session: middleware persists data across requests", "[session]")
 
     ts.router().set_http_handler<http::verb::get>(
         "/whoami",
-        [](httplib::server::request& req, httplib::server::response& resp) {
+        [](httplib::server::request& req, httplib::server::response& resp)
+        {
             auto sess = req.session();
             auto user = sess->get("user");
             resp.set_string_content(user.value_or("anonymous"), "text/plain"sv);
@@ -146,7 +159,8 @@ TEST_CASE("Session: get_session returns valid pointer", "[session]")
     test_scaffold ts;
     ts.router().set_http_handler<http::verb::get>(
         "/data",
-        [](httplib::server::request& req, httplib::server::response& resp) {
+        [](httplib::server::request& req, httplib::server::response& resp)
+        {
             auto sess = req.session();
             REQUIRE(sess);
             sess->set("count", "1");
@@ -169,7 +183,8 @@ TEST_CASE("Session: session has and remove", "[session]")
     test_scaffold ts;
     ts.router().set_http_handler<http::verb::get>(
         "/ops",
-        [](httplib::server::request& req, httplib::server::response& resp) {
+        [](httplib::server::request& req, httplib::server::response& resp)
+        {
             auto sess = req.session();
             sess->set("temp", "data");
             REQUIRE(sess->has("temp"));
@@ -194,7 +209,8 @@ TEST_CASE("Session: custom store can be injected", "[session]")
     test_scaffold ts;
     ts.router().set_http_handler<http::verb::get>(
         "/custom",
-        [](httplib::server::request& req, httplib::server::response& resp) {
+        [](httplib::server::request& req, httplib::server::response& resp)
+        {
             auto sess = req.session();
             sess->set("store", "injected");
             resp.set_string_content("ok"sv, "text/plain"sv);
@@ -214,7 +230,8 @@ TEST_CASE("Session: configurable cookie name", "[session]")
     test_scaffold ts;
     ts.router().set_http_handler<http::verb::get>(
         "/named",
-        [](httplib::server::request& req, httplib::server::response& resp) {
+        [](httplib::server::request& req, httplib::server::response& resp)
+        {
             auto sess = req.session();
             sess->set("key", "val");
             resp.set_string_content("ok"sv, "text/plain"sv);
@@ -222,7 +239,7 @@ TEST_CASE("Session: configurable cookie name", "[session]")
         sm);
     ts.start();
 
-    auto resp       = UNWRAP(ts.client->get("/named"));
+    auto resp = UNWRAP(ts.client->get("/named"));
     auto set_cookie = std::string(resp[http::field::set_cookie]);
     REQUIRE(set_cookie.starts_with("my_session="));
     REQUIRE(set_cookie.find("Path=/app") != std::string::npos);
@@ -236,14 +253,15 @@ TEST_CASE("Session: cookie attributes http_only, secure, max_age", "[session]")
     test_scaffold ts;
     ts.router().set_http_handler<http::verb::get>(
         "/attrs",
-        [](httplib::server::request& req, httplib::server::response& resp) {
+        [](httplib::server::request& req, httplib::server::response& resp)
+        {
             req.session()->set("x", "1");
             resp.set_string_content("ok"sv, "text/plain"sv);
         },
         sm);
     ts.start();
 
-    auto resp       = UNWRAP(ts.client->get("/attrs"));
+    auto resp = UNWRAP(ts.client->get("/attrs"));
     auto set_cookie = std::string(resp[http::field::set_cookie]);
     REQUIRE(set_cookie.find("HttpOnly") != std::string::npos);
     REQUIRE(set_cookie.find("Secure") != std::string::npos);
@@ -258,14 +276,15 @@ TEST_CASE("Session: same_site strict", "[session]")
     test_scaffold ts;
     ts.router().set_http_handler<http::verb::get>(
         "/samesite",
-        [](httplib::server::request& req, httplib::server::response& resp) {
+        [](httplib::server::request& req, httplib::server::response& resp)
+        {
             req.session()->set("x", "1");
             resp.set_string_content("ok"sv, "text/plain"sv);
         },
         sm);
     ts.start();
 
-    auto resp       = UNWRAP(ts.client->get("/samesite"));
+    auto resp = UNWRAP(ts.client->get("/samesite"));
     auto set_cookie = std::string(resp[http::field::set_cookie]);
     REQUIRE(set_cookie.find("SameSite=Strict") != std::string::npos);
 }
@@ -278,14 +297,15 @@ TEST_CASE("Session: max_age cookie attribute", "[session]")
     test_scaffold ts;
     ts.router().set_http_handler<http::verb::get>(
         "/aged",
-        [](httplib::server::request& req, httplib::server::response& resp) {
+        [](httplib::server::request& req, httplib::server::response& resp)
+        {
             req.session()->set("x", "1");
             resp.set_string_content("ok"sv, "text/plain"sv);
         },
         sm);
     ts.start();
 
-    auto resp       = UNWRAP(ts.client->get("/aged"));
+    auto resp = UNWRAP(ts.client->get("/aged"));
     auto set_cookie = std::string(resp[http::field::set_cookie]);
     REQUIRE(set_cookie.find("Max-Age=1800") != std::string::npos);
 }

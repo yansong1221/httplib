@@ -6,26 +6,27 @@
 #include <future>
 #include <memory>
 
-namespace httplib::util {
-
-class HTTPLIB_API action_queue
+namespace httplib::util
 {
-public:
-    using act_t = std::function<net::awaitable<void>()>;
 
-    action_queue(const net::any_io_executor& executor);
+    class HTTPLIB_API action_queue
+    {
+      public:
+        using act_t = std::function<net::awaitable<void>()>;
 
-    void push(act_t&& handler);
-    void clear();
+        action_queue(net::any_io_executor const& executor);
 
-    std::shared_future<void> shutdown(bool cancel_signal = false);
-    net::awaitable<void> async_shutdown(bool cancel_signal = false);
+        void push(act_t&& handler);
+        void clear();
 
-private:
-    action_queue(const action_queue&)            = delete;
-    action_queue& operator=(const action_queue&) = delete;
+        std::shared_future<void> shutdown(bool cancel_signal = false);
+        net::awaitable<void> async_shutdown(bool cancel_signal = false);
 
-    class impl;
-    std::shared_ptr<impl> impl_;
-};
+      private:
+        action_queue(action_queue const&) = delete;
+        action_queue& operator=(action_queue const&) = delete;
+
+        class impl;
+        std::shared_ptr<impl> impl_;
+    };
 } // namespace httplib::util

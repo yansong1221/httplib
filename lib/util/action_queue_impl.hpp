@@ -15,116 +15,138 @@
 #include <memory>
 #include <queue>
 
-namespace httplib::util {
-class action_queue::impl : public std::enable_shared_from_this<action_queue::impl>
+namespace httplib::util
 {
-public:
-    impl(const net::any_io_executor& executor)
-        : executor_(executor)
+    class action_queue::impl : public std::enable_shared_from_this<action_queue::impl>
     {
-    }
+      public:
+        impl(net::any_io_executor const& executor) : executor_(executor) {}
 
-
-    void push(act_t&& handler)
-    {
-        std::unique_lock<std::mutex> lck(que_mutex_);
-        if (shutting_down_)
-            return;
-
-        que_.push(std::move(handler));
-
-        if (!running_) {
-            running_ = true;
-            lck.unlock();
-
-            net::co_spawn(executor_,
-                          perform(),
-                          boost::asio::bind_cancellation_slot(cs_.slot(), [](std::exception_ptr e) {
-                              if (e) {
-                                  std::rethrow_exception(e);
-                              }
-                          }));
-        }
-    }
-    void clear()
-    {
-        std::unique_lock<std::mutex> lck(que_mutex_);
-        std::queue<act_t> empty;
-        std::swap(que_, empty);
-    }
-    net::any_io_executor get_executor() const { return executor_; }
-
-    net::awaitable<void> async_shutdown(bool cancel_signal)
-    {
-        std::unique_lock<std::mutex> lck(que_mutex_);
-        if (!shutting_down_.exchange(true)) {
-            co_return;
-        }
-        lck.unlock();
-
-        if (cancel_signal)
-            cs_.emit(boost::asio::cancellation_type::all);
-
-        boost::system::error_code ec;
-        boost::asio::steady_timer wait_timer(executor_);
-        for (; running_;) {
-            wait_timer.expires_after(std::chrono::milliseconds(100));
-            co_await wait_timer.async_wait(util::net_awaitable[ec]);
-            if (ec)
-                break;
-        }
-    }
-    std::shared_future<void> shutdown(bool cancel_signal)
-    {
-        return boost::asio::co_spawn(
-            executor_,
-            [this, self = shared_from_this(), cancel_signal]() -> net::awaitable<void> {
-                co_return co_await async_shutdown(cancel_signal);
-            },
-            boost::asio::use_future);
-    }
-
-private:
-    net::awaitable<void> perform()
-    {
-        auto self = shared_from_this();
-
-        co_await boost::asio::this_coro::reset_cancellation_state(
-            boost::asio::enable_total_cancellation(), boost::asio::enable_terminal_cancellation());
-
-        co_await boost::asio::this_coro::throw_if_cancelled(false);
-
-        for (auto cs = co_await net::this_coro::cancellation_state;;) {
+        void
+        push(act_t&& handler)
+        {
             std::unique_lock<std::mutex> lck(que_mutex_);
-            if (que_.empty()) {
-                running_ = false;
+            if (shutting_down_)
+            {
+                return;
+            }
+
+            que_.push(std::move(handler));
+
+            if (!running_)
+            {
+                running_ = true;
+                lck.unlock();
+
+                net::co_spawn(executor_,
+                              perform(),
+                              boost::asio::bind_cancellation_slot(cs_.slot(),
+                                                                  [](std::exception_ptr e)
+                                                                  {
+                                                                      if (e)
+                                                                      {
+                                                                          std::rethrow_exception(e);
+                                                                      }
+                                                                  }));
+            }
+        }
+        void
+        clear()
+        {
+            std::unique_lock<std::mutex> lck(que_mutex_);
+            std::queue<act_t> empty;
+            std::swap(que_, empty);
+        }
+        net::any_io_executor
+        get_executor() const
+        {
+            return executor_;
+        }
+
+        net::awaitable<void>
+        async_shutdown(bool cancel_signal)
+        {
+            std::unique_lock<std::mutex> lck(que_mutex_);
+            if (!shutting_down_.exchange(true))
+            {
                 co_return;
             }
-
-            auto handler = std::move(que_.front());
-            que_.pop();
             lck.unlock();
 
-            if (!cs.cancelled()) {
-                try {
-                    co_await handler();
-                }
-                catch (...) {
-                    assert(false);
+            if (cancel_signal)
+            {
+                cs_.emit(boost::asio::cancellation_type::all);
+            }
+
+            boost::system::error_code ec;
+            boost::asio::steady_timer wait_timer(executor_);
+            for (; running_;)
+            {
+                wait_timer.expires_after(std::chrono::milliseconds(100));
+                co_await wait_timer.async_wait(util::net_awaitable[ec]);
+                if (ec)
+                {
+                    break;
                 }
             }
         }
-    }
+        std::shared_future<void>
+        shutdown(bool cancel_signal)
+        {
+            return boost::asio::co_spawn(
+                executor_,
+                [this, self = shared_from_this(), cancel_signal]() -> net::awaitable<void>
+                { co_return co_await async_shutdown(cancel_signal); },
+                boost::asio::use_future);
+        }
 
-private:
-    net::any_io_executor executor_;
+      private:
+        net::awaitable<void>
+        perform()
+        {
+            auto self = shared_from_this();
 
-    mutable std::mutex que_mutex_;
-    std::queue<act_t> que_;
+            co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::enable_total_cancellation(),
+                                                                      boost::asio::enable_terminal_cancellation());
 
-    std::atomic_bool running_       = false;
-    std::atomic_bool shutting_down_ = false;
+            co_await boost::asio::this_coro::throw_if_cancelled(false);
 
-    boost::asio::cancellation_signal cs_;
-};
+            for (auto cs = co_await net::this_coro::cancellation_state;;)
+            {
+                std::unique_lock<std::mutex> lck(que_mutex_);
+                if (que_.empty())
+                {
+                    running_ = false;
+                    co_return;
+                }
+
+                auto handler = std::move(que_.front());
+                que_.pop();
+                lck.unlock();
+
+                if (!cs.cancelled())
+                {
+                    try
+                    {
+                        co_await handler();
+                    }
+                    catch (...)
+                    {
+                        assert(false);
+                    }
+                }
+            }
+        }
+
+      private:
+        net::any_io_executor executor_;
+
+        mutable std::mutex que_mutex_;
+        std::queue<act_t> que_;
+
+        std::atomic_bool running_ = false;
+        std::atomic_bool shutting_down_ = false;
+
+        boost::asio::cancellation_signal cs_;
+    };
 } // namespace httplib::util

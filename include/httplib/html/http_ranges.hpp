@@ -4,26 +4,27 @@
 #include <string_view>
 #include <vector>
 
-namespace httplib::html {
-class HTTPLIB_API http_ranges
+namespace httplib::html
 {
-public:
-    using range_type  = std::pair<int64_t, int64_t>;
-    using ranges_type = std::vector<range_type>;
+    class HTTPLIB_API http_ranges
+    {
+      public:
+        using range_type = std::pair<int64_t, int64_t>;
+        using ranges_type = std::vector<range_type>;
 
-public:
-    std::size_t size() const;
-    bool empty() const;
+      public:
+        std::size_t size() const;
+        bool empty() const;
 
-    const range_type& front() const;
-    const range_type& at(std::size_t index) const;
+        range_type const& front() const;
+        range_type const& at(std::size_t index) const;
 
-    void add(const range_type& range);
+        void add(range_type const& range);
 
-    const ranges_type& ranges() const;
-    bool parse(std::string_view range_str, size_t file_size);
+        ranges_type const& ranges() const;
+        bool parse(std::string_view range_str, size_t file_size);
 
-private:
-    ranges_type ranges_;
-};
+      private:
+        ranges_type ranges_;
+    };
 } // namespace httplib::html

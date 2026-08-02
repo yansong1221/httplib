@@ -6,83 +6,82 @@
 #include <future>
 #include <memory>
 
-namespace httplib::client {
-
-class HTTPLIB_API http_client_pool
+namespace httplib::client
 {
-private:
-    class impl;
 
-public:
-    class HTTPLIB_API client_handle
+    class HTTPLIB_API http_client_pool
     {
-        friend class http_client_pool;
+      private:
+        class impl;
 
-        std::weak_ptr<impl> pool_;
-        std::unique_ptr<http_client> conn_;
-        boost::system::error_code error_;
+      public:
+        class HTTPLIB_API client_handle
+        {
+            friend class http_client_pool;
 
-        client_handle(std::weak_ptr<impl> pool, std::unique_ptr<http_client> conn);
-        client_handle(boost::system::error_code ec);
-        void release();
+            std::weak_ptr<impl> pool_;
+            std::unique_ptr<http_client> conn_;
+            boost::system::error_code error_;
 
-    public:
-        client_handle()                                = default;
-        client_handle(const client_handle&)            = delete;
-        client_handle& operator=(const client_handle&) = delete;
+            client_handle(std::weak_ptr<impl> pool, std::unique_ptr<http_client> conn);
+            client_handle(boost::system::error_code ec);
+            void release();
 
-        client_handle(client_handle&& other) noexcept;
-        client_handle& operator=(client_handle&& other) noexcept;
+          public:
+            client_handle() = default;
+            client_handle(client_handle const&) = delete;
+            client_handle& operator=(client_handle const&) = delete;
 
-        ~client_handle();
+            client_handle(client_handle&& other) noexcept;
+            client_handle& operator=(client_handle&& other) noexcept;
 
-        http_client* get();
-        const http_client* get() const;
+            ~client_handle();
 
-        explicit operator bool() const noexcept;
-        bool has_error() const noexcept;
+            http_client* get();
+            http_client const* get() const;
 
-        http_client* operator->();
-        const http_client* operator->() const;
+            explicit operator bool() const noexcept;
+            bool has_error() const noexcept;
 
-        http_client& operator*();
-        const http_client& operator*() const;
+            http_client* operator->();
+            http_client const* operator->() const;
 
-        const boost::system::error_code& error() const noexcept;
+            http_client& operator*();
+            http_client const& operator*() const;
+
+            boost::system::error_code const& error() const noexcept;
+        };
+
+        struct pool_stats
+        {
+            size_t idle = 0;
+            size_t active = 0;
+        };
+
+      public:
+        explicit http_client_pool(net::any_io_executor const& ex,
+                                  size_t max_size = 10,
+                                  std::chrono::seconds idle_timeout = std::chrono::seconds(60));
+        ~http_client_pool();
+
+        http_client_pool(http_client_pool const&) = delete;
+        http_client_pool& operator=(http_client_pool const&) = delete;
+
+        std::future<client_handle> acquire(std::string_view host, uint16_t port, bool ssl = false);
+
+        net::awaitable<client_handle> async_acquire(std::string_view host, uint16_t port, bool ssl = false);
+
+        net::any_io_executor get_executor() noexcept;
+
+        void set_max_size(size_t n);
+        void set_idle_timeout(std::chrono::seconds timeout);
+
+        void stop();
+
+        pool_stats stats(std::string_view host, uint16_t port, bool ssl = false) const;
+
+      private:
+        std::shared_ptr<impl> impl_;
     };
-
-    struct pool_stats
-    {
-        size_t idle   = 0;
-        size_t active = 0;
-    };
-
-public:
-    explicit http_client_pool(const net::any_io_executor& ex,
-                              size_t max_size                   = 10,
-                              std::chrono::seconds idle_timeout = std::chrono::seconds(60));
-    ~http_client_pool();
-
-    http_client_pool(const http_client_pool&)            = delete;
-    http_client_pool& operator=(const http_client_pool&) = delete;
-
-    std::future<client_handle> acquire(std::string_view host, uint16_t port, bool ssl = false);
-
-    net::awaitable<client_handle> async_acquire(std::string_view host,
-                                                uint16_t port,
-                                                bool ssl = false);
-
-    net::any_io_executor get_executor() noexcept;
-
-    void set_max_size(size_t n);
-    void set_idle_timeout(std::chrono::seconds timeout);
-
-    void stop();
-
-    pool_stats stats(std::string_view host, uint16_t port, bool ssl = false) const;
-
-private:
-    std::shared_ptr<impl> impl_;
-};
 
 } // namespace httplib::client

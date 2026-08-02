@@ -37,8 +37,7 @@ TEST_CASE("Compressor: gzip encode/decode roundtrip", "[compressor]")
     encoder->init(httplib::compress::compressor::mode::encode);
     encoder->write(boost::asio::buffer(original), false);
     auto compressed_buf = encoder->buffer();
-    std::string compressed(
-        static_cast<const char*>(compressed_buf.data()), compressed_buf.size());
+    std::string compressed(static_cast<char const*>(compressed_buf.data()), compressed_buf.size());
     REQUIRE_FALSE(compressed.empty());
 
     auto decoder = factory.create("gzip");
@@ -46,9 +45,7 @@ TEST_CASE("Compressor: gzip encode/decode roundtrip", "[compressor]")
     decoder->init(httplib::compress::compressor::mode::decode);
     decoder->write(boost::asio::buffer(compressed), false);
     auto decompressed_buf = decoder->buffer();
-    std::string decompressed(
-        static_cast<const char*>(decompressed_buf.data()),
-        decompressed_buf.size());
+    std::string decompressed(static_cast<char const*>(decompressed_buf.data()), decompressed_buf.size());
 
     REQUIRE(decompressed == original);
 }
