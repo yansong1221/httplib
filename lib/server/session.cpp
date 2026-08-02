@@ -4,9 +4,9 @@
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
+#include "relay_writer_impl.hpp"
 #include "request_impl.hpp"
 #include "response_impl.hpp"
-#include "streaming/buffer_body_writer_impl.hpp"
 #include "streaming/chunk_writer_impl.hpp"
 #include "websocket_conn_impl.hpp"
 #include <boost/asio/experimental/awaitable_operators.hpp>
@@ -219,7 +219,9 @@ net::awaitable<session::task::ptr> session::http_task::then()
         }
 
         auto resp = response::impl::make_response(header.version(), header.keep_alive());
-        auto req  = request::impl::make_request(
+        resp.get_impl()->relay_writer_ =
+            std::make_unique<relay_writer_impl>(*resp.get_impl(), stream_, serv_.write_timeout());
+        auto req = request::impl::make_request(
             local_endp, remote_endp, http::request<http::empty_body>(header));
 
         auto h_start    = std::chrono::steady_clock::time_point {};
@@ -343,13 +345,15 @@ void session::http_task::abort()
 
 net::awaitable<bool> session::http_task::async_write(const request& req, response& resp)
 {
+    if (resp.get_impl()->relay_used_)
+        co_return true;
+
     auto& chunked_write_handler = resp.get_impl()->chunked_write_handler_;
-    auto& buffer_body_handler   = resp.get_impl()->buffer_body_write_handler_;
 
     if (chunked_write_handler) {
         resp.get_impl()->chunked(true);
     }
-    else if (!buffer_body_handler) {
+    else {
         if (!resp.get_impl()->has_content_length())
             resp.get_impl()->prepare_payload();
 
@@ -393,28 +397,6 @@ net::awaitable<bool> session::http_task::async_write(const request& req, respons
         streaming::chunk_writer_impl writer(stream_, serv_.write_timeout());
         co_await chunked_write_handler(writer);
         co_await writer.close();
-    }
-    else if (buffer_body_handler) {
-        http::response<http::buffer_body> relay_msg(*resp.get_impl());
-        //for (const auto& f : (*resp.get_impl()))
-        //    relay_msg.set(f.name_string(), f.value());
-        //relay_msg.result(resp.get_impl()->result());
-        //relay_msg.keep_alive(resp.get_impl()->keep_alive());
-        //relay_msg.version(resp.get_impl()->version());
-
-        http::response_serializer<http::buffer_body> relay_sr(relay_msg);
-
-        stream_.expires_after(serv_.write_timeout());
-        co_await http::async_write_header(stream_, relay_sr, util::net_awaitable[ec]);
-        stream_.expires_never();
-        if (ec) {
-            serv_.logger()->trace("write http header failed: {}", ec.message());
-            co_return false;
-        }
-
-        streaming::buffer_body_writer_impl writer(
-            stream_, relay_msg, relay_sr, serv_.write_timeout());
-        co_await buffer_body_handler(writer);
     }
     else {
         while (!serializer.is_done())

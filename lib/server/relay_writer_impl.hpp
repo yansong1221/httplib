@@ -1,0 +1,69 @@
+#pragma once
+#include "httplib/server/relay_writer.hpp"
+#include "httplib/util/use_awaitable.hpp"
+#include "response_impl.hpp"
+#include "stream/http_stream.hpp"
+#include <boost/beast/http/buffer_body.hpp>
+#include <boost/beast/http/serializer.hpp>
+#include <boost/beast/http/write.hpp>
+#include <memory>
+
+namespace httplib::server {
+
+class relay_writer_impl : public relay_writer
+{
+public:
+    relay_writer_impl(response::impl& resp,
+                      http_stream& stream,
+                      std::chrono::steady_clock::duration write_timeout)
+        : resp_(&resp)
+        , stream_(&stream)
+        , write_timeout_(write_timeout)
+    {
+    }
+
+    net::awaitable<void> write_header(http::status status, const http::fields& headers) override
+    {
+        resp_->relay_used_ = true;
+        resp_->result(status);
+        for (const auto& f : headers)
+            resp_->set(f.name_string(), f.value());
+        resp_->body() = body::empty_body::value_type {};
+
+        msg_ = std::make_unique<http::response<http::buffer_body>>(*resp_);
+        sr_  = std::make_unique<http::response_serializer<http::buffer_body>>(*msg_);
+
+        boost::system::error_code ec;
+        stream_->expires_after(write_timeout_);
+        co_await http::async_write_header(*stream_, *sr_, util::net_awaitable[ec]);
+        stream_->expires_never();
+        if (ec)
+            throw boost::system::system_error(ec);
+    }
+
+    net::awaitable<void> write_body(const net::const_buffer& data, bool more) override
+    {
+        msg_->body().data = (void*)data.data();
+        msg_->body().size = data.size();
+        msg_->body().more = more;
+
+        boost::system::error_code ec;
+        stream_->expires_after(write_timeout_);
+        co_await http::async_write(*stream_, *sr_, util::net_awaitable[ec]);
+        stream_->expires_never();
+        if (ec == http::error::need_buffer) {
+            ec = {};
+        }
+        if (ec)
+            throw boost::system::system_error(ec);
+    }
+
+private:
+    response::impl* resp_;
+    http_stream* stream_;
+    std::chrono::steady_clock::duration write_timeout_;
+    std::unique_ptr<http::response<http::buffer_body>> msg_;
+    std::unique_ptr<http::response_serializer<http::buffer_body>> sr_;
+};
+
+} // namespace httplib::server

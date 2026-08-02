@@ -1,7 +1,8 @@
 #pragma once
 #include "html/html.h"
-#include "httplib/streaming/chunk_writer.hpp"
+#include "httplib/server/relay_writer.hpp"
 #include "httplib/server/response.hpp"
+#include "httplib/streaming/chunk_writer.hpp"
 #include "util/mime_types.hpp"
 #include <boost/beast/version.hpp>
 #include <fmt/format.h>
@@ -189,23 +190,10 @@ public:
         this->body() = body::empty_body::value_type {};
     }
 
-    void set_buffer_body_write_handler(response::buffer_body_write_handler_type&& handler,
-                                       const http::fields& headers,
-                                       http::status status = http::status::ok)
-    {
-        reset_content();
-        buffer_body_write_handler_ = std::move(handler);
-        for (const auto& f : headers)
-            this->set(f.name_string(), f.value());
-        this->result(status);
-        this->body() = body::empty_body::value_type {};
-    }
-
     void reset_content()
     {
-        chunked_write_handler_     = nullptr;
-        buffer_body_write_handler_ = nullptr;
-        this->body()               = body::empty_body::value_type {};
+        chunked_write_handler_ = nullptr;
+        this->body()           = body::empty_body::value_type {};
     }
 
     static response make_response(unsigned int version, bool keep_alive)
@@ -215,7 +203,8 @@ public:
     }
 
     response::chunked_write_handler_type chunked_write_handler_;
-    response::buffer_body_write_handler_type buffer_body_write_handler_;
+    std::unique_ptr<relay_writer> relay_writer_;
+    bool relay_used_ = false;
 };
 
 } // namespace httplib::server

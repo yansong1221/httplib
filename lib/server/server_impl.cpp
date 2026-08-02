@@ -330,17 +330,20 @@ void http_server::impl::set_reverse_proxy(std::string_view key,
             const auto& headers = client->relay().headers();
             const auto result   = client->relay().result();
 
-            std::string newbody;
+            co_await resp.relay().write_header(result, headers);
+
+            //std::string newbody;
             {
                 while (true) {
                     auto bytes = co_await client->relay().read_body(net::buffer(relay_buf));
+                    co_await resp.relay().write_body(net::buffer(relay_buf, bytes), bytes != 0);
                     if (bytes == 0)
                         break;
-                    newbody.append(relay_buf.data(), bytes);
+                    //newbody.append(relay_buf.data(), bytes);
                 }
             }
 
-            resp.set_string_content(newbody, headers[httplib::http::field::content_type], result);
+            //resp.set_string_content(newbody, headers[httplib::http::field::content_type], result);
 
             // resp.set_buffer_body_write_handler(
             //     [client = std::move(client), relay_buf = std::move(relay_buf)](

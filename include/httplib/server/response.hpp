@@ -2,6 +2,7 @@
 #include "httplib/body/any_body.hpp"
 #include "httplib/config.hpp"
 #include "httplib/html/form_data.hpp"
+#include "httplib/server/relay_writer.hpp"
 #include "httplib/streaming/buffer_body_writer.hpp"
 #include "httplib/streaming/chunk_writer.hpp"
 #include "httplib/streaming/ndjson_writer.hpp"
@@ -72,17 +73,13 @@ public:
                                    std::string_view content_type,
                                    http::status status = http::status::ok);
 
-    using buffer_body_write_handler_type =
-        std::move_only_function<net::awaitable<void>(httplib::streaming::buffer_body_writer&)>;
-    void set_buffer_body_write_handler(buffer_body_write_handler_type&& handler,
-                                       const http::fields& headers,
-                                       http::status status = http::status::ok);
-
     using sse_write_handler_type = std::function<net::awaitable<void>(httplib::sse_writer&)>;
     void set_sse_write_handler(sse_write_handler_type&& handler);
 
     using ndjson_write_handler_type = std::function<net::awaitable<void>(httplib::ndjson_writer&)>;
     void set_ndjson_write_handler(ndjson_write_handler_type&& handler);
+
+    relay_writer& relay();
 
     impl* get_impl();
     const impl* get_impl() const;

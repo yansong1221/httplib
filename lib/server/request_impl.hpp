@@ -83,7 +83,7 @@ public:
     struct buffer_body_read_ctx
     {
         std::shared_ptr<http::request_parser<http::buffer_body>> parser;
-        detail::buffer_body_reader<true> reader;
+        httplib::detail::buffer_body_reader<true> reader;
     };
 
     struct chunk_read_ctx

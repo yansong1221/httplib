@@ -131,13 +131,6 @@ void response::set_chunked_write_handler(response::chunked_write_handler_type&& 
     impl_->set_chunked_write_handler(std::move(handler), content_type, status);
 }
 
-void response::set_buffer_body_write_handler(buffer_body_write_handler_type&& handler,
-                                             const http::fields& headers,
-                                             http::status status /*= http::status::ok*/)
-{
-    impl_->set_buffer_body_write_handler(std::move(handler), headers, status);
-}
-
 void response::set_sse_write_handler(sse_write_handler_type&& handler)
 {
     impl_->set_chunked_write_handler(
@@ -156,6 +149,11 @@ void response::set_ndjson_write_handler(ndjson_write_handler_type&& handler)
             co_await handler(ndjson);
         },
         "application/x-ndjson");
+}
+
+relay_writer& response::relay()
+{
+    return *impl_->relay_writer_;
 }
 
 httplib::server::response::impl* response::get_impl()
