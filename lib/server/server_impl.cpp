@@ -367,7 +367,10 @@ namespace httplib::server
 
                 auto client = co_await proxy_pool_->async_acquire(upstream_host, upstream_port, upstream_ssl);
 
-                auto rel_ec = co_await client->relay().write_header(req.method(), target, upstream_headers);
+                auto& writer = client->writer();
+                auto reader = client->reader();
+
+                auto rel_ec = co_await writer.write_header(req.method(), target, upstream_headers);
                 if (rel_ec)
                 {
                     logger()->warn("relay write_header failed: {}", rel_ec.message());
@@ -380,7 +383,7 @@ namespace httplib::server
                     while (true)
                     {
                         auto bytes = co_await req.read_buffer_body_some(net::buffer(relay_buf));
-                        rel_ec = co_await client->relay().write_body(net::buffer(relay_buf, bytes), bytes != 0);
+                        rel_ec = co_await writer.write_body(net::buffer(relay_buf, bytes), bytes != 0);
                         if (rel_ec)
                         {
                             logger()->warn("relay write_body failed: {}", rel_ec.message());
@@ -394,7 +397,7 @@ namespace httplib::server
                     }
                 }
 
-                rel_ec = co_await client->relay().read_header();
+                rel_ec = co_await reader->read_header();
                 if (rel_ec)
                 {
                     logger()->warn("relay read_header failed: {}", rel_ec.message());
@@ -402,8 +405,8 @@ namespace httplib::server
                     co_return;
                 }
 
-                auto const& headers = client->relay().headers();
-                auto const result = client->relay().result();
+                auto const& headers = reader->headers();
+                auto const result = reader->result();
 
                 rel_ec = co_await resp.relay().write_header(result, headers);
                 if (rel_ec)
@@ -414,7 +417,7 @@ namespace httplib::server
 
                 while (true)
                 {
-                    auto bytes_result = co_await client->relay().read_body(net::buffer(relay_buf));
+                    auto bytes_result = co_await reader->read_body(net::buffer(relay_buf));
                     if (bytes_result.has_error())
                     {
                         break;

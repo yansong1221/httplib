@@ -237,10 +237,16 @@ namespace httplib::client
         co_return co_await impl_->async_send_request_with_redirect(req, nullptr, std::move(handler));
     }
 
-    relay_session&
-    http_client::relay()
+    write_session&
+    http_client::writer()
     {
-        return impl_->session();
+        return impl_->write_session();
+    }
+
+    std::shared_ptr<read_session>
+    http_client::reader()
+    {
+        return impl_->read_session();
     }
 
     http_client::response_result

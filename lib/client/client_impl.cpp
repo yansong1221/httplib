@@ -1,10 +1,12 @@
 #include "client_impl.h"
 #include "compress/compressor.hpp"
 #include "httplib/util/use_awaitable.hpp"
+#include "read_session_impl.hpp"
 #include "streaming/chunk_reader_impl.hpp"
 #include "streaming/chunk_writer_impl.hpp"
 #include "streaming/ndjson_reader_impl.hpp"
 #include "streaming/sse_reader_impl.hpp"
+#include "write_session_impl.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/write.hpp>
@@ -38,144 +40,7 @@ namespace httplib::client
             return std::string(host);
         }
 
-        static http::field const hop_by_hop_fields[] = {
-            http::field::connection,
-            http::field::keep_alive,
-            http::field::transfer_encoding,
-            http::field::te,
-            http::field::trailer,
-            http::field::proxy_authorization,
-            http::field::proxy_authenticate,
-            http::field::upgrade,
-        };
-
-        static bool
-        is_hop_by_hop(http::field f)
-        {
-            for (auto hf : hop_by_hop_fields)
-            {
-                if (f == hf)
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
-
     } // namespace detail
-
-    class http_client::impl::relay_impl final : public relay_session
-    {
-      public:
-        explicit relay_impl(http_client::impl& parent) : parent_(parent) {}
-
-        net::awaitable<boost::system::error_code>
-        write_header(http::verb method, std::string_view target, http::fields const& headers) override
-        {
-            req_msg_ = std::make_unique<http::request<http::buffer_body>>(method, target, 11);
-            req_sr_ = std::make_unique<http::request_serializer<http::buffer_body>>(*req_msg_);
-            req_msg_->set(http::field::host, parent_.host_value_);
-            req_msg_->set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
-            req_msg_->keep_alive(true);
-
-            for (auto const& f : headers)
-            {
-                if (!detail::is_hop_by_hop(f.name()))
-                {
-                    req_msg_->set(f.name_string(), f.value());
-                }
-            }
-
-            co_return co_await parent_.async_write(*req_sr_, true);
-        }
-
-      private:
-        net::awaitable<boost::system::error_code>
-        write_body(net::const_buffer const& data, bool more) override
-        {
-            auto& body = req_msg_->body();
-            body.data = (void*)data.data();
-            body.size = data.size();
-            body.more = more;
-
-            auto ec = co_await parent_.async_write(*req_sr_, false, false);
-            if (ec == http::error::need_buffer)
-            {
-                ec = {};
-            }
-            co_return ec;
-        }
-
-        net::awaitable<boost::system::error_code>
-        read_header() override
-        {
-            resp_parser_ = std::make_unique<http::response_parser<http::buffer_body>>();
-            resp_parser_->body_limit((std::numeric_limits<std::uint64_t>::max)());
-            resp_parser_->header_limit((std::numeric_limits<std::uint32_t>::max)());
-
-            parent_.buffer_.clear();
-            co_return co_await parent_.async_read(*resp_parser_, true);
-        }
-
-        http::status
-        result() const override
-        {
-            return resp_parser_->get().result();
-        }
-
-        http::fields const&
-        headers() const override
-        {
-            return resp_parser_->get();
-        }
-
-        net::awaitable<boost::system::result<std::size_t>>
-        read_body(net::mutable_buffer const& buffer) override
-        {
-            if (!resp_parser_->is_header_done())
-            {
-                co_return 0;
-            }
-
-            for (;;)
-            {
-                auto& body = resp_parser_->get().body();
-                body.data = buffer.data();
-                body.size = buffer.size();
-
-                auto ec = co_await parent_.async_read(*resp_parser_, false);
-                if (ec == http::error::need_buffer)
-                {
-                    ec = {};
-                }
-                if (ec)
-                {
-                    co_return ec;
-                }
-
-                auto consumed = buffer.size() - body.size;
-                if (consumed > 0)
-                {
-                    co_return consumed;
-                }
-
-                if (resp_parser_->is_done())
-                {
-                    parent_.finish_io();
-                    if (!resp_parser_->keep_alive())
-                    {
-                        parent_.close();
-                    }
-                    co_return 0;
-                }
-            }
-        }
-
-        http_client::impl& parent_;
-        std::unique_ptr<http::request<http::buffer_body>> req_msg_;
-        std::unique_ptr<http::request_serializer<http::buffer_body>> req_sr_;
-        std::unique_ptr<http::response_parser<http::buffer_body>> resp_parser_;
-    };
 
     http_client::impl::impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl)
 
@@ -185,7 +50,6 @@ namespace httplib::client
         , host_value_(detail::make_host_value(host, port, ssl))
         , port_(port)
         , use_ssl_(ssl)
-        , relay_(std::make_unique<relay_impl>(*this))
     {
         auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
         spdlog::sinks_init_list sink_list = { console_sink };
@@ -468,6 +332,11 @@ namespace httplib::client
     net::awaitable<http_client::response_result>
     http_client::impl::co_read_response(body_setup_fn const& body_setup /*= {}*/, bool is_head /*= false*/)
     {
+        if (!read_impl_.expired())
+        {
+            co_return http_client::response {};
+        }
+
         boost::system::error_code ec;
         http::response_parser<body::any_body> parser;
         parser.skip(is_head);
@@ -584,10 +453,26 @@ namespace httplib::client
         co_return result;
     }
 
-    relay_session&
-    http_client::impl::session()
+    write_session&
+    http_client::impl::write_session()
     {
-        return *relay_;
+        auto sp = write_impl_.lock();
+        if (!sp) {
+            sp = std::make_shared<write_session_impl>(*this);
+            write_impl_ = sp;
+        }
+        return *sp;
+    }
+
+    std::shared_ptr<read_session>
+    http_client::impl::read_session()
+    {
+        auto sp = read_impl_.lock();
+        if (!sp) {
+            sp = std::make_shared<read_session_impl>(*this);
+            read_impl_ = sp;
+        }
+        return sp;
     }
 
 } // namespace httplib::client

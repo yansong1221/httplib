@@ -16,7 +16,8 @@ namespace httplib::client
     class http_client::impl
     {
       public:
-        class relay_impl;
+        class read_session_impl;
+        class write_session_impl;
 
         using body_setup_fn = std::function<void(http_client::response&)>;
 
@@ -70,7 +71,8 @@ namespace httplib::client
         net::awaitable<http_client::response_result> async_download(http_client::request& req,
                                                                     fs::path const& save_path);
 
-        relay_session& session();
+        write_session& write_session();
+        std::shared_ptr<read_session> read_session();
 
       private:
         net::awaitable<boost::system::error_code> co_connect();
@@ -152,7 +154,8 @@ namespace httplib::client
         std::unique_ptr<http_stream> stream_;
         mutable std::recursive_mutex stream_mutex_;
         beast::flat_buffer buffer_;
-        std::unique_ptr<relay_impl> relay_;
+        std::weak_ptr<write_session_impl> write_impl_;
+        std::weak_ptr<read_session_impl> read_impl_;
 
         chunked_read_handler_type chunked_read_handler_;
         sse_read_handler_type sse_read_handler_;

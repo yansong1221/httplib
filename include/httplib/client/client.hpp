@@ -1,6 +1,7 @@
 #pragma once
 #include "httplib/body/any_body.hpp"
-#include "httplib/client/relay_session.hpp"
+#include "httplib/client/read_session.hpp"
+#include "httplib/client/write_session.hpp"
 #include "httplib/config.hpp"
 #include "httplib/streaming/chunk_reader.hpp"
 #include "httplib/streaming/chunk_writer.hpp"
@@ -250,7 +251,8 @@ namespace httplib::client
                                              html::query_params const& params = {},
                                              http::fields const& headers = http::fields());
 
-        relay_session& relay();
+        write_session& writer();
+        std::shared_ptr<read_session> reader();
 
         // ---- send_request (sync, body-type overloads) ----
 
