@@ -125,9 +125,9 @@ void http_server::set_upload_file_limit(std::uint64_t max_bytes)
 }
 
 void http_server::set_reverse_proxy(std::string_view key,
-                                     std::string_view upstream_host,
-                                     uint16_t upstream_port,
-                                     bool upstream_ssl)
+                                    std::string_view upstream_host,
+                                    uint16_t upstream_port,
+                                    bool upstream_ssl)
 {
     impl_->set_reverse_proxy(key, upstream_host, upstream_port, upstream_ssl);
 }

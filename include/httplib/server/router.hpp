@@ -23,16 +23,15 @@ public:
     set_http_handler(http::verb method, std::string_view key, Func&& handler, Aspects&&... asps);
 
     template<http::verb... method, typename Func, typename... Aspects>
-    void set_http_handler(std::string_view key, Func&& handler, Aspects&&... asps)
+    void set_http_handler(std::string_view key, Func handler, Aspects&&... asps)
     {
         static_assert(sizeof...(method) >= 1, "must set method");
-        (set_http_handler(method, key, std::forward<Func>(handler), std::forward<Aspects>(asps)...),
-         ...);
+        (set_http_handler(method, key, handler, std::forward<Aspects>(asps)...), ...);
     }
     template<http::verb... method, typename Func, typename... Aspects>
         requires std::is_member_function_pointer_v<Func>
     void set_http_handler(std::string_view key,
-                          Func&& handler,
+                          Func handler,
                           util::class_type_t<Func>& owner,
                           Aspects&&... asps);
 
@@ -57,30 +56,26 @@ public:
     void set_chunked_http_handler(http::verb method,
                                   std::string_view key,
                                   Func&& handler,
-                                  Aspects&&... asps);
+                                  Aspects... asps);
 
     template<http::verb... method, typename Func, typename... Aspects>
-    void set_chunked_http_handler(std::string_view key, Func&& handler, Aspects&&... asps)
+    void set_chunked_http_handler(std::string_view key, Func handler, Aspects&&... asps)
     {
         static_assert(sizeof...(method) >= 1, "must set method");
-        (set_chunked_http_handler(
-             method, key, std::forward<Func>(handler), std::forward<Aspects>(asps)...),
-         ...);
+        (set_chunked_http_handler(method, key, handler, std::forward<Aspects>(asps)...), ...);
     }
 
     template<typename Func, typename... Aspects>
     void set_buffer_body_http_handler(http::verb method,
-                                 std::string_view key,
-                                 Func&& handler,
-                                 Aspects&&... asps);
+                                      std::string_view key,
+                                      Func&& handler,
+                                      Aspects... asps);
 
     template<http::verb... method, typename Func, typename... Aspects>
-    void set_buffer_body_http_handler(std::string_view key, Func&& handler, Aspects&&... asps)
+    void set_buffer_body_http_handler(std::string_view key, Func handler, Aspects&&... asps)
     {
         static_assert(sizeof...(method) >= 1, "must set method");
-        (set_buffer_body_http_handler(
-             method, key, std::forward<Func>(handler), std::forward<Aspects>(asps)...),
-         ...);
+        (set_buffer_body_http_handler(method, key, handler, std::forward<Aspects>(asps)...), ...);
     }
 
     template<typename Func>
@@ -110,8 +105,8 @@ protected:
                                                coro_http_handler_type&& handler) = 0;
 
     virtual void set_buffer_body_http_handler_impl(http::verb method,
-                                               std::string_view key,
-                                               coro_http_handler_type&& handler) = 0;
+                                                   std::string_view key,
+                                                   coro_http_handler_type&& handler) = 0;
 };
 
 } // namespace httplib::server

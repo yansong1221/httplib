@@ -58,11 +58,14 @@ bool is_hop_by_hop(http::field f)
 class http_client::impl::relay_impl final : public relay_session
 {
 public:
-    explicit relay_impl(http_client::impl& parent) : parent_(parent) {}
+    explicit relay_impl(http_client::impl& parent)
+        : parent_(parent)
+    {
+    }
 
     net::awaitable<void> write_header(http::verb method,
-                                        std::string_view target,
-                                        const http::fields& headers) override
+                                      std::string_view target,
+                                      const http::fields& headers) override
     {
         req_msg_ = std::make_unique<http::request<http::buffer_body>>(method, target, 11);
         req_sr_  = std::make_unique<http::request_serializer<http::buffer_body>>(*req_msg_);
@@ -346,28 +349,34 @@ void http_client::impl::expires_after(bool first /*= false*/)
     }
 }
 
-net::awaitable<void> http_client::impl::co_connect()
+net::awaitable<boost::system::error_code> http_client::impl::co_connect()
 {
-    std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
-    if (!is_open()) {
-        close();
-        stream_ = std::make_unique<http_stream>(executor_, host_, use_ssl_);
-        lck.unlock();
+    try {
+        std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
+        if (!is_open()) {
+            close();
+            stream_ = std::make_unique<http_stream>(executor_, host_, use_ssl_);
+            lck.unlock();
 
-        boost::system::error_code ec;
-        auto addr = net::ip::make_address(host_, ec);
-        if (!ec) {
-            expires_after(true);
-            co_await stream_->async_connect(tcp::endpoint(addr, port_));
+            boost::system::error_code ec;
+            auto addr = net::ip::make_address(host_, ec);
+            if (!ec) {
+                expires_after(true);
+                co_await stream_->async_connect(tcp::endpoint(addr, port_));
+            }
+            else {
+                auto endpoints = co_await resolver_.async_resolve(
+                    host_, std::to_string(port_), net::use_awaitable);
+                expires_after(true);
+                co_await stream_->async_connect(endpoints);
+            }
         }
-        else {
-            auto endpoints =
-                co_await resolver_.async_resolve(host_, std::to_string(port_), net::use_awaitable);
-            expires_after(true);
-            co_await stream_->async_connect(endpoints);
-        }
+        expires_after();
+        co_return boost::system::error_code {};
     }
-    expires_after();
+    catch (const boost::system::system_error& e) {
+        co_return e.code();
+    }
 }
 
 net::awaitable<http_client::response> http_client::impl::co_read_response(

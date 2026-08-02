@@ -51,7 +51,9 @@ void http_server::impl::listen(std::string_view host,
 }
 
 net::any_io_executor http_server::impl::get_executor() noexcept
-{ return ex_; }
+{
+    return ex_;
+}
 
 std::shared_future<boost::system::error_code> http_server::impl::run()
 {
@@ -104,7 +106,9 @@ httplib::net::awaitable<void> http_server::impl::async_stop()
 }
 
 router_impl& http_server::impl::router()
-{ return router_; }
+{
+    return router_;
+}
 
 net::awaitable<boost::system::error_code> http_server::impl::async_run()
 {
@@ -177,16 +181,24 @@ net::awaitable<void> http_server::impl::handle_accept(tcp::socket sock)
 }
 
 void http_server::impl::set_read_timeout(const std::chrono::steady_clock::duration& dur)
-{ read_timeout_ = dur; }
+{
+    read_timeout_ = dur;
+}
 
 void http_server::impl::set_write_timeout(const std::chrono::steady_clock::duration& dur)
-{ write_timeout_ = dur; }
+{
+    write_timeout_ = dur;
+}
 
 std::chrono::steady_clock::duration http_server::impl::read_timeout() const
-{ return read_timeout_; }
+{
+    return read_timeout_;
+}
 
 std::chrono::steady_clock::duration http_server::impl::write_timeout() const
-{ return write_timeout_; }
+{
+    return write_timeout_;
+}
 
 tcp::endpoint http_server::impl::local_endpoint() const
 {
@@ -202,10 +214,14 @@ std::shared_ptr<spdlog::logger> http_server::impl::logger() const
 }
 
 void http_server::impl::set_logger(std::shared_ptr<spdlog::logger> logger)
-{ custom_logger_ = logger; }
+{
+    custom_logger_ = logger;
+}
 
 void http_server::impl::set_compress_content_types(std::function<bool(std::string_view)> predicate)
-{ compress_content_type_predicate_ = std::move(predicate); }
+{
+    compress_content_type_predicate_ = std::move(predicate);
+}
 
 static bool default_compress_content_type(std::string_view content_type)
 {

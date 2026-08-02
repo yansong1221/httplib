@@ -63,7 +63,7 @@ public:
 
 
 private:
-    net::awaitable<void> co_connect();
+    [[nodiscard]] net::awaitable<boost::system::error_code> co_connect();
     net::awaitable<http_client::response> co_read_response(const body_setup_fn& body_setup = {},
                                                            bool is_head                    = false);
 
@@ -103,21 +103,21 @@ private:
     async_write(http::request_serializer<Body>& serializer, bool headers_only, bool retry = true)
     {
         boost::system::error_code ec;
-        try {
-            co_await co_connect();
-
-            serializer.split(headers_only);
-            while (headers_only ? !serializer.is_header_done() : !serializer.is_done()) {
-                expires_after();
-                co_await http::async_write_some(*stream_, serializer, util::net_awaitable[ec]);
-                if (ec)
-                    break;
-            }
+        ec = co_await co_connect();
+        if (ec) {
+            logger()->warn("connect [{}:{}] error {}", host_, std::to_string(port_), ec.message());
             co_return ec;
         }
-        catch (...) {
-            ec = handle_exception(std::current_exception());
+
+        serializer.split(headers_only);
+        while (headers_only ? !serializer.is_header_done() : !serializer.is_done()) {
+            expires_after();
+            co_await http::async_write_some(*stream_, serializer, util::net_awaitable[ec]);
+            if (ec)
+                break;
         }
+        co_return ec;
+
 
         if (is_retryable(ec) && retry) {
             logger()->trace("retrying request...");
@@ -145,10 +145,11 @@ public:
     tcp::resolver resolver_;
     timeout_policy timeout_policy_               = timeout_policy::overall;
     std::chrono::steady_clock::duration timeout_ = std::chrono::seconds(30);
-    std::string host_;
-    std::string host_value_;
-    uint16_t port_ = 0;
-    bool use_ssl_  = false;
+
+    const std::string host_;
+    const std::string host_value_;
+    const uint16_t port_;
+    const bool use_ssl_;
 
     std::unique_ptr<http_stream> stream_;
     mutable std::recursive_mutex stream_mutex_;

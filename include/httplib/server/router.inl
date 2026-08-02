@@ -122,7 +122,7 @@ void router::set_http_handler(http::verb method,
 template<http::verb... method, typename Func, typename... Aspects>
     requires std::is_member_function_pointer_v<Func>
 void router::set_http_handler(std::string_view key,
-                              Func&& handler,
+                              Func handler,
                               util::class_type_t<Func>& owner,
                               Aspects&&... asps)
 {
@@ -188,7 +188,7 @@ template<typename Func, typename... Aspects>
 void router::set_chunked_http_handler(http::verb method,
                                       std::string_view key,
                                       Func&& handler,
-                                      Aspects&&... asps)
+                                      Aspects... asps)
 {
     set_chunked_http_handler_impl(
         method,
@@ -198,9 +198,9 @@ void router::set_chunked_http_handler(http::verb method,
 
 template<typename Func, typename... Aspects>
 void router::set_buffer_body_http_handler(http::verb method,
-                                     std::string_view key,
-                                     Func&& handler,
-                                     Aspects&&... asps)
+                                          std::string_view key,
+                                          Func&& handler,
+                                          Aspects... asps)
 {
     set_buffer_body_http_handler_impl(
         method,

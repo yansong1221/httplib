@@ -63,11 +63,9 @@ public:
                            bool upstream_ssl = false);
 
     void set_ssl(const std::span<const char>& cert_file,
-                  const std::span<const char>& key_file,
-                  std::string passwd = {});
-    void set_ssl_file(const fs::path& cert_file,
-                       const fs::path& key_file,
-                       std::string passwd = {});
+                 const std::span<const char>& key_file,
+                 std::string passwd = {});
+    void set_ssl_file(const fs::path& cert_file, const fs::path& key_file, std::string passwd = {});
     impl* get_impl();
     const impl* get_impl() const;
 
