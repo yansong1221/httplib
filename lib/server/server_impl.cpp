@@ -313,33 +313,53 @@ void http_server::impl::set_reverse_proxy(std::string_view key,
             auto client =
                 co_await proxy_pool_->async_acquire(upstream_host, upstream_port, upstream_ssl);
 
-            co_await client->relay().write_header(req.method(), target, upstream_headers);
+            auto rel_ec =
+                co_await client->relay().write_header(req.method(), target, upstream_headers);
+            if (rel_ec) {
+                logger()->warn("relay write_header failed: {}", rel_ec.message());
+                resp.set_error_content(http::status::bad_gateway);
+                co_return;
+            }
 
             std::array<char, 8192> relay_buf {};
             {
                 while (true) {
                     auto bytes = co_await req.read_buffer_body_some(net::buffer(relay_buf));
-                    co_await client->relay().write_body(net::buffer(relay_buf, bytes), bytes != 0);
+                    rel_ec =
+                        co_await client->relay().write_body(net::buffer(relay_buf, bytes),
+                                                            bytes != 0);
+                    if (rel_ec) {
+                        logger()->warn("relay write_body failed: {}", rel_ec.message());
+                        resp.set_error_content(http::status::bad_gateway);
+                        co_return;
+                    }
                     if (bytes == 0)
                         break;
                 }
             }
 
-            co_await client->relay().read_header();
+            rel_ec = co_await client->relay().read_header();
+            if (rel_ec) {
+                logger()->warn("relay read_header failed: {}", rel_ec.message());
+                resp.set_error_content(http::status::bad_gateway);
+                co_return;
+            }
 
             const auto& headers = client->relay().headers();
             const auto result   = client->relay().result();
 
             co_await resp.relay().write_header(result, headers);
 
-            //std::string newbody;
             {
                 while (true) {
-                    auto bytes = co_await client->relay().read_body(net::buffer(relay_buf));
+                    auto bytes_result =
+                        co_await client->relay().read_body(net::buffer(relay_buf));
+                    if (bytes_result.has_error())
+                        break;
+                    auto bytes = bytes_result.value();
                     co_await resp.relay().write_body(net::buffer(relay_buf, bytes), bytes != 0);
                     if (bytes == 0)
                         break;
-                    //newbody.append(relay_buf.data(), bytes);
                 }
             }
 

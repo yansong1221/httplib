@@ -317,15 +317,11 @@ http_client_pool::client_handle::~client_handle()
 
 http_client* http_client_pool::client_handle::get()
 {
-    if (!conn_)
-        throw boost::system::system_error(error_);
     return conn_.get();
 }
 
 const http_client* http_client_pool::client_handle::get() const
 {
-    if (!conn_)
-        throw boost::system::system_error(error_);
     return conn_.get();
 }
 

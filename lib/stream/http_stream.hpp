@@ -4,8 +4,10 @@
 #include "ssl_stream.hpp"
 #endif
 #include "boost/asio/use_awaitable.hpp"
+#include "httplib/util/use_awaitable.hpp"
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core/basic_stream.hpp>
+#include <boost/system/result.hpp>
 
 namespace httplib {
 
@@ -110,26 +112,31 @@ public:
     }
 
     template<typename EndPoints>
-    net::awaitable<void> async_connect(EndPoints&& endpoints)
+    net::awaitable<boost::system::error_code> async_connect(EndPoints&& endpoints)
     {
+        boost::system::error_code ec;
         co_await std::visit(
             [&](auto& t) -> net::awaitable<void> {
                 using stream_type = std::decay_t<decltype(t)>;
 #ifdef HTTPLIB_ENABLED_SSL
                 if constexpr (std::is_same_v<stream_type, http_stream::tls_stream>) {
-                    co_await t.next_layer().async_connect(endpoints, net::use_awaitable);
-                    co_await t.async_handshake(ssl::stream_base::client, net::use_awaitable);
+                    co_await t.next_layer().async_connect(endpoints, util::net_awaitable[ec]);
+                    if (ec) co_return;
+                    co_await t.async_handshake(ssl::stream_base::client, util::net_awaitable[ec]);
+                    co_return;
                 }
 #endif
                 if constexpr (std::is_same_v<stream_type, http_stream::plain_stream>) {
-                    co_await t.async_connect(endpoints, net::use_awaitable);
+                    co_await t.async_connect(endpoints, util::net_awaitable[ec]);
                 }
             },
             stream_);
 
-        net::socket_base::reuse_address option(true);
-        socket().set_option(option);
-        co_return;
+        if (!ec) {
+            net::socket_base::reuse_address option(true);
+            socket().set_option(option);
+        }
+        co_return ec;
     }
 
     auto&& release() { return std::move(stream_); }
@@ -138,17 +145,10 @@ public:
         : stream_(std::move(stream))
     {
     }
-    http_stream(const net::any_io_executor& executor, const std::string& host, bool use_ssl)
-        : http_stream(create_stream(executor, host, use_ssl))
-    {
-    }
 
-private:
-    stream_t stream_;
-
-    static stream_t create_stream(const net::any_io_executor& executor,
-                                  const std::string& host,
-                                  bool use_ssl)
+    static boost::system::result<stream_t> create_stream(const net::any_io_executor& executor,
+                                                         const std::string& host,
+                                                         bool use_ssl)
     {
         if (use_ssl) {
 #ifdef HTTPLIB_ENABLED_SSL
@@ -164,18 +164,20 @@ private:
             if (!SSL_set_tlsext_host_name(stream.native_handle(), host.c_str())) {
                 beast::error_code ec {static_cast<int>(::ERR_get_error()),
                                       net::error::get_ssl_category()};
-                throw boost::system::system_error(ec);
+                return ec;
             }
             return stream_t(std::move(stream));
 #else
-            throw boost::system::system_error(
-                boost::system::errc::make_error_code(boost::system::errc::protocol_not_supported));
+            return boost::system::errc::make_error_code(boost::system::errc::protocol_not_supported);
 #endif
         }
         else {
             return stream_t(plain_stream(executor));
         }
     }
+
+private:
+    stream_t stream_;
 };
 
 } // namespace httplib

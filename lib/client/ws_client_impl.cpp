@@ -28,33 +28,47 @@ ws_client::impl::impl(const net::any_io_executor& ex,
 net::awaitable<boost::system::error_code>
 ws_client::impl::async_connect(std::string_view path, const http::fields& headers)
 {
-    try {
-        logger()->trace("connecting ws://{}:{}{}", host_, port_, path);
-        // Set up an HTTP GET request message
-        if (!is_open()) {
-            http_stream stream(executor_, host_, use_ssl_);
-            auto endpoints =
-                co_await resolver_.async_resolve(host_, std::to_string(port_), net::use_awaitable);
+    logger()->trace("connecting ws://{}:{}{}", host_, port_, path);
+    boost::system::error_code ec;
 
-            co_await stream.async_connect(endpoints);
-            stream_ = std::make_shared<websocket_stream>(std::move(stream));
+    if (!is_open()) {
+        auto stream_result = http_stream::create_stream(executor_, host_, use_ssl_);
+        if (!stream_result) {
+            logger()->error("ws connect failed {}:{}: {}", host_, port_,
+                            stream_result.error().message());
+            co_return stream_result.error();
         }
-        stream_->set_option(websocket::stream_base::decorator([&](websocket::request_type& req) {
-            req.set(http::field::user_agent,
-                    std::string(BOOST_BEAST_VERSION_STRING) + "websocket-client-coro");
-            for (const auto& field : headers)
-                req.set(field.name_string(), field.value());
-        }));
+        http_stream stream(std::move(*stream_result));
+        auto endpoints =
+            co_await resolver_.async_resolve(host_, std::to_string(port_), util::net_awaitable[ec]);
+        if (ec) {
+            logger()->error("ws connect failed {}:{}: {}", host_, port_, ec.message());
+            co_return ec;
+        }
 
-        co_await stream_->async_handshake(host_, path, net::use_awaitable);
-        logger()->debug("ws connected to {}:{}{}", host_, port_, path);
+        ec = co_await stream.async_connect(endpoints);
+        if (ec) {
+            logger()->error("ws connect failed {}:{}: {}", host_, port_, ec.message());
+            co_return ec;
+        }
+        stream_ = std::make_shared<websocket_stream>(std::move(stream));
+    }
 
-        co_return boost::system::error_code {};
+    stream_->set_option(websocket::stream_base::decorator([&](websocket::request_type& req) {
+        req.set(http::field::user_agent,
+                std::string(BOOST_BEAST_VERSION_STRING) + "websocket-client-coro");
+        for (const auto& field : headers)
+            req.set(field.name_string(), field.value());
+    }));
+
+    co_await stream_->async_handshake(host_, path, util::net_awaitable[ec]);
+    if (ec) {
+        logger()->error("ws connect failed {}:{}: {}", host_, port_, ec.message());
+        co_return ec;
     }
-    catch (const boost::system::system_error& e) {
-        logger()->error("ws connect failed {}:{}: {}", host_, port_, e.what());
-        co_return e.code();
-    }
+
+    logger()->debug("ws connected to {}:{}{}", host_, port_, path);
+    co_return boost::system::error_code {};
 }
 
 bool ws_client::impl::is_open() const
@@ -87,24 +101,20 @@ bool ws_client::impl::got_text() const noexcept
 httplib::net::awaitable<boost::system::error_code>
 ws_client::impl::async_send(std::string&& data, bool binary /*= false*/)
 {
-    try {
-        if (!is_open()) {
-            co_return boost::system::errc::make_error_code(boost::system::errc::not_connected);
-        }
-
-        if (binary) {
-            stream_->binary(true);
-        }
-        else {
-            stream_->text(true);
-        }
-        co_await stream_->async_write(net::buffer(data), net::use_awaitable);
-
-        co_return boost::system::error_code {};
+    if (!is_open()) {
+        co_return boost::system::errc::make_error_code(boost::system::errc::not_connected);
     }
-    catch (const boost::system::system_error& e) {
-        co_return e.code();
+
+    if (binary) {
+        stream_->binary(true);
     }
+    else {
+        stream_->text(true);
+    }
+
+    boost::system::error_code ec;
+    co_await stream_->async_write(net::buffer(data), util::net_awaitable[ec]);
+    co_return ec;
 }
 
 void ws_client::impl::send(std::string&& data, bool binary /*= false*/)
@@ -151,50 +161,40 @@ void ws_client::impl::close()
 
 httplib::net::awaitable<boost::system::error_code> ws_client::impl::async_read()
 {
-    try {
-        if (!is_open()) {
-            co_return boost::system::errc::make_error_code(boost::system::errc::not_connected);
-        }
-        buffer_.consume(buffer_.size());
-        co_await stream_->async_read(buffer_, net::use_awaitable);
+    if (!is_open()) {
+        co_return boost::system::errc::make_error_code(boost::system::errc::not_connected);
+    }
+    buffer_.consume(buffer_.size());
 
-        co_return boost::system::error_code {};
-    }
-    catch (const boost::system::system_error& e) {
-        if (e.code() != boost::asio::error::eof)
-            logger()->warn("ws read failed: {}", e.what());
-        co_return e.code();
-    }
+    boost::system::error_code ec;
+    co_await stream_->async_read(buffer_, util::net_awaitable[ec]);
+    if (ec && ec != boost::asio::error::eof)
+        logger()->warn("ws read failed: {}", ec.message());
+    co_return ec;
 }
 
 httplib::net::awaitable<boost::system::error_code> ws_client::impl::async_ping(std::string&& msg)
 {
-    try {
-        if (!is_open()) {
-            co_return boost::system::errc::make_error_code(boost::system::errc::not_connected);
-        }
-        co_await stream_->async_ping(beast::websocket::ping_data(std::string_view(msg)),
-                                     net::use_awaitable);
-        co_return boost::system::error_code {};
+    if (!is_open()) {
+        co_return boost::system::errc::make_error_code(boost::system::errc::not_connected);
     }
-    catch (const boost::system::system_error& e) {
-        co_return e.code();
-    }
+
+    boost::system::error_code ec;
+    co_await stream_->async_ping(beast::websocket::ping_data(std::string_view(msg)),
+                                 util::net_awaitable[ec]);
+    co_return ec;
 }
 
 httplib::net::awaitable<boost::system::error_code> ws_client::impl::async_pong(std::string&& msg)
 {
-    try {
-        if (!is_open()) {
-            co_return boost::system::errc::make_error_code(boost::system::errc::not_connected);
-        }
-        co_await stream_->async_pong(beast::websocket::ping_data(std::string_view(msg)),
-                                     net::use_awaitable);
-        co_return boost::system::error_code {};
+    if (!is_open()) {
+        co_return boost::system::errc::make_error_code(boost::system::errc::not_connected);
     }
-    catch (const boost::system::system_error& e) {
-        co_return e.code();
-    }
+
+    boost::system::error_code ec;
+    co_await stream_->async_pong(beast::websocket::ping_data(std::string_view(msg)),
+                                 util::net_awaitable[ec]);
+    co_return ec;
 }
 
 httplib::net::awaitable<boost::system::error_code> ws_client::impl::async_close()

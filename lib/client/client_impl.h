@@ -7,7 +7,6 @@
 #include "httplib/util/use_awaitable.hpp"
 #include "stream/http_stream.hpp"
 #include <boost/beast/http/read.hpp>
-#include <exception>
 #include <functional>
 #include <spdlog/spdlog.h>
 
@@ -64,8 +63,8 @@ public:
 
 private:
     [[nodiscard]] net::awaitable<boost::system::error_code> co_connect();
-    net::awaitable<http_client::response> co_read_response(const body_setup_fn& body_setup = {},
-                                                           bool is_head                    = false);
+    net::awaitable<http_client::response_result> co_read_response(const body_setup_fn& body_setup = {},
+                                                                  bool is_head                    = false);
 
 
     void begin_io(bool first = false);
@@ -76,29 +75,6 @@ private:
     {
         return ec == boost::asio::error::connection_aborted ||
                ec == boost::asio::error::connection_reset || ec == http::error::end_of_stream;
-    }
-
-    boost::system::error_code handle_exception(std::exception_ptr eptr)
-    {
-        boost::system::error_code ec;
-        try {
-            std::rethrow_exception(eptr);
-        }
-        catch (const boost::system::system_error& error) {
-            ec = error.code();
-            logger()->warn(
-                "{} {} {}: {}", host_, std::to_string(port_), error.what(), ec.message());
-        }
-        catch (const std::exception& e) {
-            ec = boost::system::errc::make_error_code(boost::system::errc::protocol_error);
-            logger()->warn("{} {}: {}", host_, std::to_string(port_), e.what());
-        }
-        catch (...) {
-            ec = boost::system::errc::make_error_code(boost::system::errc::protocol_error);
-            logger()->warn("{} {}: unknown exception", host_, std::to_string(port_));
-        }
-        close();
-        return ec;
     }
 
     template<typename Body>
@@ -119,6 +95,9 @@ private:
             if (ec)
                 break;
             end_io();
+        }
+        if (ec && ec != http::error::need_buffer) {
+            close();
         }
         co_return ec;
 
@@ -141,6 +120,9 @@ private:
             if (ec)
                 break;
             end_io();
+        }
+        if (ec && ec != http::error::need_buffer) {
+            close();
         }
         co_return ec;
     }

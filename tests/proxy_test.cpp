@@ -56,10 +56,11 @@ struct test_scaffold
     }
 };
 
-#define UNWRAP(result)                                                                             \
-    [&](auto&& r) {                                                                                \
-        REQUIRE(r.has_value());                                                                    \
-        return std::move(std::move(r).value());                                                    \
+#define UNWRAP(result)                                                                 \
+    [&](auto&& r) {                                                                    \
+        INFO("UNWRAP error: " << r.error() << " (" << r.error().message() << ")");     \
+        REQUIRE(r.has_value());                                                        \
+        return std::move(std::move(r).value());                                        \
     }(result)
 
 std::string as_string(auto& msg)

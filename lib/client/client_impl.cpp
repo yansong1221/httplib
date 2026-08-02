@@ -63,9 +63,9 @@ public:
     {
     }
 
-    net::awaitable<void> write_header(http::verb method,
-                                      std::string_view target,
-                                      const http::fields& headers) override
+    net::awaitable<boost::system::error_code> write_header(http::verb method,
+                                                           std::string_view target,
+                                                           const http::fields& headers) override
     {
         req_msg_ = std::make_unique<http::request<http::buffer_body>>(method, target, 11);
         req_sr_  = std::make_unique<http::request_serializer<http::buffer_body>>(*req_msg_);
@@ -82,13 +82,12 @@ public:
                 req_msg_->set(f.name_string(), f.value());
         }
 
-        auto ec = co_await parent_.async_write(*req_sr_, true);
-        if (ec)
-            throw boost::system::system_error(ec);
+        co_return co_await parent_.async_write(*req_sr_, true);
     }
 
 private:
-    net::awaitable<void> write_body(const net::const_buffer& data, bool more) override
+    net::awaitable<boost::system::error_code> write_body(const net::const_buffer& data,
+                                                         bool more) override
     {
         auto& body = req_msg_->body();
         body.data  = (void*)data.data();
@@ -99,22 +98,20 @@ private:
         if (ec == http::error::need_buffer) {
             ec = {};
         }
-        if (ec)
-            throw boost::system::system_error(ec);
+        co_return ec;
     }
 
-    net::awaitable<void> read_header() override
+    net::awaitable<boost::system::error_code> read_header() override
     {
-        auto ec = co_await parent_.async_read(*resp_parser_, true);
-        if (ec)
-            throw boost::system::system_error(ec);
+        co_return co_await parent_.async_read(*resp_parser_, true);
     }
 
     http::status result() const override { return resp_parser_->get().result(); }
 
     const http::fields& headers() const override { return resp_parser_->get(); }
 
-    net::awaitable<std::size_t> read_body(const net::mutable_buffer& buffer) override
+    net::awaitable<boost::system::result<std::size_t>>
+    read_body(const net::mutable_buffer& buffer) override
     {
         if (!resp_parser_->is_header_done())
             co_return 0;
@@ -128,7 +125,7 @@ private:
             if (ec == http::error::need_buffer)
                 ec = {};
             if (ec)
-                throw boost::system::system_error(ec);
+                co_return ec;
 
             auto consumed = buffer.size() - body.size;
             if (consumed > 0)
@@ -136,6 +133,7 @@ private:
 
             if (resp_parser_->is_done()) {
                 parent_.finish_io();
+                parent_.buffer_.clear();
                 if (!resp_parser_->keep_alive()) {
                     parent_.close();
                 }
@@ -235,19 +233,13 @@ net::awaitable<http_client::response_result> http_client::impl::async_send_reque
         co_return ec;
     }
 
-    try {
-        if (chunked_write_handler) {
-            streaming::chunk_writer_impl writer(*stream_, timeout_);
-            co_await chunked_write_handler(writer);
-            co_await writer.close();
-        }
+    if (chunked_write_handler) {
+        streaming::chunk_writer_impl writer(*stream_, timeout_);
+        co_await chunked_write_handler(writer);
+        co_await writer.close();
+    }
 
-        co_return co_await co_read_response(body_setup, req.method() == http::verb::head);
-    }
-    catch (...) {
-        ec = handle_exception(std::current_exception());
-    }
-    co_return ec;
+    co_return co_await co_read_response(body_setup, req.method() == http::verb::head);
 }
 
 net::awaitable<http_client::response_result>
@@ -373,37 +365,41 @@ void http_client::impl::finish_io()
 
 net::awaitable<boost::system::error_code> http_client::impl::co_connect()
 {
-    try {
-        begin_io(true);
-        std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
-        if (!is_open()) {
-            close();
-            stream_ = std::make_unique<http_stream>(executor_, host_, use_ssl_);
-            lck.unlock();
-
-            boost::system::error_code ec;
-            auto addr = net::ip::make_address(host_, ec);
-            if (!ec) {
-                co_await stream_->async_connect(tcp::endpoint(addr, port_));
-            }
-            else {
-                auto endpoints = co_await resolver_.async_resolve(
-                    host_, std::to_string(port_), net::use_awaitable);
-                co_await stream_->async_connect(endpoints);
-            }
+    begin_io(true);
+    std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
+    if (!is_open()) {
+        close();
+        auto stream_result = http_stream::create_stream(executor_, host_, use_ssl_);
+        if (!stream_result) {
+            co_return stream_result.error();
         }
-        end_io();
-        co_return boost::system::error_code {};
+        stream_ = std::make_unique<http_stream>(std::move(*stream_result));
+        lck.unlock();
+
+        boost::system::error_code ec;
+        auto addr = net::ip::make_address(host_, ec);
+        if (!ec) {
+            ec = co_await stream_->async_connect(tcp::endpoint(addr, port_));
+        }
+        else {
+            auto endpoints = co_await resolver_.async_resolve(
+                host_, std::to_string(port_), util::net_awaitable[ec]);
+            if (!ec)
+                ec = co_await stream_->async_connect(endpoints);
+        }
+        if (ec) {
+            close();
+            co_return ec;
+        }
     }
-    catch (const boost::system::system_error& e) {
-        finish_io();
-        co_return e.code();
-    }
+    end_io();
+    co_return boost::system::error_code {};
 }
 
-net::awaitable<http_client::response> http_client::impl::co_read_response(
+net::awaitable<http_client::response_result> http_client::impl::co_read_response(
     const body_setup_fn& body_setup /*= {}*/, bool is_head /*= false*/)
 {
+    boost::system::error_code ec;
     http::response_parser<body::any_body> parser;
     parser.skip(is_head);
     parser.eager(false);
@@ -412,8 +408,12 @@ net::awaitable<http_client::response> http_client::impl::co_read_response(
 
     while (!parser.is_header_done()) {
         begin_io();
-        co_await http::async_read_some(*stream_, buffer_, parser);
+        co_await http::async_read_some(*stream_, buffer_, parser, util::net_awaitable[ec]);
         end_io();
+        if (ec) {
+            close();
+            co_return ec;
+        }
     }
 
     if (!parser.is_done()) {
@@ -446,8 +446,12 @@ net::awaitable<http_client::response> http_client::impl::co_read_response(
 
             while (!parser.is_done()) {
                 begin_io();
-                co_await http::async_read_some(*stream_, buffer_, parser);
+                co_await http::async_read_some(*stream_, buffer_, parser, util::net_awaitable[ec]);
                 end_io();
+                if (ec) {
+                    close();
+                    co_return ec;
+                }
             }
         }
     }
@@ -476,15 +480,13 @@ void http_client::impl::set_ndjson_read_handler(ndjson_read_handler_type&& handl
 net::awaitable<http_client::response_result>
 http_client::impl::async_download(http_client::request& req, const fs::path& save_path)
 {
-    auto setup = [save_path](response& resp) {
-        body::file_body::value_type fb;
-        fb.open(save_path, std::ios::out | std::ios::binary | std::ios::trunc);
-        if (!fb.is_open())
-            throw boost::system::system_error(
-                boost::system::errc::make_error_code(boost::system::errc::permission_denied));
+    auto fb_ptr = std::make_shared<body::file_body::value_type>();
+    fb_ptr->open(save_path, std::ios::out | std::ios::binary | std::ios::trunc);
+    if (!fb_ptr->is_open()) {
+        co_return boost::system::errc::make_error_code(boost::system::errc::permission_denied);
+    }
 
-        resp.body() = std::move(fb);
-    };
+    auto setup  = [fb_ptr](response& resp) { resp.body() = std::move(*fb_ptr); };
     auto result = co_await async_send_request_with_redirect(req, setup, nullptr);
 
     if (!result.has_value() || result->result() == http::status::no_content ||
