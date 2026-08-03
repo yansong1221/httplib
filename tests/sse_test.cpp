@@ -8,7 +8,6 @@
 #include "httplib/streaming/chunk_writer.hpp"
 #include "httplib/streaming/sse_reader.hpp"
 #include "httplib/streaming/sse_writer.hpp"
-#include "streaming/sse_reader_impl.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/use_future.hpp>
@@ -117,8 +116,8 @@ TEST_CASE("SSE: server sends single event", "[sse]")
     ts.start();
 
     std::vector<httplib::sse_event> events;
-    auto writer = ts.client->writer();
-    auto reader = ts.client->reader();
+    auto writer = ts.client->create_writer();
+    auto reader = ts.client->create_reader();
 
     boost::asio::co_spawn(ts.ioc,
                           [&]() -> net::awaitable<void>
@@ -127,10 +126,10 @@ TEST_CASE("SSE: server sends single event", "[sse]")
                               co_await writer->write_body(net::buffer("", 0), false);
                               co_await reader->read_header();
 
-                              httplib::streaming::sse_reader_impl sse(reader);
-                              while (!sse.is_done())
+                              auto sse = ts.client->create_sse_reader();
+                              while (!sse->is_done())
                               {
-                                  auto ev = co_await sse.read_event();
+                                  auto ev = co_await sse->read_event();
                                   if (ev.data.empty() && ev.id.empty() && ev.event.empty()
                                       && ev.retry == std::chrono::milliseconds { 0 })
                                   {
@@ -164,8 +163,8 @@ TEST_CASE("SSE: server sends multiple events", "[sse]")
     ts.start();
 
     std::vector<httplib::sse_event> events;
-    auto writer = ts.client->writer();
-    auto reader = ts.client->reader();
+    auto writer = ts.client->create_writer();
+    auto reader = ts.client->create_reader();
 
     boost::asio::co_spawn(ts.ioc,
                           [&]() -> net::awaitable<void>
@@ -174,10 +173,10 @@ TEST_CASE("SSE: server sends multiple events", "[sse]")
                               co_await writer->write_body(net::buffer("", 0), false);
                               co_await reader->read_header();
 
-                              httplib::streaming::sse_reader_impl sse(reader);
-                              while (!sse.is_done())
+                              auto sse = ts.client->create_sse_reader();
+                              while (!sse->is_done())
                               {
-                                  auto ev = co_await sse.read_event();
+                                  auto ev = co_await sse->read_event();
                                   if (ev.data.empty() && ev.id.empty() && ev.event.empty()
                                       && ev.retry == std::chrono::milliseconds { 0 })
                                   {
@@ -211,8 +210,8 @@ TEST_CASE("SSE: event with id and type", "[sse]")
     ts.start();
 
     std::vector<httplib::sse_event> events;
-    auto writer = ts.client->writer();
-    auto reader = ts.client->reader();
+    auto writer = ts.client->create_writer();
+    auto reader = ts.client->create_reader();
 
     boost::asio::co_spawn(ts.ioc,
                           [&]() -> net::awaitable<void>
@@ -221,10 +220,10 @@ TEST_CASE("SSE: event with id and type", "[sse]")
                               co_await writer->write_body(net::buffer("", 0), false);
                               co_await reader->read_header();
 
-                              httplib::streaming::sse_reader_impl sse(reader);
-                              while (!sse.is_done())
+                              auto sse = ts.client->create_sse_reader();
+                              while (!sse->is_done())
                               {
-                                  auto ev = co_await sse.read_event();
+                                  auto ev = co_await sse->read_event();
                                   if (ev.data.empty() && ev.id.empty() && ev.event.empty()
                                       && ev.retry == std::chrono::milliseconds { 0 })
                                   {
@@ -259,8 +258,8 @@ TEST_CASE("SSE: retry interval", "[sse]")
     ts.start();
 
     std::vector<httplib::sse_event> events;
-    auto writer = ts.client->writer();
-    auto reader = ts.client->reader();
+    auto writer = ts.client->create_writer();
+    auto reader = ts.client->create_reader();
 
     boost::asio::co_spawn(ts.ioc,
                           [&]() -> net::awaitable<void>
@@ -269,10 +268,10 @@ TEST_CASE("SSE: retry interval", "[sse]")
                               co_await writer->write_body(net::buffer("", 0), false);
                               co_await reader->read_header();
 
-                              httplib::streaming::sse_reader_impl sse(reader);
-                              while (!sse.is_done())
+                              auto sse = ts.client->create_sse_reader();
+                              while (!sse->is_done())
                               {
-                                  auto ev = co_await sse.read_event();
+                                  auto ev = co_await sse->read_event();
                                   if (ev.data.empty() && ev.id.empty() && ev.event.empty()
                                       && ev.retry == std::chrono::milliseconds { 0 })
                                   {
@@ -306,8 +305,8 @@ TEST_CASE("SSE: comment is ignored", "[sse]")
     ts.start();
 
     std::vector<httplib::sse_event> events;
-    auto writer = ts.client->writer();
-    auto reader = ts.client->reader();
+    auto writer = ts.client->create_writer();
+    auto reader = ts.client->create_reader();
 
     boost::asio::co_spawn(ts.ioc,
                           [&]() -> net::awaitable<void>
@@ -316,10 +315,10 @@ TEST_CASE("SSE: comment is ignored", "[sse]")
                               co_await writer->write_body(net::buffer("", 0), false);
                               co_await reader->read_header();
 
-                              httplib::streaming::sse_reader_impl sse(reader);
-                              while (!sse.is_done())
+                              auto sse = ts.client->create_sse_reader();
+                              while (!sse->is_done())
                               {
-                                  auto ev = co_await sse.read_event();
+                                  auto ev = co_await sse->read_event();
                                   if (ev.data.empty() && ev.id.empty() && ev.event.empty()
                                       && ev.retry == std::chrono::milliseconds { 0 })
                                   {
@@ -350,8 +349,8 @@ TEST_CASE("SSE: Content-Type is text/event-stream", "[sse]")
                                                   });
     ts.start();
 
-    auto writer = ts.client->writer();
-    auto reader = ts.client->reader();
+    auto writer = ts.client->create_writer();
+    auto reader = ts.client->create_reader();
 
     boost::asio::co_spawn(ts.ioc,
                           [&]() -> net::awaitable<void>
@@ -386,8 +385,8 @@ TEST_CASE("SSE: client can stop receiving by returning false", "[sse]")
     ts.start();
 
     std::vector<httplib::sse_event> events;
-    auto writer = ts.client->writer();
-    auto reader = ts.client->reader();
+    auto writer = ts.client->create_writer();
+    auto reader = ts.client->create_reader();
 
     boost::asio::co_spawn(ts.ioc,
                           [&]() -> net::awaitable<void>
@@ -396,10 +395,10 @@ TEST_CASE("SSE: client can stop receiving by returning false", "[sse]")
                               co_await writer->write_body(net::buffer("", 0), false);
                               co_await reader->read_header();
 
-                              httplib::streaming::sse_reader_impl sse(reader);
-                              while (!sse.is_done())
+                              auto sse = ts.client->create_sse_reader();
+                              while (!sse->is_done())
                               {
-                                  auto ev = co_await sse.read_event();
+                                  auto ev = co_await sse->read_event();
                                   if (ev.data.empty() && ev.id.empty())
                                   {
                                       break;
@@ -435,8 +434,8 @@ TEST_CASE("SSE: multi-line data", "[sse]")
     ts.start();
 
     std::vector<httplib::sse_event> events;
-    auto writer = ts.client->writer();
-    auto reader = ts.client->reader();
+    auto writer = ts.client->create_writer();
+    auto reader = ts.client->create_reader();
 
     boost::asio::co_spawn(ts.ioc,
                           [&]() -> net::awaitable<void>
@@ -445,10 +444,10 @@ TEST_CASE("SSE: multi-line data", "[sse]")
                               co_await writer->write_body(net::buffer("", 0), false);
                               co_await reader->read_header();
 
-                              httplib::streaming::sse_reader_impl sse(reader);
-                              while (!sse.is_done())
+                              auto sse = ts.client->create_sse_reader();
+                              while (!sse->is_done())
                               {
-                                  auto ev = co_await sse.read_event();
+                                  auto ev = co_await sse->read_event();
                                   if (ev.data.empty() && ev.id.empty() && ev.event.empty()
                                       && ev.retry == std::chrono::milliseconds { 0 })
                                   {

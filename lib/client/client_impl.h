@@ -64,8 +64,8 @@ namespace httplib::client
         net::awaitable<http_client::response_result> async_download(http_client::request& req,
                                                                     fs::path const& save_path);
 
-        std::shared_ptr<write_session> write_session();
-        std::shared_ptr<read_session> read_session();
+        std::shared_ptr<write_session> create_writer();
+        std::shared_ptr<read_session> create_reader();
 
       private:
         net::awaitable<boost::system::error_code> co_connect();

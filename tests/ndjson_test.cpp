@@ -108,8 +108,8 @@ TEST_CASE("NDJSON: server sends single line", "[ndjson]")
     ts.start();
 
     std::vector<boost::json::value> items;
-    auto writer = ts.client->writer();
-    auto reader = ts.client->reader();
+    auto writer = ts.client->create_writer();
+    auto reader = ts.client->create_reader();
 
     boost::asio::co_spawn(ts.ioc,
                           [&]() -> net::awaitable<void>
@@ -118,10 +118,10 @@ TEST_CASE("NDJSON: server sends single line", "[ndjson]")
                               co_await writer->write_body(net::buffer("", 0), false);
                               co_await reader->read_header();
 
-                              httplib::streaming::ndjson_reader_impl ndjson(reader);
-                              while (!ndjson.is_done())
+                              auto ndjson = ts.client->create_ndjson_reader();
+                              while (!ndjson->is_done())
                               {
-                                  auto val = co_await ndjson.read();
+                                  auto val = co_await ndjson->read();
                                   if (val.is_null())
                                   {
                                       break;
@@ -161,8 +161,8 @@ TEST_CASE("NDJSON: server sends multiple lines", "[ndjson]")
     ts.start();
 
     std::vector<boost::json::value> items;
-    auto writer = ts.client->writer();
-    auto reader = ts.client->reader();
+    auto writer = ts.client->create_writer();
+    auto reader = ts.client->create_reader();
 
     boost::asio::co_spawn(ts.ioc,
                           [&]() -> net::awaitable<void>
@@ -171,10 +171,10 @@ TEST_CASE("NDJSON: server sends multiple lines", "[ndjson]")
                               co_await writer->write_body(net::buffer("", 0), false);
                               co_await reader->read_header();
 
-                              httplib::streaming::ndjson_reader_impl ndjson(reader);
-                              while (!ndjson.is_done())
+                              auto ndjson = ts.client->create_ndjson_reader();
+                              while (!ndjson->is_done())
                               {
-                                  auto val = co_await ndjson.read();
+                                  auto val = co_await ndjson->read();
                                   if (val.is_null())
                                   {
                                       break;
@@ -208,8 +208,8 @@ TEST_CASE("NDJSON: Content-Type is application/x-ndjson", "[ndjson]")
                                                   });
     ts.start();
 
-    auto writer = ts.client->writer();
-    auto reader = ts.client->reader();
+    auto writer = ts.client->create_writer();
+    auto reader = ts.client->create_reader();
 
     boost::asio::co_spawn(ts.ioc,
                           [&]() -> net::awaitable<void>
@@ -249,8 +249,8 @@ TEST_CASE("NDJSON: reader stops early", "[ndjson]")
     ts.start();
 
     std::vector<boost::json::value> items;
-    auto writer = ts.client->writer();
-    auto reader = ts.client->reader();
+    auto writer = ts.client->create_writer();
+    auto reader = ts.client->create_reader();
 
     boost::asio::co_spawn(ts.ioc,
                           [&]() -> net::awaitable<void>
@@ -259,10 +259,10 @@ TEST_CASE("NDJSON: reader stops early", "[ndjson]")
                               co_await writer->write_body(net::buffer("", 0), false);
                               co_await reader->read_header();
 
-                              httplib::streaming::ndjson_reader_impl ndjson(reader);
+                              auto ndjson = ts.client->create_ndjson_reader();
                               for (int i = 0; i < 2; ++i)
                               {
-                                  auto val = co_await ndjson.read();
+                                  auto val = co_await ndjson->read();
                                   if (val.is_null())
                                   {
                                       break;

@@ -4,6 +4,8 @@
 #include "httplib/client/write_session.hpp"
 #include "httplib/config.hpp"
 #include "httplib/streaming/chunk_writer.hpp"
+#include "httplib/streaming/ndjson_reader.hpp"
+#include "httplib/streaming/sse_reader.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <filesystem>
 #include <functional>
@@ -238,8 +240,11 @@ namespace httplib::client
                                              html::query_params const& params = {},
                                              http::fields const& headers = http::fields());
 
-        std::shared_ptr<write_session> writer();
-        std::shared_ptr<read_session> reader();
+        std::shared_ptr<write_session> create_writer();
+        std::shared_ptr<read_session> create_reader();
+
+        std::unique_ptr<sse_reader> create_sse_reader();
+        std::unique_ptr<ndjson_reader> create_ndjson_reader();
 
         // ---- send_request (sync, body-type overloads) ----
 

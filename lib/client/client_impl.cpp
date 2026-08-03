@@ -407,7 +407,7 @@ namespace httplib::client
     }
 
     std::shared_ptr<write_session>
-    http_client::impl::write_session()
+    http_client::impl::create_writer()
     {
         auto sp = write_impl_.lock();
         if (!sp) {
@@ -418,7 +418,7 @@ namespace httplib::client
     }
 
     std::shared_ptr<read_session>
-    http_client::impl::read_session()
+    http_client::impl::create_reader()
     {
         auto sp = read_impl_.lock();
         if (!sp) {

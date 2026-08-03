@@ -1,5 +1,7 @@
 #include "httplib/client/client.hpp"
 #include "client_impl.h"
+#include "streaming/ndjson_reader_impl.hpp"
+#include "streaming/sse_reader_impl.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/use_future.hpp>
 #include <utility>
@@ -238,15 +240,27 @@ namespace httplib::client
     }
 
     std::shared_ptr<write_session>
-    http_client::writer()
+    http_client::create_writer()
     {
-        return impl_->write_session();
+        return impl_->create_writer();
     }
 
     std::shared_ptr<read_session>
-    http_client::reader()
+    http_client::create_reader()
     {
-        return impl_->read_session();
+        return impl_->create_reader();
+    }
+
+    std::unique_ptr<sse_reader>
+    http_client::create_sse_reader()
+    {
+        return std::make_unique<streaming::sse_reader_impl>(create_reader());
+    }
+
+    std::unique_ptr<ndjson_reader>
+    http_client::create_ndjson_reader()
+    {
+        return std::make_unique<streaming::ndjson_reader_impl>(create_reader());
     }
 
     http_client::response_result

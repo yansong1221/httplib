@@ -161,8 +161,8 @@ TEST_CASE("Response: set_chunked_write_handler with multiple chunks", "[response
     ts.start();
 
     std::string streamed;
-    auto writer = ts.client->writer();
-    auto reader = ts.client->reader();
+    auto writer = ts.client->create_writer();
+    auto reader = ts.client->create_reader();
 
     boost::asio::co_spawn(ts.ioc,
                           [&]() -> net::awaitable<void>

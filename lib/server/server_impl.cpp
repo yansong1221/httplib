@@ -367,8 +367,8 @@ namespace httplib::server
 
                 auto client = co_await proxy_pool_->async_acquire(upstream_host, upstream_port, upstream_ssl);
 
-                auto writer = client->writer();
-                auto reader = client->reader();
+                auto writer = client->create_writer();
+                auto reader = client->create_reader();
 
                 auto rel_ec = co_await writer->write_header(req.method(), target, upstream_headers);
                 if (rel_ec)

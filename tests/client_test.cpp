@@ -290,8 +290,8 @@ TEST_CASE("Client: custom chunk handler", "[client]")
 
     std::string streamed;
     auto client = ts.make_client();
-    auto writer = client->writer();
-    auto reader = client->reader();
+    auto writer = client->create_writer();
+    auto reader = client->create_reader();
 
     boost::asio::co_spawn(ts.ioc,
                           [&]() -> net::awaitable<void>
