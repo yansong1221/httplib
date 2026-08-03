@@ -44,7 +44,9 @@ namespace httplib::util
      *
      * @param str The string to decode.
      */
-    // ToDo: Consider using Boost.URL instead
+    // NOTE: boost.url's pct_encode/pct_decode API requires charset+token,
+    // overengineered for simple standalone string percent encoding.
+    // Keeping hand-rolled version for simplicity.
     HTTPLIB_API void url_decode(std::string& str);
     HTTPLIB_API std::string url_decode(std::string_view str);
     HTTPLIB_API std::string url_encode(std::string_view value);
