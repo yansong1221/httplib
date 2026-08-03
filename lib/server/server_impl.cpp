@@ -333,7 +333,7 @@ namespace httplib::server
 
     void
     http_server::impl::set_reverse_proxy(std::string_view key,
-                                         std::string_view url,
+                                         http_server::proxy_resolver resolver,
                                          http_server::proxy_header_callback on_headers)
     {
         std::string prefix(key);
@@ -346,12 +346,6 @@ namespace httplib::server
             prefix.pop_back();
         }
 
-        auto u = boost::urls::url(url);
-        auto host = u.host();
-        uint16_t port = u.port_number() ? u.port_number() : (u.scheme() == "https" ? 443 : 80);
-        bool ssl = u.scheme() == "https";
-        auto upstream_prefix = u.encoded_path();
-
         router_.set_chunked_http_handler<http::verb::get,
                                          http::verb::head,
                                          http::verb::post,
@@ -360,10 +354,23 @@ namespace httplib::server
                                          http::verb::delete_,
                                          http::verb::options>(
             key,
-            [this, host, port, ssl, prefix, upstream_prefix, on_headers = std::move(on_headers)](
+            [this, prefix, resolver = std::move(resolver), on_headers = std::move(on_headers)](
                 request& req,
                 response& resp) -> net::awaitable<void>
             {
+                auto url = resolver(req);
+
+                auto r = boost::urls::parse_uri(url);
+                if (!r)
+                {
+                    resp.set_error_content(http::status::bad_gateway);
+                    co_return;
+                }
+                auto const& u = *r;
+                auto host = u.host();
+                auto port = u.port_number() ? u.port_number() : (u.scheme() == "https" ? 443 : 80);
+                auto ssl = u.scheme() == "https";
+                auto upstream_prefix = u.encoded_path();
                 auto target = std::string(req.target());
                 if (target.starts_with(prefix))
                 {

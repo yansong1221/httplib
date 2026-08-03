@@ -78,7 +78,7 @@ namespace httplib::server
         }
 
         void set_reverse_proxy(std::string_view key,
-                               std::string_view url,
+                               http_server::proxy_resolver resolver,
                                http_server::proxy_header_callback on_headers);
 
         void use_ssl(net::const_buffer const& cert_file, net::const_buffer const& key_file, std::string passwd = {});
