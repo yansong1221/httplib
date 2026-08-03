@@ -16,17 +16,6 @@ namespace httplib::client
         net::awaitable<boost::system::error_code>
         write_header(http::verb method, std::string_view target, http::fields const& headers) override
         {
-            static http::field const hop_by_hop[] = {
-                http::field::connection,
-                http::field::keep_alive,
-                http::field::transfer_encoding,
-                http::field::te,
-                http::field::trailer,
-                http::field::proxy_authorization,
-                http::field::proxy_authenticate,
-                http::field::upgrade,
-            };
-
             req_msg_ = std::make_unique<http::request<http::buffer_body>>(method, target, 11);
             req_sr_ = std::make_unique<http::request_serializer<http::buffer_body>>(*req_msg_);
             req_msg_->set(http::field::host, parent_.host_value_);
@@ -35,11 +24,7 @@ namespace httplib::client
 
             for (auto const& f : headers)
             {
-                bool skip = false;
-                for (auto h : hop_by_hop)
-                    if (f.name() == h) { skip = true; break; }
-                if (!skip)
-                    req_msg_->set(f.name_string(), f.value());
+                req_msg_->set(f.name_string(), f.value());
             }
 
             co_return co_await parent_.async_write(*req_sr_, true);
@@ -55,7 +40,9 @@ namespace httplib::client
 
             auto ec = co_await parent_.async_write(*req_sr_, false, false);
             if (ec == http::error::need_buffer)
+            {
                 ec = {};
+            }
             co_return ec;
         }
 

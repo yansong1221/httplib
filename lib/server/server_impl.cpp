@@ -15,6 +15,28 @@
 
 namespace httplib::server
 {
+    namespace detail
+    {
+
+        static bool
+        is_hop_by_hop(httplib::http::field f)
+        {
+            switch (f)
+            {
+                case httplib::http::field::connection:
+                case httplib::http::field::keep_alive:
+                case httplib::http::field::te:
+                case httplib::http::field::trailer:
+                case httplib::http::field::proxy_authorization:
+                case httplib::http::field::proxy_authenticate:
+                case httplib::http::field::upgrade:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+    } // namespace detail
 
     http_server::impl::impl(net::any_io_executor const& ex) : ex_(ex), acceptor_(ex)
     {
@@ -350,13 +372,14 @@ namespace httplib::server
                 auto& req_impl = *req.get_impl();
                 for (auto const& f : req_impl)
                 {
-                    if (f.name() != http::field::host)
+                    if (detail::is_hop_by_hop(f.name()))
                     {
-                        upstream_headers.set(f.name_string(), f.value());
+                        continue;
                     }
+                    upstream_headers.set(f.name_string(), f.value());
                 }
 
-                auto client_ip = req.get_client_ip().to_string();
+                auto client_ip = req.remote_endpoint().address().to_string();
                 auto xff = req_impl["X-Forwarded-For"];
                 if (!xff.empty())
                 {
@@ -366,6 +389,12 @@ namespace httplib::server
                 upstream_headers.set("X-Forwarded-For", client_ip);
 
                 auto client = co_await proxy_pool_->async_acquire(upstream_host, upstream_port, upstream_ssl);
+                if (!client)
+                {
+                    logger()->warn("relay acquire client failed");
+                    resp.set_error_content(http::status::bad_gateway);
+                    co_return;
+                }
 
                 auto writer = client->create_writer();
                 auto reader = client->create_reader();
