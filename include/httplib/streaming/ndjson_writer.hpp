@@ -6,7 +6,7 @@
 namespace httplib
 {
 
-    class ndjson_writer
+    class HTTPLIB_API ndjson_writer
     {
       public:
         virtual ~ndjson_writer() = default;

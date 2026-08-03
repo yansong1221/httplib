@@ -2,8 +2,8 @@
 #include "compress/compressor.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "read_session_impl.hpp"
-#include "write_session_impl.hpp"
 #include "streaming/chunk_writer_impl.hpp"
+#include "write_session_impl.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/write.hpp>
@@ -410,7 +410,8 @@ namespace httplib::client
     http_client::impl::create_writer()
     {
         auto sp = write_impl_.lock();
-        if (!sp) {
+        if (!sp)
+        {
             sp = std::make_shared<write_session_impl>(*this);
             write_impl_ = sp;
         }
@@ -421,7 +422,8 @@ namespace httplib::client
     http_client::impl::create_reader()
     {
         auto sp = read_impl_.lock();
-        if (!sp) {
+        if (!sp)
+        {
             sp = std::make_shared<read_session_impl>(*this);
             read_impl_ = sp;
         }

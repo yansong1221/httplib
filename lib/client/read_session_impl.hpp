@@ -37,6 +37,12 @@ namespace httplib::client
             return resp_parser_->get();
         }
 
+        bool
+        is_header_done() const override
+        {
+            return resp_parser_ && resp_parser_->is_header_done();
+        }
+
         net::awaitable<boost::system::result<std::size_t>>
         read_body(net::mutable_buffer const& buf) override
         {

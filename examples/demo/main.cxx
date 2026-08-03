@@ -519,7 +519,9 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
             {
                 while (!reader.is_done())
                 {
-                    auto ev = co_await reader.read_event();
+                    auto result = co_await reader.read_event();
+                    if (result.has_error()) { break; }
+                    auto& ev = result.value();
                     if (ev.data.empty() && ev.event.empty() && ev.id.empty()
                         && ev.retry == std::chrono::milliseconds { 0 })
                     {
@@ -543,7 +545,9 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
             {
                 while (!reader.is_done())
                 {
-                    auto val = co_await reader.read();
+                    auto result = co_await reader.read();
+                    if (result.has_error()) { break; }
+                    auto& val = result.value();
                     if (val.is_null())
                     {
                         break;

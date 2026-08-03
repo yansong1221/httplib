@@ -1,5 +1,6 @@
 #pragma once
 #include "httplib/streaming/sse_reader.hpp"
+#include <charconv>
 #include <deque>
 #include <string>
 #include <string_view>
@@ -79,7 +80,12 @@ namespace httplib::streaming::detail
                 {
                     if (!value.empty())
                     {
-                        retry_ = std::chrono::milliseconds(std::stoull(std::string(value)));
+                        unsigned long long n = 0;
+                        auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), n);
+                        if (ec == std::errc {} && ptr == value.data() + value.size())
+                        {
+                            retry_ = std::chrono::milliseconds(n);
+                        }
                     }
                 }
             }

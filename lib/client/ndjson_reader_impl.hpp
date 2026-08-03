@@ -1,22 +1,22 @@
 #pragma once
 #include "httplib/client/read_session.hpp"
-#include "httplib/streaming/ndjson_reader.hpp"
-#include <boost/json/parse.hpp>
 #include <array>
+#include <boost/json/parse.hpp>
+#include <boost/system/result.hpp>
 #include <string>
 
-namespace httplib::streaming
+namespace httplib::client
 {
 
-    class ndjson_reader_impl : public httplib::ndjson_reader
+    class ndjson_reader_impl : public httplib::client::ndjson_reader
     {
       public:
-        explicit ndjson_reader_impl(std::shared_ptr<client::read_session> session)
+        explicit ndjson_reader_impl(std::shared_ptr<httplib::client::read_session> session)
             : session_(std::move(session))
         {
         }
 
-        net::awaitable<boost::json::value>
+        net::awaitable<boost::system::result<boost::json::value>>
         read() override
         {
             for (;;)
@@ -30,7 +30,11 @@ namespace httplib::streaming
                     }
                     std::array<char, 4096> buf;
                     auto result = co_await session_->read_body(net::buffer(buf));
-                    if (result.has_error() || result.value() == 0)
+                    if (result.has_error())
+                    {
+                        co_return result.error();
+                    }
+                    if (result.value() == 0)
                     {
                         done_ = true;
                         co_return boost::json::value {};
@@ -61,10 +65,28 @@ namespace httplib::streaming
             return done_ && buf_.find('\n') == std::string::npos;
         }
 
+        bool
+        is_header_done() const override
+        {
+            return session_->is_header_done();
+        }
+
+        net::awaitable<boost::system::error_code>
+        read_header() override
+        {
+            co_return co_await session_->read_header();
+        }
+
+        http::fields const&
+        headers() const override
+        {
+            return session_->headers();
+        }
+
       private:
-        std::shared_ptr<client::read_session> session_;
+        std::shared_ptr<httplib::client::read_session> session_;
         std::string buf_;
         bool done_ = false;
     };
 
-} // namespace httplib::streaming
+} // namespace httplib::client

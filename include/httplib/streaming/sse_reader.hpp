@@ -1,6 +1,7 @@
 #pragma once
 #include "httplib/config.hpp"
 #include <boost/asio/awaitable.hpp>
+#include <boost/system/result.hpp>
 #include <chrono>
 #include <string>
 
@@ -19,7 +20,7 @@ namespace httplib
     {
       public:
         virtual ~sse_reader() = default;
-        virtual net::awaitable<sse_event> read_event() = 0;
+        virtual net::awaitable<boost::system::result<sse_event>> read_event() = 0;
         virtual bool is_done() const = 0;
     };
 
