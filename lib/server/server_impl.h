@@ -77,7 +77,7 @@ namespace httplib::server
             return upload_file_limit_;
         }
 
-        void set_reverse_proxy(std::string_view key,
+        void set_reverse_proxy(std::string_view location,
                                http_server::proxy_resolver resolver,
                                http_server::proxy_header_callback on_headers);
 

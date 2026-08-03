@@ -332,19 +332,17 @@ namespace httplib::server
     }
 
     void
-    http_server::impl::set_reverse_proxy(std::string_view key,
+    http_server::impl::set_reverse_proxy(std::string_view location,
                                          http_server::proxy_resolver resolver,
                                          http_server::proxy_header_callback on_headers)
     {
-        std::string prefix(key);
-        if (prefix.ends_with('*'))
+        std::string prefix(location);
+        while (!prefix.empty() && (prefix.back() == '/' || prefix.back() == '*'))
         {
             prefix.pop_back();
         }
-        if (prefix.ends_with('/'))
-        {
-            prefix.pop_back();
-        }
+
+        std::string route = prefix + "/*";
 
         router_.set_chunked_http_handler<http::verb::get,
                                          http::verb::head,
@@ -353,7 +351,7 @@ namespace httplib::server
                                          http::verb::patch,
                                          http::verb::delete_,
                                          http::verb::options>(
-            key,
+            route,
             [this, prefix, resolver = std::move(resolver), on_headers = std::move(on_headers)](
                 request& req,
                 response& resp) -> net::awaitable<void>
