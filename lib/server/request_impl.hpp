@@ -4,7 +4,6 @@
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "stream/http_stream.hpp"
-#include "streaming/chunk_reader_impl.hpp"
 #include "util/buffer_body_reader.hpp"
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
@@ -131,17 +130,11 @@ namespace httplib::server
             httplib::detail::buffer_body_reader<true> reader;
         };
 
-        struct chunk_read_ctx
-        {
-            std::shared_ptr<http::request_parser<body::any_body>> parser;
-            std::unique_ptr<chunk_reader> reader;
-        };
-
         void
-        setup_buffer_body_reading(http_stream& stream,
-                                  beast::flat_buffer& buffer,
-                                  http::request_parser<http::empty_body>&& header_parser,
-                                  std::chrono::steady_clock::duration read_timeout)
+        setup_chunked_reading(http_stream& stream,
+                              beast::flat_buffer& buffer,
+                              http::request_parser<http::empty_body>&& header_parser,
+                              std::chrono::steady_clock::duration read_timeout)
         {
             auto parser = std::make_shared<http::request_parser<http::buffer_body>>(std::move(header_parser));
 
@@ -151,39 +144,13 @@ namespace httplib::server
         }
 
         bool
-        is_chunked_handler() const
-        {
-            return chunk_ctx_ != nullptr;
-        }
-
-        bool
-        is_buffer_body_handler() const
+        is_chunked() const
         {
             return buffer_body_ctx_ != nullptr;
         }
 
-        void
-        setup_chunked_reading(http_stream& stream,
-                              beast::flat_buffer& buffer,
-                              http::request_parser<http::empty_body>&& header_parser,
-                              std::chrono::steady_clock::duration read_timeout)
-        {
-            auto parser = std::make_shared<http::request_parser<body::any_body>>(std::move(header_parser));
-            auto reader = std::make_unique<streaming::chunk_reader_impl<true>>(stream, buffer, *parser, read_timeout);
-
-            chunk_ctx_ = std::make_shared<chunk_read_ctx>();
-            chunk_ctx_->parser = std::move(parser);
-            chunk_ctx_->reader = std::move(reader);
-        }
-
-        httplib::chunk_reader&
-        get_chunk_reader()
-        {
-            return *chunk_ctx_->reader;
-        }
-
-        net::awaitable<std::size_t>
-        read_buffer_body_some(net::mutable_buffer const& buffer)
+        net::awaitable<boost::system::result<std::size_t>>
+        read_chunk(net::mutable_buffer const& buffer)
         {
             if (!buffer_body_ctx_)
             {
@@ -293,7 +260,6 @@ namespace httplib::server
         std::any custom_data_;
         std::shared_ptr<middleware::session> session_;
 
-        std::shared_ptr<chunk_read_ctx> chunk_ctx_;
         std::shared_ptr<buffer_body_read_ctx> buffer_body_ctx_;
     };
 } // namespace httplib::server

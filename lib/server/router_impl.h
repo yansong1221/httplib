@@ -19,17 +19,11 @@ namespace httplib::server
         router_impl();
 
         struct Node;
-        enum class body_kind
-        {
-            none,
-            chunked,
-            buffer_body,
-        };
 
         struct route_match
         {
             std::set<std::string> allows;
-            body_kind body = body_kind::none;
+            bool chunked = false;
             Node const* node = nullptr;
             std::unordered_map<std::string, std::string> params;
         };
@@ -58,12 +52,9 @@ namespace httplib::server
         void set_chunked_http_handler_impl(http::verb method,
                                            std::string_view key,
                                            coro_http_handler_type&& handler) override;
-        void set_buffer_body_http_handler_impl(http::verb method,
-                                               std::string_view key,
-                                               coro_http_handler_type&& handler) override;
 
       private:
-        static void collect_allows(std::set<std::string>& allows, Node const* node, bool include_chunked);
+        static void collect_allows(std::set<std::string>& allows, Node const* node);
 
         struct Node
         {
@@ -73,7 +64,6 @@ namespace httplib::server
 
             std::unordered_map<http::verb, coro_http_handler_type> handlers;
             std::unordered_map<http::verb, coro_http_handler_type> chunked_handlers;
-            std::unordered_map<http::verb, coro_http_handler_type> buffer_body_handlers;
             std::optional<ws_handler_entry> ws_handler;
 
             std::unordered_map<std::string, std::unique_ptr<Node>> static_children;

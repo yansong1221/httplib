@@ -5,6 +5,7 @@
 #include <boost/beast/http/buffer_body.hpp>
 #include <boost/beast/http/parser.hpp>
 #include <boost/beast/http/read.hpp>
+#include <boost/system/result.hpp>
 #include <chrono>
 #include <memory>
 #include <vector>
@@ -28,16 +29,16 @@ namespace httplib::detail
             read_timeout_ = read_timeout;
         }
 
-        net::awaitable<std::size_t>
+        net::awaitable<boost::system::result<std::size_t>>
         read_some(net::mutable_buffer const& buffer)
         {
-            if (parser_->is_done())
-            {
-                co_return 0;
-            }
-
             for (;;)
             {
+                if (parser_->is_done())
+                {
+                    co_return 0;
+                }
+
                 auto& b = parser_->get().body();
                 b.data = buffer.data();
                 b.size = buffer.size();
@@ -46,9 +47,11 @@ namespace httplib::detail
                 stream_->expires_after(read_timeout_);
                 co_await http::async_read_some(*stream_, *buffer_, *parser_, util::net_awaitable[ec]);
                 stream_->expires_never();
+                if (ec == http::error::need_buffer)
+                    ec = {};
                 if (ec)
                 {
-                    throw boost::system::system_error(ec);
+                    co_return ec;
                 }
 
                 auto& body = parser_->get().body();

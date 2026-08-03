@@ -1,4 +1,3 @@
-#include "httplib/body/string_body.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/server/middleware/cors.hpp"
 #include "httplib/server/request.hpp"
@@ -90,7 +89,7 @@ namespace
 
 } // namespace
 
-TEST_CASE("Chunked: Content-Length does NOT hit chunked handler", "[chunked]")
+TEST_CASE("Chunked: Content-Length hits chunked handler", "[chunked]")
 {
     test_scaffold ts;
 
@@ -98,13 +97,14 @@ TEST_CASE("Chunked: Content-Length does NOT hit chunked handler", "[chunked]")
         "/chunked-only",
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
-            resp.set_string_content("should-not-run"sv, "text/plain");
+            resp.set_string_content("chunked-handled"sv, "text/plain");
             co_return;
         });
     ts.start();
 
     auto resp = UNWRAP(ts.client->post("/chunked-only", "data"sv));
-    REQUIRE(resp.result() == http::status::not_found);
+    REQUIRE(resp.result() == http::status::ok);
+    REQUIRE(as_string(resp) == "chunked-handled");
 }
 
 TEST_CASE("Chunked: regular POST takes precedence over chunked", "[chunked]")
@@ -142,9 +142,12 @@ TEST_CASE("Chunked: GET coexists with chunked POST, returns 405 for Content-Leng
 
     ts.router().set_chunked_http_handler<http::verb::post>(
         "/chunked/both",
-        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+        [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
         {
-            resp.set_string_content("should-not-run"sv, "text/plain");
+            REQUIRE(req.is_chunked());
+            std::array<char, 4096> buf;
+            auto result = co_await req.read_chunk(net::buffer(buf));
+            resp.set_string_content("chunked-ok"sv, "text/plain");
             co_return;
         });
     ts.start();
@@ -154,21 +157,21 @@ TEST_CASE("Chunked: GET coexists with chunked POST, returns 405 for Content-Leng
     REQUIRE(get_resp.result() == http::status::ok);
     REQUIRE(as_string(get_resp) == "get-ok");
 
-    // Content-Length POST → 405 (path exists but POST via chunked only)
+    // Content-Length POST now hits chunked handler
     auto post_resp = UNWRAP(ts.client->post("/chunked/both", "data"sv));
-    REQUIRE(post_resp.result() == http::status::method_not_allowed);
-    REQUIRE(post_resp[http::field::allow] == "GET");
+    REQUIRE(post_resp.result() == http::status::ok);
+    REQUIRE(as_string(post_resp) == "chunked-ok");
 }
 
-TEST_CASE("Chunked: is_chunked_handler() false for Content-Length request", "[chunked]")
+TEST_CASE("Chunked: is_chunked() false for regular handler", "[chunked]")
 {
     test_scaffold ts;
 
-    // Use a regular POST handler to verify is_chunked_handler() is false
+    // Use a regular POST handler to verify is_chunked() is false
     ts.router().set_http_handler<http::verb::post>("/chunked/check",
                                                    [](httplib::server::request& req, httplib::server::response& resp)
                                                    {
-                                                       REQUIRE(!req.is_chunked_handler());
+                                                       REQUIRE(!req.is_chunked());
                                                        resp.set_string_content("not-chunked"sv, "text/plain");
                                                    });
     ts.start();
@@ -184,29 +187,23 @@ TEST_CASE("Chunked: multi-verb chunked handler registration", "[chunked]")
 
     ts.router().set_chunked_http_handler<http::verb::post, http::verb::put>(
         "/chunked/multi",
-        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+        [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
         {
-            resp.set_string_content("should-not-run"sv, "text/plain");
+            std::array<char, 1024> buf;
+            co_await req.read_chunk(net::buffer(buf));
+            auto method = std::string(req.method_string());
+            resp.set_string_content("chunked-" + method, "text/plain");
             co_return;
         });
-    ts.router().set_http_handler<http::verb::get>("/chunked/multi",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  { resp.set_string_content("get-ok"sv, "text/plain"); });
     ts.start();
 
-    // Content-Length POST → 405 (GET exists on path, chunked POST not applicable)
     auto post_resp = UNWRAP(ts.client->post("/chunked/multi", "data"sv));
-    REQUIRE(post_resp.result() == http::status::method_not_allowed);
-    REQUIRE(post_resp[http::field::allow] == "GET");
+    REQUIRE(post_resp.result() == http::status::ok);
+    REQUIRE(as_string(post_resp) == "chunked-POST");
 
-    // Content-Length PUT → 405
     auto put_resp = UNWRAP(ts.client->put("/chunked/multi", "data"sv));
-    REQUIRE(put_resp.result() == http::status::method_not_allowed);
-
-    // GET still works via regular handler
-    auto get_resp = UNWRAP(ts.client->get("/chunked/multi"));
-    REQUIRE(get_resp.result() == http::status::ok);
-    REQUIRE(as_string(get_resp) == "get-ok");
+    REQUIRE(put_resp.result() == http::status::ok);
+    REQUIRE(as_string(put_resp) == "chunked-PUT");
 }
 
 TEST_CASE("Chunked: handler with path param", "[chunked]")
@@ -218,7 +215,7 @@ TEST_CASE("Chunked: handler with path param", "[chunked]")
         [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
         {
             auto id = req.path_param("id");
-            resp.set_string_content("chunked-" + std::string(id) + "-should-not-run", "text/plain");
+            resp.set_string_content("chunked-" + std::string(id), "text/plain");
             co_return;
         });
     ts.router().set_http_handler<http::verb::get>("/chunked/user/:id",
@@ -234,10 +231,10 @@ TEST_CASE("Chunked: handler with path param", "[chunked]")
     REQUIRE(get_resp.result() == http::status::ok);
     REQUIRE(as_string(get_resp) == "get-42");
 
-    // Content-Length POST → 405 (GET exists on path)
+    // Content-Length POST hits chunked handler
     auto post_resp = UNWRAP(ts.client->post("/chunked/user/42", "data"sv));
-    REQUIRE(post_resp.result() == http::status::method_not_allowed);
-    REQUIRE(post_resp[http::field::allow] == "GET");
+    REQUIRE(post_resp.result() == http::status::ok);
+    REQUIRE(as_string(post_resp) == "chunked-42");
 }
 
 TEST_CASE("Chunked: handler with wildcard path", "[chunked]")
@@ -249,7 +246,7 @@ TEST_CASE("Chunked: handler with wildcard path", "[chunked]")
         [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
         {
             auto wild = req.path_param("*");
-            resp.set_string_content("chunked-" + std::string(wild) + "-should-not-run", "text/plain");
+            resp.set_string_content("chunked-" + std::string(wild), "text/plain");
             co_return;
         });
     ts.router().set_http_handler<http::verb::get>("/chunked/ws/*",
@@ -265,10 +262,10 @@ TEST_CASE("Chunked: handler with wildcard path", "[chunked]")
     REQUIRE(get_resp.result() == http::status::ok);
     REQUIRE(as_string(get_resp) == "get-a/b/c");
 
-    // Content-Length POST → 405 (GET exists on path)
+    // Content-Length POST hits chunked handler
     auto post_resp = UNWRAP(ts.client->post("/chunked/ws/x/y", "data"sv));
-    REQUIRE(post_resp.result() == http::status::method_not_allowed);
-    REQUIRE(post_resp[http::field::allow] == "GET");
+    REQUIRE(post_resp.result() == http::status::ok);
+    REQUIRE(as_string(post_resp) == "chunked-x/y");
 }
 
 TEST_CASE("Chunked: middleware is wrapped via set_chunked_http_handler", "[chunked]")
@@ -318,7 +315,7 @@ TEST_CASE("Chunked: regular PUT coexists with chunked POST", "[chunked]")
         "/chunked/mixed",
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
-            resp.set_string_content("should-not-run"sv, "text/plain");
+            resp.set_string_content("chunked-post"sv, "text/plain");
             co_return;
         });
     ts.start();
@@ -328,10 +325,10 @@ TEST_CASE("Chunked: regular PUT coexists with chunked POST", "[chunked]")
     REQUIRE(put_resp.result() == http::status::ok);
     REQUIRE(as_string(put_resp) == "regular-put-hello");
 
-    // Content-Length POST → 405 (PUT exists on path, chunked POST not applicable)
+    // Content-Length POST hits chunked handler
     auto post_resp = UNWRAP(ts.client->post("/chunked/mixed", "data"sv));
-    REQUIRE(post_resp.result() == http::status::method_not_allowed);
-    REQUIRE(post_resp[http::field::allow] == "PUT");
+    REQUIRE(post_resp.result() == http::status::ok);
+    REQUIRE(as_string(post_resp) == "chunked-post");
 }
 
 TEST_CASE("Chunked: chunked handler does not affect path that only has regular handlers", "[chunked]")
@@ -385,7 +382,7 @@ send_chunked(httplib::client::http_client& client,
     return resp.body().as<httplib::body::string_body>();
 }
 
-TEST_CASE("Chunked: read_chunk() receives all chunks", "[chunked]")
+TEST_CASE("Chunked: buffer_body receives de-chunked data", "[chunked]")
 {
     test_scaffold ts;
 
@@ -393,16 +390,19 @@ TEST_CASE("Chunked: read_chunk() receives all chunks", "[chunked]")
         "/chunked/read",
         [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
         {
-            REQUIRE(req.is_chunked_handler());
+            REQUIRE(req.is_chunked());
             std::string accumulated;
+            std::array<char, 8192> buf;
             for (;;)
             {
-                auto chunk = co_await req.get_chunk_reader().read_chunk();
-                if (chunk.empty())
+                auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
+                if (_bytes_r.has_error()) { break; }
+                auto bytes = _bytes_r.value();
+                if (bytes == 0)
                 {
                     break;
                 }
-                accumulated.append(chunk);
+                accumulated.append(buf.data(), bytes);
             }
             resp.set_string_content(accumulated, "text/plain");
         });
@@ -412,7 +412,7 @@ TEST_CASE("Chunked: read_chunk() receives all chunks", "[chunked]")
     REQUIRE(result == "Hello World");
 }
 
-TEST_CASE("Chunked: read_chunk() with multiple non-empty chunks", "[chunked]")
+TEST_CASE("Chunked: multiple chunks are de-chunked into single body", "[chunked]")
 {
     test_scaffold ts;
 
@@ -420,28 +420,29 @@ TEST_CASE("Chunked: read_chunk() with multiple non-empty chunks", "[chunked]")
         "/chunked/read-ext",
         [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
         {
-            REQUIRE(req.is_chunked_handler());
-            int chunk_count = 0;
+            REQUIRE(req.is_chunked());
             std::string accumulated;
+            std::array<char, 8192> buf;
             for (;;)
             {
-                auto chunk = co_await req.get_chunk_reader().read_chunk();
-                if (chunk.empty())
+                auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
+                if (_bytes_r.has_error()) { break; }
+                auto bytes = _bytes_r.value();
+                if (bytes == 0)
                 {
                     break;
                 }
-                ++chunk_count;
-                accumulated += std::string(chunk) + "|";
+                accumulated.append(buf.data(), bytes);
             }
-            resp.set_string_content(std::to_string(chunk_count) + ":" + accumulated, "text/plain");
+            resp.set_string_content(accumulated, "text/plain");
         });
     ts.start();
 
     auto result = send_chunked(*ts.client, http::verb::post, "/chunked/read-ext", { "chunk1", "chunk2", "chunk3" });
-    REQUIRE(result == "3:chunk1|chunk2|chunk3|");
+    REQUIRE(result == "chunk1chunk2chunk3");
 }
 
-TEST_CASE("Chunked: read_chunk() with single large chunk", "[chunked]")
+TEST_CASE("Chunked: large chunk via buffer_body", "[chunked]")
 {
     test_scaffold ts;
 
@@ -449,16 +450,19 @@ TEST_CASE("Chunked: read_chunk() with single large chunk", "[chunked]")
         "/chunked/read-large",
         [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
         {
-            REQUIRE(req.is_chunked_handler());
+            REQUIRE(req.is_chunked());
             std::string accumulated;
+            std::array<char, 8192> buf;
             for (;;)
             {
-                auto chunk = co_await req.get_chunk_reader().read_chunk();
-                if (chunk.empty())
+                auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
+                if (_bytes_r.has_error()) { break; }
+                auto bytes = _bytes_r.value();
+                if (bytes == 0)
                 {
                     break;
                 }
-                accumulated.append(chunk);
+                accumulated.append(buf.data(), bytes);
             }
             resp.set_string_content(std::to_string(accumulated.size()), "text/plain");
         });
@@ -469,7 +473,7 @@ TEST_CASE("Chunked: read_chunk() with single large chunk", "[chunked]")
     REQUIRE(result == "10000");
 }
 
-TEST_CASE("Chunked: read_chunk() returns empty for zero-chunk request", "[chunked]")
+TEST_CASE("Chunked: empty chunks via buffer_body", "[chunked]")
 {
     test_scaffold ts;
 
@@ -477,18 +481,11 @@ TEST_CASE("Chunked: read_chunk() returns empty for zero-chunk request", "[chunke
         "/chunked/read-empty",
         [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
         {
-            REQUIRE(req.is_chunked_handler());
-            int count = 0;
-            for (;;)
-            {
-                auto chunk = co_await req.get_chunk_reader().read_chunk();
-                if (chunk.empty())
-                {
-                    break;
-                }
-                ++count;
-            }
-            resp.set_string_content(std::to_string(count), "text/plain");
+            REQUIRE(req.is_chunked());
+            std::string accumulated;
+            std::array<char, 4096> buf;
+            auto bytes_result = co_await req.read_chunk(net::buffer(buf));
+            resp.set_string_content(std::to_string(accumulated.size()), "text/plain");
         });
     ts.start();
 
@@ -496,7 +493,7 @@ TEST_CASE("Chunked: read_chunk() returns empty for zero-chunk request", "[chunke
     REQUIRE(result == "0");
 }
 
-TEST_CASE("Chunked: read_chunk() respects is_chunked_handler() = true", "[chunked]")
+TEST_CASE("Chunked: is_buffer_body_handler() is true", "[chunked]")
 {
     test_scaffold ts;
 
@@ -504,9 +501,13 @@ TEST_CASE("Chunked: read_chunk() respects is_chunked_handler() = true", "[chunke
         "/chunked/read-is-chunked",
         [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
         {
-            bool was_chunked = req.is_chunked_handler();
-            auto chunk = co_await req.get_chunk_reader().read_chunk();
-            resp.set_string_content(std::string(was_chunked ? "yes:" : "no:") + std::string(chunk), "text/plain");
+            bool was_body = req.is_chunked();
+            std::array<char, 8192> buf;
+            auto bytes_result = co_await req.read_chunk(net::buffer(buf));
+            if (bytes_result.has_error()) { co_return; }
+            auto bytes = bytes_result.value();
+            resp.set_string_content(std::string(was_body ? "yes:" : "no:") + std::string(buf.data(), bytes),
+                                    "text/plain");
         });
     ts.start();
 
@@ -514,7 +515,7 @@ TEST_CASE("Chunked: read_chunk() respects is_chunked_handler() = true", "[chunke
     REQUIRE(result == "yes:data");
 }
 
-TEST_CASE("Chunked: read_chunk() with path parameters", "[chunked]")
+TEST_CASE("Chunked: with path parameters via buffer_body", "[chunked]")
 {
     test_scaffold ts;
 
@@ -522,17 +523,20 @@ TEST_CASE("Chunked: read_chunk() with path parameters", "[chunked]")
         "/chunked/read/:id",
         [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
         {
-            REQUIRE(req.is_chunked_handler());
+            REQUIRE(req.is_chunked());
             auto id = std::string(req.path_param("id"));
             std::string accumulated;
+            std::array<char, 8192> buf;
             for (;;)
             {
-                auto chunk = co_await req.get_chunk_reader().read_chunk();
-                if (chunk.empty())
+                auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
+                if (_bytes_r.has_error()) { break; }
+                auto bytes = _bytes_r.value();
+                if (bytes == 0)
                 {
                     break;
                 }
-                accumulated.append(chunk);
+                accumulated.append(buf.data(), bytes);
             }
             resp.set_string_content(id + ":" + accumulated, "text/plain");
         });
@@ -542,7 +546,7 @@ TEST_CASE("Chunked: read_chunk() with path parameters", "[chunked]")
     REQUIRE(result == "42:hello");
 }
 
-TEST_CASE("Chunked: read_chunk() with wildcard path", "[chunked]")
+TEST_CASE("Chunked: with wildcard path via buffer_body", "[chunked]")
 {
     test_scaffold ts;
 
@@ -550,17 +554,20 @@ TEST_CASE("Chunked: read_chunk() with wildcard path", "[chunked]")
         "/chunked/read-ws/*",
         [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
         {
-            REQUIRE(req.is_chunked_handler());
+            REQUIRE(req.is_chunked());
             auto wild = std::string(req.path_param("*"));
             std::string accumulated;
+            std::array<char, 8192> buf;
             for (;;)
             {
-                auto chunk = co_await req.get_chunk_reader().read_chunk();
-                if (chunk.empty())
+                auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
+                if (_bytes_r.has_error()) { break; }
+                auto bytes = _bytes_r.value();
+                if (bytes == 0)
                 {
                     break;
                 }
-                accumulated.append(chunk);
+                accumulated.append(buf.data(), bytes);
             }
             resp.set_string_content(wild + ":" + accumulated, "text/plain");
         });
@@ -570,7 +577,7 @@ TEST_CASE("Chunked: read_chunk() with wildcard path", "[chunked]")
     REQUIRE(result == "a/b:xyz");
 }
 
-TEST_CASE("Chunked: read_chunk() via PUT chunked handler", "[chunked]")
+TEST_CASE("Chunked: PUT via buffer_body", "[chunked]")
 {
     test_scaffold ts;
 
@@ -578,16 +585,19 @@ TEST_CASE("Chunked: read_chunk() via PUT chunked handler", "[chunked]")
         "/chunked/read-put",
         [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
         {
-            REQUIRE(req.is_chunked_handler());
+            REQUIRE(req.is_chunked());
             std::string accumulated;
+            std::array<char, 8192> buf;
             for (;;)
             {
-                auto chunk = co_await req.get_chunk_reader().read_chunk();
-                if (chunk.empty())
+                auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
+                if (_bytes_r.has_error()) { break; }
+                auto bytes = _bytes_r.value();
+                if (bytes == 0)
                 {
                     break;
                 }
-                accumulated.append(chunk);
+                accumulated.append(buf.data(), bytes);
             }
             resp.set_string_content("PUT:" + accumulated, "text/plain");
         });
@@ -597,7 +607,7 @@ TEST_CASE("Chunked: read_chunk() via PUT chunked handler", "[chunked]")
     REQUIRE(result == "PUT:put-body");
 }
 
-TEST_CASE("Chunked: read_chunk() via multi-verb chunked handler", "[chunked]")
+TEST_CASE("Chunked: multi-verb via buffer_body", "[chunked]")
 {
     test_scaffold ts;
 
@@ -605,16 +615,19 @@ TEST_CASE("Chunked: read_chunk() via multi-verb chunked handler", "[chunked]")
         "/chunked/read-multi",
         [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
         {
-            REQUIRE(req.is_chunked_handler());
+            REQUIRE(req.is_chunked());
             std::string accumulated;
+            std::array<char, 8192> buf;
             for (;;)
             {
-                auto chunk = co_await req.get_chunk_reader().read_chunk();
-                if (chunk.empty())
+                auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
+                if (_bytes_r.has_error()) { break; }
+                auto bytes = _bytes_r.value();
+                if (bytes == 0)
                 {
                     break;
                 }
-                accumulated.append(chunk);
+                accumulated.append(buf.data(), bytes);
             }
             auto method = std::string(req.method_string());
             resp.set_string_content(method + ":" + accumulated, "text/plain");
@@ -628,7 +641,7 @@ TEST_CASE("Chunked: read_chunk() via multi-verb chunked handler", "[chunked]")
     REQUIRE(patch_result == "PATCH:from-patch");
 }
 
-TEST_CASE("Chunked: async_send_chunked_request via send_chunked_request", "[chunked]")
+TEST_CASE("Chunked: sync send_chunked_request via buffer_body", "[chunked]")
 {
     test_scaffold ts;
 
@@ -636,16 +649,19 @@ TEST_CASE("Chunked: async_send_chunked_request via send_chunked_request", "[chun
         "/chunked/sync",
         [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
         {
-            REQUIRE(req.is_chunked_handler());
+            REQUIRE(req.is_chunked());
             std::string accumulated;
+            std::array<char, 8192> buf;
             for (;;)
             {
-                auto chunk = co_await req.get_chunk_reader().read_chunk();
-                if (chunk.empty())
+                auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
+                if (_bytes_r.has_error()) { break; }
+                auto bytes = _bytes_r.value();
+                if (bytes == 0)
                 {
                     break;
                 }
-                accumulated.append(chunk);
+                accumulated.append(buf.data(), bytes);
             }
             resp.set_string_content(accumulated, "text/plain");
         });
@@ -654,348 +670,4 @@ TEST_CASE("Chunked: async_send_chunked_request via send_chunked_request", "[chun
     auto gen = chunk_vec_generator({ "via", "sync" });
     auto resp = UNWRAP(ts.client->send_chunked_request(http::verb::post, "/chunked/sync", std::move(gen)));
     REQUIRE(resp.body().as<httplib::body::string_body>() == "viasync");
-}
-
-// =============================================================================
-// buffer_body handler tests
-// =============================================================================
-
-TEST_CASE("BufferBody: read_buffer_body_some() receives body incrementally", "[buffer_body]")
-{
-    test_scaffold ts;
-
-    ts.router().set_buffer_body_http_handler<http::verb::post>(
-        "/buffer/read",
-        [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
-        {
-            REQUIRE(req.is_buffer_body_handler());
-            std::string accumulated;
-            std::array<char, 8192> buf;
-            for (;;)
-            {
-                auto bytes = co_await req.read_buffer_body_some(net::buffer(buf));
-                if (bytes == 0)
-                {
-                    break;
-                }
-                accumulated.append(buf.data(), bytes);
-            }
-            resp.set_string_content(accumulated, "text/plain");
-        });
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->post("/buffer/read", "Hello World"sv));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(as_string(resp) == "Hello World");
-}
-
-TEST_CASE("BufferBody: read_buffer_body_some() with empty body", "[buffer_body]")
-{
-    test_scaffold ts;
-
-    ts.router().set_buffer_body_http_handler<http::verb::post>(
-        "/buffer/empty",
-        [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
-        {
-            REQUIRE(req.is_buffer_body_handler());
-            int count = 0;
-            std::array<char, 8192> buf;
-            for (;;)
-            {
-                auto bytes = co_await req.read_buffer_body_some(net::buffer(buf));
-                if (bytes == 0)
-                {
-                    break;
-                }
-                ++count;
-            }
-            resp.set_string_content(std::to_string(count), "text/plain");
-        });
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->post("/buffer/empty", ""sv));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(as_string(resp) == "0");
-}
-
-TEST_CASE("BufferBody: read_buffer_body_some() with large body", "[buffer_body]")
-{
-    test_scaffold ts;
-
-    ts.router().set_buffer_body_http_handler<http::verb::post>(
-        "/buffer/large",
-        [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
-        {
-            REQUIRE(req.is_buffer_body_handler());
-            std::string accumulated;
-            std::array<char, 8192> buf;
-            for (;;)
-            {
-                auto bytes = co_await req.read_buffer_body_some(net::buffer(buf));
-                if (bytes == 0)
-                {
-                    break;
-                }
-                accumulated.append(buf.data(), bytes);
-            }
-            resp.set_string_content(std::to_string(accumulated.size()), "text/plain");
-        });
-    ts.start();
-
-    std::string large_body(10000, 'X');
-    auto resp = UNWRAP(ts.client->post("/buffer/large", large_body));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(as_string(resp) == "10000");
-}
-
-TEST_CASE("BufferBody: is_buffer_body_handler() is true", "[buffer_body]")
-{
-    test_scaffold ts;
-
-    ts.router().set_buffer_body_http_handler<http::verb::post>(
-        "/buffer/is-handler",
-        [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
-        {
-            bool was_buffer = req.is_buffer_body_handler();
-            std::array<char, 8192> buf;
-            auto bytes = co_await req.read_buffer_body_some(net::buffer(buf));
-            resp.set_string_content(std::string(was_buffer ? "yes:" : "no:") + std::string(buf.data(), bytes),
-                                    "text/plain");
-        });
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->post("/buffer/is-handler", "data"sv));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(as_string(resp) == "yes:data");
-}
-
-TEST_CASE("BufferBody: read_buffer_body_some() returns empty when not set up", "[buffer_body]")
-{
-    test_scaffold ts;
-
-    ts.router().set_http_handler<http::verb::post>(
-        "/buffer/noctx",
-        [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
-        {
-            REQUIRE(!req.is_buffer_body_handler());
-            std::array<char, 1024> buf;
-            auto bytes = co_await req.read_buffer_body_some(net::buffer(buf));
-            REQUIRE(bytes == 0);
-            resp.set_string_content("ok"sv, "text/plain");
-        });
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->post("/buffer/noctx", "data"sv));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(as_string(resp) == "ok");
-}
-
-TEST_CASE("BufferBody: with path parameters", "[buffer_body]")
-{
-    test_scaffold ts;
-
-    ts.router().set_buffer_body_http_handler<http::verb::post>(
-        "/buffer/user/:id",
-        [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
-        {
-            REQUIRE(req.is_buffer_body_handler());
-            auto id = std::string(req.path_param("id"));
-            std::string accumulated;
-            std::array<char, 8192> buf;
-            for (;;)
-            {
-                auto bytes = co_await req.read_buffer_body_some(net::buffer(buf));
-                if (bytes == 0)
-                {
-                    break;
-                }
-                accumulated.append(buf.data(), bytes);
-            }
-            resp.set_string_content(id + ":" + accumulated, "text/plain");
-        });
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->post("/buffer/user/99", "hello"sv));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(as_string(resp) == "99:hello");
-}
-
-TEST_CASE("BufferBody: with wildcard path", "[buffer_body]")
-{
-    test_scaffold ts;
-
-    ts.router().set_buffer_body_http_handler<http::verb::post>(
-        "/buffer/ws/*",
-        [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
-        {
-            REQUIRE(req.is_buffer_body_handler());
-            auto wild = std::string(req.path_param("*"));
-            std::string accumulated;
-            std::array<char, 8192> buf;
-            for (;;)
-            {
-                auto bytes = co_await req.read_buffer_body_some(net::buffer(buf));
-                if (bytes == 0)
-                {
-                    break;
-                }
-                accumulated.append(buf.data(), bytes);
-            }
-            resp.set_string_content(wild + ":" + accumulated, "text/plain");
-        });
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->post("/buffer/ws/a/b/c", "xyz"sv));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(as_string(resp) == "a/b/c:xyz");
-}
-
-TEST_CASE("BufferBody: multi-verb registration", "[buffer_body]")
-{
-    test_scaffold ts;
-
-    ts.router().set_buffer_body_http_handler<http::verb::post, http::verb::patch>(
-        "/buffer/multi",
-        [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
-        {
-            REQUIRE(req.is_buffer_body_handler());
-            std::string accumulated;
-            std::array<char, 8192> buf;
-            for (;;)
-            {
-                auto bytes = co_await req.read_buffer_body_some(net::buffer(buf));
-                if (bytes == 0)
-                {
-                    break;
-                }
-                accumulated.append(buf.data(), bytes);
-            }
-            auto method = std::string(req.method_string());
-            resp.set_string_content(method + ":" + accumulated, "text/plain");
-        });
-    ts.start();
-
-    auto post_resp = UNWRAP(ts.client->post("/buffer/multi", "post-body"sv));
-    REQUIRE(post_resp.result() == http::status::ok);
-    REQUIRE(as_string(post_resp) == "POST:post-body");
-
-    auto patch_resp = UNWRAP(ts.client->patch("/buffer/multi", "patch-body"sv));
-    REQUIRE(patch_resp.result() == http::status::ok);
-    REQUIRE(as_string(patch_resp) == "PATCH:patch-body");
-}
-
-TEST_CASE("BufferBody: regular handler takes precedence", "[buffer_body]")
-{
-    test_scaffold ts;
-
-    ts.router().set_http_handler<http::verb::post>("/buffer/precedence",
-                                                   [](httplib::server::request& req, httplib::server::response& resp)
-                                                   {
-                                                       auto& body = req.body().as<httplib::body::string_body>();
-                                                       resp.set_string_content("regular-" + body, "text/plain");
-                                                   });
-
-    ts.router().set_buffer_body_http_handler<http::verb::post>(
-        "/buffer/precedence",
-        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
-        {
-            resp.set_string_content("should-not-run"sv, "text/plain");
-            co_return;
-        });
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->post("/buffer/precedence", "data"sv));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(as_string(resp) == "regular-data");
-}
-
-TEST_CASE("BufferBody: Content-Length POST does NOT hit chunked handler on same path", "[buffer_body]")
-{
-    test_scaffold ts;
-
-    ts.router().set_chunked_http_handler<http::verb::post>(
-        "/buffer/vs-chunked",
-        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
-        {
-            resp.set_string_content("chunked"sv, "text/plain");
-            co_return;
-        });
-
-    ts.router().set_buffer_body_http_handler<http::verb::post>(
-        "/buffer/vs-chunked",
-        [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
-        {
-            REQUIRE(req.is_buffer_body_handler());
-            std::string accumulated;
-            std::array<char, 8192> buf;
-            for (;;)
-            {
-                auto bytes = co_await req.read_buffer_body_some(net::buffer(buf));
-                if (bytes == 0)
-                {
-                    break;
-                }
-                accumulated.append(buf.data(), bytes);
-            }
-            resp.set_string_content("buffer-" + accumulated, "text/plain");
-        });
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->post("/buffer/vs-chunked", "body"sv));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(as_string(resp) == "buffer-body");
-}
-
-TEST_CASE("BufferBody: via PUT method", "[buffer_body]")
-{
-    test_scaffold ts;
-
-    ts.router().set_buffer_body_http_handler<http::verb::put>(
-        "/buffer/put",
-        [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
-        {
-            REQUIRE(req.is_buffer_body_handler());
-            std::string accumulated;
-            std::array<char, 8192> buf;
-            for (;;)
-            {
-                auto bytes = co_await req.read_buffer_body_some(net::buffer(buf));
-                if (bytes == 0)
-                {
-                    break;
-                }
-                accumulated.append(buf.data(), bytes);
-            }
-            resp.set_string_content("PUT:" + accumulated, "text/plain");
-        });
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->put("/buffer/put", "put-body"sv));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(as_string(resp) == "PUT:put-body");
-}
-
-TEST_CASE("BufferBody: handler does not affect other paths", "[buffer_body]")
-{
-    test_scaffold ts;
-
-    ts.router().set_buffer_body_http_handler<http::verb::post>(
-        "/buffer/isolated",
-        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
-        {
-            resp.set_string_content("should-not-run"sv, "text/plain");
-            co_return;
-        });
-
-    ts.router().set_http_handler<http::verb::post>("/regular/path",
-                                                   [](httplib::server::request& req, httplib::server::response& resp)
-                                                   {
-                                                       auto& body = req.body().as<httplib::body::string_body>();
-                                                       resp.set_string_content("regular-" + body, "text/plain");
-                                                   });
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->post("/regular/path", "data"sv));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(as_string(resp) == "regular-data");
 }

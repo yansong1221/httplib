@@ -287,7 +287,7 @@ setup_http_routes(httplib::server::router& router)
                                                      });
                                              });
 
-    router.set_buffer_body_http_handler<http::verb::post>(
+    router.set_chunked_http_handler<http::verb::post>(
         "/api/buffer",
         [](httplib::server::request& req, httplib::server::response& resp) -> httplib::net::awaitable<void>
         {
@@ -295,12 +295,12 @@ setup_http_routes(httplib::server::router& router)
             std::array<char, 1024> buffer;
             for (;;)
             {
-                auto bytes = co_await req.read_buffer_body_some(httplib::net::buffer(buffer));
-                if (bytes == 0)
+                auto bytes_result = co_await req.read_chunk(httplib::net::buffer(buffer));
+                if (bytes_result.has_error() || bytes_result.value() == 0)
                 {
                     break;
                 }
-                all.append(buffer.data(), bytes);
+                all.append(buffer.data(), bytes_result.value());
             }
             resp.set_string_content(all, "text/plain");
             co_return;

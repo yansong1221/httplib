@@ -118,18 +118,10 @@ namespace httplib::server
 
         req.set_path_param(std::unordered_map<std::string, std::string>(match.params));
 
-        if (match.body == body_kind::chunked)
+        if (match.chunked)
         {
             auto iter = match.node->chunked_handlers.find(req.method());
             if (iter != match.node->chunked_handlers.end())
-            {
-                co_await iter->second(req, resp);
-            }
-        }
-        else if (match.body == body_kind::buffer_body)
-        {
-            auto iter = match.node->buffer_body_handlers.find(req.method());
-            if (iter != match.node->buffer_body_handlers.end())
             {
                 co_await iter->second(req, resp);
             }
@@ -195,51 +187,25 @@ namespace httplib::server
 
         std::shared_lock lock(mutex_);
         auto segments = detail::split_segments(req.path());
-        bool is_chunked_te = req.get_impl()->chunked();
 
-        result.node = match_nodes(
-            root_.get(),
-            segments,
-            0,
-            result.params,
-            [&](Node const* node)
-            {
-                collect_allows(result.allows, node, is_chunked_te);
-                if (node->handlers.find(req.method()) != node->handlers.end())
-                {
-                    return true;
-                }
-                if (is_chunked_te && node->chunked_handlers.find(req.method()) != node->chunked_handlers.end())
-                {
-                    return true;
-                }
-                if (node->buffer_body_handlers.find(req.method()) != node->buffer_body_handlers.end())
-                {
-                    return true;
-                }
-                return false;
-            });
-
-        if (!result.node)
-        {
-            co_return result;
-        }
-
-        if (result.node->handlers.find(req.method()) != result.node->handlers.end())
-        {
-            result.body = body_kind::none;
-            co_return result;
-        }
-        if (is_chunked_te && result.node->chunked_handlers.find(req.method()) != result.node->chunked_handlers.end())
-        {
-            result.body = body_kind::chunked;
-            co_return result;
-        }
-        if (result.node->buffer_body_handlers.find(req.method()) != result.node->buffer_body_handlers.end())
-        {
-            result.body = body_kind::buffer_body;
-            co_return result;
-        }
+        result.node = match_nodes(root_.get(),
+                                  segments,
+                                  0,
+                                  result.params,
+                                  [&](Node const* node)
+                                  {
+                                      collect_allows(result.allows, node);
+                                      if (node->handlers.find(req.method()) != node->handlers.end())
+                                      {
+                                          return true;
+                                      }
+                                      if (node->chunked_handlers.find(req.method()) != node->chunked_handlers.end())
+                                      {
+                                          result.chunked = true;
+                                          return true;
+                                      }
+                                      return false;
+                                  });
         co_return result;
     }
 
@@ -361,33 +327,15 @@ namespace httplib::server
     }
 
     void
-    router_impl::set_buffer_body_http_handler_impl(http::verb method,
-                                                   std::string_view key,
-                                                   coro_http_handler_type&& handler)
-    {
-        std::unique_lock lock(mutex_);
-        auto segments = detail::split_segments(key);
-        auto node = insert(root_.get(), segments, 0);
-        node->buffer_body_handlers[method] = std::move(handler);
-    }
-
-    void
-    router_impl::collect_allows(std::set<std::string>& allows, Node const* node, bool include_chunked)
+    router_impl::collect_allows(std::set<std::string>& allows, Node const* node)
     {
         for (auto const& v : node->handlers)
         {
             allows.insert(to_string(v.first));
         }
-        for (auto const& v : node->buffer_body_handlers)
+        for (auto const& v : node->chunked_handlers)
         {
             allows.insert(to_string(v.first));
-        }
-        if (include_chunked)
-        {
-            for (auto const& v : node->chunked_handlers)
-            {
-                allows.insert(to_string(v.first));
-            }
         }
     }
 

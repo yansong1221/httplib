@@ -206,27 +206,16 @@ namespace httplib::server
     }
 
     bool
-    request::is_chunked_handler() const
+    request::is_chunked() const
     {
-        return impl_->is_chunked_handler();
+        return impl_->is_chunked();
     }
 
-    bool
-    request::is_buffer_body_handler() const
-    {
-        return impl_->is_buffer_body_handler();
-    }
 
-    httplib::chunk_reader&
-    request::get_chunk_reader()
+    net::awaitable<boost::system::result<std::size_t>>
+    request::read_chunk(net::mutable_buffer const& buffer)
     {
-        return impl_->get_chunk_reader();
-    }
-
-    net::awaitable<std::size_t>
-    request::read_buffer_body_some(net::mutable_buffer const& buffer)
-    {
-        co_return co_await impl_->read_buffer_body_some(buffer);
+        co_return co_await impl_->read_chunk(buffer);
     }
 
 } // namespace httplib::server

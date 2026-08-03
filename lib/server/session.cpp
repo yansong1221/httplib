@@ -284,14 +284,7 @@ namespace httplib::server
                         }
                     }
 
-                    if (match.body == router_impl::body_kind::buffer_body)
-                    {
-                        req.get_impl()->setup_buffer_body_reading(stream_,
-                                                                  buffer_,
-                                                                  std::move(header_parser),
-                                                                  serv_.read_timeout());
-                    }
-                    else if (match.body == router_impl::body_kind::chunked)
+                    if (match.chunked)
                     {
                         req.get_impl()->setup_chunked_reading(stream_,
                                                               buffer_,

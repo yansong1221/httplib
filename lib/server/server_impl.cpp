@@ -324,13 +324,13 @@ namespace httplib::server
             prefix.pop_back();
         }
 
-        router_.set_buffer_body_http_handler<http::verb::get,
-                                             http::verb::head,
-                                             http::verb::post,
-                                             http::verb::put,
-                                             http::verb::patch,
-                                             http::verb::delete_,
-                                             http::verb::options>(
+        router_.set_chunked_http_handler<http::verb::get,
+                                         http::verb::head,
+                                         http::verb::post,
+                                         http::verb::put,
+                                         http::verb::patch,
+                                         http::verb::delete_,
+                                         http::verb::options>(
             key,
             [this, upstream_host = std::string(upstream_host), upstream_port, upstream_ssl, prefix](
                 request& req,
@@ -382,7 +382,12 @@ namespace httplib::server
                 {
                     while (true)
                     {
-                        auto bytes = co_await req.read_buffer_body_some(net::buffer(relay_buf));
+                        auto bytes_result = co_await req.read_chunk(net::buffer(relay_buf));
+                        if (bytes_result.has_error())
+                        {
+                            break;
+                        }
+                        auto bytes = bytes_result.value();
                         rel_ec = co_await writer->write_body(net::buffer(relay_buf, bytes), bytes != 0);
                         if (rel_ec)
                         {
