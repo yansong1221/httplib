@@ -1,8 +1,9 @@
 #pragma once
 #include "html/html.h"
-#include "httplib/server/relay_writer.hpp"
+#include "httplib/server/chunk_writer.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/streaming/chunk_writer.hpp"
+#include "stream/http_stream.hpp"
 #include "util/mime_types.hpp"
 #include <boost/beast/version.hpp>
 #include <fmt/format.h>
@@ -215,15 +216,21 @@ namespace httplib::server
         }
 
         static response
-        make_response(unsigned int version, bool keep_alive)
+        make_response(unsigned int version,
+                      bool keep_alive,
+                      http_stream* stream = nullptr,
+                      std::chrono::steady_clock::duration write_timeout = std::chrono::steady_clock::duration(30))
         {
             auto _impl = std::make_unique<response::impl>(version, keep_alive);
+            _impl->stream_ = stream;
+            _impl->write_timeout_ = write_timeout;
             return response(std::move(_impl));
         }
 
         response::chunked_write_handler_type chunked_write_handler_;
-        std::unique_ptr<relay_writer> relay_writer_;
-        bool relay_used_ = false;
+        std::unique_ptr<chunk_writer> chunk_writer_;
+        http_stream* stream_ = nullptr;
+        std::chrono::steady_clock::duration write_timeout_ { 30 };
     };
 
 } // namespace httplib::server

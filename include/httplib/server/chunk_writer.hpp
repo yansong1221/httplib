@@ -8,10 +8,10 @@
 namespace httplib::server
 {
 
-    class HTTPLIB_API relay_writer
+    class HTTPLIB_API chunk_writer
     {
       public:
-        virtual ~relay_writer() = default;
+        virtual ~chunk_writer() = default;
 
         virtual net::awaitable<boost::system::error_code> write_header(http::status status,
                                                                        http::fields const& headers,

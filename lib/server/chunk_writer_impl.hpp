@@ -1,5 +1,5 @@
 #pragma once
-#include "httplib/server/relay_writer.hpp"
+#include "httplib/server/chunk_writer.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "response_impl.hpp"
 #include "stream/http_stream.hpp"
@@ -11,10 +11,10 @@
 namespace httplib::server
 {
 
-    class relay_writer_impl : public relay_writer
+    class chunk_writer_impl : public chunk_writer
     {
       public:
-        relay_writer_impl(response::impl& resp, http_stream& stream, std::chrono::steady_clock::duration write_timeout)
+        chunk_writer_impl(response::impl& resp, http_stream& stream, std::chrono::steady_clock::duration write_timeout)
             : resp_(&resp)
             , stream_(&stream)
             , write_timeout_(write_timeout)
@@ -42,11 +42,7 @@ namespace httplib::server
             stream_->expires_after(write_timeout_);
             co_await http::async_write_header(*stream_, *sr_, util::net_awaitable[ec]);
             stream_->expires_never();
-            if (!ec)
-            {
-                resp_->relay_used_ = true;
-            }
-            else
+            if (ec)
             {
                 resp_->keep_alive(false);
             }

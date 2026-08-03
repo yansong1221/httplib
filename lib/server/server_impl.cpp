@@ -447,7 +447,7 @@ namespace httplib::server
                                 static_cast<unsigned>(result),
                                 u.host());
 
-                if (auto rel_ec = co_await resp.relay().write_header(result, headers); rel_ec)
+                if (auto rel_ec = co_await resp.get_chunk_writer()->write_header(result, headers); rel_ec)
                 {
                     logger()->trace("[proxy] write response header failed: {}", rel_ec.message());
                     co_return;
@@ -464,7 +464,8 @@ namespace httplib::server
                     auto bytes = bytes_result.value();
                     auto more = !reader->is_body_done();
 
-                    if (auto rel_ec = co_await resp.relay().write_body(net::buffer(relay_buf, bytes), more); rel_ec)
+                    if (auto rel_ec = co_await resp.get_chunk_writer()->write_body(net::buffer(relay_buf, bytes), more);
+                        rel_ec)
                     {
                         logger()->trace("[proxy] write response body failed: {}", rel_ec.message());
                         co_return;

@@ -4,7 +4,6 @@
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
-#include "relay_writer_impl.hpp"
 #include "request_impl.hpp"
 #include "response_impl.hpp"
 #include "streaming/chunk_writer_impl.hpp"
@@ -237,9 +236,8 @@ namespace httplib::server
                 co_return std::make_unique<websocket_task>(websocket_stream(std::move(stream_)), std::move(req), serv_);
             }
 
-            auto resp = response::impl::make_response(header.version(), header.keep_alive());
-            resp.get_impl()->relay_writer_
-                = std::make_unique<relay_writer_impl>(*resp.get_impl(), stream_, serv_.write_timeout());
+            auto resp
+                = response::impl::make_response(header.version(), header.keep_alive(), &stream_, serv_.write_timeout());
             auto req = request::impl::make_request(local_endp, remote_endp, http::request<http::empty_body>(header));
 
             auto h_start = std::chrono::steady_clock::time_point {};
@@ -384,7 +382,7 @@ namespace httplib::server
     net::awaitable<bool>
     session::http_task::async_write(request const& req, response& resp)
     {
-        if (resp.get_impl()->relay_used_)
+        if (resp.get_impl()->chunk_writer_)
         {
             co_return true;
         }
@@ -524,7 +522,10 @@ namespace httplib::server
             co_return nullptr;
         }
 
-        auto resp = response::impl::make_response(req_.get_impl()->version(), req_.get_impl()->keep_alive());
+        auto resp = response::impl::make_response(req_.get_impl()->version(),
+                                                  req_.get_impl()->keep_alive(),
+                                                  &stream_,
+                                                  serv_.write_timeout());
         resp.get_impl()->reason("Connection Established");
         resp.get_impl()->result(http::status::ok);
         co_await http::async_write(stream_, (*resp.get_impl()), util::net_awaitable[ec]);

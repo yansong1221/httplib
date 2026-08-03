@@ -1,4 +1,5 @@
 #include "httplib/server/response.hpp"
+#include "chunk_writer_impl.hpp"
 #include "html/html.h"
 #include "response_impl.hpp"
 #include "streaming/ndjson_writer_impl.hpp"
@@ -151,7 +152,7 @@ namespace httplib::server
     response::set_sse_write_handler(sse_write_handler_type&& handler)
     {
         impl_->set_chunked_write_handler(
-            [handler = std::move(handler)](chunk_writer& cw) -> net::awaitable<void>
+            [handler = std::move(handler)](httplib::chunk_writer& cw) -> net::awaitable<void>
             {
                 streaming::sse_writer_impl sse(cw);
                 co_await handler(sse);
@@ -163,7 +164,7 @@ namespace httplib::server
     response::set_ndjson_write_handler(ndjson_write_handler_type&& handler)
     {
         impl_->set_chunked_write_handler(
-            [handler = std::move(handler)](chunk_writer& cw) -> net::awaitable<void>
+            [handler = std::move(handler)](httplib::chunk_writer& cw) -> net::awaitable<void>
             {
                 streaming::ndjson_writer_impl ndjson(cw);
                 co_await handler(ndjson);
@@ -171,10 +172,14 @@ namespace httplib::server
             "application/x-ndjson");
     }
 
-    relay_writer&
-    response::relay()
+    chunk_writer*
+    response::get_chunk_writer()
     {
-        return *impl_->relay_writer_;
+        if (!impl_->chunk_writer_)
+        {
+            impl_->chunk_writer_ = std::make_unique<chunk_writer_impl>(*impl_, *impl_->stream_, impl_->write_timeout_);
+        }
+        return impl_->chunk_writer_.get();
     }
 
     httplib::server::response::impl*

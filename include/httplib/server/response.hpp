@@ -2,7 +2,7 @@
 #include "httplib/body/any_body.hpp"
 #include "httplib/config.hpp"
 #include "httplib/html/form_data.hpp"
-#include "httplib/server/relay_writer.hpp"
+#include "httplib/server/chunk_writer.hpp"
 #include "httplib/streaming/chunk_writer.hpp"
 #include "httplib/streaming/ndjson_writer.hpp"
 #include "httplib/streaming/sse_writer.hpp"
@@ -78,7 +78,7 @@ namespace httplib::server
         using ndjson_write_handler_type = std::function<net::awaitable<void>(httplib::ndjson_writer&)>;
         void set_ndjson_write_handler(ndjson_write_handler_type&& handler);
 
-        relay_writer& relay();
+        chunk_writer* get_chunk_writer();
 
         impl* get_impl();
         impl const* get_impl() const;
