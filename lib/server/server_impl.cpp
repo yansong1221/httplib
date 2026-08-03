@@ -393,6 +393,7 @@ namespace httplib::server
                     }
                     upstream_headers.set(f.name_string(), f.value());
                 }
+                upstream_headers.set(http::field::host, host);
 
                 auto client_ip = req.remote_endpoint().address().to_string();
                 auto xff = req_impl["X-Forwarded-For"];
