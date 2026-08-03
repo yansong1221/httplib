@@ -12,6 +12,8 @@ namespace httplib::server
       public:
         virtual ~sse_writer() = default;
 
+        virtual net::awaitable<boost::system::error_code> begin() = 0;
+
         virtual net::awaitable<void> send_event(std::string_view data,
                                                 std::string_view event,
                                                 std::string_view id,

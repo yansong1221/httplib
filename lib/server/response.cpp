@@ -140,20 +140,16 @@ namespace httplib::server
         impl_->set_redirect(url, status);
     }
 
-    net::awaitable<std::unique_ptr<server::sse_writer>>
-    response::begin_sse()
+    std::unique_ptr<server::sse_writer>
+    response::create_sse_writer()
     {
-        auto sse = std::make_unique<sse_writer_impl>(get_chunk_writer());
-        co_await sse->begin();
-        co_return sse;
+        return std::make_unique<sse_writer_impl>(get_chunk_writer());
     }
 
-    net::awaitable<std::unique_ptr<server::ndjson_writer>>
-    response::begin_ndjson()
+    std::unique_ptr<server::ndjson_writer>
+    response::create_ndjson_writer()
     {
-        auto ndjson = std::make_unique<ndjson_writer_impl>(get_chunk_writer());
-        co_await ndjson->begin();
-        co_return ndjson;
+        return std::make_unique<ndjson_writer_impl>(get_chunk_writer());
     }
 
     chunk_writer*

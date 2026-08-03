@@ -13,6 +13,8 @@ namespace httplib::server
       public:
         virtual ~chunk_writer() = default;
 
+        virtual bool has_header() const = 0;
+
         virtual net::awaitable<boost::system::error_code> write_header(http::status status,
                                                                        http::fields const& headers,
                                                                        bool relay = true)

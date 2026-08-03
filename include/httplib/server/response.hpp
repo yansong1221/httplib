@@ -66,8 +66,8 @@ namespace httplib::server
 
         class impl;
 
-        net::awaitable<std::unique_ptr<server::sse_writer>> begin_sse();
-        net::awaitable<std::unique_ptr<server::ndjson_writer>> begin_ndjson();
+        std::unique_ptr<server::sse_writer> create_sse_writer();
+        std::unique_ptr<server::ndjson_writer> create_ndjson_writer();
 
         chunk_writer* get_chunk_writer();
 

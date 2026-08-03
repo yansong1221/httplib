@@ -251,7 +251,8 @@ setup_http_routes(httplib::server::router& router)
         "/api/sse",
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
-            auto sse = co_await resp.begin_sse();
+            auto sse = resp.create_sse_writer();
+            co_await sse->begin();
             for (int i = 1; i <= 3; ++i)
             {
                 co_await sse->send_event(std::format("event #{}", i), "tick", std::to_string(i), i == 3);
@@ -263,7 +264,8 @@ setup_http_routes(httplib::server::router& router)
         "/api/ndjson",
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
-            auto w = co_await resp.begin_ndjson();
+            auto w = resp.create_ndjson_writer();
+            co_await w->begin();
             for (int i = 1; i <= 5; ++i)
             {
                 co_await w->write(

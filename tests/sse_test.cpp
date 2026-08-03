@@ -104,7 +104,8 @@ TEST_CASE("SSE: server sends single event", "[sse]")
         "/events",
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
-            auto sse = co_await resp.begin_sse();
+            auto sse = resp.create_sse_writer();
+            co_await sse->begin();
             co_await sse->send_event("hello world", {}, {}, false);
         });
     ts.start();
@@ -150,7 +151,8 @@ TEST_CASE("SSE: server sends multiple events", "[sse]")
         "/events",
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
-            auto sse = co_await resp.begin_sse();
+            auto sse = resp.create_sse_writer();
+            co_await sse->begin();
             co_await sse->send_event("first", {}, {}, true);
             co_await sse->send_event("second", {}, {}, true);
             co_await sse->send_event("third", {}, {}, false);
@@ -200,7 +202,8 @@ TEST_CASE("SSE: event with id and type", "[sse]")
         "/events",
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
-            auto sse = co_await resp.begin_sse();
+            auto sse = resp.create_sse_writer();
+            co_await sse->begin();
             co_await sse->send_event("payload", "custom_type", "42", false);
         });
     ts.start();
@@ -248,7 +251,8 @@ TEST_CASE("SSE: retry interval", "[sse]")
         "/events",
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
-            auto sse = co_await resp.begin_sse();
+            auto sse = resp.create_sse_writer();
+            co_await sse->begin();
             co_await sse->send_retry(std::chrono::milliseconds(3000), false);
         });
     ts.start();
@@ -295,7 +299,8 @@ TEST_CASE("SSE: comment is ignored", "[sse]")
         "/events",
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
-            auto sse = co_await resp.begin_sse();
+            auto sse = resp.create_sse_writer();
+            co_await sse->begin();
             co_await sse->send_comment("keep-alive", true);
             co_await sse->send_event("real data", {}, {}, false);
         });
@@ -342,7 +347,8 @@ TEST_CASE("SSE: Content-Type is text/event-stream", "[sse]")
         "/events",
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
-            auto sse = co_await resp.begin_sse();
+            auto sse = resp.create_sse_writer();
+            co_await sse->begin();
             co_await sse->send_event("test", {}, {}, false);
         });
     ts.start();
@@ -371,7 +377,8 @@ TEST_CASE("SSE: client can stop receiving by returning false", "[sse]")
         "/events",
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
-            auto sse = co_await resp.begin_sse();
+            auto sse = resp.create_sse_writer();
+            co_await sse->begin();
             co_await sse->send_event("first", {}, {}, true);
             co_await sse->send_event("second", {}, {}, true);
             co_await sse->send_event("third", {}, {}, false);
@@ -424,7 +431,8 @@ TEST_CASE("SSE: multi-line data", "[sse]")
         "/events",
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
-            auto sse = co_await resp.begin_sse();
+            auto sse = resp.create_sse_writer();
+            co_await sse->begin();
             co_await sse->send_event("line1\nline2\nline3", {}, {}, false);
         });
     ts.start();

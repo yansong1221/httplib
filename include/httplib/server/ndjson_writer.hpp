@@ -12,6 +12,8 @@ namespace httplib::server
       public:
         virtual ~ndjson_writer() = default;
 
+        virtual net::awaitable<boost::system::error_code> begin() = 0;
+
         virtual net::awaitable<void> write(boost::json::value const& value, bool more) = 0;
     };
 

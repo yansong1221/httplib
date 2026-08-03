@@ -21,6 +21,12 @@ namespace httplib::server
         {
         }
 
+        bool
+        has_header() const override
+        {
+            return header_sent_;
+        }
+
         net::awaitable<boost::system::error_code>
         write_header(http::status status, http::fields const& headers, bool relay) override
         {
@@ -46,12 +52,21 @@ namespace httplib::server
             {
                 resp_->keep_alive(false);
             }
+            else
+            {
+                header_sent_ = true;
+            }
             co_return ec;
         }
 
         net::awaitable<boost::system::error_code>
         write_body(net::const_buffer const& data, bool more) override
         {
+            if (!msg_ || !sr_)
+            {
+                co_return boost::system::errc::make_error_code(boost::system::errc::invalid_argument);
+            }
+
             msg_->body().data = (void*)data.data();
             msg_->body().size = data.size();
             msg_->body().more = more;
@@ -77,6 +92,7 @@ namespace httplib::server
         std::chrono::steady_clock::duration write_timeout_;
         std::unique_ptr<http::response<http::buffer_body>> msg_;
         std::unique_ptr<http::response_serializer<http::buffer_body>> sr_;
+        bool header_sent_ = false;
     };
 
 } // namespace httplib::server

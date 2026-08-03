@@ -92,7 +92,8 @@ TEST_CASE("NDJSON: server sends single line", "[ndjson]")
         "/ndjson",
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
-            auto w = co_await resp.begin_ndjson();
+            auto w = resp.create_ndjson_writer();
+            co_await w->begin();
             boost::json::value v {
                 { "msg", "hello" },
                 {   "n",      42 }
@@ -143,7 +144,8 @@ TEST_CASE("NDJSON: server sends multiple lines", "[ndjson]")
         "/ndjson",
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
-            auto w = co_await resp.begin_ndjson();
+            auto w = resp.create_ndjson_writer();
+            co_await w->begin();
             co_await w->write(
                 {
                     { "i", 1 }
@@ -205,7 +207,8 @@ TEST_CASE("NDJSON: Content-Type is application/x-ndjson", "[ndjson]")
         "/ndjson",
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
-            auto w = co_await resp.begin_ndjson();
+            auto w = resp.create_ndjson_writer();
+            co_await w->begin();
             co_await w->write(
                 {
                     { "x", 1 }
@@ -237,7 +240,8 @@ TEST_CASE("NDJSON: reader stops early", "[ndjson]")
         "/ndjson",
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
-            auto w = co_await resp.begin_ndjson();
+            auto w = resp.create_ndjson_writer();
+            co_await w->begin();
             co_await w->write(
                 {
                     { "i", 1 }
