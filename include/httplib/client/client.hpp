@@ -4,8 +4,6 @@
 #include "httplib/client/write_session.hpp"
 #include "httplib/config.hpp"
 #include "httplib/streaming/chunk_writer.hpp"
-#include "httplib/streaming/ndjson_reader.hpp"
-#include "httplib/streaming/sse_reader.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <filesystem>
 #include <functional>

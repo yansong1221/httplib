@@ -3,7 +3,6 @@
 #include "httplib/config.hpp"
 #include "httplib/html/form_data.hpp"
 #include "httplib/server/relay_writer.hpp"
-#include "httplib/streaming/buffer_body_writer.hpp"
 #include "httplib/streaming/chunk_writer.hpp"
 #include "httplib/streaming/ndjson_writer.hpp"
 #include "httplib/streaming/sse_writer.hpp"

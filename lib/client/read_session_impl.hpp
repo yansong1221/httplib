@@ -43,11 +43,19 @@ namespace httplib::client
             return resp_parser_ && resp_parser_->is_header_done();
         }
 
+        bool
+        is_body_done() const override
+        {
+            return resp_parser_ && resp_parser_->is_done();
+        }
+
         net::awaitable<boost::system::result<std::size_t>>
         read_body(net::mutable_buffer const& buf) override
         {
             if (!resp_parser_->is_header_done())
+            {
                 co_return 0;
+            }
 
             for (;;)
             {
@@ -57,19 +65,27 @@ namespace httplib::client
 
                 auto ec = co_await parent_.async_read(*resp_parser_, false);
                 if (ec == http::error::need_buffer)
+                {
                     ec = {};
+                }
                 if (ec)
+                {
                     co_return ec;
+                }
 
                 auto consumed = buf.size() - body.size;
                 if (consumed > 0)
+                {
                     co_return consumed;
+                }
 
                 if (resp_parser_->is_done())
                 {
                     parent_.finish_io();
                     if (!resp_parser_->keep_alive())
+                    {
                         parent_.close();
+                    }
                     co_return 0;
                 }
             }

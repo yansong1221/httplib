@@ -520,7 +520,7 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
         auto sse = client.create_sse_reader();
 
         co_await client.async_get("/api/sse");
-        auto ec = co_await sse->read_header();
+         auto ec = co_await sse->read_header();
         if (!ec)
         {
             while (!sse->is_done())
@@ -546,7 +546,7 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
         auto ndjson = client.create_ndjson_reader();
 
         co_await client.async_get("/api/ndjson");
-        auto ec = co_await ndjson->read_header();
+         auto ec = co_await ndjson->read_header();
         if (!ec)
         {
             while (!ndjson->is_done())

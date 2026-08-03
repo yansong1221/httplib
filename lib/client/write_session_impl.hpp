@@ -18,14 +18,13 @@ namespace httplib::client
         {
             req_msg_ = std::make_unique<http::request<http::buffer_body>>(method, target, 11);
             req_sr_ = std::make_unique<http::request_serializer<http::buffer_body>>(*req_msg_);
-            req_msg_->set(http::field::host, parent_.host_value_);
             req_msg_->set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
-            req_msg_->keep_alive(true);
-
             for (auto const& f : headers)
             {
                 req_msg_->set(f.name_string(), f.value());
             }
+            req_msg_->set(http::field::host, parent_.host_value_);
+            req_msg_->keep_alive(true);
 
             co_return co_await parent_.async_write(*req_sr_, true);
         }

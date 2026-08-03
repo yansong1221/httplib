@@ -393,8 +393,6 @@ namespace httplib::server
                     }
                     upstream_headers.set(f.name_string(), f.value());
                 }
-                auto host_value = port == (ssl ? 443 : 80) ? host : fmt::format("{}:{}", host, port);
-                upstream_headers.set(http::field::host, host_value);
 
                 auto client_ip = req.remote_endpoint().address().to_string();
                 auto xff = req_impl["X-Forwarded-For"];
@@ -479,7 +477,8 @@ namespace httplib::server
                         break;
                     }
                     auto bytes = bytes_result.value();
-                    rel_ec = co_await resp.relay().write_body(net::buffer(relay_buf, bytes), bytes != 0);
+                    auto more = !reader->is_body_done();
+                    rel_ec = co_await resp.relay().write_body(net::buffer(relay_buf, bytes), more);
                     if (rel_ec)
                     {
                         logger()->warn("relay resp write_body failed: {}", rel_ec.message());

@@ -5,7 +5,6 @@
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
 #include "httplib/streaming/chunk_writer.hpp"
-#include "httplib/streaming/sse_reader.hpp"
 #include "httplib/streaming/sse_writer.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
@@ -114,7 +113,7 @@ TEST_CASE("SSE: server sends single event", "[sse]")
                                                   });
     ts.start();
 
-    std::vector<httplib::sse_event> events;
+    std::vector<httplib::client::sse_reader::sse_event> events;
 
     boost::asio::co_spawn(
         ts.ioc,
@@ -162,7 +161,7 @@ TEST_CASE("SSE: server sends multiple events", "[sse]")
                                                   });
     ts.start();
 
-    std::vector<httplib::sse_event> events;
+    std::vector<httplib::client::sse_reader::sse_event> events;
 
     boost::asio::co_spawn(
         ts.ioc,
@@ -210,7 +209,7 @@ TEST_CASE("SSE: event with id and type", "[sse]")
                                                   });
     ts.start();
 
-    std::vector<httplib::sse_event> events;
+    std::vector<httplib::client::sse_reader::sse_event> events;
 
     boost::asio::co_spawn(
         ts.ioc,
@@ -258,7 +257,7 @@ TEST_CASE("SSE: retry interval", "[sse]")
                                                   });
     ts.start();
 
-    std::vector<httplib::sse_event> events;
+    std::vector<httplib::client::sse_reader::sse_event> events;
 
     boost::asio::co_spawn(
         ts.ioc,
@@ -306,7 +305,7 @@ TEST_CASE("SSE: comment is ignored", "[sse]")
                                                   });
     ts.start();
 
-    std::vector<httplib::sse_event> events;
+    std::vector<httplib::client::sse_reader::sse_event> events;
 
     boost::asio::co_spawn(
         ts.ioc,
@@ -386,7 +385,7 @@ TEST_CASE("SSE: client can stop receiving by returning false", "[sse]")
                                                   });
     ts.start();
 
-    std::vector<httplib::sse_event> events;
+    std::vector<httplib::client::sse_reader::sse_event> events;
 
     boost::asio::co_spawn(
         ts.ioc,
@@ -437,7 +436,7 @@ TEST_CASE("SSE: multi-line data", "[sse]")
                                                   });
     ts.start();
 
-    std::vector<httplib::sse_event> events;
+    std::vector<httplib::client::sse_reader::sse_event> events;
 
     boost::asio::co_spawn(
         ts.ioc,

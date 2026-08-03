@@ -1,11 +1,11 @@
 #pragma once
-#include "httplib/streaming/sse_reader.hpp"
+#include "httplib/client/read_session.hpp"
 #include <charconv>
 #include <deque>
 #include <string>
 #include <string_view>
 
-namespace httplib::streaming::detail
+namespace httplib::client::detail
 {
 
     class sse_event_parser
@@ -97,7 +97,7 @@ namespace httplib::streaming::detail
             return !events_.empty();
         }
 
-        sse_event
+        sse_reader::sse_event
         next()
         {
             auto ev = std::move(events_.front());
@@ -106,10 +106,10 @@ namespace httplib::streaming::detail
         }
 
       private:
-        sse_event
+        sse_reader::sse_event
         emit()
         {
-            sse_event ev;
+            sse_reader::sse_event ev;
             ev.id = std::move(id_);
             ev.event = std::move(event_);
             ev.data = std::move(data_);
@@ -129,7 +129,7 @@ namespace httplib::streaming::detail
         }
 
         std::string buf_;
-        std::deque<sse_event> events_;
+        std::deque<sse_reader::sse_event> events_;
 
         std::string id_;
         std::string event_;
@@ -137,4 +137,4 @@ namespace httplib::streaming::detail
         std::chrono::milliseconds retry_ { 0 };
     };
 
-} // namespace httplib::streaming::detail
+} // namespace httplib::client::detail

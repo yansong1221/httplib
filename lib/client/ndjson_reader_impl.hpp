@@ -24,22 +24,20 @@ namespace httplib::client
                 auto lf = buf_.find('\n');
                 if (lf == std::string::npos)
                 {
-                    if (done_)
+                    if (session_->is_body_done())
                     {
                         co_return boost::json::value {};
                     }
-                    std::array<char, 4096> buf;
-                    auto result = co_await session_->read_body(net::buffer(buf));
+
+                    auto result = co_await session_->read_body(net::buffer(read_buf_));
                     if (result.has_error())
                     {
                         co_return result.error();
                     }
-                    if (result.value() == 0)
+                    if (result.value() != 0)
                     {
-                        done_ = true;
-                        co_return boost::json::value {};
+                        buf_.append(read_buf_.data(), result.value());
                     }
-                    buf_.append(buf.data(), result.value());
                     continue;
                 }
 
@@ -62,7 +60,7 @@ namespace httplib::client
         bool
         is_done() const override
         {
-            return done_ && buf_.find('\n') == std::string::npos;
+            return is_header_done() && session_->is_body_done() && buf_.empty();
         }
 
         bool
@@ -83,10 +81,16 @@ namespace httplib::client
             return session_->headers();
         }
 
+        http::status
+        result() const override
+        {
+            return session_->result();
+        }
+
       private:
         std::shared_ptr<httplib::client::read_session> session_;
         std::string buf_;
-        bool done_ = false;
+        std::array<char, 4096> read_buf_;
     };
 
 } // namespace httplib::client

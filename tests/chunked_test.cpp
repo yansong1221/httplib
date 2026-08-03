@@ -4,7 +4,6 @@
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
-#include "httplib/streaming/buffer_body_writer.hpp"
 #include "httplib/streaming/chunk_writer.hpp"
 #include <array>
 #include <boost/asio/io_context.hpp>

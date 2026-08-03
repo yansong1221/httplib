@@ -1,12 +1,11 @@
 #pragma once
 #include "httplib/client/read_session.hpp"
-#include "httplib/streaming/sse_reader.hpp"
-#include "streaming/sse_event_parser.hpp"
+#include "sse_event_parser.hpp"
 #include <array>
 
 namespace httplib::client
 {
-    class sse_reader_impl : public httplib::client::sse_reader
+    class sse_reader_impl : public sse_reader
     {
       public:
         explicit sse_reader_impl(std::shared_ptr<client::read_session> session) : session_(std::move(session)) {}
@@ -14,32 +13,25 @@ namespace httplib::client
         net::awaitable<boost::system::result<sse_event>>
         read_event() override
         {
-            while (!parser_.has_event() && !done_)
+            while (!parser_.has_event() && !session_->is_body_done())
             {
-                std::array<char, 4096> buf;
-                auto result = co_await session_->read_body(net::buffer(buf));
+
+                auto result = co_await session_->read_body(net::buffer(read_buf_));
                 if (result.has_error())
                 {
                     co_return result.error();
                 }
                 if (result.value() == 0)
                 {
-                    done_ = true;
                     break;
                 }
-                parser_.feed(std::string_view(buf.data(), result.value()));
+                parser_.feed(std::string_view(read_buf_.data(), result.value()));
             }
             if (parser_.has_event())
             {
                 co_return parser_.next();
             }
             co_return sse_event {};
-        }
-
-        bool
-        is_done() const override
-        {
-            return done_ && !parser_.has_event();
         }
 
         bool
@@ -60,10 +52,22 @@ namespace httplib::client
             return session_->headers();
         }
 
+        http::status
+        result() const override
+        {
+            return session_->result();
+        }
+
+        bool
+        is_done() const override
+        {
+            return session_->is_body_done() && !parser_.has_event();
+        }
+
       private:
         std::shared_ptr<client::read_session> session_;
-        streaming::detail::sse_event_parser parser_;
-        bool done_ = false;
+        detail::sse_event_parser parser_;
+        std::array<char, 4096> read_buf_;
     };
 
 } // namespace httplib::client
