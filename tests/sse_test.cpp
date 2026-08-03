@@ -4,8 +4,7 @@
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
-#include "httplib/streaming/chunk_writer.hpp"
-#include "httplib/streaming/sse_writer.hpp"
+#include "httplib/server/sse_writer.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/use_future.hpp>
@@ -101,16 +100,13 @@ namespace
 TEST_CASE("SSE: server sends single event", "[sse]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/events",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  {
-                                                      resp.set_sse_write_handler(
-                                                          [](httplib::sse_writer& sse) -> net::awaitable<void>
-                                                          {
-                                                              co_await sse.send_event("hello world");
-                                                              co_await sse.close();
-                                                          });
-                                                  });
+    ts.router().set_http_handler<http::verb::get>(
+        "/events",
+        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+        {
+            auto sse = co_await resp.begin_sse();
+            co_await sse->send_event("hello world", {}, {}, false);
+        });
     ts.start();
 
     std::vector<httplib::client::sse_reader::sse_event> events;
@@ -128,7 +124,10 @@ TEST_CASE("SSE: server sends single event", "[sse]")
             while (!sse->is_done())
             {
                 auto result = co_await sse->read_event();
-                if (result.has_error()) { break; }
+                if (result.has_error())
+                {
+                    break;
+                }
                 auto& ev = result.value();
                 if (ev.data.empty() && ev.id.empty() && ev.event.empty() && ev.retry == std::chrono::milliseconds { 0 })
                 {
@@ -147,18 +146,15 @@ TEST_CASE("SSE: server sends single event", "[sse]")
 TEST_CASE("SSE: server sends multiple events", "[sse]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/events",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  {
-                                                      resp.set_sse_write_handler(
-                                                          [](httplib::sse_writer& sse) -> net::awaitable<void>
-                                                          {
-                                                              co_await sse.send_event("first");
-                                                              co_await sse.send_event("second");
-                                                              co_await sse.send_event("third");
-                                                              co_await sse.close();
-                                                          });
-                                                  });
+    ts.router().set_http_handler<http::verb::get>(
+        "/events",
+        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+        {
+            auto sse = co_await resp.begin_sse();
+            co_await sse->send_event("first", {}, {}, true);
+            co_await sse->send_event("second", {}, {}, true);
+            co_await sse->send_event("third", {}, {}, false);
+        });
     ts.start();
 
     std::vector<httplib::client::sse_reader::sse_event> events;
@@ -176,7 +172,10 @@ TEST_CASE("SSE: server sends multiple events", "[sse]")
             while (!sse->is_done())
             {
                 auto result = co_await sse->read_event();
-                if (result.has_error()) { break; }
+                if (result.has_error())
+                {
+                    break;
+                }
                 auto& ev = result.value();
                 if (ev.data.empty() && ev.id.empty() && ev.event.empty() && ev.retry == std::chrono::milliseconds { 0 })
                 {
@@ -197,16 +196,13 @@ TEST_CASE("SSE: server sends multiple events", "[sse]")
 TEST_CASE("SSE: event with id and type", "[sse]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/events",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  {
-                                                      resp.set_sse_write_handler(
-                                                          [](httplib::sse_writer& sse) -> net::awaitable<void>
-                                                          {
-                                                              co_await sse.send_event("payload", "custom_type", "42");
-                                                              co_await sse.close();
-                                                          });
-                                                  });
+    ts.router().set_http_handler<http::verb::get>(
+        "/events",
+        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+        {
+            auto sse = co_await resp.begin_sse();
+            co_await sse->send_event("payload", "custom_type", "42", false);
+        });
     ts.start();
 
     std::vector<httplib::client::sse_reader::sse_event> events;
@@ -224,7 +220,10 @@ TEST_CASE("SSE: event with id and type", "[sse]")
             while (!sse->is_done())
             {
                 auto result = co_await sse->read_event();
-                if (result.has_error()) { break; }
+                if (result.has_error())
+                {
+                    break;
+                }
                 auto& ev = result.value();
                 if (ev.data.empty() && ev.id.empty() && ev.event.empty() && ev.retry == std::chrono::milliseconds { 0 })
                 {
@@ -245,16 +244,13 @@ TEST_CASE("SSE: event with id and type", "[sse]")
 TEST_CASE("SSE: retry interval", "[sse]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/events",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  {
-                                                      resp.set_sse_write_handler(
-                                                          [](httplib::sse_writer& sse) -> net::awaitable<void>
-                                                          {
-                                                              co_await sse.send_retry(std::chrono::milliseconds(3000));
-                                                              co_await sse.close();
-                                                          });
-                                                  });
+    ts.router().set_http_handler<http::verb::get>(
+        "/events",
+        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+        {
+            auto sse = co_await resp.begin_sse();
+            co_await sse->send_retry(std::chrono::milliseconds(3000), false);
+        });
     ts.start();
 
     std::vector<httplib::client::sse_reader::sse_event> events;
@@ -272,7 +268,10 @@ TEST_CASE("SSE: retry interval", "[sse]")
             while (!sse->is_done())
             {
                 auto result = co_await sse->read_event();
-                if (result.has_error()) { break; }
+                if (result.has_error())
+                {
+                    break;
+                }
                 auto& ev = result.value();
                 if (ev.data.empty() && ev.id.empty() && ev.event.empty() && ev.retry == std::chrono::milliseconds { 0 })
                 {
@@ -292,17 +291,14 @@ TEST_CASE("SSE: retry interval", "[sse]")
 TEST_CASE("SSE: comment is ignored", "[sse]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/events",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  {
-                                                      resp.set_sse_write_handler(
-                                                          [](httplib::sse_writer& sse) -> net::awaitable<void>
-                                                          {
-                                                              co_await sse.send_comment("keep-alive");
-                                                              co_await sse.send_event("real data");
-                                                              co_await sse.close();
-                                                          });
-                                                  });
+    ts.router().set_http_handler<http::verb::get>(
+        "/events",
+        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+        {
+            auto sse = co_await resp.begin_sse();
+            co_await sse->send_comment("keep-alive", true);
+            co_await sse->send_event("real data", {}, {}, false);
+        });
     ts.start();
 
     std::vector<httplib::client::sse_reader::sse_event> events;
@@ -320,7 +316,10 @@ TEST_CASE("SSE: comment is ignored", "[sse]")
             while (!sse->is_done())
             {
                 auto result = co_await sse->read_event();
-                if (result.has_error()) { break; }
+                if (result.has_error())
+                {
+                    break;
+                }
                 auto& ev = result.value();
                 if (ev.data.empty() && ev.id.empty() && ev.event.empty() && ev.retry == std::chrono::milliseconds { 0 })
                 {
@@ -339,16 +338,13 @@ TEST_CASE("SSE: comment is ignored", "[sse]")
 TEST_CASE("SSE: Content-Type is text/event-stream", "[sse]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/events",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  {
-                                                      resp.set_sse_write_handler(
-                                                          [](httplib::sse_writer& sse) -> net::awaitable<void>
-                                                          {
-                                                              co_await sse.send_event("test");
-                                                              co_await sse.close();
-                                                          });
-                                                  });
+    ts.router().set_http_handler<http::verb::get>(
+        "/events",
+        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+        {
+            auto sse = co_await resp.begin_sse();
+            co_await sse->send_event("test", {}, {}, false);
+        });
     ts.start();
 
     boost::asio::co_spawn(
@@ -371,18 +367,15 @@ TEST_CASE("SSE: Content-Type is text/event-stream", "[sse]")
 TEST_CASE("SSE: client can stop receiving by returning false", "[sse]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/events",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  {
-                                                      resp.set_sse_write_handler(
-                                                          [](httplib::sse_writer& sse) -> net::awaitable<void>
-                                                          {
-                                                              co_await sse.send_event("first");
-                                                              co_await sse.send_event("second");
-                                                              co_await sse.send_event("third");
-                                                              co_await sse.close();
-                                                          });
-                                                  });
+    ts.router().set_http_handler<http::verb::get>(
+        "/events",
+        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+        {
+            auto sse = co_await resp.begin_sse();
+            co_await sse->send_event("first", {}, {}, true);
+            co_await sse->send_event("second", {}, {}, true);
+            co_await sse->send_event("third", {}, {}, false);
+        });
     ts.start();
 
     std::vector<httplib::client::sse_reader::sse_event> events;
@@ -400,7 +393,10 @@ TEST_CASE("SSE: client can stop receiving by returning false", "[sse]")
             while (!sse->is_done())
             {
                 auto result = co_await sse->read_event();
-                if (result.has_error()) { break; }
+                if (result.has_error())
+                {
+                    break;
+                }
                 auto& ev = result.value();
                 if (ev.data.empty() && ev.id.empty())
                 {
@@ -424,16 +420,13 @@ TEST_CASE("SSE: client can stop receiving by returning false", "[sse]")
 TEST_CASE("SSE: multi-line data", "[sse]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/events",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  {
-                                                      resp.set_sse_write_handler(
-                                                          [](httplib::sse_writer& sse) -> net::awaitable<void>
-                                                          {
-                                                              co_await sse.send_event("line1\nline2\nline3");
-                                                              co_await sse.close();
-                                                          });
-                                                  });
+    ts.router().set_http_handler<http::verb::get>(
+        "/events",
+        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+        {
+            auto sse = co_await resp.begin_sse();
+            co_await sse->send_event("line1\nline2\nline3", {}, {}, false);
+        });
     ts.start();
 
     std::vector<httplib::client::sse_reader::sse_event> events;
@@ -451,7 +444,10 @@ TEST_CASE("SSE: multi-line data", "[sse]")
             while (!sse->is_done())
             {
                 auto result = co_await sse->read_event();
-                if (result.has_error()) { break; }
+                if (result.has_error())
+                {
+                    break;
+                }
                 auto& ev = result.value();
                 if (ev.data.empty() && ev.id.empty() && ev.event.empty() && ev.retry == std::chrono::milliseconds { 0 })
                 {

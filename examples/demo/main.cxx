@@ -9,13 +9,12 @@
 #include "httplib/server/middleware/cors.hpp"
 #include "httplib/server/middleware/rate_limit.hpp"
 #include "httplib/server/mount_point_entry.hpp"
+#include "httplib/server/ndjson_writer.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
-#include "httplib/streaming/chunk_writer.hpp"
-#include "httplib/streaming/ndjson_writer.hpp"
-#include "httplib/streaming/sse_writer.hpp"
+#include "httplib/server/sse_writer.hpp"
 #include "httplib/version.hpp"
 #include <array>
 #include <boost/asio/co_spawn.hpp>
@@ -233,59 +232,48 @@ setup_http_routes(httplib::server::router& router)
                                              { resp.set_redirect("/api/hello", http::status::moved_permanently); });
 
     // ---- Chunked streaming ----
-    router.set_http_handler<http::verb::get>("/api/stream",
-                                             [](httplib::server::request&, httplib::server::response& resp)
-                                             {
-                                                 auto idx = std::make_shared<int>(0);
-                                                 resp.set_chunked_write_handler(
-                                                     [idx](httplib::chunk_writer& writer) -> net::awaitable<void>
-                                                     {
-                                                         while (*idx < 5)
-                                                         {
-                                                             co_await writer.write_chunk(
-                                                                 std::format("chunk #{}\n", (*idx)++));
-                                                         }
-                                                     },
-                                                     "text/plain");
-                                             });
+    router.set_http_handler<http::verb::get>(
+        "/api/stream",
+        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+        {
+            auto cw = resp.get_chunk_writer();
+            http::fields headers;
+            headers.set(http::field::content_type, "text/plain");
+            co_await cw->write_header(http::status::ok, headers, false);
+            for (int i = 0; i < 5; ++i)
+            {
+                co_await cw->write_body(net::buffer(std::format("chunk #{}\n", i)), i < 4);
+            }
+        });
 
     // ---- SSE (Server-Sent Events) ----
     router.set_http_handler<http::verb::get>(
         "/api/sse",
-        [](httplib::server::request&, httplib::server::response& resp)
+        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
-            auto counter = std::make_shared<int>(0);
-            resp.set_sse_write_handler(
-                [counter](httplib::sse_writer& sse) -> net::awaitable<void>
-                {
-                    while (*counter < 3)
-                    {
-                        ++(*counter);
-                        co_await sse.send_event(std::format("event #{}", *counter), "tick", std::to_string(*counter));
-                    }
-                    co_await sse.close();
-                });
+            auto sse = co_await resp.begin_sse();
+            for (int i = 1; i <= 3; ++i)
+            {
+                co_await sse->send_event(std::format("event #{}", i), "tick", std::to_string(i), i == 3);
+            }
         });
 
     // ---- NDJSON (Newline Delimited JSON) ----
-    router.set_http_handler<http::verb::get>("/api/ndjson",
-                                             [](httplib::server::request&, httplib::server::response& resp)
-                                             {
-                                                 auto counter = std::make_shared<int>(0);
-                                                 resp.set_ndjson_write_handler(
-                                                     [counter](httplib::ndjson_writer& w) -> net::awaitable<void>
-                                                     {
-                                                         while (*counter < 5)
-                                                         {
-                                                             ++(*counter);
-                                                             co_await w.write({
-                                                                 { "seq", *counter },
-                                                                 { "msg",  "hello" }
-                                                             });
-                                                         }
-                                                         co_await w.close();
-                                                     });
-                                             });
+    router.set_http_handler<http::verb::get>(
+        "/api/ndjson",
+        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+        {
+            auto w = co_await resp.begin_ndjson();
+            for (int i = 1; i <= 5; ++i)
+            {
+                co_await w->write(
+                    {
+                        { "seq",       i },
+                        { "msg", "hello" }
+                },
+                    i == 5);
+            }
+        });
 
     router.set_chunked_http_handler<http::verb::post>(
         "/api/buffer",

@@ -121,8 +121,7 @@ namespace httplib::client
     }
 
     net::awaitable<http_client::response_result>
-    http_client::impl::async_send_request(http_client::request& req,
-                                           body_setup_fn const& body_setup) noexcept
+    http_client::impl::async_send_request(http_client::request& req, body_setup_fn const& body_setup) noexcept
     {
         http::request_serializer<body::any_body> serializer(req);
         auto ec = co_await async_write(serializer, false);
@@ -136,8 +135,7 @@ namespace httplib::client
     }
 
     net::awaitable<http_client::response_result>
-    http_client::impl::async_send_request_with_redirect(http_client::request& req,
-                                                         body_setup_fn const& body_setup)
+    http_client::impl::async_send_request_with_redirect(http_client::request& req, body_setup_fn const& body_setup)
     {
         if (max_redirects_ <= 0)
         {

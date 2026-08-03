@@ -1,9 +1,9 @@
 #include "httplib/server/response.hpp"
 #include "chunk_writer_impl.hpp"
 #include "html/html.h"
+#include "ndjson_writer_impl.hpp"
 #include "response_impl.hpp"
-#include "streaming/ndjson_writer_impl.hpp"
-#include "streaming/sse_writer_impl.hpp"
+#include "sse_writer_impl.hpp"
 #include "util/mime_types.hpp"
 #include <boost/beast/version.hpp>
 #include <fmt/format.h>
@@ -140,36 +140,20 @@ namespace httplib::server
         impl_->set_redirect(url, status);
     }
 
-    void
-    response::set_chunked_write_handler(response::chunked_write_handler_type&& handler,
-                                        std::string_view content_type,
-                                        http::status status /*= http::status::ok*/)
+    net::awaitable<std::unique_ptr<server::sse_writer>>
+    response::begin_sse()
     {
-        impl_->set_chunked_write_handler(std::move(handler), content_type, status);
+        auto sse = std::make_unique<sse_writer_impl>(get_chunk_writer());
+        co_await sse->begin();
+        co_return sse;
     }
 
-    void
-    response::set_sse_write_handler(sse_write_handler_type&& handler)
+    net::awaitable<std::unique_ptr<server::ndjson_writer>>
+    response::begin_ndjson()
     {
-        impl_->set_chunked_write_handler(
-            [handler = std::move(handler)](httplib::chunk_writer& cw) -> net::awaitable<void>
-            {
-                streaming::sse_writer_impl sse(cw);
-                co_await handler(sse);
-            },
-            "text/event-stream");
-    }
-
-    void
-    response::set_ndjson_write_handler(ndjson_write_handler_type&& handler)
-    {
-        impl_->set_chunked_write_handler(
-            [handler = std::move(handler)](httplib::chunk_writer& cw) -> net::awaitable<void>
-            {
-                streaming::ndjson_writer_impl ndjson(cw);
-                co_await handler(ndjson);
-            },
-            "application/x-ndjson");
+        auto ndjson = std::make_unique<ndjson_writer_impl>(get_chunk_writer());
+        co_await ndjson->begin();
+        co_return ndjson;
     }
 
     chunk_writer*

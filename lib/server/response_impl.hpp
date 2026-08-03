@@ -2,7 +2,6 @@
 #include "html/html.h"
 #include "httplib/server/chunk_writer.hpp"
 #include "httplib/server/response.hpp"
-#include "httplib/streaming/chunk_writer.hpp"
 #include "stream/http_stream.hpp"
 #include "util/mime_types.hpp"
 #include <boost/beast/version.hpp>
@@ -196,22 +195,8 @@ namespace httplib::server
             set_empty_content(status);
         }
         void
-        set_chunked_write_handler(response::chunked_write_handler_type&& handler,
-                                  std::string_view content_type,
-                                  http::status status = http::status::ok)
-        {
-            reset_content();
-            chunked_write_handler_ = std::move(handler);
-            this->set(http::field::content_type, content_type);
-            this->set(http::field::cache_control, "no-cache");
-            this->result(status);
-            this->body() = body::empty_body::value_type {};
-        }
-
-        void
         reset_content()
         {
-            chunked_write_handler_ = nullptr;
             this->body() = body::empty_body::value_type {};
         }
 
@@ -227,7 +212,6 @@ namespace httplib::server
             return response(std::move(_impl));
         }
 
-        response::chunked_write_handler_type chunked_write_handler_;
         std::unique_ptr<chunk_writer> chunk_writer_;
         http_stream* stream_ = nullptr;
         std::chrono::steady_clock::duration write_timeout_ { 30 };

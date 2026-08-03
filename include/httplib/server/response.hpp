@@ -3,15 +3,14 @@
 #include "httplib/config.hpp"
 #include "httplib/html/form_data.hpp"
 #include "httplib/server/chunk_writer.hpp"
-#include "httplib/streaming/chunk_writer.hpp"
-#include "httplib/streaming/ndjson_writer.hpp"
-#include "httplib/streaming/sse_writer.hpp"
+#include "httplib/server/ndjson_writer.hpp"
+#include "httplib/server/sse_writer.hpp"
 #include "httplib/util/misc.hpp"
 #include <boost/beast/http/fields.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/json/value.hpp>
 #include <filesystem>
-#include <functional>
+#include <memory>
 #include <string_view>
 #include <vector>
 
@@ -67,16 +66,8 @@ namespace httplib::server
 
         class impl;
 
-        using chunked_write_handler_type = std::function<net::awaitable<void>(httplib::chunk_writer&)>;
-        void set_chunked_write_handler(chunked_write_handler_type&& handler,
-                                       std::string_view content_type,
-                                       http::status status = http::status::ok);
-
-        using sse_write_handler_type = std::function<net::awaitable<void>(httplib::sse_writer&)>;
-        void set_sse_write_handler(sse_write_handler_type&& handler);
-
-        using ndjson_write_handler_type = std::function<net::awaitable<void>(httplib::ndjson_writer&)>;
-        void set_ndjson_write_handler(ndjson_write_handler_type&& handler);
+        net::awaitable<std::unique_ptr<server::sse_writer>> begin_sse();
+        net::awaitable<std::unique_ptr<server::ndjson_writer>> begin_ndjson();
 
         chunk_writer* get_chunk_writer();
 

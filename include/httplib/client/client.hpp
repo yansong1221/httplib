@@ -223,8 +223,6 @@ namespace httplib::client
                                                         fs::path const& file_path,
                                                         http::fields const& headers = http::fields());
 
-
-
         std::shared_ptr<write_session> create_writer();
         std::shared_ptr<read_session> create_reader();
 

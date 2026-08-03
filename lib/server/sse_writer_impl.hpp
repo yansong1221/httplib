@@ -1,18 +1,27 @@
 #pragma once
-#include "httplib/streaming/chunk_writer.hpp"
-#include "httplib/streaming/sse_writer.hpp"
+#include "httplib/server/chunk_writer.hpp"
+#include "httplib/server/sse_writer.hpp"
 #include <string>
 
-namespace httplib::streaming
+namespace httplib::server
 {
 
-    class sse_writer_impl : public httplib::sse_writer
+    class sse_writer_impl : public server::sse_writer
     {
       public:
-        explicit sse_writer_impl(httplib::chunk_writer& cw) : cw_(cw) {}
+        explicit sse_writer_impl(server::chunk_writer* cw) : cw_(cw) {}
 
         net::awaitable<void>
-        send_event(std::string_view data, std::string_view event, std::string_view id) override
+        begin()
+        {
+            http::fields headers;
+            headers.set(http::field::content_type, "text/event-stream");
+            headers.set(http::field::cache_control, "no-cache");
+            co_await cw_->write_header(http::status::ok, headers, false);
+        }
+
+        net::awaitable<void>
+        send_event(std::string_view data, std::string_view event, std::string_view id, bool more) override
         {
             std::string msg;
             if (!id.empty())
@@ -63,31 +72,25 @@ namespace httplib::streaming
                 }
             }
             msg += "\n";
-            co_await cw_.write_chunk(std::move(msg));
+            co_await cw_->write_body(net::buffer(msg), more);
         }
 
         net::awaitable<void>
-        send_retry(std::chrono::milliseconds ms) override
+        send_retry(std::chrono::milliseconds ms, bool more) override
         {
             auto msg = "retry: " + std::to_string(ms.count()) + "\n\n";
-            co_await cw_.write_chunk(std::move(msg));
+            co_await cw_->write_body(net::buffer(msg), more);
         }
 
         net::awaitable<void>
-        send_comment(std::string_view comment) override
+        send_comment(std::string_view comment, bool more) override
         {
             auto msg = std::string(": ") + std::string(comment) + "\n\n";
-            co_await cw_.write_chunk(std::move(msg));
-        }
-
-        net::awaitable<void>
-        close() override
-        {
-            co_await cw_.close();
+            co_await cw_->write_body(net::buffer(msg), more);
         }
 
       private:
-        httplib::chunk_writer& cw_;
+        server::chunk_writer* cw_;
     };
 
-} // namespace httplib::streaming
+} // namespace httplib::server

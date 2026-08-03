@@ -9,10 +9,10 @@
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
+#include <array>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/use_future.hpp>
-#include <array>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
@@ -142,47 +142,46 @@ TEST_CASE("Response: set_redirect", "[response]")
 TEST_CASE("Response: set_chunked_write_handler with multiple chunks", "[response]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/stream",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  {
-                                                      auto idx = std::make_shared<int>(0);
-                                                      resp.set_chunked_write_handler(
-                                                          [idx](httplib::chunk_writer& writer) -> net::awaitable<void>
-                                                          {
-                                                              constexpr std::string_view chunks[] = { "A", "B", "C" };
-                                                              for (; *idx < 3; ++(*idx))
-                                                              {
-                                                                  co_await writer.write_chunk(
-                                                                      std::string(chunks[*idx]));
-                                                              }
-                                                          },
-                                                          "text/plain");
-                                                  });
+    ts.router().set_http_handler<http::verb::get>(
+        "/stream",
+        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+        {
+            auto cw = resp.get_chunk_writer();
+            http::fields headers;
+            headers.set(http::field::content_type, "text/plain");
+            co_await cw->write_header(http::status::ok, headers, false);
+            constexpr std::string_view chunks[] = { "A", "B", "C" };
+            for (int i = 0; i < 3; ++i)
+            {
+                co_await cw->write_body(net::buffer(chunks[i]), i < 2);
+            }
+        });
     ts.start();
 
     std::string streamed;
     auto writer = ts.client->create_writer();
     auto reader = ts.client->create_reader();
 
-    boost::asio::co_spawn(ts.ioc,
-                          [&]() -> net::awaitable<void>
-                          {
-                              co_await writer->write_header(http::verb::get, "/stream", {});
-                              co_await writer->write_body(net::buffer("", 0), false);
-                              co_await reader->read_header();
+    boost::asio::co_spawn(
+        ts.ioc,
+        [&]() -> net::awaitable<void>
+        {
+            co_await writer->write_header(http::verb::get, "/stream", {});
+            co_await writer->write_body(net::buffer("", 0), false);
+            co_await reader->read_header();
 
-                              std::array<char, 4096> buf;
-                              while (true)
-                              {
-                                  auto result = co_await reader->read_body(net::buffer(buf));
-                                  if (result.has_error() || result.value() == 0)
-                                  {
-                                      break;
-                                  }
-                                  streamed.append(buf.data(), result.value());
-                              }
-                          },
-                          boost::asio::use_future)
+            std::array<char, 4096> buf;
+            while (true)
+            {
+                auto result = co_await reader->read_body(net::buffer(buf));
+                if (result.has_error() || result.value() == 0)
+                {
+                    break;
+                }
+                streamed.append(buf.data(), result.value());
+            }
+        },
+        boost::asio::use_future)
         .get();
 
     REQUIRE(reader->result() == http::status::ok);

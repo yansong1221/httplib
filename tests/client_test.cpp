@@ -7,10 +7,10 @@
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
+#include <array>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/use_future.hpp>
-#include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <filesystem>
@@ -273,18 +273,16 @@ TEST_CASE("Client: custom chunk handler", "[client]")
     test_scaffold ts;
     ts.router().set_http_handler<http::verb::get>(
         "/chunked",
-        [](httplib::server::request&, httplib::server::response& resp)
+        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
-            auto counter = std::make_shared<int>(0);
-            resp.set_chunked_write_handler(
-                [counter](httplib::chunk_writer& writer) -> net::awaitable<void>
-                {
-                    while ((*counter) < 5)
-                    {
-                        co_await writer.write_chunk("Chunk" + std::to_string((*counter)++));
-                    }
-                },
-                "text/plain");
+            auto cw = resp.get_chunk_writer();
+            http::fields headers;
+            headers.set(http::field::content_type, "text/plain");
+            co_await cw->write_header(http::status::ok, headers, false);
+            for (int i = 0; i < 5; ++i)
+            {
+                co_await cw->write_body(net::buffer(std::string("Chunk") + std::to_string(i)), i < 4);
+            }
         });
     ts.start_with_routes();
 
@@ -293,25 +291,26 @@ TEST_CASE("Client: custom chunk handler", "[client]")
     auto writer = client->create_writer();
     auto reader = client->create_reader();
 
-    boost::asio::co_spawn(ts.ioc,
-                          [&]() -> net::awaitable<void>
-                          {
-                              co_await writer->write_header(http::verb::get, "/chunked", {});
-                              co_await writer->write_body(net::buffer("", 0), false);
-                              co_await reader->read_header();
+    boost::asio::co_spawn(
+        ts.ioc,
+        [&]() -> net::awaitable<void>
+        {
+            co_await writer->write_header(http::verb::get, "/chunked", {});
+            co_await writer->write_body(net::buffer("", 0), false);
+            co_await reader->read_header();
 
-                              std::array<char, 4096> buf;
-                              while (true)
-                              {
-                                  auto result = co_await reader->read_body(net::buffer(buf));
-                                  if (result.has_error() || result.value() == 0)
-                                  {
-                                      break;
-                                  }
-                                  streamed.append(buf.data(), result.value());
-                              }
-                          },
-                          boost::asio::use_future)
+            std::array<char, 4096> buf;
+            while (true)
+            {
+                auto result = co_await reader->read_body(net::buffer(buf));
+                if (result.has_error() || result.value() == 0)
+                {
+                    break;
+                }
+                streamed.append(buf.data(), result.value());
+            }
+        },
+        boost::asio::use_future)
         .get();
 
     REQUIRE(reader->result() == http::status::ok);

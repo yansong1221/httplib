@@ -1,12 +1,11 @@
 #include "client/ndjson_reader_impl.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/client/read_session.hpp"
+#include "httplib/server/ndjson_writer.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
-#include "httplib/streaming/chunk_writer.hpp"
-#include "httplib/streaming/ndjson_writer.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/system_executor.hpp>
@@ -89,20 +88,17 @@ namespace
 TEST_CASE("NDJSON: server sends single line", "[ndjson]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/ndjson",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  {
-                                                      resp.set_ndjson_write_handler(
-                                                          [](httplib::ndjson_writer& w) -> net::awaitable<void>
-                                                          {
-                                                              boost::json::value v {
-                                                                  { "msg", "hello" },
-                                                                  {   "n",      42 }
-                                                              };
-                                                              co_await w.write(v);
-                                                              co_await w.close();
-                                                          });
-                                                  });
+    ts.router().set_http_handler<http::verb::get>(
+        "/ndjson",
+        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+        {
+            auto w = co_await resp.begin_ndjson();
+            boost::json::value v {
+                { "msg", "hello" },
+                {   "n",      42 }
+            };
+            co_await w->write(v, false);
+        });
     ts.start();
 
     std::vector<boost::json::value> items;
@@ -117,7 +113,7 @@ TEST_CASE("NDJSON: server sends single line", "[ndjson]")
             auto ec = co_await ndjson->read_header();
             REQUIRE(!ec);
 
-            while (!ndjson->is_done())
+            for (;;)
             {
                 auto result = co_await ndjson->read();
                 if (result.has_error())
@@ -143,24 +139,27 @@ TEST_CASE("NDJSON: server sends single line", "[ndjson]")
 TEST_CASE("NDJSON: server sends multiple lines", "[ndjson]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/ndjson",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  {
-                                                      resp.set_ndjson_write_handler(
-                                                          [](httplib::ndjson_writer& w) -> net::awaitable<void>
-                                                          {
-                                                              co_await w.write({
-                                                                  { "i", 1 }
-                                                              });
-                                                              co_await w.write({
-                                                                  { "i", 2 }
-                                                              });
-                                                              co_await w.write({
-                                                                  { "i", 3 }
-                                                              });
-                                                              co_await w.close();
-                                                          });
-                                                  });
+    ts.router().set_http_handler<http::verb::get>(
+        "/ndjson",
+        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+        {
+            auto w = co_await resp.begin_ndjson();
+            co_await w->write(
+                {
+                    { "i", 1 }
+            },
+                true);
+            co_await w->write(
+                {
+                    { "i", 2 }
+            },
+                true);
+            co_await w->write(
+                {
+                    { "i", 3 }
+            },
+                false);
+        });
     ts.start();
 
     std::vector<boost::json::value> items;
@@ -175,7 +174,7 @@ TEST_CASE("NDJSON: server sends multiple lines", "[ndjson]")
             auto ec = co_await ndjson->read_header();
             REQUIRE(!ec);
 
-            while (!ndjson->is_done())
+            for (;;)
             {
                 auto result = co_await ndjson->read();
                 if (result.has_error())
@@ -202,18 +201,17 @@ TEST_CASE("NDJSON: server sends multiple lines", "[ndjson]")
 TEST_CASE("NDJSON: Content-Type is application/x-ndjson", "[ndjson]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/ndjson",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  {
-                                                      resp.set_ndjson_write_handler(
-                                                          [](httplib::ndjson_writer& w) -> net::awaitable<void>
-                                                          {
-                                                              co_await w.write({
-                                                                  { "x", 1 }
-                                                              });
-                                                              co_await w.close();
-                                                          });
-                                                  });
+    ts.router().set_http_handler<http::verb::get>(
+        "/ndjson",
+        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+        {
+            auto w = co_await resp.begin_ndjson();
+            co_await w->write(
+                {
+                    { "x", 1 }
+            },
+                false);
+        });
     ts.start();
 
     boost::asio::co_spawn(
@@ -235,24 +233,27 @@ TEST_CASE("NDJSON: Content-Type is application/x-ndjson", "[ndjson]")
 TEST_CASE("NDJSON: reader stops early", "[ndjson]")
 {
     test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/ndjson",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  {
-                                                      resp.set_ndjson_write_handler(
-                                                          [](httplib::ndjson_writer& w) -> net::awaitable<void>
-                                                          {
-                                                              co_await w.write({
-                                                                  { "i", 1 }
-                                                              });
-                                                              co_await w.write({
-                                                                  { "i", 2 }
-                                                              });
-                                                              co_await w.write({
-                                                                  { "i", 3 }
-                                                              });
-                                                              co_await w.close();
-                                                          });
-                                                  });
+    ts.router().set_http_handler<http::verb::get>(
+        "/ndjson",
+        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+        {
+            auto w = co_await resp.begin_ndjson();
+            co_await w->write(
+                {
+                    { "i", 1 }
+            },
+                true);
+            co_await w->write(
+                {
+                    { "i", 2 }
+            },
+                true);
+            co_await w->write(
+                {
+                    { "i", 3 }
+            },
+                false);
+        });
     ts.start();
 
     std::vector<boost::json::value> items;

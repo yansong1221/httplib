@@ -51,13 +51,11 @@ namespace httplib::client
         std::shared_ptr<spdlog::logger> logger() const;
         void set_logger(std::shared_ptr<spdlog::logger> logger);
 
-        net::awaitable<http_client::response_result> async_send_request(
-            http_client::request& req,
-            body_setup_fn const& body_setup) noexcept;
+        net::awaitable<http_client::response_result> async_send_request(http_client::request& req,
+                                                                        body_setup_fn const& body_setup) noexcept;
 
-        net::awaitable<http_client::response_result> async_send_request_with_redirect(
-            http_client::request& req,
-            body_setup_fn const& body_setup);
+        net::awaitable<http_client::response_result> async_send_request_with_redirect(http_client::request& req,
+                                                                                      body_setup_fn const& body_setup);
 
         net::awaitable<http_client::response_result> async_download(http_client::request& req,
                                                                     fs::path const& save_path);

@@ -6,7 +6,6 @@
 #include "httplib/server/server.hpp"
 #include "request_impl.hpp"
 #include "response_impl.hpp"
-#include "streaming/chunk_writer_impl.hpp"
 #include "websocket_conn_impl.hpp"
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/write.hpp>
@@ -387,32 +386,23 @@ namespace httplib::server
             co_return true;
         }
 
-        auto& chunked_write_handler = resp.get_impl()->chunked_write_handler_;
-
-        if (chunked_write_handler)
+        if (!resp.get_impl()->has_content_length())
         {
-            resp.get_impl()->chunked(true);
+            resp.get_impl()->prepare_payload();
         }
-        else
-        {
-            if (!resp.get_impl()->has_content_length())
-            {
-                resp.get_impl()->prepare_payload();
-            }
 
-            if (auto accept_encoding = req[http::field::accept_encoding]; !accept_encoding.empty())
+        if (auto accept_encoding = req[http::field::accept_encoding]; !accept_encoding.empty())
+        {
+            html::accept_encoding_content encoding_content;
+            if (encoding_content.parse(accept_encoding))
             {
-                html::accept_encoding_content encoding_content;
-                if (encoding_content.parse(accept_encoding))
+                if (auto encoding = encoding_content.server_apply_encoding(); !encoding.empty())
                 {
-                    if (auto encoding = encoding_content.server_apply_encoding(); !encoding.empty())
+                    if (auto content_type = resp[http::field::content_type];
+                        serv_.should_compress_content_type(content_type))
                     {
-                        if (auto content_type = resp[http::field::content_type];
-                            serv_.should_compress_content_type(content_type))
-                        {
-                            resp.set(http::field::content_encoding, encoding);
-                            resp.get_impl()->chunked(true);
-                        }
+                        resp.set(http::field::content_encoding, encoding);
+                        resp.get_impl()->chunked(true);
                     }
                 }
             }
@@ -438,29 +428,11 @@ namespace httplib::server
             co_return true;
         };
 
-        if (chunked_write_handler)
+        while (!serializer.is_done())
         {
-            serializer.split(true);
-            while (!serializer.is_header_done())
+            if (!co_await send_chunk())
             {
-                if (!co_await send_chunk())
-                {
-                    co_return false;
-                }
-            }
-
-            streaming::chunk_writer_impl writer(stream_, serv_.write_timeout());
-            co_await chunked_write_handler(writer);
-            co_await writer.close();
-        }
-        else
-        {
-            while (!serializer.is_done())
-            {
-                if (!co_await send_chunk())
-                {
-                    co_return false;
-                }
+                co_return false;
             }
         }
         co_return true;
