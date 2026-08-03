@@ -330,12 +330,14 @@ namespace httplib::server
             catch (std::exception const& e)
             {
                 serv_.logger()->warn("exception in business function, reason: {}", e.what());
+                resp.get_impl()->chunk_writer_.reset();
                 resp.set_string_content(std::string(e.what()), "text/plain", http::status::internal_server_error);
             }
             catch (...)
             {
                 using namespace std::string_view_literals;
                 serv_.logger()->warn("unknown exception in business function");
+                resp.get_impl()->chunk_writer_.reset();
                 resp.set_string_content(std::string("unknown exception"),
                                         "text/plain",
                                         http::status::internal_server_error);
