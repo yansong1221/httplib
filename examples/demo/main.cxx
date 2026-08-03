@@ -17,7 +17,10 @@
 #include "httplib/streaming/ndjson_writer.hpp"
 #include "httplib/streaming/sse_writer.hpp"
 #include "httplib/version.hpp"
+#include <array>
+#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/thread_pool.hpp>
+#include <boost/asio/use_future.hpp>
 #include <boost/json.hpp>
 #include <cstdlib>
 #include <filesystem>
@@ -427,7 +430,7 @@ setup_static_files(httplib::server::router& router)
 
 // ===== Client demo =====
 
-static void
+static net::awaitable<void>
 run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 {
     httplib::client::http_client client(ex, host, port);
@@ -435,7 +438,7 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 
     // GET
     {
-        auto r = client.get("/api/greet/client");
+        auto r = co_await client.async_get("/api/greet/client");
         if (r)
         {
             spdlog::info("GET  /api/greet/client -> {} [{}]",
@@ -446,10 +449,10 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 
     // POST JSON
     {
-        auto r = client.post("/api/echo-json",
-                             {
-                                 {   "msg", "hello" },
-                                 { "count",      42 }
+        auto r = co_await client.async_post("/api/echo-json",
+                                            boost::json::value {
+                                                {   "msg", "hello" },
+                                                { "count",      42 }
         });
         if (r)
         {
@@ -459,7 +462,7 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 
     // DELETE
     {
-        auto r = client.del("/api/resource/99");
+        auto r = co_await client.async_del("/api/resource/99");
         if (r)
         {
             spdlog::info("DELETE /api/resource/99 -> {}", r.value().result_int());
@@ -468,7 +471,7 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 
     // OPTIONS
     {
-        auto r = client.options("/api/hello");
+        auto r = co_await client.async_options("/api/hello");
         if (r)
         {
             spdlog::info("OPTIONS /api/hello -> {} Allow={}",
@@ -479,7 +482,7 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 
     // Redirect
     {
-        auto r = client.get("/api/redirect");
+        auto r = co_await client.async_get("/api/redirect");
         if (r)
         {
             spdlog::info("GET /api/redirect -> {} Location={}",
@@ -488,85 +491,81 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
         }
     }
 
-#if 0
     // Stream with chunk handler
     {
-        client.set_chunked_read_handler(
-            [](httplib::chunk_reader& reader, httplib::client::http_client::response&) -> net::awaitable<void>
-            {
-                while (true)
-                {
-                    auto chunk = co_await reader.read_chunk();
-                    if (chunk.empty())
-                    {
-                        break;
-                    }
-                    spdlog::info("  chunk: {}", chunk.substr(0, chunk.size() - 1));
-                }
-            });
-        auto r = client.get("/api/stream");
-        client.set_chunked_read_handler(nullptr);
-        if (r)
+        auto writer = client.create_writer();
+        auto reader = client.create_reader();
+
+        co_await writer->write_header(http::verb::get, "/api/stream", {});
+        co_await writer->write_body(net::buffer("", 0), false);
+        auto ec = co_await reader->read_header();
+        if (!ec)
         {
-            spdlog::info("GET /api/stream -> {}", r.value().result_int());
+            while (true)
+            {
+                std::array<char, 4096> buf;
+                auto result = co_await reader->read_body(net::buffer(buf));
+                if (result.has_error() || result.value() == 0)
+                {
+                    break;
+                }
+                spdlog::info("  chunk: {}",
+                             std::string_view(buf.data(), result.value()).substr(0, result.value() - 1));
+            }
+            spdlog::info("GET /api/stream -> {}", static_cast<unsigned>(reader->result()));
         }
     }
 
     // SSE (Server-Sent Events)
     {
-        client.set_sse_read_handler(
-            [](httplib::sse_reader& reader) -> net::awaitable<void>
-            {
-                while (!reader.is_done())
-                {
-                    auto result = co_await reader.read_event();
-                    if (result.has_error()) { break; }
-                    auto& ev = result.value();
-                    if (ev.data.empty() && ev.event.empty() && ev.id.empty()
-                        && ev.retry == std::chrono::milliseconds { 0 })
-                    {
-                        break;
-                    }
-                    spdlog::info("  SSE event: id={} event={} data={}", ev.id, ev.event, ev.data);
-                }
-            });
-        auto r = client.get("/api/sse");
-        client.set_sse_read_handler(nullptr);
-        if (r)
+        auto sse = client.create_sse_reader();
+
+        co_await client.async_get("/api/sse");
+        auto ec = co_await sse->read_header();
+        if (!ec)
         {
-            spdlog::info("GET /api/sse -> {}", r.value().result_int());
+            while (!sse->is_done())
+            {
+                auto result = co_await sse->read_event();
+                if (result.has_error()) { break; }
+                auto& ev = result.value();
+                if (ev.data.empty() && ev.event.empty() && ev.id.empty()
+                    && ev.retry == std::chrono::milliseconds { 0 })
+                {
+                    break;
+                }
+                spdlog::info("  SSE event: id={} event={} data={}", ev.id, ev.event, ev.data);
+            }
+            spdlog::info("GET /api/sse -> ok");
         }
     }
 
     // NDJSON (Newline Delimited JSON)
     {
-        client.set_ndjson_read_handler(
-            [](httplib::ndjson_reader& reader) -> net::awaitable<void>
-            {
-                while (!reader.is_done())
-                {
-                    auto result = co_await reader.read();
-                    if (result.has_error()) { break; }
-                    auto& val = result.value();
-                    if (val.is_null())
-                    {
-                        break;
-                    }
-                    spdlog::info("  NDJSON line: {}", boost::json::serialize(val));
-                }
-            });
-        auto r = client.get("/api/ndjson");
-        client.set_ndjson_read_handler(nullptr);
-        if (r)
+        auto ndjson = client.create_ndjson_reader();
+
+        co_await client.async_get("/api/ndjson");
+        auto ec = co_await ndjson->read_header();
+        if (!ec)
         {
-            spdlog::info("GET /api/ndjson -> {}", r.value().result_int());
+            while (!ndjson->is_done())
+            {
+                auto result = co_await ndjson->read();
+                if (result.has_error()) { break; }
+                auto& val = result.value();
+                if (val.is_null())
+                {
+                    break;
+                }
+                spdlog::info("  NDJSON line: {}", boost::json::serialize(val));
+            }
+            spdlog::info("GET /api/ndjson -> ok");
         }
     }
-#endif
 
     // Auth: Basic (should fail without credentials)
     {
-        auto r = client.get("/api/admin");
+        auto r = co_await client.async_get("/api/admin");
         if (r)
         {
             spdlog::info("GET /api/admin (no auth) -> {}", r.value().result_int());
@@ -577,7 +576,7 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
     {
         auto hdrs = httplib::http::fields();
         hdrs.set(http::field::authorization, "Basic YWRtaW46c2VjcmV0");
-        auto r = client.send_request(http::verb::get, "/api/admin", hdrs);
+        auto r = co_await client.async_send_request(http::verb::get, "/api/admin", hdrs);
         if (r)
         {
             spdlog::info("GET /api/admin (with auth) -> {}", r.value().result_int());
@@ -586,7 +585,7 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 
     // 404
     {
-        auto r = client.get("/api/nonexistent");
+        auto r = co_await client.async_get("/api/nonexistent");
         if (r)
         {
             spdlog::info("GET /api/nonexistent -> {}", r.value().result_int());
@@ -594,15 +593,15 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
     }
 }
 
-static void
+static net::awaitable<void>
 run_http_client_pool_demo(net::any_io_executor ex, std::string host, uint16_t port)
 {
     httplib::client::http_client_pool pool(ex, 4);
     {
-        auto h = pool.acquire(host, port).get();
+        auto h = co_await pool.async_acquire(host, port);
         if (h)
         {
-            auto r = h->get("/api/hello");
+            auto r = co_await h->async_get("/api/hello");
             if (r)
             {
                 spdlog::info("Pool GET /api/hello -> {}", r.value().result_int());
@@ -729,8 +728,8 @@ main(int argc, char** argv)
 
     if (mode == "client")
     {
-        run_http_client_demo(ex, host, port);
-        run_http_client_pool_demo(ex, host, port);
+        boost::asio::co_spawn(ex, run_http_client_demo(ex, host, port), boost::asio::use_future).get();
+        boost::asio::co_spawn(ex, run_http_client_pool_demo(ex, host, port), boost::asio::use_future).get();
     }
     else if (mode == "ws")
     {
@@ -767,7 +766,7 @@ main(int argc, char** argv)
         setup_ws(router);
         setup_static_files(router);
 
-        svr.set_reverse_proxy("/*", "192.168.31.1", 80, false);
+        svr.set_reverse_proxy("/*", "192.168.101.8", 80, false);
 
         router.set_http_handler<http::verb::post>("/api/shutdown",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
@@ -783,8 +782,8 @@ main(int argc, char** argv)
 
         if (mode == "all")
         {
-            run_http_client_demo(ex, host, port);
-            run_http_client_pool_demo(ex, host, port);
+            boost::asio::co_spawn(ex, run_http_client_demo(ex, host, port), boost::asio::use_future).get();
+            boost::asio::co_spawn(ex, run_http_client_pool_demo(ex, host, port), boost::asio::use_future).get();
         }
 
         pool.wait();
