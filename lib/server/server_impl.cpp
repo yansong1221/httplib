@@ -5,6 +5,7 @@
 #include "request_impl.hpp"
 #include "response_impl.hpp"
 #include <boost/asio/use_future.hpp>
+#include <boost/url.hpp>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
@@ -332,9 +333,8 @@ namespace httplib::server
 
     void
     http_server::impl::set_reverse_proxy(std::string_view key,
-                                         std::string_view upstream_host,
-                                         uint16_t upstream_port,
-                                         bool upstream_ssl)
+                                         std::string_view url,
+                                         http_server::proxy_header_callback on_headers)
     {
         std::string prefix(key);
         if (prefix.ends_with('*'))
@@ -346,6 +346,12 @@ namespace httplib::server
             prefix.pop_back();
         }
 
+        auto u = boost::urls::url(url);
+        auto host = u.host();
+        uint16_t port = u.port_number() ? u.port_number() : (u.scheme() == "https" ? 443 : 80);
+        bool ssl = u.scheme() == "https";
+        auto upstream_prefix = u.encoded_path();
+
         router_.set_chunked_http_handler<http::verb::get,
                                          http::verb::head,
                                          http::verb::post,
@@ -354,7 +360,7 @@ namespace httplib::server
                                          http::verb::delete_,
                                          http::verb::options>(
             key,
-            [this, upstream_host = std::string(upstream_host), upstream_port, upstream_ssl, prefix](
+            [this, host, port, ssl, prefix, upstream_prefix, on_headers = std::move(on_headers)](
                 request& req,
                 response& resp) -> net::awaitable<void>
             {
@@ -362,6 +368,10 @@ namespace httplib::server
                 if (target.starts_with(prefix))
                 {
                     target = target.substr(prefix.size());
+                }
+                if (!upstream_prefix.empty())
+                {
+                    target.insert(0, upstream_prefix);
                 }
                 if (target.empty() || target[0] != '/')
                 {
@@ -388,7 +398,12 @@ namespace httplib::server
                 }
                 upstream_headers.set("X-Forwarded-For", client_ip);
 
-                auto client = co_await proxy_pool_->async_acquire(upstream_host, upstream_port, upstream_ssl);
+                if (on_headers)
+                {
+                    on_headers(req, upstream_headers);
+                }
+
+                auto client = co_await proxy_pool_->async_acquire(host, port, ssl);
                 if (!client)
                 {
                     logger()->warn("relay acquire client failed");

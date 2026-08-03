@@ -16,6 +16,7 @@
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/write.hpp>
 #include <boost/beast/version.hpp>
+#include <boost/url.hpp>
 #include <fmt/format.h>
 #include <limits>
 #include <optional>
@@ -177,29 +178,16 @@ namespace httplib::client
                 // Full URL (cross-domain) create new impl
                 if (loc.starts_with("http://") || loc.starts_with("https://"))
                 {
-                    auto scheme_end = loc.find("://");
-                    auto path_start = loc.find('/', scheme_end + 3);
-                    auto host_port = path_start == std::string_view::npos
-                                         ? loc.substr(scheme_end + 3)
-                                         : loc.substr(scheme_end + 3, path_start - scheme_end - 3);
-
-                    auto colon = host_port.find(':');
-                    auto new_host = colon == std::string_view::npos ? std::string(host_port)
-                                                                    : std::string(host_port.substr(0, colon));
-                    auto new_ssl = loc.starts_with("https://");
-                    uint16_t new_port = new_ssl ? 443 : 80;
-                    if (colon != std::string_view::npos)
-                    {
-                        new_port = static_cast<uint16_t>(std::stoul(std::string(host_port.substr(colon + 1))));
-                    }
-
-                    auto new_target
-                        = path_start == std::string_view::npos ? std::string("/") : std::string(loc.substr(path_start));
+                    auto u = boost::urls::url(loc);
+                    auto new_host = u.host();
+                    auto new_port = u.port_number() ? u.port_number() : (u.scheme() == "https" ? 443 : 80);
+                    auto new_ssl = u.scheme() == "https";
+                    auto new_target = u.encoded_path().empty() ? std::string("/") : u.encoded_path();
 
                     req.target(std::move(new_target));
                     req.set(http::field::host, new_host);
 
-                    auto new_impl = std::make_unique<impl>(executor_, new_host, new_port, new_ssl);
+                    auto new_impl = std::make_unique<impl>(executor_, std::move(new_host), new_port, new_ssl);
                     new_impl->timeout_policy_ = timeout_policy_;
                     new_impl->timeout_ = timeout_;
                     new_impl->set_logger(logger());

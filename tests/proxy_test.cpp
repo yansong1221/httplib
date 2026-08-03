@@ -139,7 +139,9 @@ TEST_CASE("reverse-proxy", "[proxy]")
         [](server::request&, server::response& resp)
         { resp.set_redirect("/resource", http::status::moved_permanently); });
 
-    ts.proxy_server.set_reverse_proxy("/api/*", ts.upstream_host, ts.upstream_port);
+    ts.proxy_server.set_reverse_proxy("/api/*",
+                                      std::string("http://") + ts.upstream_host + ":"
+                                          + std::to_string(ts.upstream_port));
 
     ts.start();
 

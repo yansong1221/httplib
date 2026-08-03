@@ -1,9 +1,11 @@
 #pragma once
 #include "httplib/config.hpp"
+#include "httplib/server/server_fwd.hpp"
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/socket_base.hpp>
+#include <boost/beast/http/fields.hpp>
 #include <filesystem>
 #include <functional>
 #include <future>
@@ -12,10 +14,6 @@
 
 namespace httplib::server
 {
-
-    class router;
-    class session;
-
     class HTTPLIB_API http_server
     {
       public:
@@ -56,12 +54,9 @@ namespace httplib::server
 
         void set_upload_dir(fs::path const& dir);
         void set_upload_file_limit(std::uint64_t max_bytes);
+        using proxy_header_callback = std::function<void(request& req, http::fields& headers)>;
 
-        void set_reverse_proxy(std::string_view key,
-                               std::string_view upstream_host,
-                               uint16_t upstream_port,
-                               bool upstream_ssl = false);
-
+        void set_reverse_proxy(std::string_view key, std::string_view url, proxy_header_callback on_headers = {});
         void set_ssl(std::span<char const> const& cert_file,
                      std::span<char const> const& key_file,
                      std::string passwd = {});

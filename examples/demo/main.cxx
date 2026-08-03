@@ -509,8 +509,7 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
                 {
                     break;
                 }
-                spdlog::info("  chunk: {}",
-                             std::string_view(buf.data(), result.value()).substr(0, result.value() - 1));
+                spdlog::info("  chunk: {}", std::string_view(buf.data(), result.value()).substr(0, result.value() - 1));
             }
             spdlog::info("GET /api/stream -> {}", static_cast<unsigned>(reader->result()));
         }
@@ -527,10 +526,12 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
             while (!sse->is_done())
             {
                 auto result = co_await sse->read_event();
-                if (result.has_error()) { break; }
+                if (result.has_error())
+                {
+                    break;
+                }
                 auto& ev = result.value();
-                if (ev.data.empty() && ev.event.empty() && ev.id.empty()
-                    && ev.retry == std::chrono::milliseconds { 0 })
+                if (ev.data.empty() && ev.event.empty() && ev.id.empty() && ev.retry == std::chrono::milliseconds { 0 })
                 {
                     break;
                 }
@@ -551,7 +552,10 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
             while (!ndjson->is_done())
             {
                 auto result = co_await ndjson->read();
-                if (result.has_error()) { break; }
+                if (result.has_error())
+                {
+                    break;
+                }
                 auto& val = result.value();
                 if (val.is_null())
                 {
@@ -766,7 +770,7 @@ main(int argc, char** argv)
         setup_ws(router);
         setup_static_files(router);
 
-        svr.set_reverse_proxy("/*", "192.168.101.8", 80, false);
+        svr.set_reverse_proxy("/*", "http://192.168.101.8:80");
 
         router.set_http_handler<http::verb::post>("/api/shutdown",
                                                   [&](httplib::server::request&, httplib::server::response& resp)

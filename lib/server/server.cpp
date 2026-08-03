@@ -138,12 +138,9 @@ namespace httplib::server
     }
 
     void
-    http_server::set_reverse_proxy(std::string_view key,
-                                   std::string_view upstream_host,
-                                   uint16_t upstream_port,
-                                   bool upstream_ssl)
+    http_server::set_reverse_proxy(std::string_view key, std::string_view url, proxy_header_callback on_headers)
     {
-        impl_->set_reverse_proxy(key, upstream_host, upstream_port, upstream_ssl);
+        impl_->set_reverse_proxy(key, url, std::move(on_headers));
     }
 
     void

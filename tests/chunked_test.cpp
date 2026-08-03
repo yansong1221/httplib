@@ -396,7 +396,10 @@ TEST_CASE("Chunked: buffer_body receives de-chunked data", "[chunked]")
             for (;;)
             {
                 auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
-                if (_bytes_r.has_error()) { break; }
+                if (_bytes_r.has_error())
+                {
+                    break;
+                }
                 auto bytes = _bytes_r.value();
                 if (bytes == 0)
                 {
@@ -426,7 +429,10 @@ TEST_CASE("Chunked: multiple chunks are de-chunked into single body", "[chunked]
             for (;;)
             {
                 auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
-                if (_bytes_r.has_error()) { break; }
+                if (_bytes_r.has_error())
+                {
+                    break;
+                }
                 auto bytes = _bytes_r.value();
                 if (bytes == 0)
                 {
@@ -456,7 +462,10 @@ TEST_CASE("Chunked: large chunk via buffer_body", "[chunked]")
             for (;;)
             {
                 auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
-                if (_bytes_r.has_error()) { break; }
+                if (_bytes_r.has_error())
+                {
+                    break;
+                }
                 auto bytes = _bytes_r.value();
                 if (bytes == 0)
                 {
@@ -504,7 +513,10 @@ TEST_CASE("Chunked: is_buffer_body_handler() is true", "[chunked]")
             bool was_body = req.is_chunked();
             std::array<char, 8192> buf;
             auto bytes_result = co_await req.read_chunk(net::buffer(buf));
-            if (bytes_result.has_error()) { co_return; }
+            if (bytes_result.has_error())
+            {
+                co_return;
+            }
             auto bytes = bytes_result.value();
             resp.set_string_content(std::string(was_body ? "yes:" : "no:") + std::string(buf.data(), bytes),
                                     "text/plain");
@@ -530,7 +542,10 @@ TEST_CASE("Chunked: with path parameters via buffer_body", "[chunked]")
             for (;;)
             {
                 auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
-                if (_bytes_r.has_error()) { break; }
+                if (_bytes_r.has_error())
+                {
+                    break;
+                }
                 auto bytes = _bytes_r.value();
                 if (bytes == 0)
                 {
@@ -561,7 +576,10 @@ TEST_CASE("Chunked: with wildcard path via buffer_body", "[chunked]")
             for (;;)
             {
                 auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
-                if (_bytes_r.has_error()) { break; }
+                if (_bytes_r.has_error())
+                {
+                    break;
+                }
                 auto bytes = _bytes_r.value();
                 if (bytes == 0)
                 {
@@ -591,7 +609,10 @@ TEST_CASE("Chunked: PUT via buffer_body", "[chunked]")
             for (;;)
             {
                 auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
-                if (_bytes_r.has_error()) { break; }
+                if (_bytes_r.has_error())
+                {
+                    break;
+                }
                 auto bytes = _bytes_r.value();
                 if (bytes == 0)
                 {
@@ -621,7 +642,10 @@ TEST_CASE("Chunked: multi-verb via buffer_body", "[chunked]")
             for (;;)
             {
                 auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
-                if (_bytes_r.has_error()) { break; }
+                if (_bytes_r.has_error())
+                {
+                    break;
+                }
                 auto bytes = _bytes_r.value();
                 if (bytes == 0)
                 {
@@ -655,7 +679,10 @@ TEST_CASE("Chunked: sync send_chunked_request via buffer_body", "[chunked]")
             for (;;)
             {
                 auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
-                if (_bytes_r.has_error()) { break; }
+                if (_bytes_r.has_error())
+                {
+                    break;
+                }
                 auto bytes = _bytes_r.value();
                 if (bytes == 0)
                 {
