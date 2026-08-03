@@ -16,6 +16,21 @@
 
 namespace httplib::server
 {
+    namespace
+    {
+
+        static http::status
+        upstream_error_to_status(boost::system::error_code ec)
+        {
+            if (ec == boost::asio::error::timed_out || ec == boost::beast::error::timeout)
+            {
+                return http::status::gateway_timeout;
+            }
+            return http::status::bad_gateway;
+        }
+
+    } // namespace
+
     http_server::impl::impl(net::any_io_executor const& ex) : ex_(ex), acceptor_(ex)
     {
         proxy_pool_ = std::make_unique<client::http_client_pool>(ex_);
@@ -334,9 +349,12 @@ namespace httplib::server
                 response& resp) -> net::awaitable<void>
             {
                 auto url = resolver(req);
+                logger()->debug("[proxy] {} {} -> {}", req.method_string(), req.target(), url);
+
                 auto r = boost::urls::parse_uri(url);
                 if (!r)
                 {
+                    logger()->trace("[proxy] invalid upstream url: {}", url);
                     resp.set_error_content(http::status::bad_gateway);
                     co_return;
                 }
@@ -377,82 +395,79 @@ namespace httplib::server
                 auto client = co_await proxy_pool_->async_acquire(host, port, ssl);
                 if (!client)
                 {
-                    logger()->warn("relay acquire client failed");
-                    resp.set_error_content(http::status::bad_gateway);
+                    logger()->trace("[proxy] acquire client failed for {}:{}", host, port);
+                    resp.set_error_content(http::status::service_unavailable);
                     co_return;
                 }
 
                 auto writer = client->create_writer();
                 auto reader = client->create_reader();
 
-                auto rel_ec = co_await writer->write_header(req.method(), target, upstream_headers);
-                if (rel_ec)
+                if (auto rel_ec = co_await writer->write_header(req.method(), target, upstream_headers); rel_ec)
                 {
-                    logger()->warn("relay write_header failed: {}", rel_ec.message());
-                    resp.set_error_content(http::status::bad_gateway);
+                    logger()->trace("[proxy] write_header to {}:{} failed: {}", host, port, rel_ec.message());
+                    resp.set_error_content(upstream_error_to_status(rel_ec));
                     co_return;
                 }
 
                 std::array<char, 8192> relay_buf {};
+
+                while (!req.get_chunk_reader()->is_done())
                 {
-                    while (true)
+                    auto bytes_result = co_await req.get_chunk_reader()->read_some(net::buffer(relay_buf));
+                    if (bytes_result.has_error())
                     {
-                        auto bytes_result = co_await req.read_chunk(net::buffer(relay_buf));
-                        if (bytes_result.has_error())
-                        {
-                            break;
-                        }
-                        auto bytes = bytes_result.value();
-                        rel_ec = co_await writer->write_body(net::buffer(relay_buf, bytes), bytes != 0);
-                        if (rel_ec)
-                        {
-                            logger()->warn("relay write_body failed: {}", rel_ec.message());
-                            resp.set_error_content(http::status::bad_gateway);
-                            co_return;
-                        }
-                        if (bytes == 0)
-                        {
-                            break;
-                        }
+                        logger()->trace("[proxy] read request body failed: {}", bytes_result.error().message());
+                        resp.set_error_content(http::status::bad_request);
+                        co_return;
+                    }
+                    auto more = !req.get_chunk_reader()->is_done();
+                    auto bytes = bytes_result.value();
+
+                    if (auto rel_ec = co_await writer->write_body(net::buffer(relay_buf, bytes), more); rel_ec)
+                    {
+                        logger()->trace("[proxy] write_body to {}:{} failed: {}", host, port, rel_ec.message());
+                        resp.set_error_content(upstream_error_to_status(rel_ec));
+                        co_return;
                     }
                 }
 
-                rel_ec = co_await reader->read_header();
-                if (rel_ec)
+                if (auto rel_ec = co_await reader->read_header(); rel_ec)
                 {
-                    logger()->warn("relay read_header failed: {}", rel_ec.message());
-                    resp.set_error_content(http::status::bad_gateway);
+                    logger()->trace("[proxy] read_header from {}:{} failed: {}", host, port, rel_ec.message());
+                    resp.set_error_content(upstream_error_to_status(rel_ec));
                     co_return;
                 }
 
                 auto const& headers = reader->headers();
                 auto const result = reader->result();
+                logger()->debug("[proxy] {} {} <- {} {}",
+                                req.method_string(),
+                                req.target(),
+                                static_cast<unsigned>(result),
+                                u.host());
 
-                rel_ec = co_await resp.relay().write_header(result, headers);
-                if (rel_ec)
+                if (auto rel_ec = co_await resp.relay().write_header(result, headers); rel_ec)
                 {
-                    logger()->warn("relay resp write_header failed: {}", rel_ec.message());
+                    logger()->trace("[proxy] write response header failed: {}", rel_ec.message());
                     co_return;
                 }
 
-                while (true)
+                while (!reader->is_body_done())
                 {
                     auto bytes_result = co_await reader->read_body(net::buffer(relay_buf));
                     if (bytes_result.has_error())
                     {
-                        break;
+                        logger()->trace("[proxy] read response body failed: {}", bytes_result.error().message());
+                        co_return;
                     }
                     auto bytes = bytes_result.value();
                     auto more = !reader->is_body_done();
-                    rel_ec = co_await resp.relay().write_body(net::buffer(relay_buf, bytes), more);
-                    if (rel_ec)
+
+                    if (auto rel_ec = co_await resp.relay().write_body(net::buffer(relay_buf, bytes), more); rel_ec)
                     {
-                        logger()->warn("relay resp write_body failed: {}", rel_ec.message());
+                        logger()->trace("[proxy] write response body failed: {}", rel_ec.message());
                         co_return;
-                    }
-                    if (bytes == 0)
-                    {
-                        break;
                     }
                 }
             });

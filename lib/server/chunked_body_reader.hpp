@@ -1,4 +1,5 @@
 #pragma once
+#include "httplib/server/body_reader.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "stream/http_stream.hpp"
 #include <boost/beast/core/flat_buffer.hpp>
@@ -7,20 +8,17 @@
 #include <boost/beast/http/read.hpp>
 #include <boost/system/result.hpp>
 #include <chrono>
-#include <memory>
-#include <vector>
 
-namespace httplib::detail
+namespace httplib::server
 {
 
-    template <bool isRequest>
-    class buffer_body_reader
+    class chunked_body_reader : public chunk_reader
     {
       public:
         void
         setup(http_stream& stream,
               beast::flat_buffer& buffer,
-              http::parser<isRequest, http::buffer_body>& parser,
+              http::request_parser<http::buffer_body>& parser,
               std::chrono::steady_clock::duration read_timeout)
         {
             stream_ = &stream;
@@ -30,7 +28,7 @@ namespace httplib::detail
         }
 
         net::awaitable<boost::system::result<std::size_t>>
-        read_some(net::mutable_buffer const& buffer)
+        read_some(net::mutable_buffer const& buffer) override
         {
             for (;;)
             {
@@ -48,7 +46,9 @@ namespace httplib::detail
                 co_await http::async_read_some(*stream_, *buffer_, *parser_, util::net_awaitable[ec]);
                 stream_->expires_never();
                 if (ec == http::error::need_buffer)
+                {
                     ec = {};
+                }
                 if (ec)
                 {
                     co_return ec;
@@ -64,16 +64,16 @@ namespace httplib::detail
         }
 
         bool
-        is_done() const
+        is_done() const override
         {
             return parser_ && parser_->is_done();
         }
 
       private:
-        http::parser<isRequest, http::buffer_body>* parser_ = nullptr;
+        http::request_parser<http::buffer_body>* parser_ = nullptr;
         http_stream* stream_ = nullptr;
         beast::flat_buffer* buffer_ = nullptr;
         std::chrono::steady_clock::duration read_timeout_ { 30 };
     };
 
-} // namespace httplib::detail
+} // namespace httplib::server

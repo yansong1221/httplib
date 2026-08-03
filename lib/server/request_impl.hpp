@@ -1,10 +1,11 @@
 #pragma once
+#include "chunked_body_reader.hpp"
+#include "httplib/server/body_reader.hpp"
 #include "httplib/server/middleware/session.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "stream/http_stream.hpp"
-#include "util/buffer_body_reader.hpp"
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/buffer_body.hpp>
@@ -127,7 +128,7 @@ namespace httplib::server
         struct buffer_body_read_ctx
         {
             std::shared_ptr<http::request_parser<http::buffer_body>> parser;
-            httplib::detail::buffer_body_reader<true> reader;
+            std::shared_ptr<chunk_reader> reader;
         };
 
         void
@@ -139,8 +140,11 @@ namespace httplib::server
             auto parser = std::make_shared<http::request_parser<http::buffer_body>>(std::move(header_parser));
 
             buffer_body_ctx_ = std::make_shared<buffer_body_read_ctx>();
-            buffer_body_ctx_->parser = std::move(parser);
-            buffer_body_ctx_->reader.setup(stream, buffer, *buffer_body_ctx_->parser, read_timeout);
+            buffer_body_ctx_->parser = parser;
+
+            auto reader = std::make_shared<chunked_body_reader>();
+            reader->setup(stream, buffer, *parser, read_timeout);
+            buffer_body_ctx_->reader = std::move(reader);
         }
 
         bool
@@ -149,14 +153,14 @@ namespace httplib::server
             return buffer_body_ctx_ != nullptr;
         }
 
-        net::awaitable<boost::system::result<std::size_t>>
-        read_chunk(net::mutable_buffer const& buffer)
+        chunk_reader*
+        get_chunk_reader()
         {
             if (!buffer_body_ctx_)
             {
-                co_return 0;
+                return nullptr;
             }
-            co_return co_await buffer_body_ctx_->reader.read_some(buffer);
+            return buffer_body_ctx_->reader.get();
         }
 
         std::string_view

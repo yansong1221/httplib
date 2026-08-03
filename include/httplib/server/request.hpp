@@ -1,6 +1,7 @@
 #pragma once
 #include "httplib/body/any_body.hpp"
 #include "httplib/config.hpp"
+#include "httplib/server/body_reader.hpp"
 #include <any>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -80,7 +81,7 @@ namespace httplib::server
         httplib::body::any_body::value_type const& body() const;
 
         bool is_chunked() const;
-        net::awaitable<boost::system::result<std::size_t>> read_chunk(net::mutable_buffer const& buffer);
+        chunk_reader* get_chunk_reader();
 
         impl* get_impl();
         impl const* get_impl() const;

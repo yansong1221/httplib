@@ -146,7 +146,7 @@ TEST_CASE("Chunked: GET coexists with chunked POST, returns 405 for Content-Leng
         {
             REQUIRE(req.is_chunked());
             std::array<char, 4096> buf;
-            auto result = co_await req.read_chunk(net::buffer(buf));
+            auto result = co_await req.get_chunk_reader()->read_some(net::buffer(buf));
             resp.set_string_content("chunked-ok"sv, "text/plain");
             co_return;
         });
@@ -190,7 +190,7 @@ TEST_CASE("Chunked: multi-verb chunked handler registration", "[chunked]")
         [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
         {
             std::array<char, 1024> buf;
-            co_await req.read_chunk(net::buffer(buf));
+            co_await req.get_chunk_reader()->read_some(net::buffer(buf));
             auto method = std::string(req.method_string());
             resp.set_string_content("chunked-" + method, "text/plain");
             co_return;
@@ -372,7 +372,7 @@ send_chunked(net::io_context& ioc,
                    auto writer = client.create_writer();
                    auto reader = client.create_reader();
 
-                    co_await writer->write_header(method, path, {}, false);
+                   co_await writer->write_header(method, path, {}, false);
                    for (size_t i = 0; i < chunks.size(); ++i)
                    {
                        auto more = (i + 1 < chunks.size());
@@ -419,7 +419,7 @@ TEST_CASE("Chunked: buffer_body receives de-chunked data", "[chunked]")
             std::array<char, 8192> buf;
             for (;;)
             {
-                auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
+                auto _bytes_r = co_await req.get_chunk_reader()->read_some(net::buffer(buf));
                 if (_bytes_r.has_error())
                 {
                     break;
@@ -452,7 +452,7 @@ TEST_CASE("Chunked: multiple chunks are de-chunked into single body", "[chunked]
             std::array<char, 8192> buf;
             for (;;)
             {
-                auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
+                auto _bytes_r = co_await req.get_chunk_reader()->read_some(net::buffer(buf));
                 if (_bytes_r.has_error())
                 {
                     break;
@@ -486,7 +486,7 @@ TEST_CASE("Chunked: large chunk via buffer_body", "[chunked]")
             std::array<char, 8192> buf;
             for (;;)
             {
-                auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
+                auto _bytes_r = co_await req.get_chunk_reader()->read_some(net::buffer(buf));
                 if (_bytes_r.has_error())
                 {
                     break;
@@ -518,7 +518,7 @@ TEST_CASE("Chunked: empty chunks via buffer_body", "[chunked]")
             REQUIRE(req.is_chunked());
             std::string accumulated;
             std::array<char, 4096> buf;
-            auto bytes_result = co_await req.read_chunk(net::buffer(buf));
+            auto bytes_result = co_await req.get_chunk_reader()->read_some(net::buffer(buf));
             resp.set_string_content(std::to_string(accumulated.size()), "text/plain");
         });
     ts.start();
@@ -537,7 +537,7 @@ TEST_CASE("Chunked: is_buffer_body_handler() is true", "[chunked]")
         {
             bool was_body = req.is_chunked();
             std::array<char, 8192> buf;
-            auto bytes_result = co_await req.read_chunk(net::buffer(buf));
+            auto bytes_result = co_await req.get_chunk_reader()->read_some(net::buffer(buf));
             if (bytes_result.has_error())
             {
                 co_return;
@@ -566,7 +566,7 @@ TEST_CASE("Chunked: with path parameters via buffer_body", "[chunked]")
             std::array<char, 8192> buf;
             for (;;)
             {
-                auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
+                auto _bytes_r = co_await req.get_chunk_reader()->read_some(net::buffer(buf));
                 if (_bytes_r.has_error())
                 {
                     break;
@@ -600,7 +600,7 @@ TEST_CASE("Chunked: with wildcard path via buffer_body", "[chunked]")
             std::array<char, 8192> buf;
             for (;;)
             {
-                auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
+                auto _bytes_r = co_await req.get_chunk_reader()->read_some(net::buffer(buf));
                 if (_bytes_r.has_error())
                 {
                     break;
@@ -633,7 +633,7 @@ TEST_CASE("Chunked: PUT via buffer_body", "[chunked]")
             std::array<char, 8192> buf;
             for (;;)
             {
-                auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
+                auto _bytes_r = co_await req.get_chunk_reader()->read_some(net::buffer(buf));
                 if (_bytes_r.has_error())
                 {
                     break;
@@ -666,7 +666,7 @@ TEST_CASE("Chunked: multi-verb via buffer_body", "[chunked]")
             std::array<char, 8192> buf;
             for (;;)
             {
-                auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
+                auto _bytes_r = co_await req.get_chunk_reader()->read_some(net::buffer(buf));
                 if (_bytes_r.has_error())
                 {
                     break;
@@ -703,7 +703,7 @@ TEST_CASE("Chunked: sync send_chunked_request via buffer_body", "[chunked]")
             std::array<char, 8192> buf;
             for (;;)
             {
-                auto _bytes_r = co_await req.read_chunk(net::buffer(buf));
+                auto _bytes_r = co_await req.get_chunk_reader()->read_some(net::buffer(buf));
                 if (_bytes_r.has_error())
                 {
                     break;

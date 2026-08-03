@@ -211,11 +211,10 @@ namespace httplib::server
         return impl_->is_chunked();
     }
 
-
-    net::awaitable<boost::system::result<std::size_t>>
-    request::read_chunk(net::mutable_buffer const& buffer)
+    chunk_reader*
+    request::get_chunk_reader()
     {
-        co_return co_await impl_->read_chunk(buffer);
+        return impl_->get_chunk_reader();
     }
 
 } // namespace httplib::server

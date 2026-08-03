@@ -22,14 +22,18 @@ namespace httplib::server
         }
 
         net::awaitable<boost::system::error_code>
-        write_header(http::status status, http::fields const& headers) override
+        write_header(http::status status, http::fields const& headers, bool relay) override
         {
             resp_->result(status);
             for (auto const& f : headers)
             {
                 resp_->set(f.name_string(), f.value());
             }
-            resp_->body() = body::empty_body::value_type {};
+            resp_->reset_content();
+            if (!relay)
+            {
+                resp_->chunked(true);
+            }
 
             msg_ = std::make_unique<http::response<http::buffer_body>>(*resp_);
             sr_ = std::make_unique<http::response_serializer<http::buffer_body>>(*msg_);

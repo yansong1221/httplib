@@ -13,7 +13,9 @@ namespace httplib::server
       public:
         virtual ~relay_writer() = default;
 
-        virtual net::awaitable<boost::system::error_code> write_header(http::status status, http::fields const& headers)
+        virtual net::awaitable<boost::system::error_code> write_header(http::status status,
+                                                                       http::fields const& headers,
+                                                                       bool relay = true)
             = 0;
         virtual net::awaitable<boost::system::error_code> write_body(net::const_buffer const& data, bool more) = 0;
     };
