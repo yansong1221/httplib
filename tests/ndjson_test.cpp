@@ -1,88 +1,15 @@
+#include "common.hpp"
 #include "client/ndjson_reader_impl.hpp"
-#include "httplib/client/client.hpp"
-#include "httplib/client/read_session.hpp"
 #include "httplib/server/ndjson_writer.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
-#include "httplib/server/router.hpp"
-#include "httplib/server/server.hpp"
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/io_context.hpp>
 #include <boost/asio/system_executor.hpp>
 #include <boost/asio/use_future.hpp>
-#include <catch2/catch_test_macros.hpp>
 #include <cstring>
-#include <memory>
-#include <spdlog/sinks/null_sink.h>
-#include <spdlog/spdlog.h>
-#include <string>
-#include <thread>
-#include <vector>
-
-using namespace std::string_view_literals;
-namespace http = httplib::http;
-namespace net = httplib::net;
 
 namespace
 {
-
-    struct test_scaffold
-    {
-        net::io_context ioc;
-        httplib::server::http_server server;
-        httplib::tcp::endpoint endpoint;
-        std::thread thread;
-        std::unique_ptr<httplib::client::http_client> client;
-        bool started_ = false;
-
-        test_scaffold() : server(ioc)
-        {
-            auto null_sink = std::make_shared<spdlog::sinks::null_sink_mt>();
-            server.set_logger(std::make_shared<spdlog::logger>("httplib.tests", null_sink));
-        }
-
-        ~test_scaffold()
-        {
-            if (started_)
-            {
-                server.stop().wait();
-                ioc.stop();
-                if (thread.joinable())
-                {
-                    thread.join();
-                }
-            }
-        }
-
-        void
-        start()
-        {
-            server.listen("127.0.0.1", 0);
-            endpoint = server.local_endpoint();
-            server.run();
-            thread = std::thread([this] { ioc.run(); });
-            started_ = true;
-
-            client = std::make_unique<httplib::client::http_client>(ioc.get_executor(),
-                                                                    endpoint.address().to_string(),
-                                                                    endpoint.port());
-            client->set_timeout(std::chrono::seconds(5));
-        }
-
-        auto&
-        router()
-        {
-            return server.router();
-        }
-    };
-
-#define UNWRAP(result)               \
-    [&](auto&& r)                    \
-    {                                \
-        REQUIRE(r.has_value());      \
-        return std::move(r).value(); \
-    }(result)
-
+    using test_common::test_scaffold;
 } // namespace
 
 TEST_CASE("NDJSON: server sends single line", "[ndjson]")
@@ -114,20 +41,7 @@ TEST_CASE("NDJSON: server sends single line", "[ndjson]")
             auto ec = co_await ndjson->read_header();
             REQUIRE(!ec);
 
-            for (;;)
-            {
-                auto result = co_await ndjson->read();
-                if (result.has_error())
-                {
-                    break;
-                }
-                auto& val = result.value();
-                if (val.is_null())
-                {
-                    break;
-                }
-                items.push_back(std::move(val));
-            }
+            co_await collect_ndjson_lines(*ndjson, items);
         },
         boost::asio::use_future)
         .get();
@@ -176,20 +90,7 @@ TEST_CASE("NDJSON: server sends multiple lines", "[ndjson]")
             auto ec = co_await ndjson->read_header();
             REQUIRE(!ec);
 
-            for (;;)
-            {
-                auto result = co_await ndjson->read();
-                if (result.has_error())
-                {
-                    break;
-                }
-                auto& val = result.value();
-                if (val.is_null())
-                {
-                    break;
-                }
-                items.push_back(std::move(val));
-            }
+            co_await collect_ndjson_lines(*ndjson, items);
         },
         boost::asio::use_future)
         .get();

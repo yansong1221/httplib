@@ -1,100 +1,31 @@
+#include "common.hpp"
 #include "httplib/body/file_body.hpp"
 #include "httplib/body/json_body.hpp"
 #include "httplib/body/string_body.hpp"
-#include "httplib/client/client.hpp"
-#include "httplib/client/read_session.hpp"
 #include "httplib/client/write_session.hpp"
 #include "httplib/server/mount_point_entry.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
-#include "httplib/server/router.hpp"
-#include "httplib/server/server.hpp"
 #include <array>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/io_context.hpp>
-#include <boost/asio/use_future.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
-#include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
-#include <memory>
-#include <spdlog/sinks/null_sink.h>
-#include <spdlog/spdlog.h>
-#include <string>
-#include <thread>
 
-using namespace std::string_view_literals;
 namespace beast = httplib::beast;
 namespace http = httplib::http;
 namespace net = httplib::net;
 
 namespace
 {
-
-    struct test_scaffold
-    {
-        net::io_context ioc;
-        httplib::server::http_server server;
-        httplib::tcp::endpoint endpoint;
-        std::thread thread;
-        std::unique_ptr<httplib::client::http_client> client;
-
-        test_scaffold() : server(ioc)
-        {
-            auto null_sink = std::make_shared<spdlog::sinks::null_sink_mt>();
-            server.set_logger(std::make_shared<spdlog::logger>("httplib.tests", null_sink));
-        }
-
-        ~test_scaffold()
-        {
-            server.stop().wait();
-            ioc.stop();
-            if (thread.joinable())
-            {
-                thread.join();
-            }
-        }
-
-        void
-        start()
-        {
-            server.listen("127.0.0.1", 0);
-            endpoint = server.local_endpoint();
-            server.run();
-            thread = std::thread([this] { ioc.run(); });
-
-            client = std::make_unique<httplib::client::http_client>(ioc.get_executor(),
-                                                                    endpoint.address().to_string(),
-                                                                    endpoint.port());
-            client->set_timeout(std::chrono::seconds(5));
-        }
-
-        auto&
-        router()
-        {
-            return server.router();
-        }
-    };
-
-    std::string
-    as_string(httplib::client::http_client::response const& resp)
-    {
-        return resp.body().as<httplib::body::string_body>();
-    }
+    using test_common::test_scaffold;
+    using test_common::as_string;
 
     void
     set_text(httplib::server::response& resp, std::string_view body, http::status status = http::status::ok)
     {
         resp.set_string_content(body, "text/plain"sv, status);
     }
-
-#define UNWRAP(result)               \
-    [&](auto&& r)                    \
-    {                                \
-        REQUIRE(r.has_value());      \
-        return std::move(r).value(); \
-    }(result)
 
 } // namespace
 

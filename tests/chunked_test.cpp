@@ -1,92 +1,17 @@
-#include "httplib/client/client.hpp"
-#include "httplib/client/read_session.hpp"
+#include "common.hpp"
 #include "httplib/client/write_session.hpp"
 #include "httplib/server/middleware/cors.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
-#include "httplib/server/router.hpp"
-#include "httplib/server/server.hpp"
 #include <array>
-#include <boost/asio/io_context.hpp>
-#include <catch2/catch_test_macros.hpp>
-#include <memory>
-#include <spdlog/sinks/null_sink.h>
-#include <spdlog/spdlog.h>
-#include <string>
-#include <thread>
 
-using namespace std::string_view_literals;
-namespace http = httplib::http;
-namespace net = httplib::net;
 namespace beast = httplib::beast;
 namespace mw = httplib::server::middleware;
 
 namespace
 {
-
-    struct test_scaffold
-    {
-        net::io_context ioc;
-        httplib::server::http_server server;
-        httplib::tcp::endpoint endpoint;
-        std::thread thread;
-        std::unique_ptr<httplib::client::http_client> client;
-        bool started_ = false;
-
-        test_scaffold() : server(ioc)
-        {
-            auto null_sink = std::make_shared<spdlog::sinks::null_sink_mt>();
-            server.set_logger(std::make_shared<spdlog::logger>("httplib.tests", null_sink));
-        }
-
-        ~test_scaffold()
-        {
-            if (started_)
-            {
-                server.stop().wait();
-                ioc.stop();
-                if (thread.joinable())
-                {
-                    thread.join();
-                }
-            }
-        }
-
-        void
-        start()
-        {
-            server.listen("127.0.0.1", 0);
-            endpoint = server.local_endpoint();
-            server.run();
-            thread = std::thread([this] { ioc.run(); });
-            started_ = true;
-
-            client = std::make_unique<httplib::client::http_client>(ioc.get_executor(),
-                                                                    endpoint.address().to_string(),
-                                                                    endpoint.port());
-            client->set_timeout(std::chrono::seconds(5));
-        }
-
-        auto&
-        router()
-        {
-            return server.router();
-        }
-    };
-
-    std::string
-    as_string(httplib::client::http_client::response const& resp)
-    {
-        return resp.body().as<httplib::body::string_body>();
-    }
-
-#define UNWRAP(result)               \
-    [&](auto&& r)                    \
-    {                                \
-        REQUIRE(r.has_value());      \
-        return std::move(r).value(); \
-    }(result)
-
+    using test_common::as_string;
+    using test_common::test_scaffold;
 } // namespace
 
 TEST_CASE("Chunked: Content-Length hits chunked handler", "[chunked]")

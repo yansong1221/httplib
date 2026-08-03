@@ -1,27 +1,15 @@
+#include "common.hpp"
 #include "httplib/body/string_body.hpp"
-#include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
-#include "httplib/client/read_session.hpp"
 #include "httplib/client/write_session.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
-#include "httplib/server/router.hpp"
-#include "httplib/server/server.hpp"
 #include <array>
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/io_context.hpp>
-#include <boost/asio/use_future.hpp>
-#include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <filesystem>
 #include <format>
 #include <fstream>
-#include <memory>
 #include <random>
-#include <spdlog/sinks/null_sink.h>
-#include <spdlog/spdlog.h>
-#include <string>
-#include <thread>
 
 using namespace std::string_view_literals;
 namespace http = httplib::http;
@@ -109,18 +97,7 @@ namespace
         }
     };
 
-    std::string
-    as_string(httplib::client::http_client::response const& resp)
-    {
-        return resp.body().as<httplib::body::string_body>();
-    }
-
-#define UNWRAP(result)               \
-    [&](auto&& r)                    \
-    {                                \
-        REQUIRE(r.has_value());      \
-        return std::move(r).value(); \
-    }(result)
+    using test_common::as_string;
 
 } // namespace
 

@@ -1,106 +1,29 @@
+#include "common.hpp"
 #include "httplib/body/form_data_body.hpp"
 #include "httplib/body/json_body.hpp"
 #include "httplib/body/query_params_body.hpp"
 #include "httplib/body/string_body.hpp"
-#include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/html/query_params.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
-#include "httplib/server/router.hpp"
-#include "httplib/server/server.hpp"
-#include <boost/asio/io_context.hpp>
 #include <boost/json.hpp>
-#include <catch2/catch_test_macros.hpp>
-#include <memory>
 #include <random>
-#include <spdlog/sinks/null_sink.h>
-#include <spdlog/spdlog.h>
-#include <string>
-#include <thread>
 
-using namespace std::string_view_literals;
 namespace beast = httplib::beast;
 namespace http = httplib::http;
 namespace net = httplib::net;
 
 namespace
 {
-
-    struct test_scaffold
-    {
-        net::io_context ioc;
-        httplib::server::http_server server;
-        httplib::tcp::endpoint endpoint;
-        std::thread thread;
-        std::unique_ptr<httplib::client::http_client> client;
-
-        test_scaffold() : server(ioc)
-        {
-            auto null_sink = std::make_shared<spdlog::sinks::null_sink_mt>();
-            server.set_logger(std::make_shared<spdlog::logger>("httplib.tests", null_sink));
-        }
-
-        ~test_scaffold()
-        {
-            server.stop().wait();
-            ioc.stop();
-            if (thread.joinable())
-            {
-                thread.join();
-            }
-        }
-
-        void
-        start()
-        {
-            server.listen("127.0.0.1", 0);
-            endpoint = server.local_endpoint();
-            server.run();
-            thread = std::thread([this] { ioc.run(); });
-
-            client = std::make_unique<httplib::client::http_client>(ioc.get_executor(),
-                                                                    endpoint.address().to_string(),
-                                                                    endpoint.port());
-            client->set_timeout(std::chrono::seconds(5));
-        }
-
-        auto&
-        router()
-        {
-            return server.router();
-        }
-
-        std::string
-        host() const
-        {
-            return endpoint.address().to_string();
-        }
-        uint16_t
-        port() const
-        {
-            return endpoint.port();
-        }
-    };
-
-    std::string
-    as_string(httplib::client::http_client::response const& resp)
-    {
-        return resp.body().as<httplib::body::string_body>();
-    }
+    using test_common::test_scaffold;
+    using test_common::as_string;
 
     boost::json::value const&
     as_json(httplib::client::http_client::response const& resp)
     {
         return resp.body().as<httplib::body::json_body>();
     }
-
-#define UNWRAP(result)               \
-    [&](auto&& r)                    \
-    {                                \
-        REQUIRE(r.has_value());      \
-        return std::move(r).value(); \
-    }(result)
 
     httplib::html::query_params
     params(std::initializer_list<std::pair<std::string, std::string>> vals)

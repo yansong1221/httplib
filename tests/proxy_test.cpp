@@ -1,9 +1,6 @@
-#include "httplib/client/client.hpp"
+#include "common.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
-#include "httplib/server/router.hpp"
-#include "httplib/server/server.hpp"
-#include <catch2/catch_test_macros.hpp>
 #include <string>
 
 using namespace httplib;
@@ -53,14 +50,6 @@ namespace
             }
         }
     };
-
-#define UNWRAP(result)                                                             \
-    [&](auto&& r)                                                                  \
-    {                                                                              \
-        INFO("UNWRAP error: " << r.error() << " (" << r.error().message() << ")"); \
-        REQUIRE(r.has_value());                                                    \
-        return std::move(std::move(r).value());                                    \
-    }(result)
 
     std::string
     as_string(auto& msg)

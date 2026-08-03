@@ -1,97 +1,16 @@
-#include "httplib/body/string_body.hpp"
-#include "httplib/client/client.hpp"
+#include "common.hpp"
 #include "httplib/server/middleware/auth.hpp"
 #include "httplib/server/middleware/cors.hpp"
 #include "httplib/server/middleware/rate_limit.hpp"
-#include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
-#include "httplib/server/router.hpp"
-#include "httplib/server/server.hpp"
-#include <boost/asio/io_context.hpp>
-#include <catch2/catch_test_macros.hpp>
 #include <chrono>
-#include <memory>
-#include <spdlog/sinks/null_sink.h>
-#include <spdlog/spdlog.h>
-#include <string>
-#include <thread>
 
-using namespace std::string_view_literals;
-namespace http = httplib::http;
-namespace net = httplib::net;
 namespace mw = httplib::server::middleware;
 
 namespace
 {
-
-    struct test_scaffold
-    {
-        net::io_context ioc;
-        httplib::server::http_server server;
-        httplib::tcp::endpoint endpoint;
-        std::thread thread;
-        std::unique_ptr<httplib::client::http_client> client;
-
-        test_scaffold() : server(ioc)
-        {
-            auto null_sink = std::make_shared<spdlog::sinks::null_sink_mt>();
-            server.set_logger(std::make_shared<spdlog::logger>("httplib.tests", null_sink));
-        }
-
-        ~test_scaffold()
-        {
-            server.stop().wait();
-            ioc.stop();
-            if (thread.joinable())
-            {
-                thread.join();
-            }
-        }
-
-        void
-        start()
-        {
-            server.listen("127.0.0.1", 0);
-            endpoint = server.local_endpoint();
-            server.run();
-            thread = std::thread([this] { ioc.run(); });
-
-            client = std::make_unique<httplib::client::http_client>(ioc.get_executor(),
-                                                                    endpoint.address().to_string(),
-                                                                    endpoint.port());
-            client->set_timeout(std::chrono::seconds(5));
-        }
-
-        auto&
-        router()
-        {
-            return server.router();
-        }
-
-        std::string
-        host() const
-        {
-            return endpoint.address().to_string();
-        }
-        uint16_t
-        port() const
-        {
-            return endpoint.port();
-        }
-    };
-
-    std::string
-    as_string(httplib::client::http_client::response const& resp)
-    {
-        return resp.body().as<httplib::body::string_body>();
-    }
-
-#define UNWRAP(result)               \
-    [&](auto&& r)                    \
-    {                                \
-        REQUIRE(r.has_value());      \
-        return std::move(r).value(); \
-    }(result)
+    using test_common::test_scaffold;
+    using test_common::as_string;
 
 } // namespace
 
@@ -387,7 +306,7 @@ TEST_CASE("Rate Limit: shared limits apply across routes", "[middleware]")
     REQUIRE(blocked->result() == http::status::too_many_requests);
 
     // Second client from same IP should also be rate-limited (shared bucket)
-    auto client2 = std::make_unique<httplib::client::http_client>(ts.ioc.get_executor(), ts.host(), ts.port());
+    auto client2 = std::make_unique<httplib::client::http_client>(ts.ioc.get_executor(), ts.endpoint.address().to_string(), ts.endpoint.port());
     client2->set_timeout(std::chrono::seconds(5));
     auto resp2 = client2->get("/rl-ip");
     REQUIRE(resp2.has_value());
