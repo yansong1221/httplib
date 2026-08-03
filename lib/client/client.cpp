@@ -95,7 +95,7 @@ namespace httplib::client
     http_client::async_send_request(http::verb method, std::string_view path, http::fields const& headers)
     {
         auto request = impl_->make_http_request(method, path, headers);
-        co_return co_await impl_->async_send_request_with_redirect(request, nullptr, nullptr);
+        co_return co_await impl_->async_send_request_with_redirect(request, nullptr);
     }
 
     net::awaitable<http_client::response_result>
@@ -107,7 +107,7 @@ namespace httplib::client
         auto request = impl_->make_http_request(method, path, headers);
         request.body() = std::string(body);
         request.content_length(body.size());
-        co_return co_await impl_->async_send_request_with_redirect(request, nullptr, nullptr);
+        co_return co_await impl_->async_send_request_with_redirect(request, nullptr);
     }
 
     net::awaitable<http_client::response_result>
@@ -120,7 +120,7 @@ namespace httplib::client
         request.set(http::field::content_type, "application/json");
         request.body() = std::move(body);
         request.prepare_payload();
-        co_return co_await impl_->async_send_request_with_redirect(request, nullptr, nullptr);
+        co_return co_await impl_->async_send_request_with_redirect(request, nullptr);
     }
 
     net::awaitable<http_client::response_result>
@@ -133,7 +133,7 @@ namespace httplib::client
         request.set(http::field::content_type, fmt::format("multipart/form-data; boundary={}", body.boundary));
         request.body() = std::move(body);
         request.prepare_payload();
-        co_return co_await impl_->async_send_request_with_redirect(request, nullptr, nullptr);
+        co_return co_await impl_->async_send_request_with_redirect(request, nullptr);
     }
 
     net::awaitable<http_client::response_result>
@@ -146,7 +146,7 @@ namespace httplib::client
         request.set(http::field::content_type, "application/x-www-form-urlencoded");
         request.body() = std::move(body);
         request.prepare_payload();
-        co_return co_await impl_->async_send_request_with_redirect(request, nullptr, nullptr);
+        co_return co_await impl_->async_send_request_with_redirect(request, nullptr);
     }
 
     net::awaitable<http_client::response_result>
@@ -160,7 +160,7 @@ namespace httplib::client
         file_body.open(file_path, std::ios::in | std::ios::binary);
         request.body() = std::move(file_body);
         request.prepare_payload();
-        co_return co_await impl_->async_send_request_with_redirect(request, nullptr, nullptr);
+        co_return co_await impl_->async_send_request_with_redirect(request, nullptr);
     }
 
     // =============================================================================
@@ -226,19 +226,6 @@ namespace httplib::client
         co_return co_await async_send_file(method, make_target(path, params), file_path, headers);
     }
 
-    net::awaitable<http_client::response_result>
-    http_client::async_send_chunked_request(http::verb method,
-                                            std::string_view path,
-                                            chunked_write_handler_type handler,
-                                            html::query_params const& params,
-                                            http::fields const& headers)
-    {
-        auto req = impl_->make_http_request(method, path, headers);
-        req.set(http::field::transfer_encoding, "chunked");
-        req.chunked(true);
-        co_return co_await impl_->async_send_request_with_redirect(req, nullptr, std::move(handler));
-    }
-
     std::shared_ptr<write_session>
     http_client::create_writer()
     {
@@ -261,19 +248,6 @@ namespace httplib::client
     http_client::create_ndjson_reader()
     {
         return std::make_unique<ndjson_reader_impl>(create_reader());
-    }
-
-    http_client::response_result
-    http_client::send_chunked_request(http::verb method,
-                                      std::string_view path,
-                                      chunked_write_handler_type handler,
-                                      html::query_params const& params,
-                                      http::fields const& headers)
-    {
-        auto future = net::co_spawn(impl_->executor_,
-                                    async_send_chunked_request(method, path, std::move(handler), params, headers),
-                                    net::use_future);
-        return future.get();
     }
 
     // =============================================================================

@@ -2,7 +2,6 @@
 #include "compress/compressor.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "read_session_impl.hpp"
-#include "streaming/chunk_writer_impl.hpp"
 #include "write_session_impl.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
@@ -123,21 +122,13 @@ namespace httplib::client
 
     net::awaitable<http_client::response_result>
     http_client::impl::async_send_request(http_client::request& req,
-                                          body_setup_fn const& body_setup,
-                                          chunked_write_handler_type const& chunked_write_handler) noexcept
+                                           body_setup_fn const& body_setup) noexcept
     {
         http::request_serializer<body::any_body> serializer(req);
-        auto ec = co_await async_write(serializer, chunked_write_handler != nullptr);
+        auto ec = co_await async_write(serializer, false);
         if (ec)
         {
             co_return ec;
-        }
-
-        if (chunked_write_handler)
-        {
-            streaming::chunk_writer_impl writer(*stream_, timeout_);
-            co_await chunked_write_handler(writer);
-            co_await writer.close();
         }
 
         buffer_.clear();
@@ -146,17 +137,16 @@ namespace httplib::client
 
     net::awaitable<http_client::response_result>
     http_client::impl::async_send_request_with_redirect(http_client::request& req,
-                                                        body_setup_fn const& body_setup,
-                                                        chunked_write_handler_type body_write)
+                                                         body_setup_fn const& body_setup)
     {
         if (max_redirects_ <= 0)
         {
-            co_return co_await async_send_request(req, body_setup, body_write);
+            co_return co_await async_send_request(req, body_setup);
         }
 
         for (int r = 0; r <= max_redirects_; ++r)
         {
-            auto result = co_await async_send_request(req, body_setup, body_write);
+            auto result = co_await async_send_request(req, body_setup);
             if (result.has_error())
             {
                 co_return result;
@@ -193,7 +183,7 @@ namespace httplib::client
                     new_impl->set_logger(logger());
                     new_impl->max_redirects_ = max_redirects_ - r - 1;
 
-                    co_return co_await new_impl->async_send_request(req, body_setup, body_write);
+                    co_return co_await new_impl->async_send_request(req, body_setup);
                 }
 
                 if (s == http::status::see_other
@@ -383,7 +373,7 @@ namespace httplib::client
         }
 
         auto setup = [fb_ptr](response& resp) { resp.body() = std::move(*fb_ptr); };
-        auto result = co_await async_send_request_with_redirect(req, setup, nullptr);
+        auto result = co_await async_send_request_with_redirect(req, setup);
 
         if (!result.has_value() || result->result() == http::status::no_content
             || result->result() == http::status::not_modified)

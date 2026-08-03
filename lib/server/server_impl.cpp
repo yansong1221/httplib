@@ -16,29 +16,6 @@
 
 namespace httplib::server
 {
-    namespace detail
-    {
-
-        static bool
-        is_hop_by_hop(httplib::http::field f)
-        {
-            switch (f)
-            {
-                case httplib::http::field::connection:
-                case httplib::http::field::keep_alive:
-                case httplib::http::field::te:
-                case httplib::http::field::trailer:
-                case httplib::http::field::proxy_authorization:
-                case httplib::http::field::proxy_authenticate:
-                case httplib::http::field::upgrade:
-                    return true;
-                default:
-                    return false;
-            }
-        }
-
-    } // namespace detail
-
     http_server::impl::impl(net::any_io_executor const& ex) : ex_(ex), acceptor_(ex)
     {
         proxy_pool_ = std::make_unique<client::http_client_pool>(ex_);
@@ -357,13 +334,13 @@ namespace httplib::server
                 response& resp) -> net::awaitable<void>
             {
                 auto url = resolver(req);
-
                 auto r = boost::urls::parse_uri(url);
                 if (!r)
                 {
                     resp.set_error_content(http::status::bad_gateway);
                     co_return;
                 }
+
                 auto const& u = *r;
                 auto host = u.host();
                 auto port = u.port_number() ? u.port_number() : (u.scheme() == "https" ? 443 : 80);
@@ -382,24 +359,13 @@ namespace httplib::server
                 {
                     target.insert(0, 1, '/');
                 }
-
-                http::fields upstream_headers;
-                auto& req_impl = *req.get_impl();
-                for (auto const& f : req_impl)
-                {
-                    if (detail::is_hop_by_hop(f.name()))
-                    {
-                        continue;
-                    }
-                    upstream_headers.set(f.name_string(), f.value());
-                }
+                http::fields upstream_headers(req.base());
 
                 auto client_ip = req.remote_endpoint().address().to_string();
-                auto xff = req_impl["X-Forwarded-For"];
+                auto xff = req["X-Forwarded-For"];
                 if (!xff.empty())
                 {
-                    std::string xf(xff);
-                    client_ip = xf + ", " + client_ip;
+                    client_ip = std::format("{},{}", xff, client_ip);
                 }
                 upstream_headers.set("X-Forwarded-For", client_ip);
 

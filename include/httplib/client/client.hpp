@@ -3,7 +3,6 @@
 #include "httplib/client/read_session.hpp"
 #include "httplib/client/write_session.hpp"
 #include "httplib/config.hpp"
-#include "httplib/streaming/chunk_writer.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <filesystem>
 #include <functional>
@@ -26,8 +25,6 @@ namespace httplib::client
         using response = http::response<body::any_body>;
         using request = http::request<body::any_body>;
         using response_result = boost::system::result<response>;
-
-        using chunked_write_handler_type = std::function<net::awaitable<void>(chunk_writer&)>;
 
       public:
         explicit http_client(net::io_context& ex, std::string_view host, uint16_t port, bool ssl = false);
@@ -226,17 +223,7 @@ namespace httplib::client
                                                         fs::path const& file_path,
                                                         http::fields const& headers = http::fields());
 
-        net::awaitable<response_result> async_send_chunked_request(http::verb method,
-                                                                   std::string_view path,
-                                                                   chunked_write_handler_type handler,
-                                                                   html::query_params const& params = {},
-                                                                   http::fields const& headers = http::fields());
 
-        response_result send_chunked_request(http::verb method,
-                                             std::string_view path,
-                                             chunked_write_handler_type handler,
-                                             html::query_params const& params = {},
-                                             http::fields const& headers = http::fields());
 
         std::shared_ptr<write_session> create_writer();
         std::shared_ptr<read_session> create_reader();

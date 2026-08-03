@@ -53,13 +53,11 @@ namespace httplib::client
 
         net::awaitable<http_client::response_result> async_send_request(
             http_client::request& req,
-            body_setup_fn const& body_setup,
-            chunked_write_handler_type const& chunked_write_handler) noexcept;
+            body_setup_fn const& body_setup) noexcept;
 
         net::awaitable<http_client::response_result> async_send_request_with_redirect(
             http_client::request& req,
-            body_setup_fn const& body_setup,
-            chunked_write_handler_type body_write);
+            body_setup_fn const& body_setup);
 
         net::awaitable<http_client::response_result> async_download(http_client::request& req,
                                                                     fs::path const& save_path);
