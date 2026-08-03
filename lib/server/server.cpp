@@ -150,6 +150,13 @@ namespace httplib::server
     {
         impl_->set_reverse_proxy(location, std::move(resolver), std::move(on_headers));
     }
+
+    void
+    http_server::set_proxy_pool_size(size_t max_size)
+    {
+        impl_->set_proxy_pool_size(max_size);
+    }
+
     void
     http_server::set_ssl(std::span<char const> const& cert_file,
                          std::span<char const> const& key_file,

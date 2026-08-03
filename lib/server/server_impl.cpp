@@ -491,4 +491,10 @@ namespace httplib::server
             });
     }
 
+    void
+    http_server::impl::set_proxy_pool_size(size_t max_size)
+    {
+        proxy_pool_->set_max_size(max_size);
+    }
+
 } // namespace httplib::server

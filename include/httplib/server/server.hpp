@@ -59,6 +59,7 @@ namespace httplib::server
 
         void set_reverse_proxy(std::string_view location, std::string_view url, proxy_header_callback on_headers = {});
         void set_reverse_proxy(std::string_view location, proxy_resolver resolver, proxy_header_callback on_headers = {});
+        void set_proxy_pool_size(size_t max_size);
         void set_ssl(std::span<char const> const& cert_file,
                      std::span<char const> const& key_file,
                      std::string passwd = {});
