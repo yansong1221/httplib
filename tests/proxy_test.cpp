@@ -139,6 +139,11 @@ TEST_CASE("reverse-proxy", "[proxy]")
         [](server::request&, server::response& resp)
         { resp.set_redirect("/resource", http::status::moved_permanently); });
 
+    ts.upstream_server.router().set_http_handler<http::verb::get>(
+        "/check-host",
+        [](server::request& req, server::response& resp)
+        { resp.set_string_content(std::string(req["Host"]), "text/plain"); });
+
     ts.proxy_server.set_reverse_proxy("/api/*",
                                       std::string("http://") + ts.upstream_host + ":"
                                           + std::to_string(ts.upstream_port));
@@ -212,6 +217,14 @@ TEST_CASE("reverse-proxy", "[proxy]")
         REQUIRE(resp.result() == http::status::ok);
         auto body = as_string(resp);
         REQUIRE(body.find("127.0.0.1") != std::string::npos);
+    }
+
+    SECTION("Host header is set to upstream host")
+    {
+        auto resp = UNWRAP(ts.proxy_client->get("/api/check-host"));
+        REQUIRE(resp.result() == http::status::ok);
+        auto body = as_string(resp);
+        REQUIRE(body == ts.upstream_host + ":" + std::to_string(ts.upstream_port));
     }
 
     SECTION("path not matching prefix returns 404")
