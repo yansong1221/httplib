@@ -1,7 +1,8 @@
 #pragma once
-#include "httplib/streaming/chunk_reader.hpp"
+#include "httplib/client/read_session.hpp"
 #include "httplib/streaming/ndjson_reader.hpp"
 #include <boost/json/parse.hpp>
+#include <array>
 #include <string>
 
 namespace httplib::streaming
@@ -10,7 +11,10 @@ namespace httplib::streaming
     class ndjson_reader_impl : public httplib::ndjson_reader
     {
       public:
-        explicit ndjson_reader_impl(httplib::chunk_reader& reader) : reader_(reader) {}
+        explicit ndjson_reader_impl(std::shared_ptr<client::read_session> session)
+            : session_(std::move(session))
+        {
+        }
 
         net::awaitable<boost::json::value>
         read() override
@@ -20,16 +24,18 @@ namespace httplib::streaming
                 auto lf = buf_.find('\n');
                 if (lf == std::string::npos)
                 {
-                    if (reader_.is_done())
+                    if (done_)
                     {
                         co_return boost::json::value {};
                     }
-                    auto chunk = co_await reader_.read_chunk();
-                    if (chunk.empty())
+                    std::array<char, 4096> buf;
+                    auto result = co_await session_->read_body(net::buffer(buf));
+                    if (result.has_error() || result.value() == 0)
                     {
+                        done_ = true;
                         co_return boost::json::value {};
                     }
-                    buf_.append(chunk);
+                    buf_.append(buf.data(), result.value());
                     continue;
                 }
 
@@ -52,12 +58,13 @@ namespace httplib::streaming
         bool
         is_done() const override
         {
-            return reader_.is_done() && buf_.find('\n') == std::string::npos;
+            return done_ && buf_.find('\n') == std::string::npos;
         }
 
       private:
-        httplib::chunk_reader& reader_;
+        std::shared_ptr<client::read_session> session_;
         std::string buf_;
+        bool done_ = false;
     };
 
 } // namespace httplib::streaming

@@ -2,12 +2,17 @@
 #include "httplib/body/json_body.hpp"
 #include "httplib/body/string_body.hpp"
 #include "httplib/client/client.hpp"
+#include "httplib/client/read_session.hpp"
+#include "httplib/client/write_session.hpp"
 #include "httplib/server/mount_point_entry.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
+#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/use_future.hpp>
+#include <array>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
@@ -156,25 +161,32 @@ TEST_CASE("Response: set_chunked_write_handler with multiple chunks", "[response
     ts.start();
 
     std::string streamed;
-    ts.client->set_chunked_read_handler(
-        [&](httplib::chunk_reader& reader, httplib::client::http_client::response&) -> net::awaitable<void>
-        {
-            while (true)
-            {
-                auto chunk = co_await reader.read_chunk();
-                if (chunk.empty())
-                {
-                    break;
-                }
-                streamed += chunk;
-            }
-        });
+    auto writer = ts.client->writer();
+    auto reader = ts.client->reader();
 
-    auto resp = UNWRAP(ts.client->get("/stream"));
-    REQUIRE(resp.result() == http::status::ok);
+    boost::asio::co_spawn(ts.ioc,
+                          [&]() -> net::awaitable<void>
+                          {
+                              co_await writer->write_header(http::verb::get, "/stream", {});
+                              co_await writer->write_body(net::buffer("", 0), false);
+                              co_await reader->read_header();
+
+                              std::array<char, 4096> buf;
+                              while (true)
+                              {
+                                  auto result = co_await reader->read_body(net::buffer(buf));
+                                  if (result.has_error() || result.value() == 0)
+                                  {
+                                      break;
+                                  }
+                                  streamed.append(buf.data(), result.value());
+                              }
+                          },
+                          boost::asio::use_future)
+        .get();
+
+    REQUIRE(reader->result() == http::status::ok);
     REQUIRE(streamed == "ABC");
-
-    ts.client->set_chunked_read_handler(nullptr);
 }
 
 TEST_CASE("Response: set_form_data_content", "[response]")

@@ -1,11 +1,16 @@
 #include "httplib/body/string_body.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
+#include "httplib/client/read_session.hpp"
+#include "httplib/client/write_session.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
+#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/use_future.hpp>
+#include <array>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <filesystem>
@@ -283,29 +288,34 @@ TEST_CASE("Client: custom chunk handler", "[client]")
         });
     ts.start_with_routes();
 
-    std::vector<std::string> chunks;
+    std::string streamed;
     auto client = ts.make_client();
-    client->set_chunked_read_handler(
-        [&](httplib::chunk_reader& reader, httplib::client::http_client::response& resp) -> net::awaitable<void>
-        {
-            while (true)
-            {
-                auto chunk = co_await reader.read_chunk();
-                if (chunk.empty())
-                {
-                    break;
-                }
-                chunks.push_back(std::string(chunk));
-            }
-        });
-    auto resp = UNWRAP(client->get("/chunked"));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(chunks.size() == 5);
-    REQUIRE(chunks[0] == "Chunk0");
-    REQUIRE(chunks[1] == "Chunk1");
-    REQUIRE(chunks[2] == "Chunk2");
-    REQUIRE(chunks[3] == "Chunk3");
-    REQUIRE(chunks[4] == "Chunk4");
+    auto writer = client->writer();
+    auto reader = client->reader();
+
+    boost::asio::co_spawn(ts.ioc,
+                          [&]() -> net::awaitable<void>
+                          {
+                              co_await writer->write_header(http::verb::get, "/chunked", {});
+                              co_await writer->write_body(net::buffer("", 0), false);
+                              co_await reader->read_header();
+
+                              std::array<char, 4096> buf;
+                              while (true)
+                              {
+                                  auto result = co_await reader->read_body(net::buffer(buf));
+                                  if (result.has_error() || result.value() == 0)
+                                  {
+                                      break;
+                                  }
+                                  streamed.append(buf.data(), result.value());
+                              }
+                          },
+                          boost::asio::use_future)
+        .get();
+
+    REQUIRE(reader->result() == http::status::ok);
+    REQUIRE(streamed == "Chunk0Chunk1Chunk2Chunk3Chunk4");
 }
 
 TEST_CASE("Client host and port", "[client]")

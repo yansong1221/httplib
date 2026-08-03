@@ -1,4 +1,6 @@
 #include "httplib/client/client.hpp"
+#include "httplib/client/read_session.hpp"
+#include "httplib/client/write_session.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
@@ -12,6 +14,7 @@
 #include <boost/asio/system_executor.hpp>
 #include <boost/asio/use_future.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <cstring>
 #include <memory>
 #include <spdlog/sinks/null_sink.h>
 #include <spdlog/spdlog.h>
@@ -105,22 +108,29 @@ TEST_CASE("NDJSON: server sends single line", "[ndjson]")
     ts.start();
 
     std::vector<boost::json::value> items;
-    ts.client->set_ndjson_read_handler(
-        [&](httplib::ndjson_reader& reader) -> net::awaitable<void>
-        {
-            while (!reader.is_done())
-            {
-                auto val = co_await reader.read();
-                if (val.is_null())
-                {
-                    break;
-                }
-                items.push_back(std::move(val));
-            }
-        });
+    auto writer = ts.client->writer();
+    auto reader = ts.client->reader();
 
-    auto resp = UNWRAP(ts.client->get("/ndjson"));
-    REQUIRE(resp.result() == http::status::ok);
+    boost::asio::co_spawn(ts.ioc,
+                          [&]() -> net::awaitable<void>
+                          {
+                              co_await writer->write_header(http::verb::get, "/ndjson", {});
+                              co_await writer->write_body(net::buffer("", 0), false);
+                              co_await reader->read_header();
+
+                              httplib::streaming::ndjson_reader_impl ndjson(reader);
+                              while (!ndjson.is_done())
+                              {
+                                  auto val = co_await ndjson.read();
+                                  if (val.is_null())
+                                  {
+                                      break;
+                                  }
+                                  items.push_back(std::move(val));
+                              }
+                          },
+                          boost::asio::use_future)
+        .get();
 
     REQUIRE(items.size() == 1);
     REQUIRE(items[0].at("msg") == "hello");
@@ -151,22 +161,29 @@ TEST_CASE("NDJSON: server sends multiple lines", "[ndjson]")
     ts.start();
 
     std::vector<boost::json::value> items;
-    ts.client->set_ndjson_read_handler(
-        [&](httplib::ndjson_reader& reader) -> net::awaitable<void>
-        {
-            while (!reader.is_done())
-            {
-                auto val = co_await reader.read();
-                if (val.is_null())
-                {
-                    break;
-                }
-                items.push_back(std::move(val));
-            }
-        });
+    auto writer = ts.client->writer();
+    auto reader = ts.client->reader();
 
-    auto resp = UNWRAP(ts.client->get("/ndjson"));
-    REQUIRE(resp.result() == http::status::ok);
+    boost::asio::co_spawn(ts.ioc,
+                          [&]() -> net::awaitable<void>
+                          {
+                              co_await writer->write_header(http::verb::get, "/ndjson", {});
+                              co_await writer->write_body(net::buffer("", 0), false);
+                              co_await reader->read_header();
+
+                              httplib::streaming::ndjson_reader_impl ndjson(reader);
+                              while (!ndjson.is_done())
+                              {
+                                  auto val = co_await ndjson.read();
+                                  if (val.is_null())
+                                  {
+                                      break;
+                                  }
+                                  items.push_back(std::move(val));
+                              }
+                          },
+                          boost::asio::use_future)
+        .get();
 
     REQUIRE(items.size() == 3);
     REQUIRE(items[0].at("i") == 1);
@@ -191,9 +208,21 @@ TEST_CASE("NDJSON: Content-Type is application/x-ndjson", "[ndjson]")
                                                   });
     ts.start();
 
-    auto resp = UNWRAP(ts.client->get("/ndjson"));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(resp[http::field::content_type] == "application/x-ndjson");
+    auto writer = ts.client->writer();
+    auto reader = ts.client->reader();
+
+    boost::asio::co_spawn(ts.ioc,
+                          [&]() -> net::awaitable<void>
+                          {
+                              co_await writer->write_header(http::verb::get, "/ndjson", {});
+                              co_await writer->write_body(net::buffer("", 0), false);
+                              co_await reader->read_header();
+                          },
+                          boost::asio::use_future)
+        .get();
+
+    REQUIRE(reader->result() == http::status::ok);
+    REQUIRE(reader->headers()[http::field::content_type] == "application/x-ndjson");
 }
 
 TEST_CASE("NDJSON: reader stops early", "[ndjson]")
@@ -220,47 +249,71 @@ TEST_CASE("NDJSON: reader stops early", "[ndjson]")
     ts.start();
 
     std::vector<boost::json::value> items;
-    ts.client->set_ndjson_read_handler(
-        [&](httplib::ndjson_reader& reader) -> net::awaitable<void>
-        {
-            for (int i = 0; i < 2; ++i)
-            {
-                auto val = co_await reader.read();
-                if (val.is_null())
-                {
-                    break;
-                }
-                items.push_back(std::move(val));
-            }
-        });
+    auto writer = ts.client->writer();
+    auto reader = ts.client->reader();
 
-    auto resp = UNWRAP(ts.client->get("/ndjson"));
-    REQUIRE(resp.result() == http::status::ok);
+    boost::asio::co_spawn(ts.ioc,
+                          [&]() -> net::awaitable<void>
+                          {
+                              co_await writer->write_header(http::verb::get, "/ndjson", {});
+                              co_await writer->write_body(net::buffer("", 0), false);
+                              co_await reader->read_header();
+
+                              httplib::streaming::ndjson_reader_impl ndjson(reader);
+                              for (int i = 0; i < 2; ++i)
+                              {
+                                  auto val = co_await ndjson.read();
+                                  if (val.is_null())
+                                  {
+                                      break;
+                                  }
+                                  items.push_back(std::move(val));
+                              }
+                          },
+                          boost::asio::use_future)
+        .get();
+
     REQUIRE(items.size() == 2);
 }
 
 namespace
 {
 
-    struct mock_chunk_reader : public httplib::chunk_reader
+    struct mock_read_session : public httplib::client::read_session
     {
-        std::vector<std::string> chunks;
-        size_t idx = 0;
+        std::string data;
+        size_t pos = 0;
 
-        httplib::net::awaitable<std::string_view>
-        read_chunk() override
+        net::awaitable<boost::system::error_code>
+        read_header() override
         {
-            if (idx >= chunks.size())
-            {
-                co_return std::string_view {};
-            }
-            co_return chunks[idx++];
+            co_return boost::system::error_code {};
         }
 
-        bool
-        is_done() const override
+        net::awaitable<boost::system::result<std::size_t>>
+        read_body(net::mutable_buffer const& buffer) override
         {
-            return idx >= chunks.size();
+            if (pos >= data.size())
+            {
+                co_return 0;
+            }
+            auto n = std::min(data.size() - pos, buffer.size());
+            std::memcpy(buffer.data(), data.data() + pos, n);
+            pos += n;
+            co_return n;
+        }
+
+        http::status
+        result() const override
+        {
+            return http::status::ok;
+        }
+
+        http::fields const&
+        headers() const override
+        {
+            static http::fields f;
+            return f;
         }
     };
 
@@ -268,8 +321,8 @@ namespace
 
 TEST_CASE("NDJSON: single line split across chunks", "[ndjson]")
 {
-    mock_chunk_reader mock;
-    mock.chunks = { "{\"a\":", "1}\n" };
+    auto mock = std::make_shared<mock_read_session>();
+    mock->data = "{\"a\":1}\n";
 
     httplib::streaming::ndjson_reader_impl reader(mock);
 
@@ -283,8 +336,8 @@ TEST_CASE("NDJSON: single line split across chunks", "[ndjson]")
 
 TEST_CASE("NDJSON: multiple lines in one chunk", "[ndjson]")
 {
-    mock_chunk_reader mock;
-    mock.chunks = { "{\"a\":1}\n{\"b\":2}\n" };
+    auto mock = std::make_shared<mock_read_session>();
+    mock->data = "{\"a\":1}\n{\"b\":2}\n";
 
     httplib::streaming::ndjson_reader_impl reader(mock);
 
@@ -305,8 +358,8 @@ TEST_CASE("NDJSON: multiple lines in one chunk", "[ndjson]")
 
 TEST_CASE("NDJSON: mixed: partial line in first chunk, rest in second", "[ndjson]")
 {
-    mock_chunk_reader mock;
-    mock.chunks = { "{\"x\":100}\n{\"y\":", "200}\n" };
+    auto mock = std::make_shared<mock_read_session>();
+    mock->data = "{\"x\":100}\n{\"y\":200}\n";
 
     httplib::streaming::ndjson_reader_impl reader(mock);
 

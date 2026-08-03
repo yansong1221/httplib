@@ -1,9 +1,6 @@
 #pragma once
 
 #include "httplib/client/client.hpp"
-#include "httplib/streaming/chunk_reader.hpp"
-#include "httplib/streaming/ndjson_reader.hpp"
-#include "httplib/streaming/sse_reader.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "stream/http_stream.hpp"
 #include <boost/beast/http/read.hpp>
@@ -39,11 +36,6 @@ namespace httplib::client
         http_client::request make_http_request(http::verb method,
                                                std::string_view target,
                                                http::fields const& headers) const;
-
-        void set_chunked_read_handler(chunked_read_handler_type&& handler);
-
-        void set_sse_read_handler(sse_read_handler_type&& handler);
-        void set_ndjson_read_handler(ndjson_read_handler_type&& handler);
 
         void
         set_max_redirects(int n)
@@ -158,9 +150,6 @@ namespace httplib::client
         std::weak_ptr<write_session_impl> write_impl_;
         std::weak_ptr<read_session_impl> read_impl_;
 
-        chunked_read_handler_type chunked_read_handler_;
-        sse_read_handler_type sse_read_handler_;
-        ndjson_read_handler_type ndjson_read_handler_;
         int max_redirects_ = 0;
 
         std::shared_ptr<spdlog::logger> default_logger_;

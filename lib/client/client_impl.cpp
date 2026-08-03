@@ -2,11 +2,8 @@
 #include "compress/compressor.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "read_session_impl.hpp"
-#include "streaming/chunk_reader_impl.hpp"
-#include "streaming/chunk_writer_impl.hpp"
-#include "streaming/ndjson_reader_impl.hpp"
-#include "streaming/sse_reader_impl.hpp"
 #include "write_session_impl.hpp"
+#include "streaming/chunk_writer_impl.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/write.hpp>
@@ -66,13 +63,10 @@ namespace httplib::client
         req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
         req.set(http::field::accept, "*/*");
 
-        if (!chunked_read_handler_)
+        auto const& encoding = compress::compressor_factory::instance().supported_encoding();
+        if (!encoding.empty())
         {
-            auto const& encoding = compress::compressor_factory::instance().supported_encoding();
-            if (!encoding.empty())
-            {
-                req.set(http::field::accept_encoding, boost::join(encoding, ","));
-            }
+            req.set(http::field::accept_encoding, boost::join(encoding, ","));
         }
 
         for (auto const& field : headers)
@@ -364,50 +358,21 @@ namespace httplib::client
 
         if (!parser.is_done())
         {
-            auto ct = parser.get()[http::field::content_type];
-            auto semi = ct.find(';');
-            auto mime = semi == std::string_view::npos ? ct : ct.substr(0, semi);
-            bool is_sse = beast::iequals(mime, "text/event-stream");
-            bool is_ndjson = beast::iequals(mime, "application/x-ndjson");
-
-            if (parser.chunked() && sse_read_handler_ && is_sse)
+            if (body_setup)
             {
-                streaming::chunk_reader_impl<false> reader_impl(*stream_, buffer_, parser, timeout_);
-
-                streaming::sse_reader_impl sse(reader_impl);
-                co_await sse_read_handler_(sse);
+                body_setup(parser.get());
             }
-            else if (parser.chunked() && ndjson_read_handler_ && is_ndjson)
-            {
-                streaming::chunk_reader_impl<false> reader_impl(*stream_, buffer_, parser, timeout_);
 
-                streaming::ndjson_reader_impl ndjson(reader_impl);
-                co_await ndjson_read_handler_(ndjson);
-            }
-            else if (parser.chunked() && chunked_read_handler_)
+            while (!parser.is_done())
             {
-                streaming::chunk_reader_impl<false> reader_impl(*stream_, buffer_, parser, timeout_);
-
-                co_await chunked_read_handler_(reader_impl, parser.get());
-            }
-            else
-            {
-                if (body_setup)
+                begin_io();
+                co_await http::async_read_some(*stream_, buffer_, parser, util::net_awaitable[ec]);
+                if (ec)
                 {
-                    body_setup(parser.get());
+                    close();
+                    co_return ec;
                 }
-
-                while (!parser.is_done())
-                {
-                    begin_io();
-                    co_await http::async_read_some(*stream_, buffer_, parser, util::net_awaitable[ec]);
-                    if (ec)
-                    {
-                        close();
-                        co_return ec;
-                    }
-                    end_io();
-                }
+                end_io();
             }
         }
 
@@ -417,24 +382,6 @@ namespace httplib::client
             close();
         }
         co_return parser.release();
-    }
-
-    void
-    http_client::impl::set_chunked_read_handler(chunked_read_handler_type&& handler)
-    {
-        chunked_read_handler_ = std::move(handler);
-    }
-
-    void
-    http_client::impl::set_sse_read_handler(sse_read_handler_type&& handler)
-    {
-        sse_read_handler_ = std::move(handler);
-    }
-
-    void
-    http_client::impl::set_ndjson_read_handler(ndjson_read_handler_type&& handler)
-    {
-        ndjson_read_handler_ = std::move(handler);
     }
 
     net::awaitable<http_client::response_result>

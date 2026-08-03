@@ -1,7 +1,8 @@
 #pragma once
-#include "httplib/streaming/chunk_reader.hpp"
+#include "httplib/client/read_session.hpp"
 #include "httplib/streaming/sse_reader.hpp"
 #include "streaming/sse_event_parser.hpp"
+#include <array>
 
 namespace httplib::streaming
 {
@@ -9,19 +10,24 @@ namespace httplib::streaming
     class sse_reader_impl : public httplib::sse_reader
     {
       public:
-        explicit sse_reader_impl(httplib::chunk_reader& reader) : reader_(reader) {}
+        explicit sse_reader_impl(std::shared_ptr<client::read_session> session)
+            : session_(std::move(session))
+        {
+        }
 
         net::awaitable<sse_event>
         read_event() override
         {
-            while (!parser_.has_event() && !reader_.is_done())
+            while (!parser_.has_event() && !done_)
             {
-                auto chunk = co_await reader_.read_chunk();
-                if (chunk.empty())
+                std::array<char, 4096> buf;
+                auto result = co_await session_->read_body(net::buffer(buf));
+                if (result.has_error() || result.value() == 0)
                 {
+                    done_ = true;
                     break;
                 }
-                parser_.feed(chunk);
+                parser_.feed(std::string_view(buf.data(), result.value()));
             }
             if (parser_.has_event())
             {
@@ -33,12 +39,13 @@ namespace httplib::streaming
         bool
         is_done() const override
         {
-            return reader_.is_done() && !parser_.has_event();
+            return done_ && !parser_.has_event();
         }
 
       private:
-        httplib::chunk_reader& reader_;
+        std::shared_ptr<client::read_session> session_;
         detail::sse_event_parser parser_;
+        bool done_ = false;
     };
 
 } // namespace httplib::streaming

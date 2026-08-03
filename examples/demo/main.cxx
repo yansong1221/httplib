@@ -13,11 +13,8 @@
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
-#include "httplib/streaming/chunk_reader.hpp"
 #include "httplib/streaming/chunk_writer.hpp"
-#include "httplib/streaming/ndjson_reader.hpp"
 #include "httplib/streaming/ndjson_writer.hpp"
-#include "httplib/streaming/sse_reader.hpp"
 #include "httplib/streaming/sse_writer.hpp"
 #include "httplib/version.hpp"
 #include <boost/asio/thread_pool.hpp>
@@ -491,6 +488,7 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
         }
     }
 
+#if 0
     // Stream with chunk handler
     {
         client.set_chunked_read_handler(
@@ -560,6 +558,7 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
             spdlog::info("GET /api/ndjson -> {}", r.value().result_int());
         }
     }
+#endif
 
     // Auth: Basic (should fail without credentials)
     {
