@@ -316,6 +316,6 @@ namespace httplib::client
         http_client& operator=(http_client const&) = delete;
 
         class impl;
-        std::shared_ptr<impl> impl_;
+        std::unique_ptr<impl> impl_;
     };
 } // namespace httplib::client
