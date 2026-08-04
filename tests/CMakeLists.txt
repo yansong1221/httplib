@@ -12,6 +12,14 @@ PRIVATE httplib
 PRIVATE Catch2::Catch2WithMain
 )
 
+find_package(jwt-cpp CONFIG REQUIRED)
+target_link_libraries(${MOUDLE} PRIVATE jwt-cpp::jwt-cpp)
+
+if(HTTPLIB_ENABLED_SSL)
+    find_package(OpenSSL REQUIRED)
+    target_link_libraries(${MOUDLE} PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+endif()
+
 target_include_directories(${MOUDLE} PRIVATE ${HTTPLIB_LIB_DIR})
 
 target_precompile_headers(${MOUDLE} PRIVATE ${HTTPLIB_LIB_DIR}/pch.hpp)
