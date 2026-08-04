@@ -1,8 +1,10 @@
 #include "common.hpp"
+#include "httplib/server/middleware/data.hpp"
 #include "httplib/server/middleware/jwt_auth.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/util/jwt.hpp"
+
 #include <catch2/catch_test_macros.hpp>
 #include <jwt-cpp/jwt.h>
 #include <jwt-cpp/traits/boost-json/traits.h>
@@ -241,8 +243,7 @@ TEST_CASE("JWT: middleware auth via Bearer token", "[jwt]")
         "/protected",
         [](httplib::server::request& req, httplib::server::response& resp)
         {
-            auto& data = req.custom_data(mw::jwt_auth::jwt_key);
-            auto jwt = std::any_cast<httplib::jwt::decoded_jwt>(data);
+            auto& jwt = mw::get_data<mw::jwt_auth>(req);
             resp.set_string_content(jwt.get_subject(), "text/plain");
         },
         ja);

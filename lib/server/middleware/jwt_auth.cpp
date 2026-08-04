@@ -110,7 +110,7 @@ namespace httplib::server::middleware
             return false;
         }
 
-        req.set_custom_data(jwt_key, std::move(decoded));
+        req.set_custom_data(key, std::move(decoded));
         return true;
     }
 
