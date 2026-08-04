@@ -106,7 +106,7 @@ namespace httplib::server
         boost::system::error_code ec;
         auto remote_endp = ws_.socket().remote_endpoint(ec);
 
-        co_await ws_.async_accept((*req_.get_impl()), util::net_awaitable[ec]);
+        co_await ws_.async_accept(get_impl(req_), util::net_awaitable[ec]);
         if (ec)
         {
             serv_.logger()->error("websocket handshake failed: {}", ec.message());

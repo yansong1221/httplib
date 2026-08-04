@@ -58,19 +58,30 @@ namespace httplib::server
         using proxy_resolver = std::function<std::string(request& req)>;
 
         void set_reverse_proxy(std::string_view location, std::string_view url, proxy_header_callback on_headers = {});
-        void set_reverse_proxy(std::string_view location, proxy_resolver resolver, proxy_header_callback on_headers = {});
+        void set_reverse_proxy(std::string_view location,
+                               proxy_resolver resolver,
+                               proxy_header_callback on_headers = {});
         void set_proxy_pool_size(size_t max_size);
         void set_ssl(std::span<char const> const& cert_file,
                      std::span<char const> const& key_file,
                      std::string passwd = {});
         void set_ssl_file(fs::path const& cert_file, fs::path const& key_file, std::string passwd = {});
-        impl* get_impl();
-        impl const* get_impl() const;
 
       private:
         http_server(http_server const&) = delete;
         http_server& operator=(http_server const&) = delete;
 
         std::shared_ptr<impl> impl_;
+
+        friend impl&
+        get_impl(http_server& self)
+        {
+            return *self.impl_;
+        }
+        friend impl const&
+        get_impl(http_server const& self)
+        {
+            return *self.impl_;
+        }
     };
 } // namespace httplib::server

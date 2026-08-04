@@ -60,22 +60,29 @@ namespace httplib::server
 
         void set_redirect(std::string_view url, http::status status = http::status::moved_permanently);
 
-        class impl;
-
         std::unique_ptr<server::sse_writer> create_sse_writer();
         std::unique_ptr<server::ndjson_writer> create_ndjson_writer();
 
         chunk_writer* get_chunk_writer();
 
-        impl* get_impl();
-        impl const* get_impl() const;
-
         bool is_chunked_done() const;
+
+        class impl;
 
       protected:
         response(std::unique_ptr<impl>&& _impl);
 
       private:
+        friend impl&
+        get_impl(response& self)
+        {
+            return *self.impl_;
+        }
+        friend impl const&
+        get_impl(response const& self)
+        {
+            return *self.impl_;
+        }
         std::unique_ptr<impl> impl_;
     };
 

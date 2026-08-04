@@ -124,7 +124,7 @@ namespace httplib::server
         {
             if (fs::is_regular_file(path, ec))
             {
-                res.set_file_content(path, req.get_impl()->base());
+                res.set_file_content(path, get_impl(req).base());
             }
             else
             {

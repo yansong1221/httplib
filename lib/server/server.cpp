@@ -171,18 +171,6 @@ namespace httplib::server
         set_ssl(detail::read_file_fast(cert_file), detail::read_file_fast(key_file), passwd);
     }
 
-    httplib::server::http_server::impl*
-    http_server::get_impl()
-    {
-        return impl_.get();
-    }
-
-    httplib::server::http_server::impl const*
-    http_server::get_impl() const
-    {
-        return impl_.get();
-    }
-
     net::awaitable<void>
     http_server::async_stop()
     {

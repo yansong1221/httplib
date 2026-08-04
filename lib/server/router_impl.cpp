@@ -301,7 +301,7 @@ namespace httplib::server
             co_return;
         }
 
-        if (not_found_handler_ && resp.get_impl()->result() == http::status::not_found)
+        if (not_found_handler_ && get_impl(resp).result() == http::status::not_found)
         {
             co_await not_found_handler_(req, resp);
         }

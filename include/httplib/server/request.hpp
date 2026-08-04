@@ -82,10 +82,17 @@ namespace httplib::server
         bool is_chunked() const;
         chunk_reader* get_chunk_reader();
 
-        impl* get_impl();
-        impl const* get_impl() const;
-
       private:
+        friend impl&
+        get_impl(request& self)
+        {
+            return *self.impl_;
+        }
+        friend impl const&
+        get_impl(request const& self)
+        {
+            return *self.impl_;
+        }
         std::unique_ptr<impl> impl_;
     };
 

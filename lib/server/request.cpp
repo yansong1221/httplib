@@ -168,18 +168,6 @@ namespace httplib::server
         impl_->erase_custom_data(key);
     }
 
-    request::impl*
-    request::get_impl()
-    {
-        return impl_.get();
-    }
-
-    request::impl const*
-    request::get_impl() const
-    {
-        return impl_.get();
-    }
-
     httplib::body::any_body::value_type&
     request::body()
     {

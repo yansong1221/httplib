@@ -162,18 +162,6 @@ namespace httplib::server
         return impl_->chunk_writer_.get();
     }
 
-    httplib::server::response::impl*
-    response::get_impl()
-    {
-        return impl_.get();
-    }
-
-    response::impl const*
-    response::get_impl() const
-    {
-        return impl_.get();
-    }
-
     bool
     response::is_chunked_done() const
     {

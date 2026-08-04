@@ -256,7 +256,7 @@ namespace httplib::server
                         case http::verb::trace:
                             break;
                         default:
-                            resp.get_impl()->keep_alive(false);
+                            get_impl(resp).keep_alive(false);
                             break;
                     }
                     if (!match.allows.empty())
@@ -283,10 +283,10 @@ namespace httplib::server
 
                     if (match.chunked)
                     {
-                        req.get_impl()->setup_chunked_reading(stream_,
-                                                              buffer_,
-                                                              std::move(header_parser),
-                                                              serv_.read_timeout());
+                        get_impl(req).setup_chunked_reading(stream_,
+                                                            buffer_,
+                                                            std::move(header_parser),
+                                                            serv_.read_timeout());
                     }
                     else
                     {
@@ -317,7 +317,7 @@ namespace httplib::server
                                 co_return nullptr;
                             }
                         }
-                        req.get_impl()->body() = std::move(body_parser.release().body());
+                        get_impl(req).body() = std::move(body_parser.release().body());
                     }
 
                     h_start = std::chrono::steady_clock::now();
@@ -330,14 +330,14 @@ namespace httplib::server
             catch (std::exception const& e)
             {
                 serv_.logger()->warn("exception in business function, reason: {}", e.what());
-                resp.get_impl()->chunk_writer_.reset();
+                get_impl(resp).chunk_writer_.reset();
                 resp.set_string_content(std::string(e.what()), "text/plain", http::status::internal_server_error);
             }
             catch (...)
             {
                 using namespace std::string_view_literals;
                 serv_.logger()->warn("unknown exception in business function");
-                resp.get_impl()->chunk_writer_.reset();
+                get_impl(resp).chunk_writer_.reset();
                 resp.set_string_content(std::string("unknown exception"),
                                         "text/plain",
                                         http::status::internal_server_error);
@@ -361,7 +361,7 @@ namespace httplib::server
                                 handler_ms.count(),
                                 total_ms.count());
 
-            if (!resp.get_impl()->keep_alive())
+            if (!get_impl(resp).keep_alive())
             {
                 boost::system::error_code ec;
                 // This means we should close the connection, usually
@@ -388,9 +388,9 @@ namespace httplib::server
             co_return true;
         }
 
-        if (!resp.get_impl()->has_content_length())
+        if (!get_impl(resp).has_content_length())
         {
-            resp.get_impl()->prepare_payload();
+            get_impl(resp).prepare_payload();
         }
 
         if (auto accept_encoding = req[http::field::accept_encoding]; !accept_encoding.empty())
@@ -404,18 +404,18 @@ namespace httplib::server
                         serv_.should_compress_content_type(content_type))
                     {
                         resp.set(http::field::content_encoding, encoding);
-                        resp.get_impl()->chunked(true);
+                        get_impl(resp).chunked(true);
                     }
                 }
             }
         }
         if (req.method() == http::verb::head)
         {
-            resp.get_impl()->reset_content();
+            get_impl(resp).reset_content();
         }
 
         boost::system::error_code ec;
-        http::response_serializer<body::any_body> serializer((*resp.get_impl()));
+        http::response_serializer<body::any_body> serializer((get_impl(resp)));
 
         auto send_chunk = [&]() -> net::awaitable<bool>
         {
@@ -496,13 +496,13 @@ namespace httplib::server
             co_return nullptr;
         }
 
-        auto resp = response::impl::make_response(req_.get_impl()->version(),
-                                                  req_.get_impl()->keep_alive(),
+        auto resp = response::impl::make_response(get_impl(req_).version(),
+                                                  get_impl(req_).keep_alive(),
                                                   &stream_,
                                                   serv_.write_timeout());
-        resp.get_impl()->reason("Connection Established");
-        resp.get_impl()->result(http::status::ok);
-        co_await http::async_write(stream_, (*resp.get_impl()), util::net_awaitable[ec]);
+        get_impl(resp).reason("Connection Established");
+        get_impl(resp).result(http::status::ok);
+        co_await http::async_write(stream_, (get_impl(resp)), util::net_awaitable[ec]);
         if (ec)
         {
             serv_.logger()->trace("http_proxy: write response failed: {}", ec.message());
