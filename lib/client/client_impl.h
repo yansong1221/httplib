@@ -108,6 +108,7 @@ namespace httplib::client
 
             if (is_retryable(ec) && retry)
             {
+                close();
                 logger()->trace("retrying request...");
                 co_return co_await async_write(serializer, headers_only, false);
             }
