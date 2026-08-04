@@ -214,19 +214,18 @@ namespace httplib::server
             }
 
             auto start_time = std::chrono::steady_clock::now();
-
             auto const& header = header_parser.get();
-            serv_.logger()->trace("{} {} ({})", header.method_string(), header.target(), log_endp_format);
+            auto req_target = std::string(header.target());
 
-            // http proxy
             if (header.method() == http::verb::connect)
             {
+                serv_.logger()->trace("proxy connect {}", req_target);
                 auto req = request::impl::make_request(local_endp, remote_endp, std::move(header_parser.release()));
                 co_return std::make_unique<http_proxy_task>(std::move(stream_), std::move(req), serv_);
             }
-            // websocket
             if (websocket::is_upgrade(header.base()))
             {
+                serv_.logger()->trace("ws upgrade {}", req_target);
                 auto req = request::impl::make_request(local_endp, remote_endp, std::move(header_parser.release()));
                 co_return std::make_unique<websocket_task>(websocket_stream(std::move(stream_)), std::move(req), serv_);
             }
@@ -264,6 +263,11 @@ namespace httplib::server
                     {
                         resp.set_error_content(httplib::http::status::not_found);
                     }
+                    serv_.logger()->debug("{} {} {} ({}) not matched",
+                                          header.method_string(),
+                                          req_target,
+                                          resp.result_int(),
+                                          log_endp_format);
                 }
                 else
                 {
@@ -325,15 +329,13 @@ namespace httplib::server
             }
             catch (std::exception const& e)
             {
-                serv_.logger()->warn("exception in business function, reason: {}", e.what());
-                get_impl(resp).chunk_writer_.reset();
+                serv_.logger()->error("exception in handler for {} {}: {}", req.method_string(), req_target, e.what());
                 resp.set_string_content(std::string(e.what()), "text/plain", http::status::internal_server_error);
             }
             catch (...)
             {
+                serv_.logger()->error("unknown exception in handler for {} {}", req.method_string(), req_target);
                 using namespace std::string_view_literals;
-                serv_.logger()->warn("unknown exception in business function");
-                get_impl(resp).chunk_writer_.reset();
                 resp.set_string_content(std::string("unknown exception"),
                                         "text/plain",
                                         http::status::internal_server_error);
@@ -347,22 +349,16 @@ namespace httplib::server
             auto total_ms
                 = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time);
 
-            using namespace std::chrono_literals;
-            serv_.logger()->log(handler_ms > 10s ? spdlog::level::warn : spdlog::level::debug,
-                                "{} {} ({}) {} handler={}ms total={}ms",
-                                req.method_string(),
-                                req.target(),
-                                log_endp_format,
-                                resp.result_int(),
-                                handler_ms.count(),
-                                total_ms.count());
+            serv_.logger()->debug("{} {} {} handler={}ms total={}ms",
+                                  req.method_string(),
+                                  req_target,
+                                  resp.result_int(),
+                                  handler_ms.count(),
+                                  total_ms.count());
 
             if (!get_impl(resp).keep_alive())
             {
                 boost::system::error_code ec;
-                // This means we should close the connection, usually
-                // because the response indicated the "Connection: close"
-                // semantic.
                 stream_.close();
                 co_return nullptr;
             }
