@@ -12,6 +12,48 @@ namespace
     using test_common::as_string;
     using test_common::test_scaffold;
 
+    TEST_CASE("Global middleware: execution order with route middleware", "[middleware]")
+    {
+        test_scaffold ts;
+        auto order = std::make_shared<std::vector<std::string>>();
+
+        struct order_mw
+        {
+            std::string name;
+            std::shared_ptr<std::vector<std::string>> order;
+            bool
+            before(httplib::server::request&, httplib::server::response&)
+            {
+                order->push_back(name + "_before");
+                return true;
+            }
+            bool
+            after(httplib::server::request&, httplib::server::response&)
+            {
+                order->push_back(name + "_after");
+                return true;
+            }
+        };
+
+        ts.router().use(order_mw { "global", order });
+
+        ts.router().set_http_handler<http::verb::get>(
+            "/order",
+            [order](httplib::server::request&, httplib::server::response& resp)
+            {
+                order->push_back("handler");
+                resp.set_string_content("ok"sv, "text/plain"sv);
+            },
+            order_mw { "route", order });
+        ts.start();
+
+        auto resp = UNWRAP(ts.client->get("/order"));
+        REQUIRE(resp.result() == http::status::ok);
+        REQUIRE(
+            *order
+            == std::vector<std::string> { "global_before", "route_before", "handler", "route_after", "global_after" });
+    }
+
 } // namespace
 
 // ===== CORS =====
