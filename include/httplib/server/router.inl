@@ -87,6 +87,28 @@ namespace httplib::server
         }
     } // namespace helper
 
+    template <typename... Aspects>
+    void
+    router::use(Aspects&&... asps)
+    {
+        (use_impl(
+             [m = std::make_shared<std::decay_t<Aspects>>(
+                  std::forward<Aspects>(asps))](request& req, response& resp) mutable -> net::awaitable<bool>
+             {
+                 bool ok = true;
+                 co_await helper::do_before(*m, req, resp, ok);
+                 co_return ok;
+             },
+             [m = std::make_shared<std::decay_t<Aspects>>(
+                  std::forward<Aspects>(asps))](request& req, response& resp) mutable -> net::awaitable<bool>
+             {
+                 bool ok = true;
+                 co_await helper::do_after(*m, req, resp, ok);
+                 co_return ok;
+             }),
+         ...);
+    }
+
     template <typename Func, typename... Aspects>
     router::coro_http_handler_type
     router::make_coro_http_handler(Func&& handler, Aspects&&... asps)

@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <boost/beast/http/fields.hpp>
 #include <filesystem>
+#include <functional>
 #include <list>
 #include <string>
 #include <string_view>
@@ -19,6 +20,9 @@ namespace httplib::server
         virtual ~router() = default;
 
       public:
+        template <typename... Aspects>
+        void use(Aspects&&... asps);
+
         template <typename Func, typename... Aspects>
         void set_http_handler(http::verb method, std::string_view key, Func&& handler, Aspects&&... asps);
 
@@ -63,6 +67,7 @@ namespace httplib::server
 
       protected:
         using coro_http_handler_type = std::function<net::awaitable<void>(request& req, response& resp)>;
+        using coro_mw_type = std::function<net::awaitable<bool>(request& req, response& resp)>;
         using http_handler_type = std::function<void(request& req, response& resp)>;
 
         template <typename Func, typename... Aspects>
@@ -82,6 +87,8 @@ namespace httplib::server
                                                    std::string_view key,
                                                    coro_http_handler_type&& handler)
             = 0;
+
+        virtual void use_impl(router::coro_mw_type before, router::coro_mw_type after) = 0;
     };
 
 } // namespace httplib::server

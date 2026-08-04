@@ -18,6 +18,8 @@ namespace httplib::server
       public:
         router_impl();
 
+        coro_http_handler_type wrap_global(coro_http_handler_type handler) const;
+
         struct Node;
 
         struct route_match
@@ -52,6 +54,7 @@ namespace httplib::server
         void set_chunked_http_handler_impl(http::verb method,
                                            std::string_view key,
                                            coro_http_handler_type&& handler) override;
+        void use_impl(router::coro_mw_type before, router::coro_mw_type after) override;
 
       private:
         static void collect_allows(std::set<std::string>& allows, Node const* node);
@@ -77,6 +80,9 @@ namespace httplib::server
 
         coro_http_handler_type post_routing_handler_;
         coro_http_handler_type not_found_handler_;
+
+        std::vector<coro_mw_type> global_before_;
+        std::vector<coro_mw_type> global_after_;
 
         // 内部函数
         static Node* insert(Node* node, std::vector<std::string_view> const& segments, size_t index);

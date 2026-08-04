@@ -34,7 +34,42 @@ namespace httplib::server
         std::unique_lock lock(mutex_);
         auto segments = detail::split_segments(key);
         auto node = insert(root_.get(), segments, 0);
-        node->handlers[method] = std::move(handler);
+        node->handlers[method] = wrap_global(std::move(handler));
+    }
+
+    router::router::coro_http_handler_type
+    router_impl::wrap_global(coro_http_handler_type handler) const
+    {
+        if (global_before_.empty())
+        {
+            return handler;
+        }
+
+        return [handler = std::move(handler), this](request& req, response& resp) -> net::awaitable<void>
+        {
+            bool ok = true;
+            for (auto& before : global_before_)
+            {
+                if (!co_await before(req, resp))
+                {
+                    ok = false;
+                    break;
+                }
+            }
+            if (ok)
+            {
+                co_await handler(req, resp);
+            }
+
+            ok = true;
+            for (auto& after : global_after_)
+            {
+                if (!co_await after(req, resp))
+                {
+                    break;
+                }
+            }
+        };
     }
 
     router_impl::Node*
@@ -137,9 +172,17 @@ namespace httplib::server
     }
 
     void
+    router_impl::use_impl(router::coro_mw_type before, router::coro_mw_type after)
+    {
+        std::unique_lock lock(mutex_);
+        global_before_.push_back(std::move(before));
+        global_after_.push_back(std::move(after));
+    }
+
+    void
     router_impl::set_not_found_handler_impl(coro_http_handler_type&& handler)
     {
-        not_found_handler_ = std::move(handler);
+        not_found_handler_ = wrap_global(std::move(handler));
     }
 
     void
@@ -328,7 +371,7 @@ namespace httplib::server
         std::unique_lock lock(mutex_);
         auto segments = detail::split_segments(key);
         auto node = insert(root_.get(), segments, 0);
-        node->chunked_handlers[method] = std::move(handler);
+        node->chunked_handlers[method] = wrap_global(std::move(handler));
     }
 
     void
