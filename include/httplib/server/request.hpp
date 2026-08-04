@@ -57,15 +57,23 @@ namespace httplib::server
         tcp::endpoint const& local_endpoint() const;
         tcp::endpoint const& remote_endpoint() const;
 
-        void set_custom_data(std::any&& data);
-        std::any& custom_data();
-        std::any const& custom_data() const;
+        void set_custom_data(std::string key, std::any value);
+        std::any& custom_data(std::string const& key);
+        std::any const& custom_data(std::string const& key) const;
+        bool has_custom_data(std::string const& key) const;
 
         template <typename T>
         inline auto
-        custom_data()
+        custom_data(std::string const& key) -> T
         {
-            return std::any_cast<T>(custom_data());
+            return std::any_cast<T>(custom_data(key));
+        }
+
+        template <typename T>
+        inline auto
+        custom_data(std::string const& key) const -> T
+        {
+            return std::any_cast<T>(custom_data(key));
         }
 
         void set_session(std::shared_ptr<middleware::session> sess);

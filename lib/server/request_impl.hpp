@@ -99,19 +99,24 @@ namespace httplib::server
         }
 
         void
-        set_custom_data(std::any&& data)
+        set_custom_data(std::string key, std::any value)
         {
-            this->custom_data_ = std::move(data);
+            custom_data_[std::move(key)] = std::move(value);
         }
         std::any&
-        custom_data()
+        custom_data(std::string const& key)
         {
-            return custom_data_;
+            return custom_data_.at(key);
         }
         std::any const&
-        custom_data() const
+        custom_data(std::string const& key) const
         {
-            return custom_data_;
+            return custom_data_.at(key);
+        }
+        bool
+        has_custom_data(std::string const& key) const
+        {
+            return custom_data_.contains(key);
         }
 
         void
@@ -261,7 +266,7 @@ namespace httplib::server
         tcp::endpoint remote_endpoint_;
 
         std::unordered_map<std::string, std::string> path_params_;
-        std::any custom_data_;
+        std::unordered_map<std::string, std::any> custom_data_;
         std::shared_ptr<middleware::session> session_;
 
         std::shared_ptr<buffer_body_read_ctx> buffer_body_ctx_;

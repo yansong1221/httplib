@@ -128,12 +128,6 @@ namespace httplib::server
         return impl_->remote_endpoint();
     }
 
-    void
-    request::set_custom_data(std::any&& data)
-    {
-        impl_->set_custom_data(std::move(data));
-    }
-
     std::string_view
     request::path_param(std::string const& key) const
     {
@@ -157,16 +151,28 @@ namespace httplib::server
         return impl_->query_params();
     }
 
-    std::any&
-    request::custom_data()
+    void
+    request::set_custom_data(std::string key, std::any value)
     {
-        return impl_->custom_data();
+        impl_->set_custom_data(std::move(key), std::move(value));
+    }
+
+    std::any&
+    request::custom_data(std::string const& key)
+    {
+        return impl_->custom_data(key);
     }
 
     std::any const&
-    request::custom_data() const
+    request::custom_data(std::string const& key) const
     {
-        return impl_->custom_data();
+        return impl_->custom_data(key);
+    }
+
+    bool
+    request::has_custom_data(std::string const& key) const
+    {
+        return impl_->has_custom_data(key);
     }
 
     void

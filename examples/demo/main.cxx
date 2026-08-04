@@ -4,15 +4,15 @@
 #include "httplib/body/string_body.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
+#include "httplib/client/read_session.hpp"
+#include "httplib/client/write_session.hpp"
 #include "httplib/client/ws_client.hpp"
+#include "httplib/server/chunk_reader.hpp"
+#include "httplib/server/chunk_writer.hpp"
 #include "httplib/server/middleware/auth.hpp"
 #include "httplib/server/middleware/cors.hpp"
 #include "httplib/server/middleware/rate_limit.hpp"
 #include "httplib/server/mount_point_entry.hpp"
-#include "httplib/client/read_session.hpp"
-#include "httplib/client/write_session.hpp"
-#include "httplib/server/chunk_reader.hpp"
-#include "httplib/server/chunk_writer.hpp"
 #include "httplib/server/ndjson_writer.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
@@ -342,14 +342,14 @@ setup_http_routes(httplib::server::router& router)
         "/api/custom-data",
         [](httplib::server::request& req, httplib::server::response& resp)
         {
-            auto data = req.custom_data<std::string>();
+            auto data = req.custom_data<std::string>("early-data");
             resp.set_json_content({
                 { "data", data }
             });
         },
         [](httplib::server::request& req, httplib::server::response&)
         {
-            req.set_custom_data(std::any(std::string("computed-early")));
+            req.set_custom_data("early-data", std::any(std::string("computed-early")));
             return true;
         });
 
