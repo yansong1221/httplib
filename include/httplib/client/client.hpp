@@ -29,6 +29,8 @@ namespace httplib::client
       public:
         explicit http_client(net::io_context& ex, std::string_view host, uint16_t port, bool ssl = false);
         explicit http_client(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl = false);
+        explicit http_client(net::io_context& ex, std::string_view url);
+        explicit http_client(net::any_io_executor const& ex, std::string_view url);
         ~http_client();
 
         void set_timeout_policy(timeout_policy const& policy);

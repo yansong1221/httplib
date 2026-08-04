@@ -154,8 +154,9 @@ namespace httplib::client
                 {
                     auto u = boost::urls::url(loc);
                     auto new_host = u.host();
-                    auto new_port = u.port_number() ? u.port_number() : (u.scheme() == "https" ? 443 : 80);
-                    auto new_ssl = u.scheme() == "https";
+                    auto new_port
+                        = u.port_number() ? u.port_number() : (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
+                    auto new_ssl = u.scheme_id() == boost::urls::scheme::https;
                     auto new_target = u.encoded_path().empty() ? std::string("/") : u.encoded_path();
 
                     req.target(std::move(new_target));

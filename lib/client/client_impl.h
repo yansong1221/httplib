@@ -84,8 +84,7 @@ namespace httplib::client
         async_write(http::request_serializer<Body>& serializer, bool headers_only, bool retry = true)
         {
             boost::system::error_code ec;
-            ec = co_await co_connect();
-            if (ec)
+            if (ec = co_await co_connect(); ec)
             {
                 logger()->warn("connect [{}:{}] error {}", host_, std::to_string(port_), ec.message());
                 co_return ec;

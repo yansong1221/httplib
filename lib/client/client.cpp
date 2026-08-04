@@ -4,6 +4,8 @@
 #include "sse_reader_impl.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/use_future.hpp>
+#include <boost/url.hpp>
+#include <stdexcept>
 #include <utility>
 
 namespace httplib::client
@@ -41,6 +43,24 @@ namespace httplib::client
     http_client::http_client(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl)
         : impl_(std::make_shared<http_client::impl>(ex, host, port, ssl))
     {
+    }
+
+    http_client::http_client(net::io_context& ex, std::string_view url) : http_client(ex.get_executor(), url) {}
+
+    http_client::http_client(net::any_io_executor const& ex, std::string_view url) : impl_(nullptr)
+    {
+        auto r = boost::urls::parse_uri(url);
+        if (!r)
+        {
+            throw std::invalid_argument(std::format("invalid url: {}", url));
+        }
+
+        auto const& u = *r;
+
+        auto port = (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
+        port = u.has_port() ? u.port_number() : port;
+
+        impl_ = std::make_shared<http_client::impl>(ex, u.host(), port, u.scheme_id() == boost::urls::scheme::https);
     }
 
     http_client::~http_client() {}

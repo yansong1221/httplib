@@ -565,3 +565,19 @@ TEST_CASE("Client: redirect full URL creates new impl", "[client]")
     REQUIRE(resp->result() == http::status::ok);
     REQUIRE(as_string(resp.value()) == "target-reached");
 }
+
+TEST_CASE("Client: create via URL", "[client]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>("/url-test",
+                                                  [](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_string_content("url-ok"sv, "text/plain"); });
+    ts.start_with_routes();
+
+    auto url = std::format("http://{}:{}", ts.endpoint.address().to_string(), ts.endpoint.port());
+    auto client = httplib::client::http_client(ts.ioc, url);
+    client.set_timeout(std::chrono::seconds(5));
+    auto resp = client.get("/url-test");
+    REQUIRE(resp.has_value());
+    REQUIRE(resp->result() == http::status::ok);
+}

@@ -363,9 +363,10 @@ namespace httplib::server
 
                 auto const& u = *r;
                 auto host = u.host();
-                auto port = u.port_number() ? u.port_number() : (u.scheme() == "https" ? 443 : 80);
-                auto ssl = u.scheme() == "https";
-                std::string_view upstream_prefix = u.encoded_path();
+                auto port = (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
+                port = u.has_port() ? u.port_number() : port;
+                auto ssl = u.scheme_id() == boost::urls::scheme::https;
+                std::string upstream_prefix(u.encoded_path());
                 std::string target(req.target());
 
                 if (target.starts_with(prefix))
