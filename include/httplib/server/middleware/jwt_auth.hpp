@@ -1,7 +1,7 @@
 #pragma once
 #include "httplib/server/server_fwd.hpp"
 #include "httplib/util/jwt.hpp"
-#include <string>
+#include <memory>
 
 namespace httplib::server::middleware
 {
@@ -12,6 +12,12 @@ namespace httplib::server::middleware
         static constexpr auto jwt_key = "jwt";
 
         explicit jwt_auth(jwt::algorithm const& alg);
+        jwt_auth(jwt_auth const& other);
+        jwt_auth(jwt_auth&&) noexcept;
+        jwt_auth& operator=(jwt_auth const& other);
+        jwt_auth& operator=(jwt_auth&&) noexcept;
+        ~jwt_auth();
+
         jwt_auth& with_issuer(std::string_view iss);
         jwt_auth& with_audience(std::string_view aud);
         jwt_auth& with_scheme(std::string_view scheme);
@@ -20,11 +26,8 @@ namespace httplib::server::middleware
         bool before(request& req, response& resp);
 
       private:
-        std::shared_ptr<jwt::algorithm const> alg_;
-        std::string issuer_;
-        std::string audience_;
-        std::string scheme_ = "Bearer";
-        std::string header_name_;
+        class impl;
+        std::unique_ptr<impl> impl_;
     };
 
 } // namespace httplib::server::middleware
