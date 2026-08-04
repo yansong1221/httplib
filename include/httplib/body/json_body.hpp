@@ -13,8 +13,8 @@
 //
 //------------------------------------------------------------------------------
 
-#ifndef BOOST_BEAST_EXAMPLE_JSON_BODY
-#define BOOST_BEAST_EXAMPLE_JSON_BODY
+#ifndef HTTPLIB_BODY_JSON_BODY_HPP
+#define HTTPLIB_BODY_JSON_BODY_HPP
 
 #include "httplib/config.hpp"
 #include <boost/beast/http/fields.hpp>
