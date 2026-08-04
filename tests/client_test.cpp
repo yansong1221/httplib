@@ -65,10 +65,7 @@ namespace
         {
             auto c = std::make_unique<httplib::client::http_client>(
                 ioc.get_executor(),
-                std::format("{}://{}:{}",
-                            ssl_ ? "https" : "http",
-                            endpoint.address().to_string(),
-                            endpoint.port()));
+                std::format("{}://{}:{}", ssl_ ? "https" : "http", endpoint.address().to_string(), endpoint.port()));
             c->set_timeout(std::chrono::seconds(5));
             return c;
         }
@@ -595,23 +592,8 @@ TEST_CASE("Client: create via URL", "[client]")
     REQUIRE(resp->result() == http::status::ok);
 }
 
-TEST_CASE("Client: set_verify_ssl does not affect HTTP", "[client]")
-{
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/verify-test",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  { resp.set_string_content("ok"sv, "text/plain"); });
-    ts.start_with_routes();
-
-    auto client = ts.make_client();
-    client->set_verify_ssl(true);
-    auto resp = client->get("/verify-test");
-    REQUIRE(resp.has_value());
-    REQUIRE(resp->result() == http::status::ok);
-}
-
 #ifdef HTTPLIB_ENABLED_SSL
-TEST_CASE("Client: SSL request via start_ssl", "[client]")
+TEST_CASE("Client: SSL with self-signed cert does not verify by default", "[client]")
 {
     test_scaffold ts;
     ts.router().set_http_handler<http::verb::get>("/ssl-test",
@@ -621,6 +603,36 @@ TEST_CASE("Client: SSL request via start_ssl", "[client]")
 
     auto client = ts.make_client();
     auto resp = client->get("/ssl-test");
+    REQUIRE(resp.has_value());
+    REQUIRE(resp->result() == http::status::ok);
+}
+
+TEST_CASE("Client: set_verify_ssl fails on self-signed cert", "[client]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>("/ssl-verify",
+                                                  [](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_string_content("ssl-ok"sv, "text/plain"); });
+    ts.start_ssl();
+
+    auto client = ts.make_client();
+    client->set_verify_ssl(true);
+    auto resp = client->get("/ssl-verify");
+    REQUIRE(!resp.has_value());
+}
+
+TEST_CASE("Client: verify with custom CA cert", "[client]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>("/ssl-ca",
+                                                  [](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_string_content("ssl-ca-ok"sv, "text/plain"); });
+    ts.start_ssl();
+
+    auto client = ts.make_client();
+    client->set_verify_ssl(true);
+    client->set_ca_cert(kTestCert);
+    auto resp = client->get("/ssl-ca");
     REQUIRE(resp.has_value());
     REQUIRE(resp->result() == http::status::ok);
 }

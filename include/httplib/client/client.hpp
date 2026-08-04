@@ -42,6 +42,7 @@ namespace httplib::client
 
         void set_max_redirects(int n);
         void set_verify_ssl(bool verify);
+        void set_ca_cert(std::string_view cert);
 
       public:
         // ---- HTTP method shorthands (no body) ----

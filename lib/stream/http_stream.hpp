@@ -162,7 +162,11 @@ namespace httplib
         http_stream(stream_t&& stream) : stream_(std::move(stream)) {}
 
         static boost::system::result<stream_t>
-        create_stream(net::any_io_executor const& executor, std::string const& host, bool use_ssl, bool verify_ssl = false)
+        create_stream(net::any_io_executor const& executor,
+                      std::string const& host,
+                      bool use_ssl,
+                      bool verify_ssl = false,
+                      std::string_view ca_cert = {})
         {
             if (use_ssl)
             {
@@ -175,7 +179,14 @@ namespace httplib
                 ssl_ctx->set_verify_mode(verify_ssl ? ssl::verify_peer : ssl::verify_none);
                 if (verify_ssl)
                 {
-                    ssl_ctx->set_default_verify_paths();
+                    if (!ca_cert.empty())
+                    {
+                        ssl_ctx->add_certificate_authority(boost::asio::const_buffer(ca_cert.data(), ca_cert.size()));
+                    }
+                    else
+                    {
+                        ssl_ctx->set_default_verify_paths();
+                    }
                 }
 
                 tls_stream stream(executor, ssl_ctx);

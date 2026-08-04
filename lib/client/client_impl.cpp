@@ -260,7 +260,7 @@ namespace httplib::client
         if (!is_open())
         {
             close();
-            auto stream_result = http_stream::create_stream(executor_, host_, use_ssl_, verify_ssl_);
+            auto stream_result = http_stream::create_stream(executor_, host_, use_ssl_, verify_ssl_, ca_cert_);
             if (!stream_result)
             {
                 co_return stream_result.error();

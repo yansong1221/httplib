@@ -109,8 +109,8 @@ namespace test_common
             started_ = true;
 
             client = std::make_unique<httplib::client::http_client>(workers_.get_executor(),
-                                                                     endpoint.address().to_string(),
-                                                                     endpoint.port());
+                                                                    endpoint.address().to_string(),
+                                                                    endpoint.port());
             client->set_timeout(std::chrono::seconds(5));
         }
 
@@ -123,8 +123,8 @@ namespace test_common
             started_ = true;
 
             client = std::make_unique<httplib::client::http_client>(workers_.get_executor(),
-                                                                     endpoint.address().to_string(),
-                                                                     endpoint.port());
+                                                                    endpoint.address().to_string(),
+                                                                    endpoint.port());
             client->set_timeout(std::chrono::seconds(30));
         }
 
@@ -140,8 +140,10 @@ namespace test_common
             started_ = true;
             ssl_ = true;
 
-            client = std::make_unique<httplib::client::http_client>(
-                workers_.get_executor(), endpoint.address().to_string(), endpoint.port(), true);
+            client = std::make_unique<httplib::client::http_client>(workers_.get_executor(),
+                                                                    endpoint.address().to_string(),
+                                                                    endpoint.port(),
+                                                                    true);
             client->set_timeout(std::chrono::seconds(5));
         }
 

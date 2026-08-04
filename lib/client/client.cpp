@@ -680,4 +680,10 @@ namespace httplib::client
         impl_->verify_ssl_ = verify;
     }
 
+    void
+    http_client::set_ca_cert(std::string_view cert)
+    {
+        impl_->ca_cert_ = cert;
+    }
+
 } // namespace httplib::client
