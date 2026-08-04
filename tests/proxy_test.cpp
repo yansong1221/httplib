@@ -318,3 +318,133 @@ TEST_CASE("reverse-proxy", "[proxy]")
         REQUIRE(as_string(resp).empty());
     }
 }
+
+TEST_CASE("CookieProxy: via reverse proxy rewrites Cookie header", "[proxy]")
+{
+    net::io_context ioc;
+    httplib::server::http_server upstream(ioc);
+    httplib::server::http_server proxy(ioc);
+
+    upstream.listen("127.0.0.1", 0);
+    auto upstream_host = upstream.local_endpoint().address().to_string();
+    auto upstream_port = upstream.local_endpoint().port();
+
+    proxy.listen("127.0.0.1", 0);
+    auto proxy_port = proxy.local_endpoint().port();
+
+    upstream.router().set_http_handler<http::verb::get>(
+        "/check-cookie",
+        [](httplib::server::request& req, httplib::server::response& resp)
+        { resp.set_string_content(std::string(req["Cookie"]), "text/plain"); });
+
+    proxy.set_reverse_proxy("/api/*", std::format("http://{}:{}", upstream_host, upstream_port));
+
+    upstream.run();
+    proxy.run();
+    auto worker = std::thread([&] { ioc.run(); });
+
+    auto client = std::make_unique<httplib::client::http_client>(ioc.get_executor(), "127.0.0.1", proxy_port);
+    client->set_timeout(std::chrono::seconds(5));
+
+    auto req_headers = httplib::http::fields();
+    req_headers.set(http::field::cookie, "token=abc; Domain=upstream.com; Path=/api");
+    auto resp = UNWRAP(client->send_request(http::verb::get, "/api/check-cookie", req_headers));
+    REQUIRE(resp.result() == http::status::ok);
+    auto body = as_string(resp);
+    REQUIRE(body.find("token=abc") != std::string::npos);
+    REQUIRE(body.find("Domain=upstream.com") == std::string::npos);
+    REQUIRE(body.find("Path=/api") == std::string::npos);
+    REQUIRE(body.find("Domain=" + upstream_host) != std::string::npos);
+    REQUIRE(body.find("Path=/") != std::string::npos);
+
+    upstream.stop().wait();
+    proxy.stop().wait();
+    ioc.stop();
+    worker.join();
+}
+
+TEST_CASE("Proxy: rewrites Referer to upstream", "[proxy]")
+{
+    net::io_context ioc;
+    httplib::server::http_server upstream(ioc);
+    httplib::server::http_server proxy(ioc);
+
+    upstream.listen("127.0.0.1", 0);
+    auto upstream_host = upstream.local_endpoint().address().to_string();
+    auto upstream_port = upstream.local_endpoint().port();
+
+    proxy.listen("127.0.0.1", 0);
+    auto proxy_port = proxy.local_endpoint().port();
+
+    upstream.router().set_http_handler<http::verb::get>(
+        "/echo-referer",
+        [](httplib::server::request& req, httplib::server::response& resp)
+        { resp.set_string_content(std::string(req[http::field::referer]), "text/plain"); });
+
+    proxy.set_reverse_proxy("/api/*", std::format("http://{}:{}", upstream_host, upstream_port));
+
+    upstream.run();
+    proxy.run();
+    auto worker = std::thread([&] { ioc.run(); });
+
+    auto client = std::make_unique<httplib::client::http_client>(ioc.get_executor(), "127.0.0.1", proxy_port);
+    client->set_timeout(std::chrono::seconds(5));
+
+    auto hdrs = httplib::http::fields();
+    hdrs.set(http::field::referer, std::format("http://127.0.0.1:{}/api/some-page?a=1&b=2#sec", proxy_port));
+    auto resp = UNWRAP(client->send_request(http::verb::get, "/api/echo-referer", hdrs));
+    REQUIRE(resp.result() == http::status::ok);
+    auto body = as_string(resp);
+    REQUIRE(body.find(upstream_host) != std::string::npos);
+    REQUIRE(body.find("/some-page?a=1&b=2#sec") != std::string::npos);
+    REQUIRE(body.find("/api") == std::string::npos);
+
+    upstream.stop().wait();
+    proxy.stop().wait();
+    ioc.stop();
+    worker.join();
+}
+
+TEST_CASE("Proxy: forwards X-Forwarded-Proto and X-Forwarded-Host", "[proxy]")
+{
+    net::io_context ioc;
+    httplib::server::http_server upstream(ioc);
+    httplib::server::http_server proxy(ioc);
+
+    upstream.listen("127.0.0.1", 0);
+    auto upstream_host = upstream.local_endpoint().address().to_string();
+    auto upstream_port = upstream.local_endpoint().port();
+
+    proxy.listen("127.0.0.1", 0);
+    auto proxy_port = proxy.local_endpoint().port();
+
+    upstream.router().set_http_handler<http::verb::get>(
+        "/echo-headers",
+        [](httplib::server::request& req, httplib::server::response& resp)
+        {
+            auto proto = req["X-Forwarded-Proto"];
+            auto host = req["X-Forwarded-Host"];
+            resp.set_string_content(std::format("proto={} host={}", std::string(proto), std::string(host)),
+                                    "text/plain");
+        });
+
+    proxy.set_reverse_proxy("/api/*", std::format("http://{}:{}", upstream_host, upstream_port));
+
+    upstream.run();
+    proxy.run();
+    auto worker = std::thread([&] { ioc.run(); });
+
+    auto client = std::make_unique<httplib::client::http_client>(ioc.get_executor(), "127.0.0.1", proxy_port);
+    client->set_timeout(std::chrono::seconds(5));
+
+    auto resp = UNWRAP(client->get("/api/echo-headers"));
+    REQUIRE(resp.result() == http::status::ok);
+    auto body = as_string(resp);
+    REQUIRE(body.find("proto=http") != std::string::npos);
+    REQUIRE(body.find("host=127.0.0.1:") != std::string::npos);
+
+    upstream.stop().wait();
+    proxy.stop().wait();
+    ioc.stop();
+    worker.join();
+}

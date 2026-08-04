@@ -1,5 +1,6 @@
 #include "client_impl.h"
 #include "compress/compressor.hpp"
+#include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "read_session_impl.hpp"
 #include "write_session_impl.hpp"
@@ -24,27 +25,12 @@
 
 namespace httplib::client
 {
-    namespace detail
-    {
-
-        static std::string
-        make_host_value(std::string_view host, uint16_t port, bool ssl)
-        {
-            if ((ssl && port != 443) || (!ssl && port != 80))
-            {
-                return fmt::format("{}:{}", host, port);
-            }
-            return std::string(host);
-        }
-
-    } // namespace detail
-
     http_client::impl::impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl)
 
         : executor_(ex)
         , resolver_(ex)
         , host_(host)
-        , host_value_(detail::make_host_value(host, port, ssl))
+        , host_value_(util::make_host_value(host, port, ssl))
         , port_(port)
         , use_ssl_(ssl)
     {

@@ -1,9 +1,11 @@
 #include "server_impl.h"
 #include "httplib/client/client_pool.hpp"
+#include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "httplib/util/when_all.hpp"
 #include "request_impl.hpp"
 #include "response_impl.hpp"
+#include <boost/algorithm/string/predicate.hpp>
 #include <boost/asio/use_future.hpp>
 #include <boost/url.hpp>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -363,8 +365,9 @@ namespace httplib::server
                 auto host = u.host();
                 auto port = u.port_number() ? u.port_number() : (u.scheme() == "https" ? 443 : 80);
                 auto ssl = u.scheme() == "https";
-                auto upstream_prefix = u.encoded_path();
-                auto target = std::string(req.target());
+                std::string_view upstream_prefix = u.encoded_path();
+                std::string target(req.target());
+
                 if (target.starts_with(prefix))
                 {
                     target = target.substr(prefix.size());
@@ -379,13 +382,74 @@ namespace httplib::server
                 }
                 http::fields upstream_headers(req.base());
 
+                // Strip and rewrite Cookie Domain/Path before forwarding upstream
+                if (auto cookie = req[http::field::cookie]; !cookie.empty())
+                {
+                    std::vector<std::string> rewritten;
+                    for (auto item : util::split(cookie, ";"))
+                    {
+                        auto parts = util::split(item, "=");
+                        if (parts.empty())
+                        {
+                            continue;
+                        }
+                        auto key = parts.front();
+                        if (boost::iequals(key, "Domain") || boost::iequals(key, "Path"))
+                        {
+                            continue;
+                        }
+                        rewritten.emplace_back(item);
+                    }
+                    using namespace std::string_view_literals;
+                    rewritten.emplace_back(std::format("Domain={}", util::make_host_value(u.host(), port, ssl)));
+                    rewritten.emplace_back(std::format("Path={}", upstream_prefix.empty() ? "/"sv : upstream_prefix));
+                    upstream_headers.set(http::field::cookie, boost::join(rewritten, ";"));
+                }
+
                 auto client_ip = req.remote_endpoint().address().to_string();
-                auto xff = req["X-Forwarded-For"];
-                if (!xff.empty())
+                if (auto xff = req["X-Forwarded-For"]; !xff.empty())
                 {
                     client_ip = std::format("{},{}", xff, client_ip);
                 }
                 upstream_headers.set("X-Forwarded-For", client_ip);
+                upstream_headers.set("X-Forwarded-Proto", ssl ? "https" : "http");
+                upstream_headers.set("X-Forwarded-Host", req["Host"]);
+
+                // Rewrite Referer to upstream
+                if (auto ref = req[http::field::referer]; !ref.empty())
+                {
+                    auto r = boost::urls::parse_uri(ref);
+                    if (r)
+                    {
+                        auto ref_path = std::string(r->encoded_path());
+                        if (ref_path.starts_with(prefix))
+                        {
+                            ref_path = ref_path.substr(prefix.size());
+                        }
+                        if (!upstream_prefix.empty())
+                        {
+                            ref_path.insert(0, upstream_prefix);
+                        }
+                        if (ref_path.empty() || ref_path[0] != '/')
+                        {
+                            ref_path.insert(0, 1, '/');
+                        }
+
+                        auto new_ref = std::format("{}://{}{}",
+                                                   u.scheme(),
+                                                   util::make_host_value(u.host(), port, ssl),
+                                                   ref_path);
+                        if (!r->encoded_query().empty())
+                        {
+                            new_ref += std::format("?{}", std::string(r->encoded_query()));
+                        }
+                        if (!r->encoded_fragment().empty())
+                        {
+                            new_ref += std::format("#{}", std::string(r->encoded_fragment()));
+                        }
+                        upstream_headers.set(http::field::referer, new_ref);
+                    }
+                }
 
                 if (on_headers)
                 {

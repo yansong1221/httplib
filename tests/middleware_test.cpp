@@ -9,8 +9,8 @@ namespace mw = httplib::server::middleware;
 
 namespace
 {
-    using test_common::test_scaffold;
     using test_common::as_string;
+    using test_common::test_scaffold;
 
 } // namespace
 
@@ -306,7 +306,9 @@ TEST_CASE("Rate Limit: shared limits apply across routes", "[middleware]")
     REQUIRE(blocked->result() == http::status::too_many_requests);
 
     // Second client from same IP should also be rate-limited (shared bucket)
-    auto client2 = std::make_unique<httplib::client::http_client>(ts.ioc.get_executor(), ts.endpoint.address().to_string(), ts.endpoint.port());
+    auto client2 = std::make_unique<httplib::client::http_client>(ts.ioc.get_executor(),
+                                                                  ts.endpoint.address().to_string(),
+                                                                  ts.endpoint.port());
     client2->set_timeout(std::chrono::seconds(5));
     auto resp2 = client2->get("/rl-ip");
     REQUIRE(resp2.has_value());

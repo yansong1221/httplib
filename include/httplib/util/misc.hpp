@@ -50,8 +50,12 @@ namespace httplib::util
     HTTPLIB_API void url_decode(std::string& str);
     HTTPLIB_API std::string url_decode(std::string_view str);
     HTTPLIB_API std::string url_encode(std::string_view value);
-    HTTPLIB_API std::vector<std::string_view> split(std::string_view str, std::string_view delimiter);
+    HTTPLIB_API std::vector<std::string_view> split(std::string_view str,
+                                                    std::string_view delimiter,
+                                                    bool compress = true);
 
     HTTPLIB_API std::string_view buffer_to_string_view(boost::asio::const_buffer const& buffer);
+
+    HTTPLIB_API std::string make_host_value(std::string_view host, uint16_t port, bool ssl);
 
 } // namespace httplib::util
