@@ -1,26 +1,29 @@
 # httplib
 
-A small, embeddable HTTP/1.1 & WebSocket server and client library for C++23, built on top of [Boost.Beast](https://boost.org).
+A small, embeddable HTTP/1.1 & WebSocket server and client library for C++23, built on [Boost.Beast](https://boost.org).
 
 ## Features
 
 - **Full HTTP/1.1 support** — GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, CONNECT, TRACE
 - **Coroutine-first** — all I/O operations are `boost::asio::awaitable` based
 - **Synchronous client** — blocking HTTP client methods also available
-- **WebSocket** — server and client with text/binary messaging, ping/pong
+- **WebSocket** — server and client with text/binary messaging, ping/pong, middleware support
 - **Flexible routing** — fixed paths, `:named` parameters, `{param:regex}` constraints, `*` wildcard
 - **Multiple body types** — string, JSON (Boost.JSON), multipart form-data, URL-encoded forms, file serving, empty
 - **Static file serving** — mount directories with Range/Content-Range support, directory listing (HTML/JSON)
-- **Chunked streaming** — server streaming responses, client chunk handler
-- **SSE (Server-Sent Events)** — `resp.set_sse_write_handler()` for servers, `client.set_sse_read_handler()` for clients
-- **NDJSON** — `resp.set_ndjson_write_handler()` / `client.set_ndjson_read_handler()` for newline-delimited JSON streaming
+- **Chunked streaming** — `chunk_writer` / `chunk_reader` for server and client
+- **SSE (Server-Sent Events)** — `create_sse_writer()` / `sse_reader` streaming
+- **NDJSON** — `create_ndjson_writer()` / `ndjson_reader` for newline-delimited JSON
 - **Redirects** — `resp.set_redirect(url)`
-- **Compression** — Brotli content-encoding (optional)
-- **SSL/TLS** — HTTPS and WSS support via OpenSSL (optional)
-- **Built-in middleware** — CORS, Basic Auth, Bearer Auth, Rate Limiting, Session
-- **Custom aspects** — per-route middleware with `before`/`after` hooks
+- **Compression** — Brotli content-encoding (optional, `-DHTTPLIB_ENABLED_COMPRESS=ON`)
+- **SSL/TLS** — HTTPS and WSS via OpenSSL (optional, `-DHTTPLIB_ENABLED_SSL=ON`)
+- **JWT** — HS256/HS384/HS512 signing, verification, builder API, `boost::system::result` error handling
+- **Built-in middleware** — CORS, Basic Auth, Bearer Auth, JWT Auth, Rate Limiting, Session (cookie-based)
+- **Global middleware** — `router::use()` applies middleware to all routes
+- **Custom middleware** — per-route `before`/`after` hooks, supports both sync and coroutine returns
+- **Reverse proxy** — with Cookie/Referer rewriting, `X-Forwarded-*` headers
 - **Client connection pool** — RAII handles, connection reuse, async acquire with backpressure
-- **Logging** — integrated spdlog
+- **Logging** — integrated spdlog, configurable per-request detail level
 
 ## Platform Support
 
@@ -71,8 +74,8 @@ cmake --build .
 using namespace httplib;
 
 int main() {
-    net::io_context ioc;
-    server::http_server svr(ioc);
+    net::thread_pool pool(4);
+    server::http_server svr(pool.get_executor());
 
     svr.router().set_http_handler<http::verb::get>(
         "/api/hello",
@@ -82,7 +85,7 @@ int main() {
 
     svr.listen("127.0.0.1", 8080);
     svr.run();
-    ioc.run();
+    pool.join();
 }
 ```
 
@@ -106,6 +109,14 @@ int main() {
 }
 ```
 
+### URL-Based Client
+
+```cpp
+client::http_client client(ex, "http://127.0.0.1:8080");
+// or
+client::http_client client(ex, "https://example.com");
+```
+
 ### Client Connection Pool
 
 ```cpp
@@ -127,14 +138,10 @@ net::co_spawn(ex, []() -> net::awaitable<void> {
     auto handle = co_await pool.async_acquire("127.0.0.1", 8080);
     if (handle) {
         auto resp = co_await handle->async_get("/api/hello");
-    } else {
-        auto ec = handle.error();
     }
     co_return;
 }, net::detached);
 ```
-
-`client_handle` carries a `std::error_code` on failure; check with `operator bool()` and retrieve via `.error()`. Both `acquire` and `async_acquire` respect `max_size` — they block/wait when the pool has reached the limit.
 
 ## Routing
 
@@ -157,12 +164,8 @@ router.set_http_handler<http::verb::get>(
 // Wildcard
 router.set_http_handler<http::verb::get>(
     "/api/files/*", [](server::request& req, server::response& resp) {
-        auto path = req.path_param("*");  // remaining path
+        auto path = req.path_param("*");
     });
-
-// Multiple verbs on one route
-router.set_http_handler<http::verb::get, http::verb::post>(
-    "/api/multi", handler);
 
 // Member function handlers
 router.set_http_handler<http::verb::get>(
@@ -192,120 +195,69 @@ resp.set_error_content(http::status::internal_server_error);
 // Redirect
 resp.set_redirect("/new-location", http::status::moved_permanently);
 
-// File serving (with Range support)
+// File serving (with Range/ETag/If-Modified-Since support)
 resp.set_file_content("/path/to/file.pdf", req.base());
 
 // Multipart form data
-std::vector<html::form_data::field> fields = {
+resp.set_form_data_content({
     {"name", "", "text/plain", "value"}
-};
-resp.set_form_data_content(std::move(fields));
-
-// Chunked streaming
-resp.set_chunked_write_handler(
-    [idx = std::make_shared<int>(0)](
-        httplib::chunk_writer& writer) -> net::awaitable<void> {
-        while (*idx < 5)
-            co_await writer.write_chunk(std::format("chunk #{}\n", (*idx)++));
-    },
-    "text/plain");
+});
 ```
 
-## SSE (Server-Sent Events)
-
-### Server
+### Chunked Streaming
 
 ```cpp
-router.set_http_handler<http::verb::get>(
-    "/api/sse", [](server::request&, server::response& resp) {
+resp.set_http_handler<http::verb::get>(
+    "/stream",
+    [](server::request&, server::response& resp) -> net::awaitable<void> {
+        auto* writer = resp.get_chunk_writer();
+        for (int i = 0; i < 5; ++i)
+            co_await writer->write_chunk(std::format("chunk #{}\n", i));
+        co_await writer->close();
+    });
+```
+
+### SSE (Server-Sent Events)
+
+```cpp
+resp.set_http_handler<http::verb::get>(
+    "/api/sse", [](server::request&, server::response& resp) -> net::awaitable<void> {
+        auto sse = resp.create_sse_writer();
         auto counter = std::make_shared<int>(0);
-        resp.set_sse_write_handler(
-            [counter](httplib::sse_writer& sse) -> net::awaitable<void> {
-                while (true) {
-                    ++(*counter);
-                    co_await sse.send_event(
-                        std::format("event #{}", *counter),
-                        "tick",                          // event type (optional)
-                        std::to_string(*counter));       // event id (optional)
-
-                    // or send a retry hint or keep-alive comment
-                    // co_await sse.send_retry(std::chrono::seconds(3));
-                    // co_await sse.send_comment("keep-alive");
-                }
-            });
-    });
-```
-
-`sse_writer` methods:
-| Method | SSE Protocol |
-|--------|-------------|
-| `send_event(data)` | `data: ...\n\n` |
-| `send_event(data, event)` | `event: ...\ndata: ...\n\n` |
-| `send_event(data, event, id)` | `id: ...\nevent: ...\ndata: ...\n\n` |
-| `send_retry(ms)` | `retry: ...\n\n` |
-| `send_comment(msg)` | `: msg\n\n` |
-| `close()` | terminates the stream |
-
-### Client
-
-```cpp
-client.set_sse_read_handler(
-    [](httplib::sse_reader& reader) -> net::awaitable<void> {
-        while (!reader.is_done()) {
-            auto ev = co_await reader.read_event();
-            // ev.id, ev.event, ev.data, ev.retry
+        while (true) {
+            ++(*counter);
+            co_await sse->send_event(
+                std::format("event #{}", *counter), "tick", std::to_string(*counter));
         }
     });
-
-auto resp = client.get("/api/sse");   // returns after stream closes
-client.set_sse_read_handler(nullptr); // remove handler for subsequent requests
 ```
 
-## NDJSON (Newline Delimited JSON)
+`create_sse_writer()` returns `unique_ptr<sse_writer>`. `sse_writer` methods: `send_event(data)`, `send_event(data, event)`, `send_event(data, event, id)`, `send_retry(ms)`, `send_comment(msg)`.
 
-### Server
-
-```cpp
-resp.set_ndjson_write_handler(
-    [](httplib::ndjson_writer& w) -> net::awaitable<void> {
-        co_await w.write({{"seq", 1}, {"msg", "hello"}});
-        co_await w.write({{"seq", 2}, {"msg", "world"}});
-        co_await w.close();
-    });
-```
-
-### Client
+### NDJSON (Newline Delimited JSON)
 
 ```cpp
-client.set_ndjson_read_handler(
-    [](httplib::ndjson_reader& reader) -> net::awaitable<void> {
-        while (!reader.is_done()) {
-            auto val = co_await reader.read();
-            if (val.is_null()) break;  // empty = stream ended
-        }
+resp.set_http_handler<http::verb::get>(
+    "/api/ndjson", [](server::request&, server::response& resp) -> net::awaitable<void> {
+        auto w = resp.create_ndjson_writer();
+        co_await w->write({{"seq", 1}, {"msg", "hello"}});
+        co_await w->write({{"seq", 2}, {"msg", "world"}});
+        co_await w->close();
     });
-
-auto resp = client.get("/api/ndjson");
-client.set_ndjson_read_handler(nullptr);
 ```
 
 ## Body Types
 
-The request/response body is a type-safe variant (`any_body::value_type`). Access it with `.as<T>()`:
+The request/response body is a type-safe variant (`any_body::value_type`). Access with `.as<T>()`:
 
 ```cpp
-// String
-auto& str = req.body().as<body::string_body>();
-
-// JSON
+auto& str  = req.body().as<body::string_body>();
 auto& json = req.body().as<body::json_body>();
-
-// Form data (multipart)
-auto& fd = req.body().as<body::form_data_body>();
-
-// URL-encoded form
-auto& params = req.body().as<body::query_params_body>();
+auto& fd   = req.body().as<body::form_data_body>();
+auto& qp   = req.body().as<body::query_params_body>();
 ```
+
+Auto-detection during parsing: `content-type` header selects the correct body reader at runtime.
 
 ## WebSocket
 
@@ -314,45 +266,44 @@ auto& params = req.body().as<body::query_params_body>();
 ```cpp
 router.set_ws_handler(
     "/ws",
-    // on_open
     [](server::websocket_conn::weak_ptr hdl) -> net::awaitable<void> {
-        if (auto conn = hdl.lock())
-            conn->send("Welcome!");
+        if (auto conn = hdl.lock()) conn->send("Welcome!");
         co_return;
     },
-    // on_message
-    [](server::websocket_conn::weak_ptr hdl,
-       std::string_view msg, bool binary) -> net::awaitable<void> {
-        if (auto conn = hdl.lock())
-            conn->send(std::format("Echo: {}", msg), binary);
+    [](server::websocket_conn::weak_ptr hdl, std::string_view msg, bool binary) -> net::awaitable<void> {
+        if (auto conn = hdl.lock()) conn->send(std::format("Echo: {}", msg), binary);
         co_return;
     },
-    // on_close
-    [](server::websocket_conn::weak_ptr) -> net::awaitable<void> {
-        co_return;
-    });
+    [](server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });
+```
+
+WebSocket handlers support middleware aspects:
+
+```cpp
+router.set_ws_handler("/ws", open, msg, close,
+    middleware::basic_auth{[](std::string_view u, std::string_view p) {
+        return u == "admin" && p == "secret";
+    }});
 ```
 
 ### Client
 
 ```cpp
 client::ws_client ws(ex, "127.0.0.1", 8080);
-ws.set_handler(open_handler, message_handler, close_handler);
-ws.async_connect("/ws");
-```
+ws.set_handler(
+    [](boost::system::error_code ec) -> net::awaitable<void> { co_return; },
+    [](std::string_view msg, bool binary) -> net::awaitable<void> { co_return; },
+    []() -> net::awaitable<void> { co_return; });
 
-## Static File Serving
-
-```cpp
-server::mount_point_entry mp("/static", "/var/www");
-mp.set_enabled_dir(true);                              // enable directory listing
-mp.set_dir_format(mount_point_entry::dir_format_type::html);
-router.set_static_mount_point(std::move(mp));
+// With custom headers
+auto hdrs = http::fields();
+hdrs.set(http::field::authorization, "Bearer my-token");
+ws.run("/ws", hdrs);
 ```
 
 ## Built-in Middleware
 
-Middleware are applied per-route as trailing variadic arguments:
+Middleware can be applied per-route (variadic arguments) or globally (`router::use()`).
 
 ### CORS
 
@@ -375,8 +326,7 @@ router.set_http_handler<http::verb::get>(
     middleware::basic_auth(
         [](std::string_view user, std::string_view pass) {
             return user == "admin" && pass == "secret";
-        },
-        "Admin Area"));           // realm
+        }, "Admin Area"));
 ```
 
 ### Bearer Token Auth
@@ -385,19 +335,73 @@ router.set_http_handler<http::verb::get>(
 router.set_http_handler<http::verb::get>(
     "/api/protected", handler,
     middleware::bearer_auth(
-        [](std::string_view token) {
-            return token == "my-secret-token";
-        }));
+        [](std::string_view token) { return token == "my-secret-token"; }));
+```
+
+### JWT Auth
+
+```cpp
+#include <httplib/server/middleware/jwt_auth.hpp>
+#include <httplib/util/jwt.hpp>
+
+// Per-route
+router.set_http_handler<http::verb::get>(
+    "/api/secure", handler,
+    middleware::jwt_auth{httplib::jwt::hs256("secret")}
+        .with_issuer("my-app")
+        .with_audience("api.example.com"));
+
+// Custom scheme / header name
+router.set_http_handler<http::verb::get>(
+    "/api/secure", handler,
+    middleware::jwt_auth{httplib::jwt::hs256("secret")}
+        .with_header_name("X-API-Key"));       // read from custom header
+
+// Access verified JWT in handler
+router.set_http_handler<http::verb::get>(
+    "/api/profile", [](server::request& req, server::response& resp) {
+        auto& jwt = middleware::get_data<middleware::jwt_auth>(req);
+        auto sub = jwt.get_subject();
+        bool has_exp = jwt.has_expires_at();
+    },
+    middleware::jwt_auth{httplib::jwt::hs256("secret")});
+```
+
+#### JWT Builder & Verifier
+
+```cpp
+// Create & sign
+auto token = jwt::create()
+    .set_subject("alice")
+    .set_issuer("my-app")
+    .set_expires_in(std::chrono::hours(1))
+    .sign(jwt::hs256("secret"));
+
+// Decode (returns result)
+auto result = jwt::decode(token);
+if (result.has_error()) return;
+
+auto& decoded = result.value();
+auto sub = decoded.get_subject();
+auto iss = decoded.get_issuer();
+
+// Verify with claims
+auto verifier = jwt::verify(jwt::hs256("secret"))
+    .with_issuer("my-app")
+    .with_subject("alice")
+    .with_claim("role", [](auto& v) { return v == "admin"; });
+
+boost::system::error_code ec;
+verifier.verify(decoded, ec);
+if (ec) { /* verification failed */ }
 ```
 
 ### Rate Limiting
 
 ```cpp
-auto limiter = std::make_shared<middleware::rate_limit>(
-    100, std::chrono::seconds(60));   // 100 req / 60s per IP
-
 router.set_http_handler<http::verb::get>(
-    "/api/limited", handler, *limiter);
+    "/api/limited", handler,
+    middleware::rate_limit(100, std::chrono::seconds(60)));
 ```
 
 ### Session
@@ -405,85 +409,170 @@ router.set_http_handler<http::verb::get>(
 ```cpp
 #include <httplib/server/middleware/session.hpp>
 
-auto sess = std::make_shared<middleware::session_middleware>();
+auto sm = middleware::session_middleware()
+    .cookie_name("SID")
+    .max_age(std::chrono::hours(24))
+    .http_only(true);
 
-sess->cookie_name("SID").max_age(std::chrono::hours(24)).http_only(true);
-
-router.set_http_handler<http::verb::get>(
-    "/api/session", handler, *sess);
-
-// In handler:
 router.set_http_handler<http::verb::get>(
     "/api/profile", [](server::request& req, server::response& resp) {
-        auto session = req.session();
-        session->set("user", "alice");
-        auto user = session->get("user");
-    }, *sess);
+        auto sess = middleware::get_data<middleware::session_middleware>(req);
+        sess->set("user", "alice");
+        auto user = sess->get("user");
+    }, sm);
 ```
 
-## Custom Aspects
+### Global Middleware
 
-Write your own middleware with `before`/`after` hooks:
+Apply middleware to all routes at once:
+
+```cpp
+router.use(
+    middleware::cors{}
+        .allow_origin("https://example.com"),
+    middleware::basic_auth{[](auto...) { return true; }});
+
+// All subsequent route registrations inherit these.
+router.set_http_handler<http::verb::get>("/api/a", handler_a);
+router.set_http_handler<http::verb::get>("/api/b", handler_b);
+```
+
+Execution order: `global_before → route_before → handler → route_after → global_after`.
+
+### Custom Middleware
 
 ```cpp
 struct LoggingAspect {
     bool before(server::request& req, server::response&) {
         spdlog::info("[{}] {}", req.method_string(), req.path());
-        return true;  // false to short-circuit the handler
+        return true;
     }
     bool after(server::request& req, server::response&) {
-        spdlog::info("[{}] {} -> done", req.method_string(), req.path());
+        spdlog::info("[{}] {} done", req.method_string(), req.path());
         return true;
     }
 };
 
-router.set_http_handler<http::verb::get>(
-    "/api/logged", handler,
-    LoggingAspect{});
+router.set_http_handler<http::verb::get>("/api/logged", handler, LoggingAspect{});
 ```
 
-Aspects can also be anonymous lambdas that only need `before()`:
+Both sync (`bool`) and coroutine (`net::awaitable<bool>`) return types are supported for `before`/`after`.
+
+### Middleware Data Access
+
+Middleware that stores data in the request (like `jwt_auth` and `session_middleware`) exposes a `key` and `value_type`. Use the generic `get_data<>()` template:
 
 ```cpp
-router.set_http_handler<http::verb::get>(
-    "/api/data", handler,
-    [](server::request& req, server::response&) {
-        req.set_custom_data(std::make_any<std::string>("precomputed"));
-        return true;
+auto& jwt  = middleware::get_data<middleware::jwt_auth>(req);
+auto  sess = middleware::get_data<middleware::session_middleware>(req);
+```
+
+The same `data` constant is used internally by `set_custom_data` → `request::custom_data`. You can also use the raw `custom_data` API:
+
+```cpp
+req.set_custom_data("my_key", std::make_any<int>(42));
+req.erase_custom_data("my_key");
+bool exists = req.has_custom_data("my_key");
+```
+
+## Reverse Proxy
+
+```cpp
+// Simple URL proxy
+svr.set_reverse_proxy("/api/*", "http://upstream:8080");
+
+// With custom header transformation
+svr.set_reverse_proxy("/api/*", "http://upstream:8080",
+    [](server::request& req, http::fields& headers) {
+        headers.set("X-Custom", "value");
     });
+
+// Dynamic upstream selection
+svr.set_reverse_proxy("/api/*",
+    [](server::request& req) -> std::string {
+        return "http://backend-" + std::string(req.path_param("id")) + ":8080";
+    },
+    headers_callback);
+```
+
+### Proxy Config
+
+```cpp
+svr.set_proxy_pool_size(32);           // max idle connections to upstream
+svr.set_proxy_buffer_size(256 * 1024); // relay buffer (default 512KB)
+```
+
+Global middleware applies to proxy routes automatically. Use `set_http_handler` on the same path for route-specific proxy middleware.
+
+## Server Configuration
+
+```cpp
+svr.set_read_timeout(std::chrono::seconds(10));
+svr.set_write_timeout(std::chrono::seconds(10));
+svr.set_acceptor_count(64);     // concurrent listen sockets (default 32)
+svr.set_upload_dir("/tmp/uploads");
+svr.set_upload_file_limit(10 * 1024 * 1024);  // 10MB
+svr.set_compress_content_types([](std::string_view ct) {
+    return ct.starts_with("text/") || ct.starts_with("application/json");
+});
 ```
 
 ## SSL/TLS
 
 ```cpp
-server::http_server svr(ioc);
+server::http_server svr(ex);
 
 // From memory
 svr.set_ssl(cert_pem, key_pem, "password");
 
 // From files
 svr.set_ssl_file("server.crt", "server.key", "password");
+
+// Client
+client::http_client client(ex, "example.com", 443, true);
+// Verify server certificate
+client.set_verify_ssl(true);
+client.set_ca_cert("/path/to/ca.pem");
 ```
 
-SSL clients simply pass `ssl=true`:
+## Static File Serving
 
 ```cpp
-client::http_client client(ex, "example.com", 443, true);
+server::mount_point_entry mp("/static", "/var/www");
+mp.set_enabled_directory(true);
+mp.set_directory_format(server::mount_point_entry::dir_format_type::html);
+router.set_static_mount_point(std::move(mp));
+
+// With middleware
+router.set_static_mount_point("/secure-storage", "/data",
+    middleware::basic_auth{...});
+```
+
+## Client Features
+
+```cpp
+// Async request
+auto resp = co_await client.async_get("/api/data");
+
+// File upload via multipart
+consumer.set_http_handler<http::verb::post>(
+    "/upload", [](server::request& req, server::response& resp) {
+        auto& fd = req.body().as<body::form_data_body>();
+        resp.set_string_content("OK", "text/plain");
+    });
+
+// File download to disk
+client.async_download("/files/large.bin", "local_copy.bin");
+
+// Timeout policies
+client.set_timeout(std::chrono::seconds(5));           // per-step
+client.set_overall_timeout(std::chrono::seconds(30));  // total
+client.set_timeout_policy(client::timeout_policy::never);
+
+// Follow redirects
+client.set_max_redirects(5);
 ```
 
 ## License
 
 This project is distributed under the Boost Software License, Version 1.0.
-
-## Version
-
-```cpp
-#include <httplib/version.hpp>
-
-// Compile-time
-static_assert(HTTPLIB_VERSION_MAJOR == 1);
-static_assert(HTTPLIB_VERSION_MINOR == 0);
-
-// Runtime
-std::string v = httplib::version();   // "1.0.0"
-```
