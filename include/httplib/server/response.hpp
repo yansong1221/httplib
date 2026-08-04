@@ -4,11 +4,15 @@
 #include "httplib/server/server_fwd.hpp"
 #include <boost/beast/http/fields.hpp>
 #include <boost/beast/http/message.hpp>
-#include <boost/json/value.hpp>
 #include <filesystem>
 #include <memory>
 #include <string_view>
 #include <vector>
+
+namespace boost::json
+{
+    class value;
+}
 
 namespace httplib::server
 {
@@ -49,11 +53,7 @@ namespace httplib::server
                                 std::string_view content_type,
                                 http::status status = http::status::ok);
 
-        void
-        set_json_content(boost::json::value const& data, http::status status = http::status::ok)
-        {
-            set_json_content(boost::json::value(data), status);
-        }
+        void set_json_content(boost::json::value const& data, http::status status = http::status::ok);
         void set_json_content(boost::json::value&& data, http::status status = http::status::ok);
         void set_file_content(fs::path const& path, http::fields const& req_header = {});
         void set_form_data_content(std::vector<html::form_data::field>&& data);

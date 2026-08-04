@@ -117,6 +117,12 @@ namespace httplib::server
     }
 
     void
+    response::set_json_content(boost::json::value const& data, http::status status)
+    {
+        set_json_content(boost::json::value(data), status);
+    }
+
+    void
     response::set_json_content(boost::json::value&& data, http::status status /*= http::status::ok*/)
     {
         impl_->set_json_content(std::move(data), status);
