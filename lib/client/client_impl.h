@@ -97,6 +97,10 @@ namespace httplib::client
                 co_await http::async_write_some(*stream_, serializer, util::net_awaitable[ec]);
                 if (ec)
                 {
+                    if (ec != http::error::need_buffer)
+                    {
+                        close();
+                    }
                     break;
                 }
                 end_io();
@@ -121,6 +125,10 @@ namespace httplib::client
                 co_await http::async_read_some(*stream_, buffer_, parser, util::net_awaitable[ec]);
                 if (ec)
                 {
+                    if (ec != http::error::need_buffer)
+                    {
+                        close();
+                    }
                     break;
                 }
                 end_io();
