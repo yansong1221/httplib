@@ -24,10 +24,10 @@ namespace httplib::client
 namespace httplib::server
 {
 
-    class http_server::impl : public std::enable_shared_from_this<impl>
+    class http_server::impl
     {
       public:
-        explicit impl(net::any_io_executor const& ex);
+        explicit impl(net::any_io_executor const& ex, http_server& owner);
         ~impl();
 
       public:
@@ -48,6 +48,11 @@ namespace httplib::server
 
         std::chrono::steady_clock::duration read_timeout() const;
         std::chrono::steady_clock::duration write_timeout() const;
+
+        int acceptor_count() const;
+        void set_acceptor_count(int n);
+        int proxy_buffer_size() const;
+        void set_proxy_buffer_size(int sz);
 
         tcp::endpoint local_endpoint() const;
 
@@ -99,6 +104,10 @@ namespace httplib::server
 
       private:
         net::any_io_executor ex_;
+
+        http_server* owner_ = nullptr;
+        int acceptor_count_ = 32;
+        int proxy_buffer_size_ = 512 * 1024;
 
         router_impl router_;
         tcp::acceptor acceptor_;

@@ -14,6 +14,7 @@
 #include <functional>
 #include <memory>
 #include <queue>
+#include <spdlog/spdlog.h>
 
 namespace httplib::util
 {
@@ -130,9 +131,13 @@ namespace httplib::util
                     {
                         co_await handler();
                     }
+                    catch (std::exception const& e)
+                    {
+                        spdlog::error("action_queue handler exception: {}", e.what());
+                    }
                     catch (...)
                     {
-                        assert(false);
+                        spdlog::error("action_queue handler unknown exception");
                     }
                 }
             }

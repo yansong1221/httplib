@@ -36,7 +36,7 @@ namespace httplib::server
 
     } // namespace
 
-    http_server::impl::impl(net::any_io_executor const& ex) : ex_(ex), acceptor_(ex)
+    http_server::impl::impl(net::any_io_executor const& ex, http_server& owner) : ex_(ex), acceptor_(ex), owner_(&owner)
     {
         proxy_pool_ = std::make_unique<client::http_client_pool>(ex_);
 
@@ -79,8 +79,7 @@ namespace httplib::server
     {
         return net::co_spawn(
             ex_,
-            [this, self = shared_from_this()]() -> net::awaitable<boost::system::error_code>
-            { co_return co_await async_run(); },
+            [this]() -> net::awaitable<boost::system::error_code> { co_return co_await async_run(); },
             boost::asio::use_future);
     }
 
@@ -89,7 +88,7 @@ namespace httplib::server
     {
         return net::co_spawn(
             ex_,
-            [this, self = shared_from_this()]() -> net::awaitable<void> { co_return co_await async_stop(); },
+            [this]() -> net::awaitable<void> { co_return co_await async_stop(); },
             boost::asio::use_future);
     }
     httplib::net::awaitable<void>
@@ -142,7 +141,7 @@ namespace httplib::server
     http_server::impl::async_run()
     {
         std::vector<net::awaitable<boost::system::error_code>> ops;
-        for (int i = 0; i < 32; ++i)
+        for (int i = 0; i < acceptor_count_; ++i)
         {
             ops.push_back(co_accept());
         }
@@ -198,7 +197,7 @@ namespace httplib::server
         auto local_endp = sock.local_endpoint();
         logger()->trace("accept new connection [{}:{}]", remote_endp.address().to_string(), remote_endp.port());
 
-        auto conn = std::make_shared<session>(std::move(sock), *this);
+        auto conn = std::make_shared<session>(std::move(sock), *owner_);
         {
             std::lock_guard lck(session_mutex_);
             sessions_.insert(conn);
@@ -244,6 +243,27 @@ namespace httplib::server
     http_server::impl::write_timeout() const
     {
         return write_timeout_;
+    }
+
+    int
+    http_server::impl::acceptor_count() const
+    {
+        return acceptor_count_;
+    }
+    void
+    http_server::impl::set_acceptor_count(int n)
+    {
+        acceptor_count_ = n;
+    }
+    int
+    http_server::impl::proxy_buffer_size() const
+    {
+        return proxy_buffer_size_;
+    }
+    void
+    http_server::impl::set_proxy_buffer_size(int sz)
+    {
+        proxy_buffer_size_ = sz;
     }
 
     tcp::endpoint

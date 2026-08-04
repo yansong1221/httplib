@@ -47,6 +47,9 @@ namespace httplib::server
         std::chrono::steady_clock::duration read_timeout() const;
         std::chrono::steady_clock::duration write_timeout() const;
 
+        void set_acceptor_count(int n);
+        void set_proxy_buffer_size(int sz);
+
         std::shared_ptr<spdlog::logger> logger() const;
         void set_logger(std::shared_ptr<spdlog::logger> logger);
 
@@ -71,7 +74,7 @@ namespace httplib::server
         http_server(http_server const&) = delete;
         http_server& operator=(http_server const&) = delete;
 
-        std::shared_ptr<impl> impl_;
+        std::unique_ptr<impl> impl_;
 
         friend impl&
         get_impl(http_server& self)

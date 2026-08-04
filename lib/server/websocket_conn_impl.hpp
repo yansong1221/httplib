@@ -18,7 +18,7 @@ namespace httplib::server
     class websocket_conn_impl : public websocket_conn
     {
       public:
-        websocket_conn_impl(http_server::impl& serv, websocket_stream&& stream, request&& req);
+        websocket_conn_impl(http_server& serv, websocket_stream&& stream, request&& req);
         ~websocket_conn_impl();
 
       public:
@@ -37,7 +37,7 @@ namespace httplib::server
         net::awaitable<void> run();
 
       private:
-        http_server::impl& serv_;
+        http_server& serv_;
 
         request req_;
         websocket_stream ws_;

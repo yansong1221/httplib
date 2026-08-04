@@ -26,10 +26,8 @@ namespace httplib::server
 
         template <typename S1, typename S2>
         net::awaitable<void>
-        transfer(S1& from, S2& to, size_t& bytes_transferred)
+        transfer(S1& from, S2& to, size_t& bytes_transferred, int buffer_size)
         {
-            static constexpr int buffer_size = 512 * 1024;
-
             bytes_transferred = 0;
             std::vector<uint8_t> buffer(buffer_size);
             boost::system::error_code ec;
@@ -63,9 +61,7 @@ namespace httplib::server
     class session::ssl_handshake_task : public session::task
     {
       public:
-        explicit ssl_handshake_task(http_stream::tls_stream&& stream,
-                                    beast::flat_buffer&& buffer,
-                                    http_server::impl& serv)
+        explicit ssl_handshake_task(http_stream::tls_stream&& stream, beast::flat_buffer&& buffer, http_server& serv)
             : serv_(serv)
             , stream_(std::move(stream))
             , buffer_(std::move(buffer))
@@ -99,13 +95,13 @@ namespace httplib::server
         }
 
       private:
-        http_server::impl& serv_;
+        http_server& serv_;
         http_stream::tls_stream stream_;
         beast::flat_buffer buffer_;
     };
 #endif
 
-    session::session(tcp::socket&& stream, http_server::impl& serv)
+    session::session(tcp::socket&& stream, http_server& serv)
         : task_(std::make_unique<detect_ssl_task>(std::move(stream), serv))
     {
     }
@@ -140,7 +136,7 @@ namespace httplib::server
         co_return;
     }
 
-    session::detect_ssl_task::detect_ssl_task(tcp::socket&& stream, http_server::impl& serv)
+    session::detect_ssl_task::detect_ssl_task(tcp::socket&& stream, http_server& serv)
         : serv_(serv)
         , stream_(std::move(stream))
     {
@@ -151,7 +147,7 @@ namespace httplib::server
     {
         beast::flat_buffer buffer;
 #ifdef HTTPLIB_ENABLED_SSL
-        if (auto ssl_ctx = serv_.ssl_context(); ssl_ctx)
+        if (auto ssl_ctx = get_impl(serv_).ssl_context(); ssl_ctx)
         {
             boost::system::error_code ec;
             stream_.expires_after(serv_.read_timeout());
@@ -179,7 +175,7 @@ namespace httplib::server
         stream_.close();
     }
 
-    session::http_task::http_task(http_stream&& stream, beast::flat_buffer&& buffer, http_server::impl& serv)
+    session::http_task::http_task(http_stream&& stream, beast::flat_buffer&& buffer, http_server& serv)
         : serv_(serv)
         , buffer_(std::move(buffer))
         , stream_(std::move(stream))
@@ -191,7 +187,7 @@ namespace httplib::server
 
     {
         boost::system::error_code ec;
-        auto& _router = serv_.router();
+        auto& _router = get_impl(serv_).router();
 
         auto local_endp = stream_.socket().local_endpoint(ec);
         auto remote_endp = stream_.socket().remote_endpoint(ec);
@@ -293,7 +289,7 @@ namespace httplib::server
                         boost::system::error_code ec;
                         http::request_parser<body::any_body> body_parser(std::move(header_parser));
 
-                        if (!serv_.upload_dir().empty())
+                        if (!get_impl(serv_).upload_dir().empty())
                         {
                             auto ct = body_parser.get()[http::field::content_type];
                             if (ct.starts_with("multipart/form-data"))
@@ -301,8 +297,8 @@ namespace httplib::server
                                 auto& body = body_parser.get().body();
                                 body = body::form_data_body::value_type {};
                                 auto& fd = std::get<body::form_data_body::value_type>(body);
-                                fd.save_dir = serv_.upload_dir();
-                                fd.max_file_size = serv_.upload_file_limit();
+                                fd.save_dir = get_impl(serv_).upload_dir();
+                                fd.max_file_size = get_impl(serv_).upload_file_limit();
                             }
                         }
 
@@ -401,7 +397,7 @@ namespace httplib::server
                 if (auto encoding = encoding_content.server_apply_encoding(); !encoding.empty())
                 {
                     if (auto content_type = resp[http::field::content_type];
-                        serv_.should_compress_content_type(content_type))
+                        get_impl(serv_).should_compress_content_type(content_type))
                     {
                         resp.set(http::field::content_encoding, encoding);
                         get_impl(resp).chunked(true);
@@ -440,7 +436,7 @@ namespace httplib::server
         co_return true;
     }
 
-    session::websocket_task::websocket_task(websocket_stream&& stream, request&& req, http_server::impl& serv)
+    session::websocket_task::websocket_task(websocket_stream&& stream, request&& req, http_server& serv)
         : conn_(std::make_shared<websocket_conn_impl>(serv, std::move(stream), std::move(req)))
     {
     }
@@ -458,7 +454,7 @@ namespace httplib::server
         conn_->close("abort");
     }
 
-    session::http_proxy_task::http_proxy_task(http_stream&& stream, request&& req, http_server::impl& serv)
+    session::http_proxy_task::http_proxy_task(http_stream&& stream, request&& req, http_server& serv)
         : stream_(std::move(stream))
         , req_(std::move(req))
         , serv_(serv)
@@ -513,8 +509,8 @@ namespace httplib::server
         using namespace net::experimental::awaitable_operators;
         size_t l2r_transferred = 0;
         size_t r2l_transferred = 0;
-        co_await (detail::transfer(stream_, proxy_socket_, l2r_transferred)
-                  && detail::transfer(proxy_socket_, stream_, r2l_transferred));
+        co_await (detail::transfer(stream_, proxy_socket_, l2r_transferred, get_impl(serv_).proxy_buffer_size())
+                  && detail::transfer(proxy_socket_, stream_, r2l_transferred, get_impl(serv_).proxy_buffer_size()));
         co_return nullptr;
     }
 

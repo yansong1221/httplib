@@ -31,7 +31,7 @@ namespace httplib::server
 
     http_server::http_server(net::io_context& ioc) : http_server(ioc.get_executor()) {}
 
-    http_server::http_server(net::any_io_executor const& ex) : impl_(std::make_shared<impl>(ex)) {}
+    http_server::http_server(net::any_io_executor const& ex) : impl_(std::make_unique<impl>(ex, *this)) {}
 
     http_server::~http_server() {}
 
@@ -108,6 +108,16 @@ namespace httplib::server
     {
         return impl_->write_timeout();
     }
+    void
+    http_server::set_acceptor_count(int n)
+    {
+        impl_->set_acceptor_count(n);
+    }
+    void
+    http_server::set_proxy_buffer_size(int sz)
+    {
+        impl_->set_proxy_buffer_size(sz);
+    }
     std::shared_ptr<spdlog::logger>
     http_server::logger() const
     {
@@ -141,8 +151,7 @@ namespace httplib::server
     http_server::set_reverse_proxy(std::string_view location, std::string_view url, proxy_header_callback on_headers)
     {
         auto u = std::string(url);
-        impl_->set_reverse_proxy(location,
-            [u = std::move(u)](request&) { return u; }, std::move(on_headers));
+        impl_->set_reverse_proxy(location, [u = std::move(u)](request&) { return u; }, std::move(on_headers));
     }
 
     void

@@ -8,7 +8,7 @@
 namespace httplib::server
 {
 
-    websocket_conn_impl::websocket_conn_impl(http_server::impl& serv, websocket_stream&& stream, request&& req)
+    websocket_conn_impl::websocket_conn_impl(http_server& serv, websocket_stream&& stream, request&& req)
 
         : serv_(serv)
         , req_(std::move(req))
@@ -97,7 +97,7 @@ namespace httplib::server
     httplib::net::awaitable<void>
     websocket_conn_impl::run()
     {
-        auto entry = serv_.router().query_ws_handler(req_);
+        auto entry = get_impl(serv_).router().query_ws_handler(req_);
         if (!entry)
         {
             co_return;
