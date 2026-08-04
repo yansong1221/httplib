@@ -7,7 +7,7 @@
 namespace httplib::server::middleware
 {
 
-    struct jwt_auth::impl
+    struct jwt_auth_middleware::impl
     {
         std::shared_ptr<jwt::algorithm const> alg;
         std::string issuer;
@@ -16,12 +16,12 @@ namespace httplib::server::middleware
         std::string header_name;
     };
 
-    jwt_auth::jwt_auth(jwt::algorithm const& alg) : impl_(std::make_unique<impl>()) { impl_->alg = alg.clone(); }
-    jwt_auth::jwt_auth(jwt_auth const& other) : impl_(std::make_unique<impl>(*other.impl_)) {}
-    jwt_auth::jwt_auth(jwt_auth&&) noexcept = default;
-    jwt_auth::~jwt_auth() = default;
-    jwt_auth&
-    jwt_auth::operator=(jwt_auth const& other)
+    jwt_auth_middleware::jwt_auth_middleware(jwt::algorithm const& alg) : impl_(std::make_unique<impl>()) { impl_->alg = alg.clone(); }
+    jwt_auth_middleware::jwt_auth_middleware(jwt_auth_middleware const& other) : impl_(std::make_unique<impl>(*other.impl_)) {}
+    jwt_auth_middleware::jwt_auth_middleware(jwt_auth_middleware&&) noexcept = default;
+    jwt_auth_middleware::~jwt_auth_middleware() = default;
+    jwt_auth_middleware&
+    jwt_auth_middleware::operator=(jwt_auth_middleware const& other)
     {
         if (this != &other)
         {
@@ -29,38 +29,38 @@ namespace httplib::server::middleware
         }
         return *this;
     }
-    jwt_auth& jwt_auth::operator=(jwt_auth&&) noexcept = default;
+    jwt_auth_middleware& jwt_auth_middleware::operator=(jwt_auth_middleware&&) noexcept = default;
 
-    jwt_auth&
-    jwt_auth::with_issuer(std::string_view iss)
+    jwt_auth_middleware&
+    jwt_auth_middleware::with_issuer(std::string_view iss)
     {
         impl_->issuer = iss;
         return *this;
     }
 
-    jwt_auth&
-    jwt_auth::with_audience(std::string_view aud)
+    jwt_auth_middleware&
+    jwt_auth_middleware::with_audience(std::string_view aud)
     {
         impl_->audience = aud;
         return *this;
     }
 
-    jwt_auth&
-    jwt_auth::with_scheme(std::string_view scheme)
+    jwt_auth_middleware&
+    jwt_auth_middleware::with_scheme(std::string_view scheme)
     {
         impl_->scheme = scheme;
         return *this;
     }
 
-    jwt_auth&
-    jwt_auth::with_header_name(std::string_view name)
+    jwt_auth_middleware&
+    jwt_auth_middleware::with_header_name(std::string_view name)
     {
         impl_->header_name = name;
         return *this;
     }
 
     bool
-    jwt_auth::before(request& req, response& resp)
+    jwt_auth_middleware::before(request& req, response& resp)
     {
         auto& p = *impl_;
         std::string_view token;

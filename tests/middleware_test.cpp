@@ -56,16 +56,16 @@ namespace
 
 } // namespace
 
-// ===== CORS =====
+// ===== cors_middleware =====
 
-TEST_CASE("CORS: allows request without Origin", "[middleware]")
+TEST_CASE("cors_middleware: allows request without Origin", "[middleware]")
 {
     test_scaffold ts;
     ts.router().set_http_handler<http::verb::get>(
         "/data",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("ok"sv, "text/plain"sv); },
-        mw::cors {});
+        mw::cors_middleware {});
     ts.start();
 
     auto resp = UNWRAP(ts.client->get("/data"));
@@ -74,14 +74,14 @@ TEST_CASE("CORS: allows request without Origin", "[middleware]")
     REQUIRE_FALSE(resp["Access-Control-Allow-Methods"].empty());
 }
 
-TEST_CASE("CORS: OPTIONS preflight is short-circuited", "[middleware]")
+TEST_CASE("cors_middleware: OPTIONS preflight is short-circuited", "[middleware]")
 {
     test_scaffold ts;
     ts.router().set_http_handler<http::verb::options>(
         "/data",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("should-not-reach"sv, "text/plain"sv); },
-        mw::cors {});
+        mw::cors_middleware {});
     ts.start();
 
     auto resp = UNWRAP(ts.client->options("/data"));
@@ -89,16 +89,16 @@ TEST_CASE("CORS: OPTIONS preflight is short-circuited", "[middleware]")
     REQUIRE(resp["Access-Control-Allow-Origin"] == "*");
 }
 
-TEST_CASE("CORS: custom origin and credentials", "[middleware]")
+TEST_CASE("cors_middleware: custom origin and credentials", "[middleware]")
 {
     test_scaffold ts;
-    auto cors = mw::cors().allow_origin("https://example.com").allow_credentials(true).max_age(3600);
+    auto cors_middleware = mw::cors_middleware().allow_origin("https://example.com").allow_credentials(true).max_age(3600);
 
     ts.router().set_http_handler<http::verb::get>(
         "/data",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("ok"sv, "text/plain"sv); },
-        std::move(cors));
+        std::move(cors_middleware));
     ts.start();
 
     auto resp = UNWRAP(ts.client->get("/data"));
@@ -117,7 +117,7 @@ TEST_CASE("Basic Auth: valid credentials pass through", "[middleware]")
         "/secret",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("secret-data"sv, "text/plain"sv); },
-        mw::basic_auth([](std::string_view u, std::string_view p) { return u == "user" && p == "pass"; }));
+        mw::basic_auth_middleware([](std::string_view u, std::string_view p) { return u == "user" && p == "pass"; }));
     ts.start();
 
     auto hdrs = httplib::http::fields();
@@ -135,7 +135,7 @@ TEST_CASE("Basic Auth: invalid credentials return 401", "[middleware]")
         "/secret",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("secret-data"sv, "text/plain"sv); },
-        mw::basic_auth([](std::string_view u, std::string_view p) { return u == "user" && p == "pass"; }));
+        mw::basic_auth_middleware([](std::string_view u, std::string_view p) { return u == "user" && p == "pass"; }));
     ts.start();
 
     auto hdrs = httplib::http::fields();
@@ -152,7 +152,7 @@ TEST_CASE("Basic Auth: missing header returns 401", "[middleware]")
         "/secret",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("secret-data"sv, "text/plain"sv); },
-        mw::basic_auth([](std::string_view, std::string_view) { return true; }));
+        mw::basic_auth_middleware([](std::string_view, std::string_view) { return true; }));
     ts.start();
 
     auto resp = UNWRAP(ts.client->get("/secret"));
@@ -169,7 +169,7 @@ TEST_CASE("Bearer Auth: valid token passes through", "[middleware]")
         "/token-area",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("ok"sv, "text/plain"sv); },
-        mw::bearer_auth([](std::string_view t) { return t == "abc-123"; }));
+        mw::bearer_auth_middleware([](std::string_view t) { return t == "abc-123"; }));
     ts.start();
 
     auto hdrs = httplib::http::fields();
@@ -186,7 +186,7 @@ TEST_CASE("Bearer Auth: invalid token returns 401", "[middleware]")
         "/token-area",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("ok"sv, "text/plain"sv); },
-        mw::bearer_auth([](std::string_view t) { return t == "abc-123"; }));
+        mw::bearer_auth_middleware([](std::string_view t) { return t == "abc-123"; }));
     ts.start();
 
     auto hdrs = httplib::http::fields();
@@ -205,7 +205,7 @@ TEST_CASE("Rate Limit: allows requests within limit", "[middleware]")
         "/limited",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("ok"sv, "text/plain"sv); },
-        mw::rate_limit(10, std::chrono::seconds(60)));
+        mw::rate_limit_middleware(10, std::chrono::seconds(60)));
     ts.start();
 
     for (int i = 0; i < 5; ++i)
@@ -222,7 +222,7 @@ TEST_CASE("Rate Limit: blocks after exceeding limit", "[middleware]")
         "/limited",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("ok"sv, "text/plain"sv); },
-        mw::rate_limit(3, std::chrono::seconds(60)));
+        mw::rate_limit_middleware(3, std::chrono::seconds(60)));
     ts.start();
 
     for (int i = 0; i < 3; ++i)
@@ -238,7 +238,7 @@ TEST_CASE("Rate Limit: blocks after exceeding limit", "[middleware]")
 
 TEST_CASE("Rate Limit: shared instance across routes", "[middleware]")
 {
-    auto limiter = mw::rate_limit(2, std::chrono::seconds(60));
+    auto limiter = mw::rate_limit_middleware(2, std::chrono::seconds(60));
 
     test_scaffold ts;
 
@@ -265,15 +265,15 @@ TEST_CASE("Rate Limit: shared instance across routes", "[middleware]")
 
 // ===== Combined middleware =====
 
-TEST_CASE("Combined: CORS + Auth", "[middleware]")
+TEST_CASE("Combined: cors_middleware + Auth", "[middleware]")
 {
     test_scaffold ts;
     ts.router().set_http_handler<http::verb::get>(
         "/protected",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("protected-data"sv, "text/plain"sv); },
-        mw::cors {},
-        mw::basic_auth([](std::string_view u, std::string_view p) { return u == "u" && p == "p"; }));
+        mw::cors_middleware {},
+        mw::basic_auth_middleware([](std::string_view u, std::string_view p) { return u == "u" && p == "p"; }));
     ts.start();
 
     auto hdrs = httplib::http::fields();
@@ -285,43 +285,43 @@ TEST_CASE("Combined: CORS + Auth", "[middleware]")
     REQUIRE(resp["Access-Control-Allow-Origin"] == "*");
 }
 
-TEST_CASE("CORS: allow_origins with multiple origins", "[middleware]")
+TEST_CASE("cors_middleware: allow_origins with multiple origins", "[middleware]")
 {
     test_scaffold ts;
-    mw::cors cors;
-    cors.allow_origins({ "https://a.com", "https://b.com" });
+    mw::cors_middleware cors_middleware;
+    cors_middleware.allow_origins({ "https://a.com", "https://b.com" });
 
     ts.router().set_http_handler<http::verb::get>(
-        "/cors-multi",
+        "/cors_middleware-multi",
         [](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_string_content("cors-data"sv, "text/plain"sv); },
-        cors);
+        { resp.set_string_content("cors_middleware-data"sv, "text/plain"sv); },
+        cors_middleware);
     ts.start();
 
     auto hdrs = httplib::http::fields();
     hdrs.set(http::field::origin, "https://a.com");
-    auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/cors-multi", hdrs));
+    auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/cors_middleware-multi", hdrs));
     REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(as_string(resp) == "cors-data");
+    REQUIRE(as_string(resp) == "cors_middleware-data");
 }
 
-TEST_CASE("CORS: allow_methods custom", "[middleware]")
+TEST_CASE("cors_middleware: allow_methods custom", "[middleware]")
 {
     test_scaffold ts;
-    mw::cors cors;
-    cors.allow_methods({ "PUT", "PATCH" });
-    cors.allow_origin("https://x.com");
+    mw::cors_middleware cors_middleware;
+    cors_middleware.allow_methods({ "PUT", "PATCH" });
+    cors_middleware.allow_origin("https://x.com");
 
     ts.router().set_http_handler<http::verb::options>(
-        "/cors-methods",
+        "/cors_middleware-methods",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_empty_content(http::status::no_content); },
-        cors);
+        cors_middleware);
     ts.start();
 
     auto hdrs = httplib::http::fields();
     hdrs.set(http::field::origin, "https://x.com");
-    auto resp = UNWRAP(ts.client->send_request(http::verb::options, "/cors-methods", hdrs));
+    auto resp = UNWRAP(ts.client->send_request(http::verb::options, "/cors_middleware-methods", hdrs));
     REQUIRE(resp.result() == http::status::no_content);
     auto methods = std::string(resp["Access-Control-Allow-Methods"]);
     REQUIRE(methods.find("PUT") != std::string::npos);
@@ -331,7 +331,7 @@ TEST_CASE("CORS: allow_methods custom", "[middleware]")
 TEST_CASE("Rate Limit: shared limits apply across routes", "[middleware]")
 {
     test_scaffold ts;
-    auto limiter = std::make_shared<mw::rate_limit>(2, std::chrono::seconds(60));
+    auto limiter = std::make_shared<mw::rate_limit_middleware>(2, std::chrono::seconds(60));
 
     ts.router().set_http_handler<http::verb::get>(
         "/rl-ip",
@@ -364,7 +364,7 @@ TEST_CASE("Bearer Auth: missing header returns 401", "[middleware]")
         "/bearer-missing",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("secret"sv, "text/plain"sv); },
-        mw::bearer_auth([](std::string_view) { return true; }));
+        mw::bearer_auth_middleware([](std::string_view) { return true; }));
     ts.start();
 
     auto resp = UNWRAP(ts.client->get("/bearer-missing"));
@@ -378,7 +378,7 @@ TEST_CASE("Bearer Auth: non-Bearer scheme returns 401", "[middleware]")
         "/bearer-scheme",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("secret"sv, "text/plain"sv); },
-        mw::bearer_auth([](std::string_view) { return true; }));
+        mw::bearer_auth_middleware([](std::string_view) { return true; }));
     ts.start();
 
     auto hdrs = httplib::http::fields();
@@ -392,7 +392,7 @@ TEST_CASE("Global middleware: applies to all routes", "[middleware]")
     test_scaffold ts;
 
     ts.router().use(
-        mw::basic_auth([](std::string_view u, std::string_view p) { return u == "admin" && p == "secret"; }));
+        mw::basic_auth_middleware([](std::string_view u, std::string_view p) { return u == "admin" && p == "secret"; }));
 
     ts.router().set_http_handler<http::verb::get>("/public",
                                                   [](httplib::server::request&, httplib::server::response& resp)
@@ -414,11 +414,11 @@ TEST_CASE("Global middleware: applies to all routes", "[middleware]")
     REQUIRE(resp3.result() == http::status::unauthorized);
 }
 
-TEST_CASE("Global middleware: cors via use()", "[middleware]")
+TEST_CASE("Global middleware: cors_middleware via use()", "[middleware]")
 {
     test_scaffold ts;
 
-    ts.router().use(mw::cors {}.allow_origin("x"));
+    ts.router().use(mw::cors_middleware {}.allow_origin("x"));
 
     ts.router().set_http_handler<http::verb::get>("/gc",
                                                   [](httplib::server::request&, httplib::server::response& resp)

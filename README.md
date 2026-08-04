@@ -4,26 +4,26 @@ A small, embeddable HTTP/1.1 & WebSocket server and client library for C++23, bu
 
 ## Features
 
-- **Full HTTP/1.1 support** — GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, CONNECT, TRACE
-- **Coroutine-first** — all I/O operations are `boost::asio::awaitable` based
-- **Synchronous client** — blocking HTTP client methods also available
-- **WebSocket** — server and client with text/binary messaging, ping/pong, middleware support
-- **Flexible routing** — fixed paths, `:named` parameters, `{param:regex}` constraints, `*` wildcard
-- **Multiple body types** — string, JSON (Boost.JSON), multipart form-data, URL-encoded forms, file serving, empty
-- **Static file serving** — mount directories with Range/Content-Range support, directory listing (HTML/JSON)
-- **Chunked streaming** — `chunk_writer` / `chunk_reader` for server and client
-- **SSE (Server-Sent Events)** — `create_sse_writer()` / `sse_reader` streaming
-- **NDJSON** — `create_ndjson_writer()` / `ndjson_reader` for newline-delimited JSON
-- **Redirects** — `resp.set_redirect(url)`
-- **Compression** — Brotli content-encoding (optional, `-DHTTPLIB_ENABLED_COMPRESS=ON`)
-- **SSL/TLS** — HTTPS and WSS via OpenSSL (optional, `-DHTTPLIB_ENABLED_SSL=ON`)
-- **JWT** — HS256/HS384/HS512 signing, verification, builder API, `boost::system::result` error handling
-- **Built-in middleware** — CORS, Basic Auth, Bearer Auth, JWT Auth, Rate Limiting, Session (cookie-based)
-- **Global middleware** — `router::use()` applies middleware to all routes
-- **Custom middleware** — per-route `before`/`after` hooks, supports both sync and coroutine returns
-- **Reverse proxy** — with Cookie/Referer rewriting, `X-Forwarded-*` headers
-- **Client connection pool** — RAII handles, connection reuse, async acquire with backpressure
-- **Logging** — integrated spdlog, configurable per-request detail level
+- **Full HTTP/1.1 support** �?GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS, CONNECT, TRACE
+- **Coroutine-first** �?all I/O operations are `boost::asio::awaitable` based
+- **Synchronous client** �?blocking HTTP client methods also available
+- **WebSocket** �?server and client with text/binary messaging, ping/pong, middleware support
+- **Flexible routing** �?fixed paths, `:named` parameters, `{param:regex}` constraints, `*` wildcard
+- **Multiple body types** �?string, JSON (Boost.JSON), multipart form-data, URL-encoded forms, file serving, empty
+- **Static file serving** �?mount directories with Range/Content-Range support, directory listing (HTML/JSON)
+- **Chunked streaming** �?`chunk_writer` / `chunk_reader` for server and client
+- **SSE (Server-Sent Events)** �?`create_sse_writer()` / `sse_reader` streaming
+- **NDJSON** �?`create_ndjson_writer()` / `ndjson_reader` for newline-delimited JSON
+- **Redirects** �?`resp.set_redirect(url)`
+- **Compression** �?Brotli content-encoding (optional, `-DHTTPLIB_ENABLED_COMPRESS=ON`)
+- **SSL/TLS** �?HTTPS and WSS via OpenSSL (optional, `-DHTTPLIB_ENABLED_SSL=ON`)
+- **JWT** �?HS256/HS384/HS512 signing, verification, builder API, `boost::system::result` error handling
+- **Built-in middleware** �?cors_middleware, Basic Auth, Bearer Auth, JWT Auth, Rate Limiting, Session (cookie-based)
+- **Global middleware** �?`router::use()` applies middleware to all routes
+- **Custom middleware** �?per-route `before`/`after` hooks, supports both sync and coroutine returns
+- **Reverse proxy** �?with Cookie/Referer rewriting, `X-Forwarded-*` headers
+- **Client connection pool** �?RAII handles, connection reuse, async acquire with backpressure
+- **Logging** �?integrated spdlog, configurable per-request detail level
 
 ## Platform Support
 
@@ -124,7 +124,7 @@ client::http_client client(ex, "https://example.com");
 
 client::http_client_pool pool(ex, 4);  // max 4 active connections
 
-// Synchronous — returns std::future<client_handle>
+// Synchronous �?returns std::future<client_handle>
 {
     auto handle = pool.acquire("127.0.0.1", 8080).get();
     if (handle) {
@@ -133,7 +133,7 @@ client::http_client_pool pool(ex, 4);  // max 4 active connections
     }
 }
 
-// Asynchronous — waits when pool is at capacity
+// Asynchronous �?waits when pool is at capacity
 net::co_spawn(ex, []() -> net::awaitable<void> {
     auto handle = co_await pool.async_acquire("127.0.0.1", 8080);
     if (handle) {
@@ -281,7 +281,7 @@ WebSocket handlers support middleware aspects:
 
 ```cpp
 router.set_ws_handler("/ws", open, msg, close,
-    middleware::basic_auth{[](std::string_view u, std::string_view p) {
+    middleware::basic_auth_middleware{[](std::string_view u, std::string_view p) {
         return u == "admin" && p == "secret";
     }});
 ```
@@ -305,12 +305,12 @@ ws.run("/ws", hdrs);
 
 Middleware can be applied per-route (variadic arguments) or globally (`router::use()`).
 
-### CORS
+### cors_middleware
 
 ```cpp
 router.set_http_handler<http::verb::get>(
     "/api/data", handler,
-    middleware::cors{}
+    middleware::cors_middleware{}
         .allow_origin("https://example.com")
         .allow_methods("GET, POST")
         .allow_headers("Content-Type, Authorization")
@@ -323,7 +323,7 @@ router.set_http_handler<http::verb::get>(
 ```cpp
 router.set_http_handler<http::verb::get>(
     "/api/admin", handler,
-    middleware::basic_auth(
+    middleware::basic_auth_middleware(
         [](std::string_view user, std::string_view pass) {
             return user == "admin" && pass == "secret";
         }, "Admin Area"));
@@ -334,7 +334,7 @@ router.set_http_handler<http::verb::get>(
 ```cpp
 router.set_http_handler<http::verb::get>(
     "/api/protected", handler,
-    middleware::bearer_auth(
+    middleware::bearer_auth_middleware(
         [](std::string_view token) { return token == "my-secret-token"; }));
 ```
 
@@ -347,24 +347,24 @@ router.set_http_handler<http::verb::get>(
 // Per-route
 router.set_http_handler<http::verb::get>(
     "/api/secure", handler,
-    middleware::jwt_auth{httplib::jwt::hs256("secret")}
+    middleware::jwt_auth_middleware{httplib::jwt::hs256("secret")}
         .with_issuer("my-app")
         .with_audience("api.example.com"));
 
 // Custom scheme / header name
 router.set_http_handler<http::verb::get>(
     "/api/secure", handler,
-    middleware::jwt_auth{httplib::jwt::hs256("secret")}
+    middleware::jwt_auth_middleware{httplib::jwt::hs256("secret")}
         .with_header_name("X-API-Key"));       // read from custom header
 
 // Access verified JWT in handler
 router.set_http_handler<http::verb::get>(
     "/api/profile", [](server::request& req, server::response& resp) {
-        auto& jwt = middleware::get_data<middleware::jwt_auth>(req);
+        auto& jwt = middleware::get_data<middleware::jwt_auth_middleware>(req);
         auto sub = jwt.get_subject();
         bool has_exp = jwt.has_expires_at();
     },
-    middleware::jwt_auth{httplib::jwt::hs256("secret")});
+    middleware::jwt_auth_middleware{httplib::jwt::hs256("secret")});
 ```
 
 #### JWT Builder & Verifier
@@ -401,7 +401,7 @@ if (ec) { /* verification failed */ }
 ```cpp
 router.set_http_handler<http::verb::get>(
     "/api/limited", handler,
-    middleware::rate_limit(100, std::chrono::seconds(60)));
+    middleware::rate_limit_middleware(100, std::chrono::seconds(60)));
 ```
 
 ### Session
@@ -428,16 +428,16 @@ Apply middleware to all routes at once:
 
 ```cpp
 router.use(
-    middleware::cors{}
+    middleware::cors_middleware{}
         .allow_origin("https://example.com"),
-    middleware::basic_auth{[](auto...) { return true; }});
+    middleware::basic_auth_middleware{[](auto...) { return true; }});
 
 // All subsequent route registrations inherit these.
 router.set_http_handler<http::verb::get>("/api/a", handler_a);
 router.set_http_handler<http::verb::get>("/api/b", handler_b);
 ```
 
-Execution order: `global_before → route_before → handler → route_after → global_after`.
+Execution order: `global_before �?route_before �?handler �?route_after �?global_after`.
 
 ### Custom Middleware
 
@@ -460,14 +460,14 @@ Both sync (`bool`) and coroutine (`net::awaitable<bool>`) return types are suppo
 
 ### Middleware Data Access
 
-Middleware that stores data in the request (like `jwt_auth` and `session_middleware`) exposes a `key` and `value_type`. Use the generic `get_data<>()` template:
+Middleware that stores data in the request (like `jwt_auth_middleware` and `session_middleware`) exposes a `key` and `value_type`. Use the generic `get_data<>()` template:
 
 ```cpp
-auto& jwt  = middleware::get_data<middleware::jwt_auth>(req);
+auto& jwt  = middleware::get_data<middleware::jwt_auth_middleware>(req);
 auto  sess = middleware::get_data<middleware::session_middleware>(req);
 ```
 
-The same `data` constant is used internally by `set_custom_data` → `request::custom_data`. You can also use the raw `custom_data` API:
+The same `data` constant is used internally by `set_custom_data` �?`request::custom_data`. You can also use the raw `custom_data` API:
 
 ```cpp
 req.set_custom_data("my_key", std::make_any<int>(42));
@@ -545,7 +545,7 @@ router.set_static_mount_point(std::move(mp));
 
 // With middleware
 router.set_static_mount_point("/secure-storage", "/data",
-    middleware::basic_auth{...});
+    middleware::basic_auth_middleware{...});
 ```
 
 ## Client Features

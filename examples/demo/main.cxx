@@ -10,8 +10,8 @@
 #include "httplib/server/chunk_reader.hpp"
 #include "httplib/server/chunk_writer.hpp"
 #include "httplib/server/middleware/auth.hpp"
-#include "httplib/server/middleware/cors_middleware.hpp"
-#include "httplib/server/middleware/rate_limit_middleware.hpp"
+#include "httplib/server/middleware/cors.hpp"
+#include "httplib/server/middleware/rate_limit.hpp"
 #include "httplib/server/mount_point_entry.hpp"
 #include "httplib/server/ndjson_writer.hpp"
 #include "httplib/server/request.hpp"
@@ -118,10 +118,10 @@ struct log_t
 static void
 setup_http_routes(httplib::server::router& router)
 {
-    // ---- Built-in middleware: CORS (applied per-route as an aspect) ----
-    // CORS can also be set globally via the post_handler pattern (see setup_cors_middleware below)
+    // ---- Built-in middleware: cors_middleware (applied per-route as an aspect) ----
+    // cors_middleware can also be set globally via the post_handler pattern (see setup_global_cors below)
 
-    // ---- Basic HTTP methods (with CORS) ----
+    // ---- Basic HTTP methods (with cors_middleware) ----
     router.set_http_handler<http::verb::get>(
         "/api/hello",
         [](httplib::server::request&, httplib::server::response& resp)
@@ -203,7 +203,7 @@ setup_http_routes(httplib::server::router& router)
                                                      });
                                                  });
 
-    // ---- OPTIONS (CORS preflight handled by cors_middleware) ----
+    // ---- OPTIONS (cors_middleware preflight handled by cors_middleware) ----
     router.set_http_handler<http::verb::options>("/*",
                                                  [](httplib::server::request&, httplib::server::response& resp)
                                                  {
@@ -309,7 +309,7 @@ setup_http_routes(httplib::server::router& router)
                 { "secret", "admin data" }
             });
         },
-        mw::basic_auth_middleware_middleware([](std::string_view user, std::string_view pass) { return user == "admin" && pass == "secret"; },
+        mw::basic_auth_middleware([](std::string_view user, std::string_view pass) { return user == "admin" && pass == "secret"; },
                        "Admin Area"));
 
     // ---- Built-in middleware: Bearer Token Auth ----
@@ -324,17 +324,14 @@ setup_http_routes(httplib::server::router& router)
         mw::bearer_auth_middleware([](std::string_view token) { return token == "my-secret-token"; }));
 
     // ---- Built-in middleware: Rate Limit (10 req / 10 seconds per IP) ----
-    auto rate_limit_middlewareer = std::make_shared<mw::rate_limit_middleware>(10, std::chrono::seconds(10));
-
+    auto limiter = std::make_shared<mw::rate_limit_middleware>(10, std::chrono::seconds(10));
     router.set_http_handler<http::verb::get>(
         "/api/limited",
         [](httplib::server::request&, httplib::server::response& resp)
         {
-            resp.set_json_content({
-                { "message", "you are not rate-limited... yet" }
-            });
+            resp.set_json_content({ { "message", "you are not rate-limited... yet" } });
         },
-        *rate_limit_middlewareer);
+        *limiter);
 
     // ---- Custom data on request (via custom aspect) ----
     router.set_http_handler<http::verb::get>(
@@ -367,9 +364,9 @@ setup_http_routes(httplib::server::router& router)
 }
 
 static void
-setup_cors_middleware(httplib::server::router& router)
+setup_global_cors(httplib::server::router& router)
 {
-    // Global CORS via post_handler (runs after every route handler)
+    // Global cors_middleware via post_handler (runs after every route handler)
     router.set_post_routing_handler(
         [](httplib::server::request&, httplib::server::response& resp)
         {
@@ -665,10 +662,10 @@ Client options:
   --port N     Server port (default: 18808)
 
 Built-in middleware on display:
-  cors_middleware      CORS header injection + OPTIONS preflight
-  basic_auth_middleware     HTTP Basic auth (admin:secret on /api/admin)
-  bearer_auth_middleware    Token auth (my-secret-token on /api/token-protected)
-  rate_limit_middleware     10 req / 10 s per IP (on /api/limited)
+  cors_middleware      cors_middleware header injection + OPTIONS preflight
+  basic_auth_middleware      HTTP Basic auth (admin:secret on /api/admin)
+  bearer_auth_middleware     Token auth (my-secret-token on /api/token-protected)
+  rate_limit_middleware      10 req / 10 s per IP (on /api/limited)
 
 Custom aspects:
   log_t                Request/response logging
@@ -759,7 +756,7 @@ main(int argc, char** argv)
         // false; });
 
         setup_http_routes(router);
-        setup_cors_middleware(router);
+        setup_global_cors(router);
         setup_ws(router);
         setup_static_files(router);
 

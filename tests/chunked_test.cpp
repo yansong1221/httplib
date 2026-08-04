@@ -198,31 +198,31 @@ TEST_CASE("Chunked: middleware is wrapped via set_chunked_http_handler", "[chunk
 {
     test_scaffold ts;
 
-    mw::cors cors;
-    cors.allow_origins({ "https://example.com" });
-    cors.allow_methods({ "GET", "POST" });
+    mw::cors_middleware cors_middleware;
+    cors_middleware.allow_origins({ "https://example.com" });
+    cors_middleware.allow_methods({ "GET", "POST" });
 
     ts.router().set_chunked_http_handler<http::verb::post>(
-        "/chunked/cors",
+        "/chunked/cors_middleware",
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
             resp.set_string_content("should-not-run"sv, "text/plain");
             co_return;
         },
-        cors);
+        cors_middleware);
     ts.router().set_http_handler<http::verb::get>(
-        "/chunked/cors",
+        "/chunked/cors_middleware",
         [](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_string_content("cors-get"sv, "text/plain"); },
-        cors);
+        { resp.set_string_content("cors_middleware-get"sv, "text/plain"); },
+        cors_middleware);
     ts.start();
 
-    // GET with CORS works
+    // GET with cors_middleware works
     auto hdrs = httplib::http::fields();
     hdrs.set(http::field::origin, "https://example.com");
-    auto get_resp = UNWRAP(ts.client->send_request(http::verb::get, "/chunked/cors", hdrs));
+    auto get_resp = UNWRAP(ts.client->send_request(http::verb::get, "/chunked/cors_middleware", hdrs));
     REQUIRE(get_resp.result() == http::status::ok);
-    REQUIRE(as_string(get_resp) == "cors-get");
+    REQUIRE(as_string(get_resp) == "cors_middleware-get");
     REQUIRE(get_resp[http::field::access_control_allow_origin] == "https://example.com");
 }
 
@@ -246,7 +246,7 @@ TEST_CASE("Chunked: regular PUT coexists with chunked POST", "[chunked]")
         });
     ts.start();
 
-    // Content-Length PUT → regular handler
+    // Content-Length PUT �?regular handler
     auto put_resp = UNWRAP(ts.client->put("/chunked/mixed", "hello"sv));
     REQUIRE(put_resp.result() == http::status::ok);
     REQUIRE(as_string(put_resp) == "regular-put-hello");
@@ -261,7 +261,7 @@ TEST_CASE("Chunked: chunked handler does not affect path that only has regular h
 {
     test_scaffold ts;
 
-    // Register a chunked handler on a DIFFERENT path — should not affect other paths
+    // Register a chunked handler on a DIFFERENT path �?should not affect other paths
     ts.router().set_chunked_http_handler<http::verb::post>(
         "/chunked/isolated",
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>

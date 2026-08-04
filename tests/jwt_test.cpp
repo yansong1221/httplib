@@ -237,13 +237,13 @@ TEST_CASE("JWT: middleware auth via Bearer token", "[jwt]")
     test_common::test_scaffold ts;
     namespace mw = httplib::server::middleware;
 
-    auto ja = mw::jwt_auth { httplib::jwt::hs256("secret") };
+    auto ja = mw::jwt_auth_middleware { httplib::jwt::hs256("secret") };
     ja.with_issuer("my-app");
     ts.router().set_http_handler<http::verb::get>(
         "/protected",
         [](httplib::server::request& req, httplib::server::response& resp)
         {
-            auto& jwt = mw::get_data<mw::jwt_auth>(req);
+            auto& jwt = mw::get_data<mw::jwt_auth_middleware>(req);
             resp.set_string_content(jwt.get_subject(), "text/plain");
         },
         ja);
@@ -268,7 +268,7 @@ TEST_CASE("JWT: middleware rejects invalid token", "[jwt]")
         "/protected",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("ok"sv, "text/plain"sv); },
-        mw::jwt_auth { httplib::jwt::hs256("secret") });
+        mw::jwt_auth_middleware { httplib::jwt::hs256("secret") });
 
     ts.start();
 
@@ -287,7 +287,7 @@ TEST_CASE("JWT: middleware rejects missing Bearer", "[jwt]")
         "/protected",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("ok"sv, "text/plain"sv); },
-        mw::jwt_auth { httplib::jwt::hs256("secret") });
+        mw::jwt_auth_middleware { httplib::jwt::hs256("secret") });
 
     ts.start();
 

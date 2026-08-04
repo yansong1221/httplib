@@ -8,11 +8,11 @@
 namespace httplib::server::middleware
 {
 
-    class HTTPLIB_API rate_limit
+    class HTTPLIB_API rate_limit_middleware
     {
       public:
-        rate_limit(uint32_t max_requests, std::chrono::steady_clock::duration window);
-        ~rate_limit();
+        rate_limit_middleware(uint32_t max_requests, std::chrono::steady_clock::duration window);
+        ~rate_limit_middleware();
 
         bool before(request& req, response& resp);
 

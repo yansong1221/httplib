@@ -6,23 +6,23 @@
 namespace httplib::server::middleware
 {
 
-    class HTTPLIB_API jwt_auth
+    class HTTPLIB_API jwt_auth_middleware
     {
       public:
         static constexpr auto key = "jwt";
         using value_type = jwt::decoded_jwt;
 
-        explicit jwt_auth(jwt::algorithm const& alg);
-        jwt_auth(jwt_auth const& other);
-        jwt_auth(jwt_auth&&) noexcept;
-        jwt_auth& operator=(jwt_auth const& other);
-        jwt_auth& operator=(jwt_auth&&) noexcept;
-        ~jwt_auth();
+        explicit jwt_auth_middleware(jwt::algorithm const& alg);
+        jwt_auth_middleware(jwt_auth_middleware const& other);
+        jwt_auth_middleware(jwt_auth_middleware&&) noexcept;
+        jwt_auth_middleware& operator=(jwt_auth_middleware const& other);
+        jwt_auth_middleware& operator=(jwt_auth_middleware&&) noexcept;
+        ~jwt_auth_middleware();
 
-        jwt_auth& with_issuer(std::string_view iss);
-        jwt_auth& with_audience(std::string_view aud);
-        jwt_auth& with_scheme(std::string_view scheme);
-        jwt_auth& with_header_name(std::string_view name);
+        jwt_auth_middleware& with_issuer(std::string_view iss);
+        jwt_auth_middleware& with_audience(std::string_view aud);
+        jwt_auth_middleware& with_scheme(std::string_view scheme);
+        jwt_auth_middleware& with_header_name(std::string_view name);
 
         bool before(request& req, response& resp);
 
