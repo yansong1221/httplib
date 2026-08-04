@@ -7,6 +7,15 @@
 namespace httplib::server
 {
 
+    struct mount_point_entry::impl
+    {
+        std::string mount_point;
+        fs::path base_dir;
+        bool enabled_directory = true;
+        mount_point_entry::dir_format_type directory_type = mount_point_entry::dir_format_type::json;
+        std::vector<std::string> default_document_name = { "index.html", "index.htm" };
+    };
+
     namespace detail
     {
         inline static bool
@@ -71,19 +80,34 @@ namespace httplib::server
     } // namespace detail
 
     mount_point_entry::mount_point_entry(std::string const& mount_point, fs::path const& base_dir)
-        : mount_point_(mount_point)
-        , base_dir_(base_dir)
+        : impl_(std::make_unique<impl>(mount_point, base_dir))
     {
     }
+    mount_point_entry::mount_point_entry(mount_point_entry const& other) : impl_(std::make_unique<impl>(*other.impl_))
+    {
+    }
+    mount_point_entry::mount_point_entry(mount_point_entry&&) noexcept = default;
+    mount_point_entry::~mount_point_entry() = default;
+    mount_point_entry&
+    mount_point_entry::operator=(mount_point_entry const& other)
+    {
+        if (this != &other)
+        {
+            impl_ = std::make_unique<impl>(*other.impl_);
+        }
+        return *this;
+    }
+    mount_point_entry& mount_point_entry::operator=(mount_point_entry&&) noexcept = default;
+
     std::string const&
     mount_point_entry::mount_point() const
     {
-        return mount_point_;
+        return impl_->mount_point;
     }
     httplib::fs::path const&
     mount_point_entry::base_dir() const
     {
-        return base_dir_;
+        return impl_->base_dir;
     }
     void
     mount_point_entry::operator()(request& req, response& res) const
@@ -96,8 +120,8 @@ namespace httplib::server
         }
 
         std::error_code ec;
-        auto path
-            = base_dir_ / fs::path(std::u8string_view((char8_t const*)relative_path.data(), relative_path.size()));
+        auto path = impl_->base_dir
+                    / fs::path(std::u8string_view((char8_t const*)relative_path.data(), relative_path.size()));
         if (!fs::exists(path, ec))
         {
             res.set_error_content(http::status::not_found);
@@ -106,7 +130,7 @@ namespace httplib::server
 
         if (!path.has_filename())
         {
-            for (auto const& doc_name : default_document_name_)
+            for (auto const& doc_name : impl_->default_document_name)
             {
                 auto doc_path = path / doc_name;
 
@@ -134,10 +158,10 @@ namespace httplib::server
         }
         else if (fs::is_directory(path, ec))
         {
-            if (enabled_directory_)
+            if (impl_->enabled_directory)
             {
                 beast::error_code ec;
-                switch (directory_type_)
+                switch (impl_->directory_type)
                 {
                     case mount_point_entry::dir_format_type::json:
                     {
@@ -171,19 +195,19 @@ namespace httplib::server
     void
     mount_point_entry::set_enabled_directory(bool enabled)
     {
-        enabled_directory_ = enabled;
+        impl_->enabled_directory = enabled;
     }
 
     void
     mount_point_entry::set_directory_format(dir_format_type type)
     {
-        directory_type_ = type;
+        impl_->directory_type = type;
     }
 
     void
     mount_point_entry::set_default_document_name(std::vector<std::string> const& default_document_name)
     {
-        default_document_name_ = default_document_name;
+        impl_->default_document_name = default_document_name;
     }
 
 } // namespace httplib::server

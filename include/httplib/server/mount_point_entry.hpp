@@ -3,6 +3,7 @@
 #include "httplib/server/server_fwd.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <filesystem>
+#include <memory>
 
 namespace httplib::server
 {
@@ -10,8 +11,12 @@ namespace httplib::server
     class HTTPLIB_API mount_point_entry
     {
       public:
-        mount_point_entry(std::string const& _mount_point, fs::path const& _base_dir);
-        virtual ~mount_point_entry() = default;
+        mount_point_entry(std::string const& mount_point, fs::path const& base_dir);
+        mount_point_entry(mount_point_entry const& other);
+        mount_point_entry(mount_point_entry&&) noexcept;
+        mount_point_entry& operator=(mount_point_entry const& other);
+        mount_point_entry& operator=(mount_point_entry&&) noexcept;
+        ~mount_point_entry();
 
         enum class dir_format_type
         {
@@ -27,16 +32,11 @@ namespace httplib::server
         void set_directory_format(dir_format_type type);
         void set_default_document_name(std::vector<std::string> const& default_document_name);
 
-      public:
         void operator()(request& req, response& resp) const;
 
       private:
-        std::string mount_point_;
-        fs::path base_dir_;
-        bool enabled_directory_ = true;
-        dir_format_type directory_type_ = dir_format_type::json;
-
-        std::vector<std::string> default_document_name_ = { "index.html", "index.htm" };
+        struct impl;
+        std::unique_ptr<impl> impl_;
     };
 
 } // namespace httplib::server
