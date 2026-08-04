@@ -41,29 +41,29 @@ namespace httplib::server::middleware
 
     } // namespace
 
-    // ---- basic_auth_middleware::impl ----
+    // ---- basic_auth::impl ----
 
-    class basic_auth_middleware::impl
+    class basic_auth::impl
     {
       public:
-        basic_auth_middleware::validator_t validator_;
+        basic_auth::validator_t validator_;
         std::string realm_;
     };
 
-    basic_auth_middleware::basic_auth_middleware(validator_t validator, std::string realm)
+    basic_auth::basic_auth(validator_t validator, std::string realm)
         : impl_(std::make_unique<impl>(std::move(validator), std::move(realm)))
     {
     }
 
-    basic_auth_middleware::~basic_auth_middleware() = default;
+    basic_auth::~basic_auth() = default;
 
-    basic_auth_middleware::basic_auth_middleware(basic_auth_middleware const& other)
+    basic_auth::basic_auth(basic_auth const& other)
         : impl_(std::make_unique<impl>(other.impl_->validator_, other.impl_->realm_))
     {
     }
 
-    basic_auth_middleware&
-    basic_auth_middleware::operator=(basic_auth_middleware const& other)
+    basic_auth&
+    basic_auth::operator=(basic_auth const& other)
     {
         if (this != &other)
         {
@@ -72,11 +72,11 @@ namespace httplib::server::middleware
         return *this;
     }
 
-    basic_auth_middleware::basic_auth_middleware(basic_auth_middleware&&) noexcept = default;
-    basic_auth_middleware& basic_auth_middleware::operator=(basic_auth_middleware&&) noexcept = default;
+    basic_auth::basic_auth(basic_auth&&) noexcept = default;
+    basic_auth& basic_auth::operator=(basic_auth&&) noexcept = default;
 
     bool
-    basic_auth_middleware::before(request& req, response& resp)
+    basic_auth::before(request& req, response& resp)
     {
         auto auth = std::string(req.base()[http::field::authorization]);
         if (auth.starts_with("Basic "))
@@ -101,29 +101,29 @@ namespace httplib::server::middleware
         return false;
     }
 
-    // ---- bearer_auth_middleware::impl ----
+    // ---- bearer_auth::impl ----
 
-    class bearer_auth_middleware::impl
+    class bearer_auth::impl
     {
       public:
-        bearer_auth_middleware::validator_t validator_;
+        bearer_auth::validator_t validator_;
         std::string realm_;
     };
 
-    bearer_auth_middleware::bearer_auth_middleware(validator_t validator, std::string realm)
+    bearer_auth::bearer_auth(validator_t validator, std::string realm)
         : impl_(std::make_unique<impl>(std::move(validator), std::move(realm)))
     {
     }
 
-    bearer_auth_middleware::~bearer_auth_middleware() = default;
+    bearer_auth::~bearer_auth() = default;
 
-    bearer_auth_middleware::bearer_auth_middleware(bearer_auth_middleware const& other)
+    bearer_auth::bearer_auth(bearer_auth const& other)
         : impl_(std::make_unique<impl>(other.impl_->validator_, other.impl_->realm_))
     {
     }
 
-    bearer_auth_middleware&
-    bearer_auth_middleware::operator=(bearer_auth_middleware const& other)
+    bearer_auth&
+    bearer_auth::operator=(bearer_auth const& other)
     {
         if (this != &other)
         {
@@ -132,11 +132,11 @@ namespace httplib::server::middleware
         return *this;
     }
 
-    bearer_auth_middleware::bearer_auth_middleware(bearer_auth_middleware&&) noexcept = default;
-    bearer_auth_middleware& bearer_auth_middleware::operator=(bearer_auth_middleware&&) noexcept = default;
+    bearer_auth::bearer_auth(bearer_auth&&) noexcept = default;
+    bearer_auth& bearer_auth::operator=(bearer_auth&&) noexcept = default;
 
     bool
-    bearer_auth_middleware::before(request& req, response& resp)
+    bearer_auth::before(request& req, response& resp)
     {
         auto auth = std::string(req.base()[http::field::authorization]);
         if (auth.starts_with("Bearer "))

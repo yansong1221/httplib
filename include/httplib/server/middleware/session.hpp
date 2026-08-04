@@ -18,27 +18,16 @@ namespace httplib::server::middleware
         using time_point = clock::time_point;
 
         explicit session(std::string id, time_point created = clock::now());
+        session(session const& other);
+        session(session&&) noexcept;
+        session& operator=(session const& other);
+        session& operator=(session&&) noexcept;
+        ~session();
 
-        std::string const&
-        id() const
-        {
-            return id_;
-        }
-        time_point
-        created() const
-        {
-            return created_;
-        }
-        time_point
-        last_access() const
-        {
-            return last_access_;
-        }
-        void
-        touch()
-        {
-            last_access_ = clock::now();
-        }
+        std::string const& id() const;
+        time_point created() const;
+        time_point last_access() const;
+        void touch();
 
         std::optional<std::string> get(std::string_view key) const;
         void set(std::string key, std::string value);
@@ -48,10 +37,8 @@ namespace httplib::server::middleware
         std::unordered_map<std::string, std::string> const& data() const;
 
       private:
-        std::string id_;
-        time_point created_;
-        time_point last_access_;
-        std::unordered_map<std::string, std::string> data_;
+        struct impl;
+        std::unique_ptr<impl> impl_;
     };
 
     class HTTPLIB_API session_store

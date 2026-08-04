@@ -6,7 +6,7 @@
 namespace httplib::server::middleware
 {
 
-    class cors_middleware::impl
+    class cors::impl
     {
       public:
         std::vector<std::string> origins_ { "*" };
@@ -71,13 +71,13 @@ namespace httplib::server::middleware
         }
     };
 
-    cors_middleware::cors_middleware() : impl_(std::make_unique<impl>()) {}
-    cors_middleware::~cors_middleware() = default;
+    cors::cors() : impl_(std::make_unique<impl>()) {}
+    cors::~cors() = default;
 
-    cors_middleware::cors_middleware(cors_middleware const& other) : impl_(std::make_unique<impl>(*other.impl_)) {}
+    cors::cors(cors const& other) : impl_(std::make_unique<impl>(*other.impl_)) {}
 
-    cors_middleware&
-    cors_middleware::operator=(cors_middleware const& other)
+    cors&
+    cors::operator=(cors const& other)
     {
         if (this != &other)
         {
@@ -86,54 +86,54 @@ namespace httplib::server::middleware
         return *this;
     }
 
-    cors_middleware::cors_middleware(cors_middleware&&) noexcept = default;
-    cors_middleware& cors_middleware::operator=(cors_middleware&&) noexcept = default;
+    cors::cors(cors&&) noexcept = default;
+    cors& cors::operator=(cors&&) noexcept = default;
 
-    cors_middleware&
-    cors_middleware::allow_origin(std::string origin)
+    cors&
+    cors::allow_origin(std::string origin)
     {
         impl_->origins_.clear();
         impl_->origins_.push_back(std::move(origin));
         return *this;
     }
 
-    cors_middleware&
-    cors_middleware::allow_origins(std::vector<std::string> origins)
+    cors&
+    cors::allow_origins(std::vector<std::string> origins)
     {
         impl_->origins_ = std::move(origins);
         return *this;
     }
 
-    cors_middleware&
-    cors_middleware::allow_methods(std::vector<std::string> methods)
+    cors&
+    cors::allow_methods(std::vector<std::string> methods)
     {
         impl_->methods_ = std::move(methods);
         return *this;
     }
 
-    cors_middleware&
-    cors_middleware::allow_headers(std::vector<std::string> headers)
+    cors&
+    cors::allow_headers(std::vector<std::string> headers)
     {
         impl_->headers_ = std::move(headers);
         return *this;
     }
 
-    cors_middleware&
-    cors_middleware::allow_credentials(bool allow)
+    cors&
+    cors::allow_credentials(bool allow)
     {
         impl_->credentials_ = allow;
         return *this;
     }
 
-    cors_middleware&
-    cors_middleware::max_age(int seconds)
+    cors&
+    cors::max_age(int seconds)
     {
         impl_->max_age_ = seconds;
         return *this;
     }
 
     bool
-    cors_middleware::before(request& req, response& resp)
+    cors::before(request& req, response& resp)
     {
         if (req.method() == http::verb::options)
         {
@@ -145,7 +145,7 @@ namespace httplib::server::middleware
     }
 
     bool
-    cors_middleware::after(request&, response& resp)
+    cors::after(request&, response& resp)
     {
         impl_->apply(resp);
         return true;

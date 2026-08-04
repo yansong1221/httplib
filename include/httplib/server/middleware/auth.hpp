@@ -9,17 +9,17 @@
 namespace httplib::server::middleware
 {
 
-    class HTTPLIB_API basic_auth_middleware
+    class HTTPLIB_API basic_auth
     {
       public:
         using validator_t = std::function<bool(std::string_view username, std::string_view password)>;
 
-        explicit basic_auth_middleware(validator_t validator, std::string realm = "Restricted");
-        ~basic_auth_middleware();
-        basic_auth_middleware(basic_auth_middleware const&);
-        basic_auth_middleware& operator=(basic_auth_middleware const&);
-        basic_auth_middleware(basic_auth_middleware&&) noexcept;
-        basic_auth_middleware& operator=(basic_auth_middleware&&) noexcept;
+        explicit basic_auth(validator_t validator, std::string realm = "Restricted");
+        ~basic_auth();
+        basic_auth(basic_auth const&);
+        basic_auth& operator=(basic_auth const&);
+        basic_auth(basic_auth&&) noexcept;
+        basic_auth& operator=(basic_auth&&) noexcept;
 
         bool before(request& req, response& resp);
 
@@ -28,17 +28,17 @@ namespace httplib::server::middleware
         std::unique_ptr<impl> impl_;
     };
 
-    class HTTPLIB_API bearer_auth_middleware
+    class HTTPLIB_API bearer_auth
     {
       public:
         using validator_t = std::function<bool(std::string_view token)>;
 
-        explicit bearer_auth_middleware(validator_t validator, std::string realm = "Restricted");
-        ~bearer_auth_middleware();
-        bearer_auth_middleware(bearer_auth_middleware const&);
-        bearer_auth_middleware& operator=(bearer_auth_middleware const&);
-        bearer_auth_middleware(bearer_auth_middleware&&) noexcept;
-        bearer_auth_middleware& operator=(bearer_auth_middleware&&) noexcept;
+        explicit bearer_auth(validator_t validator, std::string realm = "Restricted");
+        ~bearer_auth();
+        bearer_auth(bearer_auth const&);
+        bearer_auth& operator=(bearer_auth const&);
+        bearer_auth(bearer_auth&&) noexcept;
+        bearer_auth& operator=(bearer_auth&&) noexcept;
 
         bool before(request& req, response& resp);
 

@@ -28,15 +28,58 @@ namespace httplib::server::middleware
 
     // ---- session ----
 
-    session::session(std::string id, time_point created) : id_(std::move(id)), created_(created), last_access_(created)
+    struct session::impl
     {
+        std::string id;
+        session::time_point created;
+        session::time_point last_access;
+        std::unordered_map<std::string, std::string> data;
+    };
+
+    session::session(std::string id, time_point created)
+        : impl_(std::make_unique<impl>(std::move(id), created, created))
+    {
+    }
+    session::session(session const& other) : impl_(std::make_unique<impl>(*other.impl_)) {}
+    session::session(session&&) noexcept = default;
+    session::~session() = default;
+    session&
+    session::operator=(session const& other)
+    {
+        if (this != &other)
+        {
+            impl_ = std::make_unique<impl>(*other.impl_);
+        }
+        return *this;
+    }
+    session& session::operator=(session&&) noexcept = default;
+
+    std::string const&
+    session::id() const
+    {
+        return impl_->id;
+    }
+    session::time_point
+    session::created() const
+    {
+        return impl_->created;
+    }
+    session::time_point
+    session::last_access() const
+    {
+        return impl_->last_access;
+    }
+    void
+    session::touch()
+    {
+        impl_->last_access = clock::now();
     }
 
     std::optional<std::string>
     session::get(std::string_view key) const
     {
-        auto it = data_.find(std::string(key));
-        if (it != data_.end())
+        auto it = impl_->data.find(std::string(key));
+        if (it != impl_->data.end())
         {
             return it->second;
         }
@@ -46,31 +89,31 @@ namespace httplib::server::middleware
     void
     session::set(std::string key, std::string value)
     {
-        data_[std::move(key)] = std::move(value);
+        impl_->data[std::move(key)] = std::move(value);
     }
 
     bool
     session::has(std::string_view key) const
     {
-        return data_.count(std::string(key)) > 0;
+        return impl_->data.count(std::string(key)) > 0;
     }
 
     void
     session::remove(std::string_view key)
     {
-        data_.erase(std::string(key));
+        impl_->data.erase(std::string(key));
     }
 
     bool
     session::empty() const
     {
-        return data_.empty();
+        return impl_->data.empty();
     }
 
     std::unordered_map<std::string, std::string> const&
     session::data() const
     {
-        return data_;
+        return impl_->data;
     }
 
     // ---- memory_session_store ----

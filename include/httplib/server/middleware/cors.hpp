@@ -9,22 +9,22 @@
 namespace httplib::server::middleware
 {
 
-    class HTTPLIB_API cors_middleware
+    class HTTPLIB_API cors
     {
       public:
-        cors_middleware();
-        ~cors_middleware();
-        cors_middleware(cors_middleware const& other);
-        cors_middleware& operator=(cors_middleware const& other);
-        cors_middleware(cors_middleware&&) noexcept;
-        cors_middleware& operator=(cors_middleware&&) noexcept;
+        cors();
+        ~cors();
+        cors(cors const& other);
+        cors& operator=(cors const& other);
+        cors(cors&&) noexcept;
+        cors& operator=(cors&&) noexcept;
 
-        cors_middleware& allow_origin(std::string origin);
-        cors_middleware& allow_origins(std::vector<std::string> origins);
-        cors_middleware& allow_methods(std::vector<std::string> methods);
-        cors_middleware& allow_headers(std::vector<std::string> headers);
-        cors_middleware& allow_credentials(bool allow);
-        cors_middleware& max_age(int seconds);
+        cors& allow_origin(std::string origin);
+        cors& allow_origins(std::vector<std::string> origins);
+        cors& allow_methods(std::vector<std::string> methods);
+        cors& allow_headers(std::vector<std::string> headers);
+        cors& allow_credentials(bool allow);
+        cors& max_age(int seconds);
 
         bool before(request& req, response& resp);
         bool after(request& req, response& resp);

@@ -126,7 +126,7 @@ setup_http_routes(httplib::server::router& router)
         "/api/hello",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("Hello, World!"sv, "text/plain"sv); },
-        mw::cors_middleware {});
+        mw::cors {});
 
     router.set_http_handler<http::verb::get>("/api/greet/:name",
                                              [](httplib::server::request& req, httplib::server::response& resp)
@@ -203,7 +203,7 @@ setup_http_routes(httplib::server::router& router)
                                                      });
                                                  });
 
-    // ---- OPTIONS (CORS preflight handled by cors_middleware) ----
+    // ---- OPTIONS (CORS preflight handled by cors) ----
     router.set_http_handler<http::verb::options>("/*",
                                                  [](httplib::server::request&, httplib::server::response& resp)
                                                  {
@@ -309,9 +309,8 @@ setup_http_routes(httplib::server::router& router)
                 { "secret", "admin data" }
             });
         },
-        mw::basic_auth_middleware([](std::string_view user, std::string_view pass)
-                                  { return user == "admin" && pass == "secret"; },
-                                  "Admin Area"));
+        mw::basic_auth([](std::string_view user, std::string_view pass) { return user == "admin" && pass == "secret"; },
+                       "Admin Area"));
 
     // ---- Built-in middleware: Bearer Token Auth ----
     router.set_http_handler<http::verb::get>(
@@ -322,10 +321,10 @@ setup_http_routes(httplib::server::router& router)
                 { "data", "token-gated content" }
             });
         },
-        mw::bearer_auth_middleware([](std::string_view token) { return token == "my-secret-token"; }));
+        mw::bearer_auth([](std::string_view token) { return token == "my-secret-token"; }));
 
     // ---- Built-in middleware: Rate Limit (10 req / 10 seconds per IP) ----
-    auto rate_limiter = std::make_shared<mw::rate_limit_middleware>(10, std::chrono::seconds(10));
+    auto rate_limiter = std::make_shared<mw::rate_limit>(10, std::chrono::seconds(10));
 
     router.set_http_handler<http::verb::get>(
         "/api/limited",
@@ -666,10 +665,10 @@ Client options:
   --port N     Server port (default: 18808)
 
 Built-in middleware on display:
-  cors_middleware      CORS header injection + OPTIONS preflight
-  basic_auth_middleware     HTTP Basic auth (admin:secret on /api/admin)
-  bearer_auth_middleware    Token auth (my-secret-token on /api/token-protected)
-  rate_limit_middleware     10 req / 10 s per IP (on /api/limited)
+  cors      CORS header injection + OPTIONS preflight
+  basic_auth     HTTP Basic auth (admin:secret on /api/admin)
+  bearer_auth    Token auth (my-secret-token on /api/token-protected)
+  rate_limit     10 req / 10 s per IP (on /api/limited)
 
 Custom aspects:
   log_t                Request/response logging

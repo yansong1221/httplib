@@ -23,7 +23,7 @@ TEST_CASE("CORS: allows request without Origin", "[middleware]")
         "/data",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("ok"sv, "text/plain"sv); },
-        mw::cors_middleware {});
+        mw::cors {});
     ts.start();
 
     auto resp = UNWRAP(ts.client->get("/data"));
@@ -39,7 +39,7 @@ TEST_CASE("CORS: OPTIONS preflight is short-circuited", "[middleware]")
         "/data",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("should-not-reach"sv, "text/plain"sv); },
-        mw::cors_middleware {});
+        mw::cors {});
     ts.start();
 
     auto resp = UNWRAP(ts.client->options("/data"));
@@ -50,7 +50,7 @@ TEST_CASE("CORS: OPTIONS preflight is short-circuited", "[middleware]")
 TEST_CASE("CORS: custom origin and credentials", "[middleware]")
 {
     test_scaffold ts;
-    auto cors = mw::cors_middleware().allow_origin("https://example.com").allow_credentials(true).max_age(3600);
+    auto cors = mw::cors().allow_origin("https://example.com").allow_credentials(true).max_age(3600);
 
     ts.router().set_http_handler<http::verb::get>(
         "/data",
@@ -75,7 +75,7 @@ TEST_CASE("Basic Auth: valid credentials pass through", "[middleware]")
         "/secret",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("secret-data"sv, "text/plain"sv); },
-        mw::basic_auth_middleware([](std::string_view u, std::string_view p) { return u == "user" && p == "pass"; }));
+        mw::basic_auth([](std::string_view u, std::string_view p) { return u == "user" && p == "pass"; }));
     ts.start();
 
     auto hdrs = httplib::http::fields();
@@ -93,7 +93,7 @@ TEST_CASE("Basic Auth: invalid credentials return 401", "[middleware]")
         "/secret",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("secret-data"sv, "text/plain"sv); },
-        mw::basic_auth_middleware([](std::string_view u, std::string_view p) { return u == "user" && p == "pass"; }));
+        mw::basic_auth([](std::string_view u, std::string_view p) { return u == "user" && p == "pass"; }));
     ts.start();
 
     auto hdrs = httplib::http::fields();
@@ -110,7 +110,7 @@ TEST_CASE("Basic Auth: missing header returns 401", "[middleware]")
         "/secret",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("secret-data"sv, "text/plain"sv); },
-        mw::basic_auth_middleware([](std::string_view, std::string_view) { return true; }));
+        mw::basic_auth([](std::string_view, std::string_view) { return true; }));
     ts.start();
 
     auto resp = UNWRAP(ts.client->get("/secret"));
@@ -127,7 +127,7 @@ TEST_CASE("Bearer Auth: valid token passes through", "[middleware]")
         "/token-area",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("ok"sv, "text/plain"sv); },
-        mw::bearer_auth_middleware([](std::string_view t) { return t == "abc-123"; }));
+        mw::bearer_auth([](std::string_view t) { return t == "abc-123"; }));
     ts.start();
 
     auto hdrs = httplib::http::fields();
@@ -144,7 +144,7 @@ TEST_CASE("Bearer Auth: invalid token returns 401", "[middleware]")
         "/token-area",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("ok"sv, "text/plain"sv); },
-        mw::bearer_auth_middleware([](std::string_view t) { return t == "abc-123"; }));
+        mw::bearer_auth([](std::string_view t) { return t == "abc-123"; }));
     ts.start();
 
     auto hdrs = httplib::http::fields();
@@ -163,7 +163,7 @@ TEST_CASE("Rate Limit: allows requests within limit", "[middleware]")
         "/limited",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("ok"sv, "text/plain"sv); },
-        mw::rate_limit_middleware(10, std::chrono::seconds(60)));
+        mw::rate_limit(10, std::chrono::seconds(60)));
     ts.start();
 
     for (int i = 0; i < 5; ++i)
@@ -180,7 +180,7 @@ TEST_CASE("Rate Limit: blocks after exceeding limit", "[middleware]")
         "/limited",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("ok"sv, "text/plain"sv); },
-        mw::rate_limit_middleware(3, std::chrono::seconds(60)));
+        mw::rate_limit(3, std::chrono::seconds(60)));
     ts.start();
 
     for (int i = 0; i < 3; ++i)
@@ -196,7 +196,7 @@ TEST_CASE("Rate Limit: blocks after exceeding limit", "[middleware]")
 
 TEST_CASE("Rate Limit: shared instance across routes", "[middleware]")
 {
-    auto limiter = mw::rate_limit_middleware(2, std::chrono::seconds(60));
+    auto limiter = mw::rate_limit(2, std::chrono::seconds(60));
 
     test_scaffold ts;
 
@@ -230,8 +230,8 @@ TEST_CASE("Combined: CORS + Auth", "[middleware]")
         "/protected",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("protected-data"sv, "text/plain"sv); },
-        mw::cors_middleware {},
-        mw::basic_auth_middleware([](std::string_view u, std::string_view p) { return u == "u" && p == "p"; }));
+        mw::cors {},
+        mw::basic_auth([](std::string_view u, std::string_view p) { return u == "u" && p == "p"; }));
     ts.start();
 
     auto hdrs = httplib::http::fields();
@@ -246,7 +246,7 @@ TEST_CASE("Combined: CORS + Auth", "[middleware]")
 TEST_CASE("CORS: allow_origins with multiple origins", "[middleware]")
 {
     test_scaffold ts;
-    mw::cors_middleware cors;
+    mw::cors cors;
     cors.allow_origins({ "https://a.com", "https://b.com" });
 
     ts.router().set_http_handler<http::verb::get>(
@@ -266,7 +266,7 @@ TEST_CASE("CORS: allow_origins with multiple origins", "[middleware]")
 TEST_CASE("CORS: allow_methods custom", "[middleware]")
 {
     test_scaffold ts;
-    mw::cors_middleware cors;
+    mw::cors cors;
     cors.allow_methods({ "PUT", "PATCH" });
     cors.allow_origin("https://x.com");
 
@@ -289,7 +289,7 @@ TEST_CASE("CORS: allow_methods custom", "[middleware]")
 TEST_CASE("Rate Limit: shared limits apply across routes", "[middleware]")
 {
     test_scaffold ts;
-    auto limiter = std::make_shared<mw::rate_limit_middleware>(2, std::chrono::seconds(60));
+    auto limiter = std::make_shared<mw::rate_limit>(2, std::chrono::seconds(60));
 
     ts.router().set_http_handler<http::verb::get>(
         "/rl-ip",
@@ -307,8 +307,8 @@ TEST_CASE("Rate Limit: shared limits apply across routes", "[middleware]")
 
     // Second client from same IP should also be rate-limited (shared bucket)
     auto client2 = std::make_unique<httplib::client::http_client>(ts.executor(),
-                                                                   ts.endpoint.address().to_string(),
-                                                                   ts.endpoint.port());
+                                                                  ts.endpoint.address().to_string(),
+                                                                  ts.endpoint.port());
     client2->set_timeout(std::chrono::seconds(5));
     auto resp2 = client2->get("/rl-ip");
     REQUIRE(resp2.has_value());
@@ -322,7 +322,7 @@ TEST_CASE("Bearer Auth: missing header returns 401", "[middleware]")
         "/bearer-missing",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("secret"sv, "text/plain"sv); },
-        mw::bearer_auth_middleware([](std::string_view) { return true; }));
+        mw::bearer_auth([](std::string_view) { return true; }));
     ts.start();
 
     auto resp = UNWRAP(ts.client->get("/bearer-missing"));
@@ -336,7 +336,7 @@ TEST_CASE("Bearer Auth: non-Bearer scheme returns 401", "[middleware]")
         "/bearer-scheme",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("secret"sv, "text/plain"sv); },
-        mw::bearer_auth_middleware([](std::string_view) { return true; }));
+        mw::bearer_auth([](std::string_view) { return true; }));
     ts.start();
 
     auto hdrs = httplib::http::fields();

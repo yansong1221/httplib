@@ -198,7 +198,7 @@ TEST_CASE("Chunked: middleware is wrapped via set_chunked_http_handler", "[chunk
 {
     test_scaffold ts;
 
-    mw::cors_middleware cors;
+    mw::cors cors;
     cors.allow_origins({ "https://example.com" });
     cors.allow_methods({ "GET", "POST" });
 
@@ -394,8 +394,11 @@ TEST_CASE("Chunked: multiple chunks are de-chunked into single body", "[chunked]
         });
     ts.start();
 
-    auto result
-        = send_chunked(ts.executor(), *ts.client, http::verb::post, "/chunked/read-ext", { "chunk1", "chunk2", "chunk3" });
+    auto result = send_chunked(ts.executor(),
+                               *ts.client,
+                               http::verb::post,
+                               "/chunked/read-ext",
+                               { "chunk1", "chunk2", "chunk3" });
     REQUIRE(result == "chunk1chunk2chunk3");
 }
 
@@ -609,10 +612,12 @@ TEST_CASE("Chunked: multi-verb via buffer_body", "[chunked]")
         });
     ts.start();
 
-    auto post_result = send_chunked(ts.executor(), *ts.client, http::verb::post, "/chunked/read-multi", { "from-post" });
+    auto post_result
+        = send_chunked(ts.executor(), *ts.client, http::verb::post, "/chunked/read-multi", { "from-post" });
     REQUIRE(post_result == "POST:from-post");
 
-    auto patch_result = send_chunked(ts.executor(), *ts.client, http::verb::patch, "/chunked/read-multi", { "from-patch" });
+    auto patch_result
+        = send_chunked(ts.executor(), *ts.client, http::verb::patch, "/chunked/read-multi", { "from-patch" });
     REQUIRE(patch_result == "PATCH:from-patch");
 }
 

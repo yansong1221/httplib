@@ -359,7 +359,7 @@ Middleware are applied per-route as trailing variadic arguments:
 ```cpp
 router.set_http_handler<http::verb::get>(
     "/api/data", handler,
-    middleware::cors_middleware{}
+    middleware::cors{}
         .allow_origin("https://example.com")
         .allow_methods("GET, POST")
         .allow_headers("Content-Type, Authorization")
@@ -372,7 +372,7 @@ router.set_http_handler<http::verb::get>(
 ```cpp
 router.set_http_handler<http::verb::get>(
     "/api/admin", handler,
-    middleware::basic_auth_middleware(
+    middleware::basic_auth(
         [](std::string_view user, std::string_view pass) {
             return user == "admin" && pass == "secret";
         },
@@ -384,7 +384,7 @@ router.set_http_handler<http::verb::get>(
 ```cpp
 router.set_http_handler<http::verb::get>(
     "/api/protected", handler,
-    middleware::bearer_auth_middleware(
+    middleware::bearer_auth(
         [](std::string_view token) {
             return token == "my-secret-token";
         }));
@@ -393,7 +393,7 @@ router.set_http_handler<http::verb::get>(
 ### Rate Limiting
 
 ```cpp
-auto limiter = std::make_shared<middleware::rate_limit_middleware>(
+auto limiter = std::make_shared<middleware::rate_limit>(
     100, std::chrono::seconds(60));   // 100 req / 60s per IP
 
 router.set_http_handler<http::verb::get>(

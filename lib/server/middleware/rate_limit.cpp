@@ -7,7 +7,7 @@
 namespace httplib::server::middleware
 {
 
-    class rate_limit_middleware::impl
+    class rate_limit::impl
     {
       public:
         using clock = std::chrono::steady_clock;
@@ -26,15 +26,15 @@ namespace httplib::server::middleware
         std::unordered_map<std::string, bucket> buckets;
     };
 
-    rate_limit_middleware::rate_limit_middleware(uint32_t max_requests, std::chrono::steady_clock::duration window)
+    rate_limit::rate_limit(uint32_t max_requests, std::chrono::steady_clock::duration window)
         : impl_(new impl { max_requests, window, {}, {} })
     {
     }
 
-    rate_limit_middleware::~rate_limit_middleware() = default;
+    rate_limit::~rate_limit() = default;
 
     bool
-    rate_limit_middleware::before(request& req, response& resp)
+    rate_limit::before(request& req, response& resp)
     {
         auto ip = req.get_client_ip().to_string();
         auto now = std::chrono::steady_clock::now();
