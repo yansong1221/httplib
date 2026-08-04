@@ -79,7 +79,7 @@ namespace test_common
 
     struct test_scaffold
     {
-        net::thread_pool workers_ { 1 };
+        net::thread_pool workers_ { 4 };
         httplib::server::http_server server { workers_.get_executor() };
         httplib::tcp::endpoint endpoint;
         std::unique_ptr<httplib::client::http_client> client;

@@ -23,7 +23,7 @@ namespace
         net::io_context ioc;
         httplib::server::http_server server;
         httplib::tcp::endpoint endpoint;
-        net::thread_pool workers_ { 1 };
+        net::thread_pool workers_ { 4 };
         bool ssl_ = false;
 
         test_scaffold() : server(ioc)
