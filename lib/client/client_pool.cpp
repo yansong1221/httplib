@@ -1,4 +1,5 @@
 #include "httplib/client/client_pool.hpp"
+#include "httplib/client/client.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include <algorithm>
 #include <atomic>

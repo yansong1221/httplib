@@ -1,4 +1,5 @@
 #include "common.hpp"
+#include "httplib/server/chunk_writer.hpp"
 #include "httplib/body/file_body.hpp"
 #include "httplib/body/json_body.hpp"
 #include "httplib/body/string_body.hpp"

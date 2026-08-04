@@ -1,5 +1,8 @@
 #include "server_impl.h"
+#include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
+#include "httplib/client/read_session.hpp"
+#include "httplib/client/write_session.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "httplib/util/when_all.hpp"

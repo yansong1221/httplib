@@ -1,11 +1,9 @@
 #pragma once
 #include "httplib/body/any_body.hpp"
-#include "httplib/config.hpp"
-#include "httplib/server/body_reader.hpp"
+#include "httplib/server/server_fwd.hpp"
 #include <any>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/ip/tcp.hpp>
-#include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/message.hpp>
 #include <memory>
 #include <string>

@@ -1,7 +1,9 @@
 #include "common.hpp"
 #include "httplib/body/string_body.hpp"
 #include "httplib/client/client_pool.hpp"
+#include "httplib/client/read_session.hpp"
 #include "httplib/client/write_session.hpp"
+#include "httplib/server/chunk_writer.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include <array>

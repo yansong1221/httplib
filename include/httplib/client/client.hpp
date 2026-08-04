@@ -1,12 +1,8 @@
 #pragma once
 #include "httplib/body/any_body.hpp"
-#include "httplib/client/read_session.hpp"
-#include "httplib/client/write_session.hpp"
-#include "httplib/config.hpp"
+#include "httplib/client/client_fwd.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <filesystem>
-#include <functional>
-#include <limits>
 #include <memory>
 
 namespace httplib::client

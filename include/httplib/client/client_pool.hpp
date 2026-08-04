@@ -1,5 +1,5 @@
 #pragma once
-#include "httplib/client/client.hpp"
+#include "httplib/client/client_fwd.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <boost/system/error_code.hpp>
 #include <chrono>
