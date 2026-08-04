@@ -296,6 +296,11 @@ namespace httplib::server
     net::awaitable<void>
     router_impl::post_routing(request& req, response& resp) const
     {
+        if (resp.is_chunked_done())
+        {
+            co_return;
+        }
+
         if (not_found_handler_ && resp.get_impl()->result() == http::status::not_found)
         {
             co_await not_found_handler_(req, resp);

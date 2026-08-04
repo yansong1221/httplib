@@ -383,7 +383,7 @@ namespace httplib::server
     net::awaitable<bool>
     session::http_task::async_write(request const& req, response& resp)
     {
-        if (resp.get_impl()->chunk_writer_ && resp.get_impl()->chunk_writer_->has_header())
+        if (resp.is_chunked_done())
         {
             co_return true;
         }

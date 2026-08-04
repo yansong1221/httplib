@@ -2,6 +2,7 @@
 #include "httplib/config.hpp"
 #include <boost/json.hpp>
 #include <boost/system/error_code.hpp>
+#include <boost/system/result.hpp>
 #include <chrono>
 #include <functional>
 #include <memory>
@@ -12,6 +13,21 @@
 
 namespace httplib::jwt
 {
+
+    namespace claim
+    {
+        constexpr auto issuer = "iss";
+        constexpr auto subject = "sub";
+        constexpr auto audience = "aud";
+        constexpr auto id = "jti";
+        constexpr auto issued_at = "iat";
+        constexpr auto not_before = "nbf";
+        constexpr auto expires_at = "exp";
+        constexpr auto algorithm = "alg";
+        constexpr auto type = "typ";
+        constexpr auto content_type = "cty";
+        constexpr auto key_id = "kid";
+    } // namespace claim
 
     enum class error
     {
@@ -131,10 +147,12 @@ namespace httplib::jwt
         bool has_issued_at() const;
         bool has_not_before() const;
         bool has_expires_at() const;
+        bool has_type() const;
         std::string get_issuer() const;
         std::string get_subject() const;
         std::string get_audience() const;
         std::string get_id() const;
+        std::string get_type() const;
         std::chrono::system_clock::time_point get_issued_at() const;
         std::chrono::system_clock::time_point get_not_before() const;
         std::chrono::system_clock::time_point get_expires_at() const;
@@ -199,7 +217,13 @@ namespace httplib::jwt
         return builder {};
     }
 
-    HTTPLIB_API decoded_jwt decode(std::string_view token);
+    HTTPLIB_API boost::system::result<decoded_jwt> decode(std::string_view token);
+    template <std::convertible_to<std::string_view> S>
+    boost::system::result<decoded_jwt>
+    decode(S&& token)
+    {
+        return decode(std::string_view(std::forward<S>(token)));
+    }
 
     class HTTPLIB_API verifier
     {
@@ -209,8 +233,7 @@ namespace httplib::jwt
         verifier& with_subject(std::string_view sub);
         verifier& with_audience(std::string_view aud);
         verifier& with_id(std::string_view id);
-        verifier& with_claim(std::string_view key, std::function<void(boost::json::value const&)> fn);
-        void verify(decoded_jwt const& jwt, boost::system::error_code& ec) const;
+        verifier& with_claim(std::string_view key, std::function<bool(boost::json::value const&)> fn);
         void
         verify(decoded_jwt const& jwt) const
         {
@@ -221,14 +244,15 @@ namespace httplib::jwt
                 throw std::system_error(ec);
             }
         }
+        void verify(decoded_jwt const& jwt, boost::system::error_code& ec) const;
 
       private:
-        std::shared_ptr<algorithm const> alg_;
+        std::shared_ptr<algorithm> alg_;
         std::string issuer_;
         std::string subject_;
         std::string audience_;
         std::string id_;
-        std::vector<std::pair<std::string, std::function<void(boost::json::value const&)>>> custom_checks_;
+        std::vector<std::pair<std::string, std::function<bool(boost::json::value const&)>>> custom_checks_;
     };
 
     inline verifier

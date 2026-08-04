@@ -66,6 +66,8 @@ namespace httplib::server::middleware
     class HTTPLIB_API session_middleware
     {
       public:
+        static constexpr auto session_key = "session";
+
         session_middleware();
         explicit session_middleware(std::shared_ptr<session_store> store);
         ~session_middleware();

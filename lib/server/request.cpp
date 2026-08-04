@@ -1,5 +1,4 @@
 #include "httplib/server/request.hpp"
-#include "httplib/server/middleware/session.hpp"
 #include "httplib/util/misc.hpp"
 #include "request_impl.hpp"
 
@@ -92,18 +91,6 @@ namespace httplib::server
         impl_->set(name, value);
     }
 
-    void
-    request::erase(http::field name)
-    {
-        impl_->erase(name);
-    }
-
-    void
-    request::erase(std::string_view name)
-    {
-        impl_->erase(name);
-    }
-
     std::string_view
     request::path() const
     {
@@ -176,15 +163,9 @@ namespace httplib::server
     }
 
     void
-    request::set_session(std::shared_ptr<middleware::session> sess)
+    request::erase_custom_data(std::string const& key)
     {
-        impl_->set_session(std::move(sess));
-    }
-
-    std::shared_ptr<middleware::session>
-    request::session() const
-    {
-        return impl_->session();
+        impl_->erase_custom_data(key);
     }
 
     request::impl*

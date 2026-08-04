@@ -160,88 +160,102 @@ namespace httplib::jwt
     decoded_jwt::decoded_jwt(std::string_view token) : token_(token)
     {
         auto dot1 = token.find('.');
-        auto dot2 = dot1 != std::string_view::npos ? token.find('.', dot1 + 1) : std::string_view::npos;
-        if (dot1 == std::string_view::npos || dot2 == std::string_view::npos)
+        if (dot1 == std::string_view::npos)
         {
-            throw std::invalid_argument("invalid token format");
+            return;
+        }
+        auto dot2 = token.find('.', dot1 + 1);
+        if (dot2 == std::string_view::npos)
+        {
+            return;
         }
 
         signature_ = token.substr(dot2 + 1);
         header_ = boost::json::parse(base64url_decode(token.substr(0, dot1)));
         payload_ = boost::json::parse(base64url_decode(token.substr(dot1 + 1, dot2 - dot1 - 1)));
-        algorithm_ = boost::json::value_to<std::string>(header_.at("alg"));
+        algorithm_ = boost::json::value_to<std::string>(header_.at(claim::algorithm));
     }
 
     bool
     decoded_jwt::has_issuer() const
     {
-        return payload_.as_object().contains("iss");
+        return payload_.is_object() && payload_.as_object().contains(claim::issuer);
     }
     bool
     decoded_jwt::has_subject() const
     {
-        return payload_.as_object().contains("sub");
+        return payload_.is_object() && payload_.as_object().contains(claim::subject);
     }
     bool
     decoded_jwt::has_audience() const
     {
-        return payload_.as_object().contains("aud");
+        return payload_.is_object() && payload_.as_object().contains(claim::audience);
     }
     bool
     decoded_jwt::has_id() const
     {
-        return payload_.as_object().contains("jti");
+        return payload_.is_object() && payload_.as_object().contains(claim::id);
     }
     bool
     decoded_jwt::has_issued_at() const
     {
-        return payload_.as_object().contains("iat");
+        return payload_.is_object() && payload_.as_object().contains(claim::issued_at);
     }
     bool
     decoded_jwt::has_not_before() const
     {
-        return payload_.as_object().contains("nbf");
+        return payload_.is_object() && payload_.as_object().contains(claim::not_before);
     }
     bool
     decoded_jwt::has_expires_at() const
     {
-        return payload_.as_object().contains("exp");
+        return payload_.is_object() && payload_.as_object().contains(claim::expires_at);
+    }
+    bool
+    decoded_jwt::has_type() const
+    {
+        return header_.is_object() && header_.as_object().contains(claim::type);
     }
 
     std::string
     decoded_jwt::get_issuer() const
     {
-        return get_payload_claim<std::string>("iss");
+        return get_payload_claim<std::string>(claim::issuer);
     }
     std::string
     decoded_jwt::get_subject() const
     {
-        return get_payload_claim<std::string>("sub");
+        return get_payload_claim<std::string>(claim::subject);
     }
     std::string
     decoded_jwt::get_audience() const
     {
-        return get_payload_claim<std::string>("aud");
+        return get_payload_claim<std::string>(claim::audience);
     }
     std::string
     decoded_jwt::get_id() const
     {
-        return get_payload_claim<std::string>("jti");
+        return get_payload_claim<std::string>(claim::id);
+    }
+    std::string
+    decoded_jwt::get_type() const
+    {
+        return boost::json::value_to<std::string>(header_.at(claim::type));
     }
     std::chrono::system_clock::time_point
     decoded_jwt::get_issued_at() const
     {
-        return std::chrono::system_clock::from_time_t((time_t)get_payload_claim<int64_t>("iat"));
+        return std::chrono::system_clock::from_time_t((time_t)get_payload_claim<int64_t>(claim::issued_at));
     }
     std::chrono::system_clock::time_point
     decoded_jwt::get_not_before() const
     {
-        return std::chrono::system_clock::from_time_t((time_t)get_payload_claim<int64_t>("nbf"));
+        return std::chrono::system_clock::from_time_t((time_t)get_payload_claim<int64_t>(claim::not_before));
     }
     std::chrono::system_clock::time_point
     decoded_jwt::get_expires_at() const
     {
-        return std::chrono::system_clock::from_time_t((time_t)get_payload_claim<int64_t>("exp"));
+        return std::chrono::system_clock::from_time_t((time_t)get_payload_claim<int64_t>(claim::expires_at));
     }
 
     bool
@@ -262,6 +276,10 @@ namespace httplib::jwt
         {
             ec = make_error_code(error::signature_verification);
         }
+        else
+        {
+            ec.clear();
+        }
         return ok;
     }
 
@@ -275,13 +293,13 @@ namespace httplib::jwt
     builder&
     builder::set_content_type(std::string_view cty)
     {
-        return set_header_claim("cty", boost::json::value(std::string(cty)));
+        return set_header_claim(claim::content_type, boost::json::value(std::string(cty)));
     }
 
     builder&
     builder::set_key_id(std::string_view kid)
     {
-        return set_header_claim("kid", boost::json::value(std::string(kid)));
+        return set_header_claim(claim::key_id, boost::json::value(std::string(kid)));
     }
 
     builder&
@@ -294,25 +312,25 @@ namespace httplib::jwt
     builder&
     builder::set_issuer(std::string_view iss)
     {
-        return set_payload_claim("iss", boost::json::value(std::string(iss)));
+        return set_payload_claim(claim::issuer, boost::json::value(std::string(iss)));
     }
 
     builder&
     builder::set_subject(std::string_view sub)
     {
-        return set_payload_claim("sub", boost::json::value(std::string(sub)));
+        return set_payload_claim(claim::subject, boost::json::value(std::string(sub)));
     }
 
     builder&
     builder::set_audience(std::string_view aud)
     {
-        return set_payload_claim("aud", boost::json::value(std::string(aud)));
+        return set_payload_claim(claim::audience, boost::json::value(std::string(aud)));
     }
 
     builder&
     builder::set_id(std::string_view id)
     {
-        return set_payload_claim("jti", boost::json::value(std::string(id)));
+        return set_payload_claim(claim::id, boost::json::value(std::string(id)));
     }
 
     builder&
@@ -356,24 +374,24 @@ namespace httplib::jwt
             = [](auto tp) { return std::chrono::duration_cast<std::chrono::seconds>(tp.time_since_epoch()).count(); };
 
         header_ = {
-            { "alg", alg.name() }
+            { claim::algorithm, alg.name() }
         };
         if (!type_.empty())
         {
-            header_.emplace("typ", type_);
+            header_.emplace(claim::type, type_);
         }
 
         if (iat_ != std::chrono::system_clock::time_point {})
         {
-            payload_.emplace("iat", to_epoch(iat_));
+            payload_.emplace(claim::issued_at, to_epoch(iat_));
         }
         if (nbf_ != std::chrono::system_clock::time_point {})
         {
-            payload_.emplace("nbf", to_epoch(nbf_));
+            payload_.emplace(claim::not_before, to_epoch(nbf_));
         }
         if (exp_ != std::chrono::system_clock::time_point {})
         {
-            payload_.emplace("exp", to_epoch(exp_));
+            payload_.emplace(claim::expires_at, to_epoch(exp_));
         }
         for (auto& [k, v] : claims_)
         {
@@ -387,10 +405,23 @@ namespace httplib::jwt
         return std::string(header_b64) + "." + std::string(payload_b64) + "." + signature_b64;
     }
 
-    decoded_jwt
+    boost::system::result<decoded_jwt>
     decode(std::string_view token)
     {
-        return decoded_jwt(token);
+        auto dot1 = token.find('.');
+        auto dot2 = dot1 != std::string_view::npos ? token.find('.', dot1 + 1) : std::string_view::npos;
+        if (dot1 == std::string_view::npos || dot2 == std::string_view::npos)
+        {
+            return make_error_code(error::invalid_token);
+        }
+        try
+        {
+            return decoded_jwt(token);
+        }
+        catch (std::exception const&)
+        {
+            return make_error_code(error::invalid_token);
+        }
     }
 
     verifier&
@@ -429,7 +460,7 @@ namespace httplib::jwt
     }
 
     verifier&
-    verifier::with_claim(std::string_view key, std::function<void(boost::json::value const&)> fn)
+    verifier::with_claim(std::string_view key, std::function<bool(boost::json::value const&)> fn)
     {
         custom_checks_.emplace_back(std::string(key), std::move(fn));
         return *this;
@@ -465,11 +496,9 @@ namespace httplib::jwt
         }
         for (auto& [key, fn] : custom_checks_)
         {
-            try
-            {
-                fn(jwt.get_payload().at(key));
-            }
-            catch (...)
+            auto payload = jwt.get_payload();
+            auto it = payload.as_object().find(key);
+            if (it == payload.as_object().end() || !fn(it->value()))
             {
                 ec = make_error_code(error::signature_verification);
                 return;

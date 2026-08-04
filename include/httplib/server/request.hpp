@@ -13,11 +13,6 @@
 namespace httplib::server
 {
 
-    namespace middleware
-    {
-        class session;
-    }
-
     class HTTPLIB_API request
     {
       public:
@@ -58,6 +53,7 @@ namespace httplib::server
         tcp::endpoint const& remote_endpoint() const;
 
         void set_custom_data(std::string key, std::any value);
+        void erase_custom_data(std::string const& key);
         std::any& custom_data(std::string const& key);
         std::any const& custom_data(std::string const& key) const;
         bool has_custom_data(std::string const& key) const;
@@ -75,9 +71,6 @@ namespace httplib::server
         {
             return std::any_cast<T>(custom_data(key));
         }
-
-        void set_session(std::shared_ptr<middleware::session> sess);
-        std::shared_ptr<middleware::session> session() const;
 
         std::string_view path_param(std::string const& key) const;
         void set_path_param(std::string const& key, std::string const& val);

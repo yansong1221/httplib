@@ -1,7 +1,6 @@
 #pragma once
 #include "chunked_body_reader.hpp"
 #include "httplib/server/chunk_reader.hpp"
-#include "httplib/server/middleware/session.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
@@ -113,21 +112,15 @@ namespace httplib::server
         {
             return custom_data_.at(key);
         }
+        void
+        erase_custom_data(std::string const& key)
+        {
+            custom_data_.erase(key);
+        }
         bool
         has_custom_data(std::string const& key) const
         {
             return custom_data_.contains(key);
-        }
-
-        void
-        set_session(std::shared_ptr<middleware::session> sess)
-        {
-            session_ = std::move(sess);
-        }
-        std::shared_ptr<middleware::session>
-        session() const
-        {
-            return session_;
         }
 
         struct buffer_body_read_ctx
@@ -267,7 +260,6 @@ namespace httplib::server
 
         std::unordered_map<std::string, std::string> path_params_;
         std::unordered_map<std::string, std::any> custom_data_;
-        std::shared_ptr<middleware::session> session_;
 
         std::shared_ptr<buffer_body_read_ctx> buffer_body_ctx_;
     };

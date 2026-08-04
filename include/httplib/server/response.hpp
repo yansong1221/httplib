@@ -70,6 +70,8 @@ namespace httplib::server
         impl* get_impl();
         impl const* get_impl() const;
 
+        bool is_chunked_done() const;
+
       protected:
         response(std::unique_ptr<impl>&& _impl);
 

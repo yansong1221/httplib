@@ -174,4 +174,10 @@ namespace httplib::server
         return impl_.get();
     }
 
+    bool
+    response::is_chunked_done() const
+    {
+        return impl_->chunk_writer_ && impl_->chunk_writer_->has_header();
+    }
+
 } // namespace httplib::server

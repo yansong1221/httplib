@@ -277,14 +277,14 @@ namespace httplib::server::middleware
             impl_->is_new_ = false;
         }
 
-        req.set_session(std::move(sess));
+        req.set_custom_data(session_key, sess);
         return true;
     }
 
     bool
     session_middleware::after(request& req, response& resp)
     {
-        auto sess = req.session();
+        auto sess = req.custom_data<std::shared_ptr<session>>(session_key);
 
         impl_->store_->save(*sess);
 
