@@ -91,22 +91,24 @@ namespace httplib::server
     void
     router::use(Aspects&&... asps)
     {
-        (use_impl(
-             [m = std::make_shared<std::decay_t<Aspects>>(
-                  std::forward<Aspects>(asps))](request& req, response& resp) mutable -> net::awaitable<bool>
-             {
-                 bool ok = true;
-                 co_await helper::do_before(*m, req, resp, ok);
-                 co_return ok;
-             },
-             [m = std::make_shared<std::decay_t<Aspects>>(
-                  std::forward<Aspects>(asps))](request& req, response& resp) mutable -> net::awaitable<bool>
-             {
-                 bool ok = true;
-                 co_await helper::do_after(*m, req, resp, ok);
-                 co_return ok;
-             }),
-         ...);
+        auto do_use = [this]<typename T>(T&& asp)
+        {
+            auto m = std::make_shared<std::decay_t<T>>(std::forward<T>(asp));
+            use_impl(
+                [m](request& req, response& resp) mutable -> net::awaitable<bool>
+                {
+                    bool ok = true;
+                    co_await helper::do_before(*m, req, resp, ok);
+                    co_return ok;
+                },
+                [m](request& req, response& resp) mutable -> net::awaitable<bool>
+                {
+                    bool ok = true;
+                    co_await helper::do_after(*m, req, resp, ok);
+                    co_return ok;
+                });
+        };
+        (do_use(std::forward<Aspects>(asps)), ...);
     }
 
     template <typename Func, typename... Aspects>

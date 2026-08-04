@@ -67,7 +67,7 @@ namespace httplib::server
 
       protected:
         using coro_http_handler_type = std::function<net::awaitable<void>(request& req, response& resp)>;
-        using coro_mw_type = std::function<net::awaitable<bool>(request& req, response& resp)>;
+        using coro_mw_handler_type = std::function<net::awaitable<bool>(request& req, response& resp)>;
         using http_handler_type = std::function<void(request& req, response& resp)>;
 
         template <typename Func, typename... Aspects>
@@ -88,7 +88,7 @@ namespace httplib::server
                                                    coro_http_handler_type&& handler)
             = 0;
 
-        virtual void use_impl(router::coro_mw_type before, router::coro_mw_type after) = 0;
+        virtual void use_impl(coro_mw_handler_type&& before, coro_mw_handler_type&& after) = 0;
     };
 
 } // namespace httplib::server

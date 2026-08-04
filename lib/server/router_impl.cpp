@@ -38,13 +38,8 @@ namespace httplib::server
     }
 
     router::router::coro_http_handler_type
-    router_impl::wrap_global(coro_http_handler_type handler) const
+    router_impl::wrap_global(coro_http_handler_type&& handler) const
     {
-        if (global_before_.empty())
-        {
-            return handler;
-        }
-
         return [handler = std::move(handler), this](request& req, response& resp) -> net::awaitable<void>
         {
             bool ok = true;
@@ -172,7 +167,7 @@ namespace httplib::server
     }
 
     void
-    router_impl::use_impl(router::coro_mw_type before, router::coro_mw_type after)
+    router_impl::use_impl(coro_mw_handler_type&& before, coro_mw_handler_type&& after)
     {
         std::unique_lock lock(mutex_);
         global_before_.push_back(std::move(before));

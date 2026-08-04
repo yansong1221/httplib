@@ -344,3 +344,46 @@ TEST_CASE("Bearer Auth: non-Bearer scheme returns 401", "[middleware]")
     auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/bearer-scheme", hdrs));
     REQUIRE(resp.result() == http::status::unauthorized);
 }
+
+TEST_CASE("Global middleware: applies to all routes", "[middleware]")
+{
+    test_scaffold ts;
+
+    ts.router().use(
+        mw::basic_auth([](std::string_view u, std::string_view p) { return u == "admin" && p == "secret"; }));
+
+    ts.router().set_http_handler<http::verb::get>("/public",
+                                                  [](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_string_content("ok"sv, "text/plain"sv); });
+    ts.router().set_http_handler<http::verb::get>("/private",
+                                                  [](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_string_content("secret"sv, "text/plain"sv); });
+    ts.start();
+
+    auto hdrs = httplib::http::fields();
+    hdrs.set(http::field::authorization, "Basic YWRtaW46c2VjcmV0");
+    auto resp1 = UNWRAP(ts.client->send_request(http::verb::get, "/public", hdrs));
+    REQUIRE(resp1.result() == http::status::ok);
+
+    auto resp2 = UNWRAP(ts.client->send_request(http::verb::get, "/private", hdrs));
+    REQUIRE(resp2.result() == http::status::ok);
+
+    auto resp3 = UNWRAP(ts.client->get("/public"));
+    REQUIRE(resp3.result() == http::status::unauthorized);
+}
+
+TEST_CASE("Global middleware: cors via use()", "[middleware]")
+{
+    test_scaffold ts;
+
+    ts.router().use(mw::cors {}.allow_origin("x"));
+
+    ts.router().set_http_handler<http::verb::get>("/gc",
+                                                  [](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_string_content("ok"sv, "text/plain"sv); });
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->get("/gc"));
+    REQUIRE(resp.result() == http::status::ok);
+    REQUIRE(std::string(resp[http::field::access_control_allow_origin]) == "x");
+}
