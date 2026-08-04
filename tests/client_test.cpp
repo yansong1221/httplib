@@ -13,9 +13,6 @@
 #include <fstream>
 #include <random>
 
-using namespace std::string_view_literals;
-namespace http = httplib::http;
-namespace net = httplib::net;
 namespace beast = httplib::beast;
 
 namespace
@@ -26,7 +23,8 @@ namespace
         net::io_context ioc;
         httplib::server::http_server server;
         httplib::tcp::endpoint endpoint;
-        std::thread thread;
+        net::thread_pool workers_ { 1 };
+        bool ssl_ = false;
 
         test_scaffold() : server(ioc)
         {
@@ -38,10 +36,7 @@ namespace
         {
             server.stop().wait();
             ioc.stop();
-            if (thread.joinable())
-            {
-                thread.join();
-            }
+            workers_.join();
         }
 
         void
@@ -62,18 +57,34 @@ namespace
             server.listen("127.0.0.1", 0);
             endpoint = server.local_endpoint();
             server.run();
-            thread = std::thread([this] { ioc.run(); });
+            net::post(workers_, [this] { ioc.run(); });
         }
 
         std::unique_ptr<httplib::client::http_client>
         make_client()
         {
-            auto c = std::make_unique<httplib::client::http_client>(ioc.get_executor(),
-                                                                    endpoint.address().to_string(),
-                                                                    endpoint.port());
+            auto c = std::make_unique<httplib::client::http_client>(
+                ioc.get_executor(),
+                std::format("{}://{}:{}",
+                            ssl_ ? "https" : "http",
+                            endpoint.address().to_string(),
+                            endpoint.port()));
             c->set_timeout(std::chrono::seconds(5));
             return c;
         }
+
+#ifdef HTTPLIB_ENABLED_SSL
+        void
+        start_ssl()
+        {
+            server.set_ssl(kTestCert, kTestKey, "test");
+            server.listen("127.0.0.1", 0);
+            endpoint = server.local_endpoint();
+            server.run();
+            ssl_ = true;
+            net::post(workers_, [this] { ioc.run(); });
+        }
+#endif
 
         auto&
         router()
@@ -92,7 +103,7 @@ namespace
             return endpoint.port();
         }
 
-        net::any_io_executor
+        auto
         executor()
         {
             return ioc.get_executor();
@@ -224,7 +235,7 @@ TEST_CASE("Client pool: closed connection still reusable", "[client]")
     }();
     raw->close();
 
-    // Re-acquire — gets the same connection, reconnects on next request
+    // Re-acquire �?gets the same connection, reconnects on next request
     auto h2 = pool.acquire(ts.host(), ts.port()).get();
     auto resp = UNWRAP(h2->get("/echo", params));
     REQUIRE(resp.result() == http::status::ok);
@@ -271,7 +282,7 @@ TEST_CASE("Client: custom chunk handler", "[client]")
     auto reader = client->create_reader();
 
     boost::asio::co_spawn(
-        ts.ioc,
+        ts.executor(),
         [&]() -> net::awaitable<void>
         {
             co_await writer->write_header(http::verb::get, "/chunked", {});
@@ -577,9 +588,40 @@ TEST_CASE("Client: create via URL", "[client]")
     ts.start_with_routes();
 
     auto url = std::format("http://{}:{}", ts.endpoint.address().to_string(), ts.endpoint.port());
-    auto client = httplib::client::http_client(ts.ioc, url);
+    auto client = httplib::client::http_client(ts.executor(), url);
     client.set_timeout(std::chrono::seconds(5));
     auto resp = client.get("/url-test");
     REQUIRE(resp.has_value());
     REQUIRE(resp->result() == http::status::ok);
 }
+
+TEST_CASE("Client: set_verify_ssl does not affect HTTP", "[client]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>("/verify-test",
+                                                  [](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_string_content("ok"sv, "text/plain"); });
+    ts.start_with_routes();
+
+    auto client = ts.make_client();
+    client->set_verify_ssl(true);
+    auto resp = client->get("/verify-test");
+    REQUIRE(resp.has_value());
+    REQUIRE(resp->result() == http::status::ok);
+}
+
+#ifdef HTTPLIB_ENABLED_SSL
+TEST_CASE("Client: SSL request via start_ssl", "[client]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>("/ssl-test",
+                                                  [](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_string_content("ssl-ok"sv, "text/plain"); });
+    ts.start_ssl();
+
+    auto client = ts.make_client();
+    auto resp = client->get("/ssl-test");
+    REQUIRE(resp.has_value());
+    REQUIRE(resp->result() == http::status::ok);
+}
+#endif

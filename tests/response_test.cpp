@@ -95,7 +95,7 @@ TEST_CASE("Response: set_chunked_write_handler with multiple chunks", "[response
     auto reader = ts.client->create_reader();
 
     boost::asio::co_spawn(
-        ts.ioc,
+        ts.executor(),
         [&]() -> net::awaitable<void>
         {
             co_await writer->write_header(http::verb::get, "/stream", {});

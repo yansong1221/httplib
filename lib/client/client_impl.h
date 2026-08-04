@@ -138,6 +138,7 @@ namespace httplib::client
         std::string const host_value_;
         uint16_t const port_;
         bool const use_ssl_;
+        bool verify_ssl_ = false;
 
         std::unique_ptr<http_stream> stream_;
         mutable std::recursive_mutex stream_mutex_;

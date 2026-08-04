@@ -26,7 +26,7 @@ TEST_CASE("SSE: server sends single event", "[sse]")
     std::vector<httplib::client::sse_reader::sse_event> events;
 
     boost::asio::co_spawn(
-        ts.ioc,
+        ts.executor(),
         [&]() -> net::awaitable<void>
         {
             auto sse = ts.client->create_sse_reader();
@@ -62,7 +62,7 @@ TEST_CASE("SSE: server sends multiple events", "[sse]")
     std::vector<httplib::client::sse_reader::sse_event> events;
 
     boost::asio::co_spawn(
-        ts.ioc,
+        ts.executor(),
         [&]() -> net::awaitable<void>
         {
             auto sse = ts.client->create_sse_reader();
@@ -98,7 +98,7 @@ TEST_CASE("SSE: event with id and type", "[sse]")
     std::vector<httplib::client::sse_reader::sse_event> events;
 
     boost::asio::co_spawn(
-        ts.ioc,
+        ts.executor(),
         [&]() -> net::awaitable<void>
         {
             auto sse = ts.client->create_sse_reader();
@@ -134,7 +134,7 @@ TEST_CASE("SSE: retry interval", "[sse]")
     std::vector<httplib::client::sse_reader::sse_event> events;
 
     boost::asio::co_spawn(
-        ts.ioc,
+        ts.executor(),
         [&]() -> net::awaitable<void>
         {
             auto sse = ts.client->create_sse_reader();
@@ -170,7 +170,7 @@ TEST_CASE("SSE: comment is ignored", "[sse]")
     std::vector<httplib::client::sse_reader::sse_event> events;
 
     boost::asio::co_spawn(
-        ts.ioc,
+        ts.executor(),
         [&]() -> net::awaitable<void>
         {
             auto sse = ts.client->create_sse_reader();
@@ -202,7 +202,7 @@ TEST_CASE("SSE: Content-Type is text/event-stream", "[sse]")
     ts.start();
 
     boost::asio::co_spawn(
-        ts.ioc,
+        ts.executor(),
         [&]() -> net::awaitable<void>
         {
             auto sse = ts.client->create_sse_reader();
@@ -236,7 +236,7 @@ TEST_CASE("SSE: client can stop receiving by returning false", "[sse]")
     std::vector<httplib::client::sse_reader::sse_event> events;
 
     boost::asio::co_spawn(
-        ts.ioc,
+        ts.executor(),
         [&]() -> net::awaitable<void>
         {
             auto sse = ts.client->create_sse_reader();
@@ -288,7 +288,7 @@ TEST_CASE("SSE: multi-line data", "[sse]")
     std::vector<httplib::client::sse_reader::sse_event> events;
 
     boost::asio::co_spawn(
-        ts.ioc,
+        ts.executor(),
         [&]() -> net::awaitable<void>
         {
             auto sse = ts.client->create_sse_reader();

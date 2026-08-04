@@ -41,6 +41,7 @@ namespace httplib::client
         void set_logger(std::shared_ptr<spdlog::logger> logger);
 
         void set_max_redirects(int n);
+        void set_verify_ssl(bool verify);
 
       public:
         // ---- HTTP method shorthands (no body) ----

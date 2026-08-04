@@ -32,7 +32,7 @@ TEST_CASE("NDJSON: server sends single line", "[ndjson]")
     std::vector<boost::json::value> items;
 
     boost::asio::co_spawn(
-        ts.ioc,
+        ts.executor(),
         [&]() -> net::awaitable<void>
         {
             auto ndjson = ts.client->create_ndjson_reader();
@@ -81,7 +81,7 @@ TEST_CASE("NDJSON: server sends multiple lines", "[ndjson]")
     std::vector<boost::json::value> items;
 
     boost::asio::co_spawn(
-        ts.ioc,
+        ts.executor(),
         [&]() -> net::awaitable<void>
         {
             auto ndjson = ts.client->create_ndjson_reader();
@@ -119,7 +119,7 @@ TEST_CASE("NDJSON: Content-Type is application/x-ndjson", "[ndjson]")
     ts.start();
 
     boost::asio::co_spawn(
-        ts.ioc,
+        ts.executor(),
         [&]() -> net::awaitable<void>
         {
             auto ndjson = ts.client->create_ndjson_reader();
@@ -164,7 +164,7 @@ TEST_CASE("NDJSON: reader stops early", "[ndjson]")
     std::vector<boost::json::value> items;
 
     boost::asio::co_spawn(
-        ts.ioc,
+        ts.executor(),
         [&]() -> net::awaitable<void>
         {
             auto ndjson = ts.client->create_ndjson_reader();

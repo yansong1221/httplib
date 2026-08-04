@@ -674,4 +674,10 @@ namespace httplib::client
         impl_->set_max_redirects(n);
     }
 
+    void
+    http_client::set_verify_ssl(bool verify)
+    {
+        impl_->verify_ssl_ = verify;
+    }
+
 } // namespace httplib::client

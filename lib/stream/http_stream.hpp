@@ -162,7 +162,7 @@ namespace httplib
         http_stream(stream_t&& stream) : stream_(std::move(stream)) {}
 
         static boost::system::result<stream_t>
-        create_stream(net::any_io_executor const& executor, std::string const& host, bool use_ssl)
+        create_stream(net::any_io_executor const& executor, std::string const& host, bool use_ssl, bool verify_ssl = false)
         {
             if (use_ssl)
             {
@@ -172,8 +172,11 @@ namespace httplib
 
                 auto ssl_ctx = std::make_shared<ssl::context>(ssl::context::sslv23);
                 ssl_ctx->set_options(ssl_options);
-                ssl_ctx->set_default_verify_paths();
-                ssl_ctx->set_verify_mode(ssl::verify_none);
+                ssl_ctx->set_verify_mode(verify_ssl ? ssl::verify_peer : ssl::verify_none);
+                if (verify_ssl)
+                {
+                    ssl_ctx->set_default_verify_paths();
+                }
 
                 tls_stream stream(executor, ssl_ctx);
                 if (!SSL_set_tlsext_host_name(stream.native_handle(), host.c_str()))

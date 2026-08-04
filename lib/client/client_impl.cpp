@@ -165,6 +165,7 @@ namespace httplib::client
                     auto new_impl = std::make_unique<impl>(executor_, std::move(new_host), new_port, new_ssl);
                     new_impl->timeout_policy_ = timeout_policy_;
                     new_impl->timeout_ = timeout_;
+                    new_impl->verify_ssl_ = verify_ssl_;
                     new_impl->set_logger(logger());
                     new_impl->max_redirects_ = max_redirects_ - r - 1;
 
@@ -259,7 +260,7 @@ namespace httplib::client
         if (!is_open())
         {
             close();
-            auto stream_result = http_stream::create_stream(executor_, host_, use_ssl_);
+            auto stream_result = http_stream::create_stream(executor_, host_, use_ssl_, verify_ssl_);
             if (!stream_result)
             {
                 co_return stream_result.error();

@@ -285,14 +285,14 @@ TEST_CASE("Chunked: chunked handler does not affect path that only has regular h
 }
 
 static std::string
-send_chunked(net::io_context& ioc,
+send_chunked(net::any_io_executor ex,
              httplib::client::http_client& client,
              http::verb method,
              std::string_view path,
              std::vector<std::string> chunks)
 {
     return net::co_spawn(
-               ioc,
+               ex,
                [&client, method, path, chunks = std::move(chunks)]() -> net::awaitable<std::string>
                {
                    auto writer = client.create_writer();
@@ -361,7 +361,7 @@ TEST_CASE("Chunked: buffer_body receives de-chunked data", "[chunked]")
         });
     ts.start();
 
-    auto result = send_chunked(ts.ioc, *ts.client, http::verb::post, "/chunked/read", { "Hello", " World" });
+    auto result = send_chunked(ts.executor(), *ts.client, http::verb::post, "/chunked/read", { "Hello", " World" });
     REQUIRE(result == "Hello World");
 }
 
@@ -395,7 +395,7 @@ TEST_CASE("Chunked: multiple chunks are de-chunked into single body", "[chunked]
     ts.start();
 
     auto result
-        = send_chunked(ts.ioc, *ts.client, http::verb::post, "/chunked/read-ext", { "chunk1", "chunk2", "chunk3" });
+        = send_chunked(ts.executor(), *ts.client, http::verb::post, "/chunked/read-ext", { "chunk1", "chunk2", "chunk3" });
     REQUIRE(result == "chunk1chunk2chunk3");
 }
 
@@ -429,7 +429,7 @@ TEST_CASE("Chunked: large chunk via buffer_body", "[chunked]")
     ts.start();
 
     std::string large_chunk(10000, 'X');
-    auto result = send_chunked(ts.ioc, *ts.client, http::verb::post, "/chunked/read-large", { large_chunk });
+    auto result = send_chunked(ts.executor(), *ts.client, http::verb::post, "/chunked/read-large", { large_chunk });
     REQUIRE(result == "10000");
 }
 
@@ -449,7 +449,7 @@ TEST_CASE("Chunked: empty chunks via buffer_body", "[chunked]")
         });
     ts.start();
 
-    auto result = send_chunked(ts.ioc, *ts.client, http::verb::post, "/chunked/read-empty", {});
+    auto result = send_chunked(ts.executor(), *ts.client, http::verb::post, "/chunked/read-empty", {});
     REQUIRE(result == "0");
 }
 
@@ -474,7 +474,7 @@ TEST_CASE("Chunked: is_buffer_body_handler() is true", "[chunked]")
         });
     ts.start();
 
-    auto result = send_chunked(ts.ioc, *ts.client, http::verb::post, "/chunked/read-is-chunked", { "data" });
+    auto result = send_chunked(ts.executor(), *ts.client, http::verb::post, "/chunked/read-is-chunked", { "data" });
     REQUIRE(result == "yes:data");
 }
 
@@ -508,7 +508,7 @@ TEST_CASE("Chunked: with path parameters via buffer_body", "[chunked]")
         });
     ts.start();
 
-    auto result = send_chunked(ts.ioc, *ts.client, http::verb::post, "/chunked/read/42", { "hello" });
+    auto result = send_chunked(ts.executor(), *ts.client, http::verb::post, "/chunked/read/42", { "hello" });
     REQUIRE(result == "42:hello");
 }
 
@@ -542,7 +542,7 @@ TEST_CASE("Chunked: with wildcard path via buffer_body", "[chunked]")
         });
     ts.start();
 
-    auto result = send_chunked(ts.ioc, *ts.client, http::verb::post, "/chunked/read-ws/a/b", { "xyz" });
+    auto result = send_chunked(ts.executor(), *ts.client, http::verb::post, "/chunked/read-ws/a/b", { "xyz" });
     REQUIRE(result == "a/b:xyz");
 }
 
@@ -575,7 +575,7 @@ TEST_CASE("Chunked: PUT via buffer_body", "[chunked]")
         });
     ts.start();
 
-    auto result = send_chunked(ts.ioc, *ts.client, http::verb::put, "/chunked/read-put", { "put-body" });
+    auto result = send_chunked(ts.executor(), *ts.client, http::verb::put, "/chunked/read-put", { "put-body" });
     REQUIRE(result == "PUT:put-body");
 }
 
@@ -609,10 +609,10 @@ TEST_CASE("Chunked: multi-verb via buffer_body", "[chunked]")
         });
     ts.start();
 
-    auto post_result = send_chunked(ts.ioc, *ts.client, http::verb::post, "/chunked/read-multi", { "from-post" });
+    auto post_result = send_chunked(ts.executor(), *ts.client, http::verb::post, "/chunked/read-multi", { "from-post" });
     REQUIRE(post_result == "POST:from-post");
 
-    auto patch_result = send_chunked(ts.ioc, *ts.client, http::verb::patch, "/chunked/read-multi", { "from-patch" });
+    auto patch_result = send_chunked(ts.executor(), *ts.client, http::verb::patch, "/chunked/read-multi", { "from-patch" });
     REQUIRE(patch_result == "PATCH:from-patch");
 }
 
@@ -645,6 +645,6 @@ TEST_CASE("Chunked: sync send_chunked_request via buffer_body", "[chunked]")
         });
     ts.start();
 
-    auto result = send_chunked(ts.ioc, *ts.client, http::verb::post, "/chunked/sync", { "via", "sync" });
+    auto result = send_chunked(ts.executor(), *ts.client, http::verb::post, "/chunked/sync", { "via", "sync" });
     REQUIRE(result == "viasync");
 }
