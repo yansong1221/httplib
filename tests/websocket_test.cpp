@@ -387,4 +387,57 @@ TEST_CASE("WebSocket is_open flag", "[websocket]")
     REQUIRE(send_done);
     REQUIRE(open_is_open);
     REQUIRE(msg_is_open);
+} // namespace
+
+TEST_CASE("WebSocket middleware: before() runs during upgrade", "[websocket]")
+{
+    ws_test_server ts;
+    bool mw_called = false;
+    bool open_ok = false;
+
+    struct test_mw
+    {
+        bool* called;
+        bool
+        before(httplib::server::request&, httplib::server::response&)
+        {
+            *called = true;
+            return true;
+        }
+    };
+
+    ts.router().set_ws_handler(
+        "/ws-mw",
+        [&](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void>
+        {
+            open_ok = true;
+            co_return;
+        },
+        [&](httplib::server::websocket_conn::weak_ptr, std::string_view, bool) -> net::awaitable<void> { co_return; },
+        [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; },
+        test_mw { &mw_called });
+    ts.start();
+
+    net::io_context client_ioc;
+    httplib::client::ws_client ws_client(client_ioc, ts.host(), ts.port());
+
+    bool connected = false;
+    ws_client.set_handler(
+        [&](boost::system::error_code) -> net::awaitable<void>
+        {
+            connected = true;
+            co_return;
+        },
+        [&](std::string_view, bool) -> net::awaitable<void> { co_return; },
+        []() -> net::awaitable<void> { co_return; });
+
+    auto work = net::make_work_guard(client_ioc);
+    ws_client.run("/ws-mw");
+    client_ioc.run_for(std::chrono::seconds(3));
+
+    REQUIRE(connected);
+    REQUIRE(open_ok);
+    REQUIRE(mw_called);
+
+    client_ioc.stop();
 }

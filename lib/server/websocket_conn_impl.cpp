@@ -1,5 +1,6 @@
 #include "websocket_conn_impl.hpp"
 #include "request_impl.hpp"
+#include "response_impl.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
@@ -101,6 +102,13 @@ namespace httplib::server
         if (!entry)
         {
             co_return;
+        }
+
+        if (entry->aspect_handler)
+        {
+            auto& req_impl = get_impl(req_);
+            auto resp = response::impl::make_response(req_impl.version(), req_impl.keep_alive());
+            co_await entry->aspect_handler(req_, resp);
         }
 
         boost::system::error_code ec;

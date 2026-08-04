@@ -40,11 +40,12 @@ namespace httplib::server
         template <typename Func, typename... Aspects>
         void set_http_not_found_handler(Func&& handler, Aspects&&... asps);
 
-        template <typename OpenFunc, typename MessageFunc, typename CloseFunc>
+        template <typename OpenFunc, typename MessageFunc, typename CloseFunc, typename... Aspects>
         void set_ws_handler(std::string_view key,
                             OpenFunc&& open_handler,
                             MessageFunc&& message_handler,
-                            CloseFunc&& close_handler);
+                            CloseFunc&& close_handler,
+                            Aspects&&... asps);
 
         template <typename... Aspects>
         void set_static_mount_point(std::string const& mount_point, fs::path const& dir, Aspects&&... asps);
@@ -79,7 +80,8 @@ namespace httplib::server
         virtual void set_ws_handler_impl(std::string_view key,
                                          websocket_conn::coro_open_handler_type&& open_handler,
                                          websocket_conn::coro_message_handler_type&& message_handler,
-                                         websocket_conn::coro_close_handler_type&& close_handler)
+                                         websocket_conn::coro_close_handler_type&& close_handler,
+                                         coro_http_handler_type&& aspect_handler)
             = 0;
         virtual void set_post_routing_handler_impl(coro_http_handler_type&& handler) = 0;
 

@@ -37,6 +37,7 @@ namespace httplib::server
             websocket_conn::coro_open_handler_type open_handler;
             websocket_conn::coro_close_handler_type close_handler;
             websocket_conn::coro_message_handler_type message_handler;
+            coro_http_handler_type aspect_handler;
         };
         std::optional<ws_handler_entry> query_ws_handler(request& req) const;
 
@@ -49,7 +50,8 @@ namespace httplib::server
         void set_ws_handler_impl(std::string_view path,
                                  websocket_conn::coro_open_handler_type&& open_handler,
                                  websocket_conn::coro_message_handler_type&& message_handler,
-                                 websocket_conn::coro_close_handler_type&& close_handler) override;
+                                 websocket_conn::coro_close_handler_type&& close_handler,
+                                 coro_http_handler_type&& aspect_handler) override;
         void set_post_routing_handler_impl(coro_http_handler_type&& handler) override;
         void set_chunked_http_handler_impl(http::verb method,
                                            std::string_view key,

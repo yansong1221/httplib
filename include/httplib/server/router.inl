@@ -178,17 +178,31 @@ namespace httplib::server
         set_not_found_handler_impl(make_coro_http_handler(std::forward<Func>(handler), std::forward<Aspects>(asps)...));
     }
 
-    template <typename OpenFunc, typename MessageFunc, typename CloseFunc>
+    template <typename OpenFunc, typename MessageFunc, typename CloseFunc, typename... Aspects>
     void
     router::set_ws_handler(std::string_view key,
                            OpenFunc&& open_handler,
                            MessageFunc&& message_handler,
-                           CloseFunc&& close_handler)
+                           CloseFunc&& close_handler,
+                           Aspects&&... asps)
     {
+        using helper::has_before_v;
+        auto aspect_handler = [&]() -> coro_http_handler_type
+        {
+            if constexpr (sizeof...(Aspects) > 0)
+            {
+                return make_coro_http_handler([](request&, response&) {}, std::forward<Aspects>(asps)...);
+            }
+            else
+            {
+                return nullptr;
+            }
+        }();
         set_ws_handler_impl(key,
                             util::make_coro_handler(std::forward<OpenFunc>(open_handler)),
                             util::make_coro_handler(std::forward<MessageFunc>(message_handler)),
-                            util::make_coro_handler(std::forward<CloseFunc>(close_handler)));
+                            util::make_coro_handler(std::forward<CloseFunc>(close_handler)),
+                            std::move(aspect_handler));
     }
 
     template <typename... Aspects>
