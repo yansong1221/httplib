@@ -92,7 +92,8 @@ TEST_CASE("cors_middleware: OPTIONS preflight is short-circuited", "[middleware]
 TEST_CASE("cors_middleware: custom origin and credentials", "[middleware]")
 {
     test_scaffold ts;
-    auto cors_middleware = mw::cors_middleware().allow_origin("https://example.com").allow_credentials(true).max_age(3600);
+    auto cors_middleware
+        = mw::cors_middleware().allow_origin("https://example.com").allow_credentials(true).max_age(3600);
 
     ts.router().set_http_handler<http::verb::get>(
         "/data",
@@ -391,8 +392,8 @@ TEST_CASE("Global middleware: applies to all routes", "[middleware]")
 {
     test_scaffold ts;
 
-    ts.router().use(
-        mw::basic_auth_middleware([](std::string_view u, std::string_view p) { return u == "admin" && p == "secret"; }));
+    ts.router().use(mw::basic_auth_middleware([](std::string_view u, std::string_view p)
+                                              { return u == "admin" && p == "secret"; }));
 
     ts.router().set_http_handler<http::verb::get>("/public",
                                                   [](httplib::server::request&, httplib::server::response& resp)

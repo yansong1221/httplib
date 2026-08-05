@@ -16,8 +16,14 @@ namespace httplib::server::middleware
         std::string header_name;
     };
 
-    jwt_auth_middleware::jwt_auth_middleware(jwt::algorithm const& alg) : impl_(std::make_unique<impl>()) { impl_->alg = alg.clone(); }
-    jwt_auth_middleware::jwt_auth_middleware(jwt_auth_middleware const& other) : impl_(std::make_unique<impl>(*other.impl_)) {}
+    jwt_auth_middleware::jwt_auth_middleware(jwt::algorithm const& alg) : impl_(std::make_unique<impl>())
+    {
+        impl_->alg = alg.clone();
+    }
+    jwt_auth_middleware::jwt_auth_middleware(jwt_auth_middleware const& other)
+        : impl_(std::make_unique<impl>(*other.impl_))
+    {
+    }
     jwt_auth_middleware::jwt_auth_middleware(jwt_auth_middleware&&) noexcept = default;
     jwt_auth_middleware::~jwt_auth_middleware() = default;
     jwt_auth_middleware&

@@ -16,8 +16,8 @@ namespace net = httplib::net;
 
 namespace
 {
-    using test_common::test_scaffold;
     using test_common::as_string;
+    using test_common::test_scaffold;
 
     boost::json::value const&
     as_json(httplib::client::http_client::response const& resp)

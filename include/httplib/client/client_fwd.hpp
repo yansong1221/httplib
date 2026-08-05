@@ -7,6 +7,9 @@ namespace httplib::client
 
     class http_client;
     class http_client_pool;
+    class downloader;
+    class cache;
+    class disk_cache;
     class header_read_session;
     class read_session;
     class write_session;

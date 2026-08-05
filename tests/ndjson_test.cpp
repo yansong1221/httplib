@@ -1,5 +1,5 @@
-#include "common.hpp"
 #include "client/ndjson_reader_impl.hpp"
+#include "common.hpp"
 #include "httplib/server/ndjson_writer.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"

@@ -5,8 +5,8 @@
 
 namespace
 {
-    using test_common::test_scaffold;
     using test_common::as_string;
+    using test_common::test_scaffold;
 
     void
     set_text(httplib::server::response& resp, std::string_view body, http::status status = http::status::ok)

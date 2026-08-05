@@ -1,13 +1,11 @@
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/util/use_awaitable.hpp"
-#include <algorithm>
 #include <atomic>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/use_future.hpp>
-#include <boost/system/system_error.hpp>
 #include <deque>
 #include <mutex>
 #include <string>
@@ -143,9 +141,12 @@ namespace httplib::client
         release(std::unique_ptr<http_client> conn)
         {
             if (!conn)
+            {
                 return;
+            }
 
-            if (conn->has_active_session()) {
+            if (conn->has_active_session())
+            {
                 conn->close();
                 return;
             }

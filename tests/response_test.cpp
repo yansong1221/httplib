@@ -1,9 +1,9 @@
 #include "common.hpp"
-#include "httplib/server/chunk_writer.hpp"
 #include "httplib/body/file_body.hpp"
 #include "httplib/body/json_body.hpp"
 #include "httplib/body/string_body.hpp"
 #include "httplib/client/write_session.hpp"
+#include "httplib/server/chunk_writer.hpp"
 #include "httplib/server/mount_point_entry.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
@@ -19,8 +19,8 @@ namespace net = httplib::net;
 
 namespace
 {
-    using test_common::test_scaffold;
     using test_common::as_string;
+    using test_common::test_scaffold;
 
     void
     set_text(httplib::server::response& resp, std::string_view body, http::status status = http::status::ok)
