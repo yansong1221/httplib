@@ -679,7 +679,7 @@ int
 main(int argc, char** argv)
 {
     std::string mode = "server";
-    std::string host = "127.0.0.1";
+    std::string host = "0.0.0.0";
     uint16_t port = 18808;
     bool use_ssl = true;
 
@@ -761,6 +761,7 @@ main(int argc, char** argv)
         setup_static_files(router);
 
         svr.set_reverse_proxy("/*", "http://192.168.101.8:80");
+        svr.set_ws_forward("/ws/forward", "ws://192.168.101.8:18808/ws");
 
         router.set_http_handler<http::verb::post>("/api/shutdown",
                                                   [&](httplib::server::request&, httplib::server::response& resp)

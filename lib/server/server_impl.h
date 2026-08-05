@@ -87,6 +87,10 @@ namespace httplib::server
                                http_server::proxy_resolver resolver,
                                http_server::proxy_header_callback on_headers);
 
+        void set_ws_forward(std::string_view location,
+                            http_server::proxy_resolver resolver,
+                            http_server::proxy_header_callback on_headers);
+
         void set_proxy_pool_size(size_t max_size);
 
         void use_ssl(net::const_buffer const& cert_file, net::const_buffer const& key_file, std::string passwd = {});

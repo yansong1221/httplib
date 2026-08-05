@@ -1046,9 +1046,7 @@ namespace httplib::client
     // =========================================================================
 
     net::awaitable<boost::system::error_code>
-    downloader::impl::async_download(std::string_view url,
-                                     fs::path const& save_path,
-                                     http::fields const& headers)
+    downloader::impl::async_download(std::string_view url, fs::path const& save_path, http::fields const& headers)
     {
         if (cancelled_.exchange(false, std::memory_order_relaxed))
         {
@@ -1172,8 +1170,7 @@ namespace httplib::client
     boost::system::error_code
     downloader::download(std::string_view url, fs::path const& save_path, http::fields const& headers)
     {
-        auto future = net::co_spawn(
-            impl_->executor_, impl_->async_download(url, save_path, headers), net::use_future);
+        auto future = net::co_spawn(impl_->executor_, impl_->async_download(url, save_path, headers), net::use_future);
         return future.get();
     }
 

@@ -57,13 +57,15 @@ namespace httplib::server
 
         void set_upload_dir(fs::path const& dir);
         void set_upload_file_limit(std::uint64_t max_bytes);
-        using proxy_header_callback = std::function<void(request& req, http::fields& headers)>;
-        using proxy_resolver = std::function<std::string(request& req)>;
+        using proxy_header_callback = std::function<net::awaitable<void>(request& req, http::fields& headers)>;
+        using proxy_resolver = std::function<net::awaitable<std::string>(request& req)>;
 
         void set_reverse_proxy(std::string_view location, std::string_view url, proxy_header_callback on_headers = {});
         void set_reverse_proxy(std::string_view location,
                                proxy_resolver resolver,
                                proxy_header_callback on_headers = {});
+        void set_ws_forward(std::string_view location, std::string_view url, proxy_header_callback on_headers = {});
+        void set_ws_forward(std::string_view location, proxy_resolver resolver, proxy_header_callback on_headers = {});
         void set_proxy_pool_size(size_t max_size);
         void set_ssl(std::span<char const> const& cert_file,
                      std::span<char const> const& key_file,

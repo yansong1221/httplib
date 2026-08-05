@@ -151,13 +151,28 @@ namespace httplib::server
     http_server::set_reverse_proxy(std::string_view location, std::string_view url, proxy_header_callback on_headers)
     {
         auto u = std::string(url);
-        impl_->set_reverse_proxy(location, [u = std::move(u)](request&) { return u; }, std::move(on_headers));
+        impl_->set_reverse_proxy(
+            location, [u = std::move(u)](request&) -> net::awaitable<std::string> { co_return u; }, std::move(on_headers));
     }
 
     void
     http_server::set_reverse_proxy(std::string_view location, proxy_resolver resolver, proxy_header_callback on_headers)
     {
         impl_->set_reverse_proxy(location, std::move(resolver), std::move(on_headers));
+    }
+
+    void
+    http_server::set_ws_forward(std::string_view location, std::string_view url, proxy_header_callback on_headers)
+    {
+        auto u = std::string(url);
+        impl_->set_ws_forward(
+            location, [u = std::move(u)](request&) -> net::awaitable<std::string> { co_return u; }, std::move(on_headers));
+    }
+
+    void
+    http_server::set_ws_forward(std::string_view location, proxy_resolver resolver, proxy_header_callback on_headers)
+    {
+        impl_->set_ws_forward(location, std::move(resolver), std::move(on_headers));
     }
 
     void

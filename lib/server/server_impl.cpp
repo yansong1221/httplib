@@ -3,6 +3,7 @@
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/read_session.hpp"
 #include "httplib/client/write_session.hpp"
+#include "httplib/client/ws_client.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "httplib/util/when_all.hpp"
@@ -21,8 +22,49 @@
 
 namespace httplib::server
 {
-    namespace
+    namespace detail
     {
+
+        constexpr auto kWsForwardKey = "ws-forward";
+        using ws_client_ptr = std::shared_ptr<client::ws_client>;
+
+        static std::string
+        strip_proxy_prefix(std::string_view route)
+        {
+            std::string result(route);
+            while (!result.empty() && (result.back() == '/' || result.back() == '*'))
+            {
+                result.pop_back();
+            }
+            return result;
+        }
+
+        static std::string
+        make_upstream_path(std::string_view client_target,
+                           std::string_view proxy_prefix,
+                           std::string_view upstream_base)
+        {
+            std::string tail(client_target);
+            tail.erase(0, proxy_prefix.size());
+
+            if (tail.empty())
+            {
+                return upstream_base.empty() ? std::string("/") : std::string(upstream_base);
+            }
+
+            if (tail[0] != '/')
+            {
+                tail.insert(0, 1, '/');
+            }
+
+            std::string result(upstream_base);
+            if (result.ends_with('/'))
+            {
+                result.pop_back();
+            }
+            result += tail;
+            return result;
+        }
 
         static http::status
         upstream_error_to_status(boost::system::error_code ec)
@@ -34,7 +76,7 @@ namespace httplib::server
             return http::status::bad_gateway;
         }
 
-    } // namespace
+    } // namespace detail
 
     http_server::impl::impl(net::any_io_executor const& ex, http_server& owner) : ex_(ex), acceptor_(ex), owner_(&owner)
     {
@@ -353,13 +395,7 @@ namespace httplib::server
                                          http_server::proxy_resolver resolver,
                                          http_server::proxy_header_callback on_headers)
     {
-        std::string prefix(location);
-        while (!prefix.empty() && (prefix.back() == '/' || prefix.back() == '*'))
-        {
-            prefix.pop_back();
-        }
-
-        std::string route = prefix + "/*";
+        std::string prefix = detail::strip_proxy_prefix(location);
 
         router_.set_chunked_http_handler<http::verb::get,
                                          http::verb::head,
@@ -368,12 +404,12 @@ namespace httplib::server
                                          http::verb::patch,
                                          http::verb::delete_,
                                          http::verb::options>(
-            route,
+            location,
             [this, prefix, resolver = std::move(resolver), on_headers = std::move(on_headers)](
                 request& req,
                 response& resp) -> net::awaitable<void>
             {
-                auto url = resolver(req);
+                auto url = co_await resolver(req);
                 logger()->debug("[proxy] {} {} -> {}", req.method_string(), req.target(), url);
 
                 auto r = boost::urls::parse_uri(url);
@@ -390,20 +426,7 @@ namespace httplib::server
                 port = u.has_port() ? u.port_number() : port;
                 auto ssl = u.scheme_id() == boost::urls::scheme::https;
                 std::string upstream_prefix(u.encoded_path());
-                std::string target(req.target());
-
-                if (target.starts_with(prefix))
-                {
-                    target = target.substr(prefix.size());
-                }
-                if (!upstream_prefix.empty())
-                {
-                    target.insert(0, upstream_prefix);
-                }
-                if (target.empty() || target[0] != '/')
-                {
-                    target.insert(0, 1, '/');
-                }
+                auto upstream_target = detail::make_upstream_path(req.target(), prefix, upstream_prefix);
                 http::fields upstream_headers(req.base());
 
                 // Strip and rewrite Cookie Domain/Path before forwarding upstream
@@ -477,7 +500,7 @@ namespace httplib::server
 
                 if (on_headers)
                 {
-                    on_headers(req, upstream_headers);
+                    co_await on_headers(req, upstream_headers);
                 }
 
                 auto client = co_await proxy_pool_->async_acquire(host, port, ssl);
@@ -491,10 +514,11 @@ namespace httplib::server
                 auto writer = client->create_writer();
                 auto reader = client->create_reader();
 
-                if (auto rel_ec = co_await writer->write_header(req.method(), target, upstream_headers); rel_ec)
+                if (auto rel_ec = co_await writer->write_header(req.method(), upstream_target, upstream_headers);
+                    rel_ec)
                 {
                     logger()->trace("[proxy] write_header to {}:{} failed: {}", host, port, rel_ec.message());
-                    resp.set_error_content(upstream_error_to_status(rel_ec));
+                    resp.set_error_content(detail::upstream_error_to_status(rel_ec));
                     co_return;
                 }
 
@@ -515,7 +539,7 @@ namespace httplib::server
                     if (auto rel_ec = co_await writer->write_body(net::buffer(relay_buf, bytes), more); rel_ec)
                     {
                         logger()->trace("[proxy] write_body to {}:{} failed: {}", host, port, rel_ec.message());
-                        resp.set_error_content(upstream_error_to_status(rel_ec));
+                        resp.set_error_content(detail::upstream_error_to_status(rel_ec));
                         co_return;
                     }
                 }
@@ -523,7 +547,7 @@ namespace httplib::server
                 if (auto rel_ec = co_await reader->read_header(); rel_ec)
                 {
                     logger()->trace("[proxy] read_header from {}:{} failed: {}", host, port, rel_ec.message());
-                    resp.set_error_content(upstream_error_to_status(rel_ec));
+                    resp.set_error_content(detail::upstream_error_to_status(rel_ec));
                     co_return;
                 }
 
@@ -560,6 +584,147 @@ namespace httplib::server
                     }
                 }
             });
+    }
+
+    void
+    http_server::impl::set_ws_forward(std::string_view location,
+                                      http_server::proxy_resolver resolver,
+                                      http_server::proxy_header_callback on_headers)
+    {
+        std::string prefix = detail::strip_proxy_prefix(location);
+
+        auto open_handler = [this, prefix, resolver = std::move(resolver), on_headers = std::move(on_headers)](
+                                websocket_conn::weak_ptr wp) -> net::awaitable<void>
+        {
+            auto conn = wp.lock();
+            if (!conn)
+            {
+                co_return;
+            }
+
+            auto& req = conn->http_request();
+            auto url = co_await resolver(req);
+            logger()->debug("[ws-forward] {} -> {}", req.target(), url);
+
+            auto r = boost::urls::parse_uri(url);
+            if (!r)
+            {
+                logger()->trace("[ws-forward] invalid upstream url: {}", url);
+                conn->close("bad upstream");
+                co_return;
+            }
+
+            auto const& u = *r;
+            auto host = u.host();
+            auto scheme = u.scheme();
+            auto ssl = (scheme == "wss" || scheme == "https");
+            auto port = u.port_number() ? u.port_number() : (ssl ? 443 : 80);
+
+            auto upstream_path = detail::make_upstream_path(req.target(), prefix, u.encoded_path());
+
+            http::fields upstream_headers(req.base());
+            upstream_headers.erase(http::field::host);
+            upstream_headers.erase(http::field::sec_websocket_key);
+            upstream_headers.erase(http::field::sec_websocket_accept);
+            upstream_headers.erase(http::field::sec_websocket_version);
+            upstream_headers.erase(http::field::upgrade);
+            upstream_headers.erase(http::field::connection);
+            upstream_headers.set(http::field::host, util::make_host_value(host, port, ssl));
+
+            if (on_headers)
+            {
+                on_headers(req, upstream_headers);
+            }
+
+            req.set_custom_data(detail::kWsForwardKey, std::make_any<detail::ws_client_ptr>(nullptr));
+
+            auto upstream = std::make_shared<client::ws_client>(ex_, host, port, ssl);
+            upstream->set_logger(logger());
+
+            auto ec = co_await upstream->async_connect(upstream_path, upstream_headers);
+            if (ec)
+            {
+                logger()->trace("[ws-forward] upstream connect failed: {}", ec.message());
+                conn->close(ec.message());
+                co_return;
+            }
+
+            req.set_custom_data(detail::kWsForwardKey, std::make_any<detail::ws_client_ptr>(upstream));
+
+            net::co_spawn(
+                ex_,
+                [conn = websocket_conn::weak_ptr(conn), upstream]() -> net::awaitable<void>
+                {
+                    for (;;)
+                    {
+                        auto ec = co_await upstream->async_read();
+                        if (ec)
+                        {
+                            break;
+                        }
+                        if (auto c = conn.lock())
+                        {
+                            c->send(std::string(upstream->got_data()), upstream->got_binary());
+                        }
+                        else
+                        {
+                            break;
+                        }
+                    }
+                    if (auto c = conn.lock())
+                    {
+                        c->close();
+                    }
+                },
+                net::detached);
+        };
+
+        auto message_handler
+            = [](websocket_conn::weak_ptr wp, std::string_view data, bool binary) -> net::awaitable<void>
+        {
+            auto conn = wp.lock();
+            if (!conn)
+            {
+                co_return;
+            }
+            try
+            {
+                auto& req = conn->http_request();
+                auto upstream = req.custom_data<detail::ws_client_ptr>(detail::kWsForwardKey);
+                if (upstream)
+                {
+                    co_await upstream->async_send(std::string(data), binary);
+                }
+            }
+            catch (...)
+            {
+            }
+            co_return;
+        };
+
+        auto close_handler = [](websocket_conn::weak_ptr wp) -> net::awaitable<void>
+        {
+            auto conn = wp.lock();
+            if (!conn)
+            {
+                co_return;
+            }
+            try
+            {
+                auto& req = conn->http_request();
+                auto upstream = req.custom_data<detail::ws_client_ptr>(detail::kWsForwardKey);
+                if (upstream)
+                {
+                    co_await upstream->async_close();
+                }
+            }
+            catch (...)
+            {
+            }
+            co_return;
+        };
+
+        router_.set_ws_handler(location, std::move(open_handler), std::move(message_handler), std::move(close_handler));
     }
 
     void

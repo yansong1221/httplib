@@ -70,8 +70,6 @@ namespace
         }
     };
 
-
-
     std::string
     read_file(fs::path const& path)
     {
@@ -578,8 +576,7 @@ TEST_CASE("Downloader: custom headers sent in request", "[downloader]")
 
     dl_test_scaffold ts;
     ts.router().set_http_handler<http::verb::get>("/auth",
-                                                  [&](httplib::server::request& req,
-                                                      httplib::server::response& resp)
+                                                  [&](httplib::server::request& req, httplib::server::response& resp)
                                                   {
                                                       auto auth = req[http::field::authorization];
                                                       if (auth != "Bearer secret-token")
@@ -590,8 +587,7 @@ TEST_CASE("Downloader: custom headers sent in request", "[downloader]")
                                                       resp.set_file_content(server_path);
                                                   });
     ts.router().set_http_handler<http::verb::head>("/auth",
-                                                   [&](httplib::server::request& req,
-                                                       httplib::server::response& resp)
+                                                   [&](httplib::server::request& req, httplib::server::response& resp)
                                                    {
                                                        auto auth = req[http::field::authorization];
                                                        if (auth != "Bearer secret-token")
@@ -622,19 +618,15 @@ TEST_CASE("http_client_pool: acquire timeout", "[downloader]")
 
     auto pool = std::make_shared<httplib::client::http_client_pool>(ts.ioc_.get_executor(), 1);
 
-    auto h1 = co_spawn(ts.ioc_, pool->async_acquire("127.0.0.1", ts.endpoint.port(), false),
-                       net::use_future)
-                  .get();
+    auto h1 = co_spawn(ts.ioc_, pool->async_acquire("127.0.0.1", ts.endpoint.port(), false), net::use_future).get();
     REQUIRE(h1);
 
     auto t0 = std::chrono::steady_clock::now();
-    auto h2 = co_spawn(
-                  ts.ioc_,
-                  pool->async_acquire("127.0.0.1", ts.endpoint.port(), false, std::chrono::milliseconds(200)),
-                  net::use_future)
+    auto h2 = co_spawn(ts.ioc_,
+                       pool->async_acquire("127.0.0.1", ts.endpoint.port(), false, std::chrono::milliseconds(200)),
+                       net::use_future)
                   .get();
-    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::steady_clock::now() - t0);
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0);
 
     REQUIRE(h2.has_error());
     REQUIRE(h2.error() == boost::system::errc::timed_out);

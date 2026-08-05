@@ -32,6 +32,11 @@ namespace httplib::server
         {
             return req_;
         }
+        request&
+        http_request() override
+        {
+            return req_;
+        }
 
       public:
         net::awaitable<void> run();

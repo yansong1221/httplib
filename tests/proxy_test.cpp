@@ -1,4 +1,5 @@
 #include "common.hpp"
+#include "httplib/client/ws_client.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include <string>
@@ -447,4 +448,81 @@ TEST_CASE("Proxy: forwards X-Forwarded-Proto and X-Forwarded-Host", "[proxy]")
     proxy.stop().wait();
     ioc.stop();
     worker.join();
+}
+
+TEST_CASE("ws-forward echo", "[proxy][ws-forward]")
+{
+    net::io_context ioc;
+    server::http_server upstream(ioc);
+    server::http_server proxy(ioc);
+
+    upstream.listen("127.0.0.1", 0);
+    proxy.listen("127.0.0.1", 0);
+    upstream.run();
+    proxy.run();
+
+    auto upstream_ep = upstream.local_endpoint();
+    auto proxy_ep = proxy.local_endpoint();
+    std::string upstream_url = std::format("ws://{}:{}", upstream_ep.address().to_string(), upstream_ep.port());
+
+    upstream.router().set_ws_handler(
+        "/extra-path",
+        [](server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; },
+        [](server::websocket_conn::weak_ptr wp, std::string_view msg, bool binary) -> net::awaitable<void>
+        {
+            if (auto c = wp.lock())
+            {
+                c->send(msg, binary);
+            }
+            co_return;
+        },
+        [](server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });
+
+    proxy.set_ws_forward("/ws/*", upstream_url);
+
+    std::thread worker([&] { ioc.run(); });
+
+    client::ws_client ws(ioc, proxy_ep.address().to_string(), proxy_ep.port());
+    std::vector<std::string> received;
+    std::string large_data(1024 * 64, 'X');
+    for (std::size_t i = 0; i < large_data.size(); ++i)
+    {
+        large_data[i] = static_cast<char>(i % 256);
+    }
+
+    ws.set_handler(
+        [&](boost::system::error_code ec) -> net::awaitable<void>
+        {
+            REQUIRE(!ec);
+            ws.send(std::string("hello-forward"));
+            ws.send(std::string("message-two"));
+            ws.send(std::string(large_data), true);
+            ws.send(std::string("final"));
+            co_return;
+        },
+        [&](std::string_view msg, bool binary) -> net::awaitable<void>
+        {
+            received.emplace_back(msg);
+            if (received.size() >= 4)
+            {
+                ws.close();
+            }
+            co_return;
+        },
+        []() -> net::awaitable<void> { co_return; });
+
+    auto work = net::make_work_guard(ioc);
+    ws.run("/ws/extra-path");
+
+    ioc.run_for(std::chrono::seconds(5));
+    upstream.stop().wait();
+    proxy.stop().wait();
+    ioc.stop();
+    worker.join();
+
+    REQUIRE(received.size() == 4);
+    REQUIRE(received[0] == "hello-forward");
+    REQUIRE(received[1] == "message-two");
+    REQUIRE(received[2] == large_data);
+    REQUIRE(received[3] == "final");
 }

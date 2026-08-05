@@ -80,8 +80,8 @@ namespace httplib::client
         downloader::state current_state() const;
 
         net::awaitable<boost::system::error_code> async_download(std::string_view url,
-                                                                  fs::path const& save_path,
-                                                                  http::fields const& headers = {});
+                                                                 fs::path const& save_path,
+                                                                 http::fields const& headers = {});
         void cancel();
 
         std::string suggested_filename() const;

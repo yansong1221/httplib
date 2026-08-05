@@ -24,6 +24,7 @@ namespace httplib::server
         virtual void close(std::string_view reason) = 0;
         virtual bool is_open() const = 0;
         virtual request const& http_request() const = 0;
+        virtual request& http_request() = 0;
         virtual void send(std::string&& msg, bool binary = true) = 0;
         virtual void ping(std::string&& msg = std::string()) = 0;
 
