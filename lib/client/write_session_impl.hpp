@@ -62,6 +62,11 @@ namespace httplib::client
         net::awaitable<boost::system::error_code>
         write_body(net::const_buffer const& data, bool more) override
         {
+            if (!req_msg_)
+            {
+                co_return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+            }
+
             auto& body = req_msg_->body();
             body.data = (void*)data.data();
             body.size = data.size();

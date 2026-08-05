@@ -52,9 +52,9 @@ namespace httplib::client
         net::awaitable<boost::system::result<std::size_t>>
         read_body(net::mutable_buffer const& buf) override
         {
-            if (!resp_parser_->is_header_done())
+            if (!resp_parser_ || !resp_parser_->is_header_done())
             {
-                co_return 0;
+                co_return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
             }
 
             for (;;)
