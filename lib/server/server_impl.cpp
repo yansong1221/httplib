@@ -657,7 +657,7 @@ namespace httplib::server
 
             net::co_spawn(
                 ex_,
-                [conn = websocket_conn::weak_ptr(conn), upstream]() -> net::awaitable<void>
+                [self = shared_from_this(), conn = websocket_conn::weak_ptr(conn), upstream]() -> net::awaitable<void>
                 {
                     for (;;)
                     {
@@ -674,6 +674,10 @@ namespace httplib::server
                         {
                             break;
                         }
+                    }
+                    if (auto c = conn.lock())
+                    {
+                        c->close();
                     }
                 },
                 net::detached);
@@ -693,7 +697,11 @@ namespace httplib::server
             auto upstream = req.custom_data<detail::ws_client_ptr>(detail::kWsForwardKey);
             if (upstream)
             {
-                co_await upstream->async_send(std::string(data), binary);
+                auto ec = co_await upstream->async_send(std::string(data), binary);
+                if (ec)
+                {
+                    conn->close();
+                }
             }
             co_return;
         };

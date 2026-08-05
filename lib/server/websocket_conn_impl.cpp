@@ -125,6 +125,10 @@ namespace httplib::server
             co_return;
         }
 
+        server_impl_->logger()->debug("websocket new connection: [{}:{}]",
+                                      remote_endp.address().to_string(),
+                                      remote_endp.port());
+
         try
         {
             co_await entry->open_handler(weak_from_this());
@@ -134,10 +138,6 @@ namespace httplib::server
             server_impl_->logger()->error("websocket open handler failed: {}", e.what());
             co_return;
         }
-
-        server_impl_->logger()->debug("websocket new connection: [{}:{}]",
-                                      remote_endp.address().to_string(),
-                                      remote_endp.port());
 
         for (;;)
         {
@@ -169,7 +169,6 @@ namespace httplib::server
             catch (std::exception const& e)
             {
                 server_impl_->logger()->error("websocket message handler failed: {}", e.what());
-                co_return;
             }
             buffer_.consume(bytes);
         }
