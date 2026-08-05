@@ -191,11 +191,11 @@ TEST_CASE("Client pool: stats reflects idle count", "[client]")
         auto h1 = pool.acquire(ts.host(), ts.port(), false).get();
         auto h2 = pool.acquire(ts.host(), ts.port(), false).get();
         // h1, h2 in use, none idle
-        auto s = pool.stats(ts.host(), ts.port());
+        auto s = pool.stats(ts.host(), ts.port(), false);
         REQUIRE(s.idle == 0);
     }
     // Both released
-    auto s = pool.stats(ts.host(), ts.port());
+    auto s = pool.stats(ts.host(), ts.port(), false);
     REQUIRE(s.idle == 2);
 }
 
@@ -210,7 +210,7 @@ TEST_CASE("Client pool: respects max_size", "[client]")
         auto h2 = pool.acquire(ts.host(), ts.port(), false).get();
         auto h3 = pool.acquire(ts.host(), ts.port(), false).get();
     }
-    auto s = pool.stats(ts.host(), ts.port());
+    auto s = pool.stats(ts.host(), ts.port(), false);
     REQUIRE(s.idle == 3);
 }
 
