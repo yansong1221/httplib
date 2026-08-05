@@ -24,11 +24,12 @@ namespace httplib::client
             boost::system::error_code error_;
 
             client_handle(std::weak_ptr<impl> pool, std::unique_ptr<http_client> conn);
-            client_handle(boost::system::error_code ec);
             void release();
 
           public:
-            client_handle() = default;
+            client_handle();
+            explicit client_handle(boost::system::error_code ec);
+
             client_handle(client_handle const&) = delete;
             client_handle& operator=(client_handle const&) = delete;
 
@@ -67,9 +68,23 @@ namespace httplib::client
         http_client_pool(http_client_pool const&) = delete;
         http_client_pool& operator=(http_client_pool const&) = delete;
 
-        std::future<client_handle> acquire(std::string_view host, uint16_t port, bool ssl = false);
+        std::future<client_handle> acquire(std::string_view host,
+                                           uint16_t port,
+                                           bool ssl,
+                                           std::chrono::milliseconds wait_timeout = std::chrono::milliseconds(0));
 
-        net::awaitable<client_handle> async_acquire(std::string_view host, uint16_t port, bool ssl = false);
+        std::future<client_handle> acquire(std::string_view url,
+                                           std::chrono::milliseconds wait_timeout = std::chrono::milliseconds(0));
+
+        net::awaitable<client_handle> async_acquire(std::string_view host,
+                                                    uint16_t port,
+                                                    bool ssl,
+                                                    std::chrono::milliseconds wait_timeout
+                                                    = std::chrono::milliseconds(0));
+
+        net::awaitable<client_handle> async_acquire(std::string_view url,
+                                                    std::chrono::milliseconds wait_timeout
+                                                    = std::chrono::milliseconds(0));
 
         net::any_io_executor get_executor() noexcept;
 

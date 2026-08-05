@@ -553,6 +553,7 @@ TEST_CASE("Downloader: config presets", "[downloader]")
     REQUIRE(cfg.verify_ssl == true);
     REQUIRE(cfg.max_speed_bytes_per_sec == 0);
     REQUIRE(cfg.save_state == true);
+    REQUIRE(cfg.acquire_timeout == std::chrono::seconds(30));
     REQUIRE(dl.get_cache() == nullptr);
 
     dl.set_config({ .segments = 8, .max_retries = 5, .resume = false });
@@ -612,6 +613,32 @@ TEST_CASE("Downloader: custom headers sent in request", "[downloader]")
 
     fs::remove(server_path);
     fs::remove(dl_path);
+}
+
+TEST_CASE("http_client_pool: acquire timeout", "[downloader]")
+{
+    dl_test_scaffold ts;
+    ts.start();
+
+    auto pool = std::make_shared<httplib::client::http_client_pool>(ts.ioc_.get_executor(), 1);
+
+    auto h1 = co_spawn(ts.ioc_, pool->async_acquire("127.0.0.1", ts.endpoint.port(), false),
+                       net::use_future)
+                  .get();
+    REQUIRE(h1);
+
+    auto t0 = std::chrono::steady_clock::now();
+    auto h2 = co_spawn(
+                  ts.ioc_,
+                  pool->async_acquire("127.0.0.1", ts.endpoint.port(), false, std::chrono::milliseconds(200)),
+                  net::use_future)
+                  .get();
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0);
+
+    REQUIRE(h2.has_error());
+    REQUIRE(h2.error() == boost::system::errc::timed_out);
+    REQUIRE(elapsed >= std::chrono::milliseconds(100));
 }
 
 TEST_CASE("Downloader: disk_cache basic put and get", "[downloader]")

@@ -47,6 +47,7 @@ namespace httplib::client
             int segments = 4;
             int max_retries = 3;
             std::chrono::steady_clock::duration timeout = std::chrono::seconds(60);
+            std::chrono::milliseconds acquire_timeout = std::chrono::seconds(30);
             int max_redirects = 5;
             bool resume = true;
             bool verify_ssl = true;

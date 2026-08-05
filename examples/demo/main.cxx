@@ -592,7 +592,7 @@ run_http_client_pool_demo(net::any_io_executor ex, std::string host, uint16_t po
 {
     httplib::client::http_client_pool pool(ex, 4);
     {
-        auto h = co_await pool.async_acquire(host, port);
+        auto h = co_await pool.async_acquire(host, port, false);
         if (h)
         {
             auto r = co_await h->async_get("/api/hello");

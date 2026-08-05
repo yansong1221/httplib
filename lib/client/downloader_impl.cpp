@@ -512,7 +512,7 @@ namespace httplib::client
             }
 
             assert(pool_);
-            auto handle = co_await pool_->async_acquire(h, p, s);
+            auto handle = co_await pool_->async_acquire(h, p, s, config_.acquire_timeout);
             if (!handle)
             {
                 co_return request_result {};
