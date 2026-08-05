@@ -61,7 +61,7 @@ namespace httplib::client
 
       public:
         explicit http_client_pool(net::any_io_executor const& ex,
-                                  size_t max_size = 10,
+                                  size_t max_size = 20,
                                   std::chrono::seconds idle_timeout = std::chrono::seconds(60));
         ~http_client_pool();
 
@@ -93,7 +93,8 @@ namespace httplib::client
 
         void stop();
 
-        pool_stats stats(std::string_view host, uint16_t port, bool ssl = false) const;
+        pool_stats stats(std::string_view host, uint16_t port, bool ssl) const;
+        pool_stats stats(std::string_view url) const;
 
       private:
         std::shared_ptr<impl> impl_;

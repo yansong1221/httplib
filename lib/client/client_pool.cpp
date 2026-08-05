@@ -1,5 +1,6 @@
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/client.hpp"
+#include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include <atomic>
 #include <boost/asio/co_spawn.hpp>
@@ -21,32 +22,6 @@ namespace httplib::client
 
     namespace
     {
-
-        struct connection_info
-        {
-            std::string host;
-            uint16_t port;
-            bool ssl;
-
-            bool
-            operator==(connection_info const& other) const
-            {
-                return host == other.host && port == other.port && ssl == other.ssl;
-            }
-        };
-
-        struct connection_info_hash
-        {
-            size_t
-            operator()(connection_info const& info) const noexcept
-            {
-                std::size_t seed = std::hash<std::string> {}(info.host);
-                seed ^= std::hash<uint16_t> {}(info.port) + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
-                seed ^= std::hash<bool> {}(info.ssl) + 0x9e3779b97f4a7c15ULL + (seed << 6) + (seed >> 2);
-                return seed;
-            }
-        };
-
         struct pooled_conn
         {
             std::unique_ptr<http_client> client;
@@ -91,7 +66,7 @@ namespace httplib::client
                       std::chrono::milliseconds wait_timeout = std::chrono::milliseconds(0))
         {
             auto self = shared_from_this();
-            connection_info info { std::string(host), port, ssl };
+            auto url = util::make_url_value(host, port, ssl);
             auto deadline = std::chrono::steady_clock::now() + wait_timeout;
 
             do
@@ -103,7 +78,7 @@ namespace httplib::client
                         boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
                 }
 
-                if (auto handle = self->try_pop(info); handle)
+                if (auto handle = self->try_pop(url); handle)
                 {
                     co_return std::move(handle);
                 }
@@ -111,8 +86,7 @@ namespace httplib::client
                 if (self->active_count_ < self->max_size_)
                 {
                     self->active_count_++;
-                    co_return client_handle(self,
-                                            std::make_unique<http_client>(self->ex_, info.host, info.port, info.ssl));
+                    co_return client_handle(self, std::make_unique<http_client>(self->ex_, url));
                 }
                 if (wait_timeout <= std::chrono::milliseconds(0))
                 {
@@ -131,7 +105,7 @@ namespace httplib::client
 
                 lock.lock();
 
-                if (auto handle = self->try_pop(info); handle)
+                if (auto handle = self->try_pop(url); handle)
                 {
                     co_return std::move(handle);
                 }
@@ -147,8 +121,7 @@ namespace httplib::client
             {
                 return;
             }
-
-            connection_info info { std::string(conn->host()), conn->port(), conn->is_use_ssl() };
+            auto url = util::make_url_value(conn->host(), conn->port(), conn->is_use_ssl());
 
             std::lock_guard<std::mutex> lock(mutex_);
 
@@ -162,7 +135,7 @@ namespace httplib::client
                 active_count_--;
             }
 
-            auto& pool = pools_[info];
+            auto& pool = pools_[url];
             if (pool.size() < max_size_)
             {
                 pool.push_back({ std::move(conn), std::chrono::steady_clock::now() });
@@ -222,11 +195,11 @@ namespace httplib::client
         }
 
         pool_stats
-        stats(connection_info const& info) const
+        stats(std::string const& url) const
         {
             std::lock_guard<std::mutex> lock(mutex_);
             pool_stats s;
-            auto it = pools_.find(info);
+            auto it = pools_.find(url);
             if (it != pools_.end())
             {
                 s.idle = it->second.size();
@@ -260,9 +233,9 @@ namespace httplib::client
 
       private:
         client_handle
-        try_pop(connection_info const& info)
+        try_pop(std::string const& url)
         {
-            auto it = pools_.find(info);
+            auto it = pools_.find(url);
             if (it != pools_.end() && !it->second.empty())
             {
                 auto& pool = it->second;
@@ -324,7 +297,7 @@ namespace httplib::client
         using waiters_list = std::deque<std::weak_ptr<waiter_node>>;
 
         mutable std::mutex mutex_;
-        std::unordered_map<connection_info, pool_list, connection_info_hash> pools_;
+        std::unordered_map<std::string, pool_list> pools_;
         size_t max_size_;
         std::chrono::seconds idle_timeout_;
         size_t active_count_ = 0;
@@ -532,8 +505,15 @@ namespace httplib::client
     http_client_pool::pool_stats
     http_client_pool::stats(std::string_view host, uint16_t port, bool ssl /*= false*/) const
     {
-        connection_info info { std::string(host), port, ssl };
-        return impl_->stats(info);
+        auto url = util::make_url_value(host, port, ssl);
+        return impl_->stats(url);
+    }
+
+    httplib::client::http_client_pool::pool_stats
+    http_client_pool::stats(std::string_view url) const
+    {
+        std::string u(url);
+        return impl_->stats(u);
     }
 
 } // namespace httplib::client
