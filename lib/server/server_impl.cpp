@@ -1,4 +1,4 @@
-#include "server_impl.h"
+﻿#include "server_impl.h"
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/read_session.hpp"
@@ -78,7 +78,7 @@ namespace httplib::server
 
     } // namespace detail
 
-    http_server::impl::impl(net::any_io_executor const& ex, http_server& owner) : ex_(ex), acceptor_(ex), owner_(&owner)
+    http_server::impl::impl(net::any_io_executor const& ex) : ex_(ex), acceptor_(ex)
     {
         proxy_pool_ = std::make_unique<client::http_client_pool>(ex_);
 
@@ -121,7 +121,8 @@ namespace httplib::server
     {
         return net::co_spawn(
             ex_,
-            [this]() -> net::awaitable<boost::system::error_code> { co_return co_await async_run(); },
+            [self = shared_from_this(), this]() -> net::awaitable<boost::system::error_code>
+            { co_return co_await async_run(); },
             boost::asio::use_future);
     }
 
@@ -130,7 +131,7 @@ namespace httplib::server
     {
         return net::co_spawn(
             ex_,
-            [this]() -> net::awaitable<void> { co_return co_await async_stop(); },
+            [self = shared_from_this(), this]() -> net::awaitable<void> { co_return co_await async_stop(); },
             boost::asio::use_future);
     }
     httplib::net::awaitable<void>
@@ -239,7 +240,7 @@ namespace httplib::server
         auto local_endp = sock.local_endpoint();
         logger()->trace("accept new connection [{}:{}]", remote_endp.address().to_string(), remote_endp.port());
 
-        auto conn = std::make_shared<session>(std::move(sock), *owner_);
+        auto conn = std::make_shared<session>(std::move(sock), shared_from_this());
         {
             std::lock_guard lck(session_mutex_);
             sessions_.insert(conn);
@@ -405,9 +406,11 @@ namespace httplib::server
                                          http::verb::delete_,
                                          http::verb::options>(
             location,
-            [this, prefix, resolver = std::move(resolver), on_headers = std::move(on_headers)](
-                request& req,
-                response& resp) -> net::awaitable<void>
+            [self = shared_from_this(),
+             this,
+             prefix,
+             resolver = std::move(resolver),
+             on_headers = std::move(on_headers)](request& req, response& resp) -> net::awaitable<void>
             {
                 auto url = co_await resolver(req);
                 logger()->debug("[proxy] {} {} -> {}", req.method_string(), req.target(), url);
@@ -593,8 +596,11 @@ namespace httplib::server
     {
         std::string prefix = detail::strip_proxy_prefix(location);
 
-        auto open_handler = [this, prefix, resolver = std::move(resolver), on_headers = std::move(on_headers)](
-                                websocket_conn::weak_ptr wp) -> net::awaitable<void>
+        auto open_handler = [self = shared_from_this(),
+                             this,
+                             prefix,
+                             resolver = std::move(resolver),
+                             on_headers = std::move(on_headers)](websocket_conn::weak_ptr wp) -> net::awaitable<void>
         {
             auto conn = wp.lock();
             if (!conn)
@@ -636,8 +642,6 @@ namespace httplib::server
                 on_headers(req, upstream_headers);
             }
 
-            req.set_custom_data(detail::kWsForwardKey, std::make_any<detail::ws_client_ptr>(nullptr));
-
             auto upstream = std::make_shared<client::ws_client>(ex_, host, port, ssl);
             upstream->set_logger(logger());
 
@@ -671,57 +675,43 @@ namespace httplib::server
                             break;
                         }
                     }
-                    if (auto c = conn.lock())
-                    {
-                        c->close();
-                    }
                 },
                 net::detached);
         };
 
-        auto message_handler
-            = [](websocket_conn::weak_ptr wp, std::string_view data, bool binary) -> net::awaitable<void>
+        auto message_handler = [self = shared_from_this()](websocket_conn::weak_ptr wp,
+                                                           std::string_view data,
+                                                           bool binary) -> net::awaitable<void>
         {
             auto conn = wp.lock();
             if (!conn)
             {
                 co_return;
             }
-            try
+
+            auto& req = conn->http_request();
+            auto upstream = req.custom_data<detail::ws_client_ptr>(detail::kWsForwardKey);
+            if (upstream)
             {
-                auto& req = conn->http_request();
-                auto upstream = req.custom_data<detail::ws_client_ptr>(detail::kWsForwardKey);
-                if (upstream)
-                {
-                    co_await upstream->async_send(std::string(data), binary);
-                }
-            }
-            catch (...)
-            {
+                co_await upstream->async_send(std::string(data), binary);
             }
             co_return;
         };
 
-        auto close_handler = [](websocket_conn::weak_ptr wp) -> net::awaitable<void>
+        auto close_handler = [self = shared_from_this()](websocket_conn::weak_ptr wp) -> net::awaitable<void>
         {
             auto conn = wp.lock();
             if (!conn)
             {
                 co_return;
             }
-            try
+
+            auto& req = conn->http_request();
+            auto upstream = req.custom_data<detail::ws_client_ptr>(detail::kWsForwardKey);
+            if (upstream)
             {
-                auto& req = conn->http_request();
-                auto upstream = req.custom_data<detail::ws_client_ptr>(detail::kWsForwardKey);
-                if (upstream)
-                {
-                    co_await upstream->async_close();
-                }
+                co_await upstream->async_close();
             }
-            catch (...)
-            {
-            }
-            co_return;
         };
 
         router_.set_ws_handler(location, std::move(open_handler), std::move(message_handler), std::move(close_handler));

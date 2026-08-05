@@ -1,4 +1,4 @@
-
+﻿
 #include "httplib/server/server.hpp"
 #include "httplib/server/router.hpp"
 #include "server_impl.h"
@@ -31,7 +31,7 @@ namespace httplib::server
 
     http_server::http_server(net::io_context& ioc) : http_server(ioc.get_executor()) {}
 
-    http_server::http_server(net::any_io_executor const& ex) : impl_(std::make_unique<impl>(ex, *this)) {}
+    http_server::http_server(net::any_io_executor const& ex) : impl_(std::make_shared<impl>(ex)) {}
 
     http_server::~http_server() {}
 

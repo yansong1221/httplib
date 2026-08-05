@@ -76,17 +76,6 @@ namespace httplib::server
         http_server(http_server const&) = delete;
         http_server& operator=(http_server const&) = delete;
 
-        std::unique_ptr<impl> impl_;
-
-        friend impl&
-        get_impl(http_server& self)
-        {
-            return *self.impl_;
-        }
-        friend impl const&
-        get_impl(http_server const& self)
-        {
-            return *self.impl_;
-        }
+        std::shared_ptr<impl> impl_;
     };
 } // namespace httplib::server

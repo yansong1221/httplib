@@ -526,3 +526,101 @@ TEST_CASE("ws-forward echo", "[proxy][ws-forward]")
     REQUIRE(received[2] == large_data);
     REQUIRE(received[3] == "final");
 }
+
+TEST_CASE("ws-forward stress: concurrent connections + shutdown", "[proxy][ws-forward]")
+{
+    net::io_context ioc;
+    server::http_server upstream(ioc);
+    server::http_server proxy(ioc);
+
+    upstream.listen("127.0.0.1", 0);
+    proxy.listen("127.0.0.1", 0);
+    upstream.run();
+    proxy.run();
+
+    auto upstream_ep = upstream.local_endpoint();
+    auto proxy_ep = proxy.local_endpoint();
+    std::string upstream_url
+        = std::format("ws://{}:{}", upstream_ep.address().to_string(), upstream_ep.port());
+
+    upstream.router().set_ws_handler(
+        "/echo",
+        [](server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; },
+        [](server::websocket_conn::weak_ptr wp, std::string_view msg, bool binary) -> net::awaitable<void>
+        {
+            if (auto c = wp.lock())
+                c->send(msg, binary);
+            co_return;
+        },
+        [](server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });
+
+    proxy.set_ws_forward("/ws/*", upstream_url);
+
+    std::thread worker([&] { ioc.run(); });
+
+    constexpr int kConnections = 6;
+    std::atomic<int> connected{ 0 };
+    std::atomic<int> total_sent{ 0 };
+    std::atomic<int> total_recv{ 0 };
+    std::atomic<int> closed{ 0 };
+    std::atomic<bool> stop_flag{ false };
+    std::vector<std::unique_ptr<client::ws_client>> clients;
+
+    upstream.router().set_ws_handler(
+        "/echo",
+        [](server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; },
+        [&](server::websocket_conn::weak_ptr wp, std::string_view msg, bool binary) -> net::awaitable<void>
+        {
+            ++total_recv;
+            if (auto c = wp.lock())
+                c->send(msg, binary);
+            co_return;
+        },
+        [](server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });
+
+    proxy.set_ws_forward("/ws/*", upstream_url);
+
+    for (int i = 0; i < kConnections; ++i)
+    {
+        auto ws = std::make_unique<client::ws_client>(
+            ioc, proxy_ep.address().to_string(), proxy_ep.port());
+        ws->set_handler(
+            [&, ws = ws.get()](boost::system::error_code ec) -> net::awaitable<void>
+            {
+                if (!ec)
+                {
+                    ++connected;
+                    for (int j = 0; j < 2000 && !stop_flag.load(); ++j)
+                    {
+                        ws->send(std::format("{}", j));
+                        ++total_sent;
+                    }
+                }
+                co_return;
+            },
+            [](std::string_view, bool) -> net::awaitable<void> { co_return; },
+            [&]() -> net::awaitable<void>
+            {
+                ++closed;
+                co_return;
+            });
+        clients.push_back(std::move(ws));
+    }
+
+    for (auto& c : clients)
+        c->run("/ws/echo");
+
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+
+    stop_flag.store(true);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+    upstream.stop().wait();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    proxy.stop().wait();
+    ioc.stop();
+    worker.join();
+
+    REQUIRE(total_sent.load() > 0);
+    REQUIRE(total_recv.load() > 0);
+}

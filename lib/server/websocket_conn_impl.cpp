@@ -9,12 +9,14 @@
 namespace httplib::server
 {
 
-    websocket_conn_impl::websocket_conn_impl(http_server& serv, websocket_stream&& stream, request&& req)
+    websocket_conn_impl::websocket_conn_impl(std::shared_ptr<http_server::impl> server_impl,
+                                             websocket_stream&& stream,
+                                             request&& req)
 
-        : serv_(serv)
+        : server_impl_(std::move(server_impl))
         , req_(std::move(req))
         , ws_(std::move(stream))
-        , ac_que_(serv.get_executor())
+        , ac_que_(server_impl_->get_executor())
     {
     }
     websocket_conn_impl::~websocket_conn_impl() {}
@@ -82,7 +84,7 @@ namespace httplib::server
 
                 if (ec && ec != boost::asio::error::operation_aborted)
                 {
-                    serv_.logger()->debug("websocket async_close failed: {}", ec.message());
+                    server_impl_->logger()->debug("websocket async_close failed: {}", ec.message());
                 }
 
                 ws_.socket().shutdown(net::socket_base::shutdown_both, ec);
@@ -98,7 +100,7 @@ namespace httplib::server
     httplib::net::awaitable<void>
     websocket_conn_impl::run()
     {
-        auto entry = get_impl(serv_).router().query_ws_handler(req_);
+        auto entry = server_impl_->router().query_ws_handler(req_);
         if (!entry)
         {
             co_return;
@@ -114,10 +116,12 @@ namespace httplib::server
         boost::system::error_code ec;
         auto remote_endp = ws_.socket().remote_endpoint(ec);
 
+        ws_.set_option(websocket::permessage_deflate {});
+
         co_await ws_.async_accept(get_impl(req_), util::net_awaitable[ec]);
         if (ec)
         {
-            serv_.logger()->error("websocket handshake failed: {}", ec.message());
+            server_impl_->logger()->error("websocket handshake failed: {}", ec.message());
             co_return;
         }
 
@@ -127,13 +131,13 @@ namespace httplib::server
         }
         catch (std::exception const& e)
         {
-            serv_.logger()->error("websocket open handler failed: {}", e.what());
+            server_impl_->logger()->error("websocket open handler failed: {}", e.what());
             co_return;
         }
 
-        serv_.logger()->debug("websocket new connection: [{}:{}]",
-                              remote_endp.address().to_string(),
-                              remote_endp.port());
+        server_impl_->logger()->debug("websocket new connection: [{}:{}]",
+                                      remote_endp.address().to_string(),
+                                      remote_endp.port());
 
         for (;;)
         {
@@ -141,10 +145,10 @@ namespace httplib::server
             if (ec)
             {
                 shutting_down_.store(true, std::memory_order_release);
-                serv_.logger()->debug("websocket disconnect: [{}:{}] what: {}",
-                                      remote_endp.address().to_string(),
-                                      remote_endp.port(),
-                                      ec.message());
+                server_impl_->logger()->debug("websocket disconnect: [{}:{}] what: {}",
+                                              remote_endp.address().to_string(),
+                                              remote_endp.port(),
+                                              ec.message());
                 co_await ac_que_.async_shutdown();
                 try
                 {
@@ -152,7 +156,7 @@ namespace httplib::server
                 }
                 catch (std::exception const& e)
                 {
-                    serv_.logger()->error("websocket close handler failed: {}", e.what());
+                    server_impl_->logger()->error("websocket close handler failed: {}", e.what());
                 }
                 co_return;
             }
@@ -164,7 +168,8 @@ namespace httplib::server
             }
             catch (std::exception const& e)
             {
-                serv_.logger()->error("websocket message handler failed: {}", e.what());
+                server_impl_->logger()->error("websocket message handler failed: {}", e.what());
+                co_return;
             }
             buffer_.consume(bytes);
         }

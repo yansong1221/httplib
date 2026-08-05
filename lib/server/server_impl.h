@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
 #include "router_impl.h"
@@ -24,10 +24,10 @@ namespace httplib::client
 namespace httplib::server
 {
 
-    class http_server::impl
+    class http_server::impl : public std::enable_shared_from_this<http_server::impl>
     {
       public:
-        explicit impl(net::any_io_executor const& ex, http_server& owner);
+        explicit impl(net::any_io_executor const& ex);
         ~impl();
 
       public:
@@ -107,10 +107,7 @@ namespace httplib::server
         net::awaitable<void> handle_accept(tcp::socket sock);
 
       private:
-        net::any_io_executor ex_;
-
-        http_server* owner_ = nullptr;
-        int acceptor_count_ = 32;
+        net::any_io_executor ex_;int acceptor_count_ = 32;
         int proxy_buffer_size_ = 512 * 1024;
 
         router_impl router_;

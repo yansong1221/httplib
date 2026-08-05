@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "httplib/config.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/server.hpp"
@@ -34,7 +34,7 @@ namespace httplib::server
         class http_proxy_task;
         class websocket_task;
 
-        explicit session(tcp::socket&& stream, http_server& serv);
+        explicit session(tcp::socket&& stream, std::shared_ptr<http_server::impl> server_impl);
         ~session();
 
       public:
@@ -51,7 +51,7 @@ namespace httplib::server
     class session::detect_ssl_task : public session::task
     {
       public:
-        explicit detect_ssl_task(tcp::socket&& stream, http_server& serv);
+        explicit detect_ssl_task(tcp::socket&& stream, std::shared_ptr<http_server::impl> server_impl);
         ~detect_ssl_task();
 
       public:
@@ -59,14 +59,14 @@ namespace httplib::server
         net::awaitable<task::ptr> then() override;
 
       private:
-        http_server& serv_;
+        std::shared_ptr<http_server::impl> server_impl_;
         http_stream::plain_stream stream_;
     };
 
     class session::http_task : public session::task
     {
       public:
-        explicit http_task(http_stream&& stream, beast::flat_buffer&& buffer, http_server& serv);
+        explicit http_task(http_stream&& stream, beast::flat_buffer&& buffer, std::shared_ptr<http_server::impl> server_impl);
 
         net::awaitable<task::ptr> then() override;
         void abort() override;
@@ -75,7 +75,7 @@ namespace httplib::server
         net::awaitable<bool> async_write(request const& req, response& resp);
 
       private:
-        http_server& serv_;
+        std::shared_ptr<http_server::impl> server_impl_;
 
         http_stream stream_;
         beast::flat_buffer buffer_;
@@ -84,7 +84,7 @@ namespace httplib::server
     class session::websocket_task : public session::task
     {
       public:
-        explicit websocket_task(websocket_stream&& stream, request&& req, http_server& serv);
+        explicit websocket_task(websocket_stream&& stream, request&& req, std::shared_ptr<http_server::impl> server_impl);
 
       public:
         net::awaitable<task::ptr> then() override;
@@ -97,7 +97,7 @@ namespace httplib::server
     class session::http_proxy_task : public session::task
     {
       public:
-        explicit http_proxy_task(http_stream&& stream, request&& req, http_server& serv);
+        explicit http_proxy_task(http_stream&& stream, request&& req, std::shared_ptr<http_server::impl> server_impl);
 
       public:
         net::awaitable<task::ptr> then() override;
@@ -109,7 +109,7 @@ namespace httplib::server
         tcp::socket proxy_socket_;
 
         request req_;
-        http_server& serv_;
+        std::shared_ptr<http_server::impl> server_impl_;
     };
 
 } // namespace httplib::server

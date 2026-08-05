@@ -57,12 +57,16 @@ namespace httplib::client
         stream_->set_option(websocket::stream_base::decorator(
             [&](websocket::request_type& req)
             {
+                req.set(http::field::origin, util::make_url_value(host_, port_, use_ssl_));
+                req.set(http::field::host, util::make_host_value(host_, port_, use_ssl_));
                 req.set(http::field::user_agent, std::string(BOOST_BEAST_VERSION_STRING) + "websocket-client-coro");
                 for (auto const& field : headers)
                 {
                     req.set(field.name_string(), field.value());
                 }
             }));
+
+        stream_->set_option(websocket::permessage_deflate {});
 
         co_await stream_->async_handshake(host_, path, util::net_awaitable[ec]);
         if (ec)
