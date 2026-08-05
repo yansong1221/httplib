@@ -117,10 +117,6 @@ namespace httplib::client
         void
         release(std::unique_ptr<http_client> conn)
         {
-            if (!conn || conn->has_active_session())
-            {
-                return;
-            }
             auto url = util::make_url_value(conn->host(), conn->port(), conn->is_use_ssl());
 
             std::lock_guard<std::mutex> lock(mutex_);
@@ -133,6 +129,10 @@ namespace httplib::client
             if (active_count_ > 0)
             {
                 active_count_--;
+            }
+            if (conn->has_active_session())
+            {
+                return;
             }
 
             auto& pool = pools_[url];
