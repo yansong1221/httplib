@@ -57,6 +57,10 @@ namespace httplib::util
     HTTPLIB_API std::string_view buffer_to_string_view(boost::asio::const_buffer const& buffer);
 
     HTTPLIB_API std::string make_host_value(std::string_view host, uint16_t port, bool ssl);
-    HTTPLIB_API std::string make_url_value(std::string_view host, uint16_t port, bool ssl);
+    HTTPLIB_API std::string make_url_value(std::string_view host,
+                                           uint16_t port,
+                                           bool ssl,
+                                           std::string_view target = {},
+                                           std::string_view scheme = {});
 
 } // namespace httplib::util

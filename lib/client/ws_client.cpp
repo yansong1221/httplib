@@ -15,9 +15,9 @@ namespace httplib::client
     }
     ws_client::~ws_client() {}
     net::awaitable<boost::system::error_code>
-    ws_client::async_connect(std::string_view path, http::fields const& headers)
+    ws_client::async_connect(std::string_view target, http::fields const& headers)
     {
-        co_return co_await impl_->async_connect(path, headers);
+        co_return co_await impl_->async_connect(target, headers);
     }
 
     bool

@@ -150,10 +150,14 @@ namespace httplib::util
     }
 
     std::string
-    make_url_value(std::string_view host, uint16_t port, bool ssl)
+    make_url_value(std::string_view host, uint16_t port, bool ssl, std::string_view target, std::string_view scheme)
     {
         using namespace std::string_view_literals;
-        return std::format("{}{}", ssl ? "https://"sv : "http://"sv, make_host_value(host, port, ssl));
+
+        return std::format("{}://{}{}",
+                           (scheme.empty() ? (ssl ? "https" : "http") : scheme),
+                           make_host_value(host, port, ssl),
+                           target);
     }
 
 } // namespace httplib::util

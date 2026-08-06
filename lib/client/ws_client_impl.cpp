@@ -24,9 +24,9 @@ namespace httplib::client
     }
 
     net::awaitable<boost::system::error_code>
-    ws_client::impl::async_connect(std::string_view path, http::fields const& headers)
+    ws_client::impl::async_connect(std::string_view target, http::fields const& headers)
     {
-        logger()->trace("connecting ws://{}:{}{}", host_, port_, path);
+        logger()->trace("connecting ws://{}:{}{}", host_, port_, target);
         boost::system::error_code ec;
 
         if (!is_open())
@@ -68,14 +68,14 @@ namespace httplib::client
 
         stream_->set_option(websocket::permessage_deflate {});
 
-        co_await stream_->async_handshake(host_, path, util::net_awaitable[ec]);
+        co_await stream_->async_handshake(host_, target, util::net_awaitable[ec]);
         if (ec)
         {
             logger()->error("ws connect failed {}:{}: {}", host_, port_, ec.message());
             co_return ec;
         }
 
-        logger()->debug("ws connected to {}:{}{}", host_, port_, path);
+        logger()->debug("ws connected to {}:{}{}", host_, port_, target);
         co_return boost::system::error_code {};
     }
 

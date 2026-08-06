@@ -24,7 +24,7 @@ namespace httplib::client
         net::awaitable<boost::system::error_code> async_close();
         net::awaitable<boost::system::error_code> async_send(std::string&& data, bool binary = false);
 
-        net::awaitable<boost::system::error_code> async_connect(std::string_view path,
+        net::awaitable<boost::system::error_code> async_connect(std::string_view target,
                                                                 http::fields const& headers = {});
 
         bool got_binary() const noexcept;
