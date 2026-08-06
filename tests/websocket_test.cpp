@@ -6,7 +6,7 @@
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
-#include <boost/asio/io_context.hpp>
+#include <boost/asio/thread_pool.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <memory>
@@ -14,7 +14,6 @@
 #include <spdlog/sinks/null_sink.h>
 #include <spdlog/spdlog.h>
 #include <string>
-#include <thread>
 #include <vector>
 
 using namespace std::string_view_literals;
@@ -26,15 +25,11 @@ namespace
 
     struct ws_test_server
     {
-        net::io_context ioc;
+        net::thread_pool ioc;
         httplib::server::http_server server;
         httplib::tcp::endpoint endpoint;
-        std::thread thread;
-        std::string last_message;
-        bool last_binary = false;
-        std::mutex mutex;
 
-        ws_test_server() : server(ioc)
+        ws_test_server() : server(ioc.get_executor())
         {
             auto null_sink = std::make_shared<spdlog::sinks::null_sink_mt>();
             server.set_logger(std::make_shared<spdlog::logger>("httplib.tests", null_sink));
@@ -42,12 +37,8 @@ namespace
 
         ~ws_test_server()
         {
-            server.stop().wait();
-            ioc.stop();
-            if (thread.joinable())
-            {
-                thread.join();
-            }
+            server.stop();
+            ioc.join();
         }
 
         void
@@ -56,7 +47,6 @@ namespace
             server.listen("127.0.0.1", 0);
             endpoint = server.local_endpoint();
             server.run();
-            thread = std::thread([this] { ioc.run(); });
         }
 
         auto&
@@ -104,8 +94,8 @@ TEST_CASE("WebSocket echo server and client", "[websocket]")
         [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });
     server.start();
 
-    net::io_context client_ioc;
-    httplib::client::ws_client ws_client(client_ioc, server.host(), server.port());
+    net::thread_pool client_ioc;
+    httplib::client::ws_client ws_client(client_ioc.get_executor(), server.host(), server.port());
     std::vector<std::string> client_received;
     std::mutex cli_mutex;
     bool open_called = false;
@@ -131,10 +121,10 @@ TEST_CASE("WebSocket echo server and client", "[websocket]")
         },
         []() -> net::awaitable<void> { co_return; });
 
-    auto work = net::make_work_guard(client_ioc);
     ws_client.run("/ws");
-
-    client_ioc.run_for(std::chrono::seconds(5));
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+    server.server.stop().wait();
+    client_ioc.join();
 
     REQUIRE(open_called);
     REQUIRE(client_received.size() >= 2);
@@ -165,8 +155,8 @@ TEST_CASE("WebSocket binary message", "[websocket]")
         [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });
     server.start();
 
-    net::io_context client_ioc;
-    httplib::client::ws_client ws_client(client_ioc, server.host(), server.port());
+    net::thread_pool client_ioc;
+    httplib::client::ws_client ws_client(client_ioc.get_executor(), server.host(), server.port());
     bool response_received = false;
     bool response_binary = false;
 
@@ -190,10 +180,10 @@ TEST_CASE("WebSocket binary message", "[websocket]")
         },
         []() -> net::awaitable<void> { co_return; });
 
-    auto work = net::make_work_guard(client_ioc);
     ws_client.run("/ws-bin");
-
-    client_ioc.run_for(std::chrono::seconds(5));
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+    server.server.stop().wait();
+    client_ioc.join();
 
     REQUIRE(received_binary);
     REQUIRE(received_content.size() == 4);
@@ -227,8 +217,8 @@ TEST_CASE("WebSocket close propagates to server", "[websocket]")
         });
     server.start();
 
-    net::io_context client_ioc;
-    httplib::client::ws_client ws_client(client_ioc, server.host(), server.port());
+    net::thread_pool client_ioc;
+    httplib::client::ws_client ws_client(client_ioc.get_executor(), server.host(), server.port());
     bool client_close_called = false;
 
     ws_client.set_handler(
@@ -244,10 +234,10 @@ TEST_CASE("WebSocket close propagates to server", "[websocket]")
             co_return;
         });
 
-    auto work = net::make_work_guard(client_ioc);
     ws_client.run("/ws-close");
-
-    client_ioc.run_for(std::chrono::seconds(5));
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+    server.server.stop().wait();
+    client_ioc.join();
 
     REQUIRE(server_close_called);
     REQUIRE(client_close_called);
@@ -265,8 +255,8 @@ TEST_CASE("WebSocket client ping", "[websocket]")
         [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });
     server.start();
 
-    net::io_context client_ioc;
-    httplib::client::ws_client ws_client(client_ioc, server.host(), server.port());
+    net::thread_pool client_ioc;
+    httplib::client::ws_client ws_client(client_ioc.get_executor(), server.host(), server.port());
     bool ping_result = false;
 
     ws_client.set_handler(
@@ -281,9 +271,10 @@ TEST_CASE("WebSocket client ping", "[websocket]")
         [](std::string_view, bool) -> net::awaitable<void> { co_return; },
         []() -> net::awaitable<void> { co_return; });
 
-    auto work = net::make_work_guard(client_ioc);
     ws_client.run("/ws-ping");
-    client_ioc.run_for(std::chrono::seconds(5));
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+    server.server.stop().wait();
+    client_ioc.join();
 
     REQUIRE(ping_result);
 }
@@ -308,8 +299,8 @@ TEST_CASE("WebSocket close with reason", "[websocket]")
         });
     server.start();
 
-    net::io_context client_ioc;
-    httplib::client::ws_client ws_client(client_ioc, server.host(), server.port());
+    net::thread_pool client_ioc;
+    httplib::client::ws_client ws_client(client_ioc.get_executor(), server.host(), server.port());
     bool client_close_called = false;
 
     ws_client.set_handler(
@@ -325,9 +316,10 @@ TEST_CASE("WebSocket close with reason", "[websocket]")
             co_return;
         });
 
-    auto work = net::make_work_guard(client_ioc);
     ws_client.run("/ws-close-reason");
-    client_ioc.run_for(std::chrono::seconds(5));
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+    server.server.stop().wait();
+    client_ioc.join();
 
     REQUIRE(client_close_called);
     REQUIRE(close_reason_received == "server-closed");
@@ -362,8 +354,8 @@ TEST_CASE("WebSocket is_open flag", "[websocket]")
         [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });
     server.start();
 
-    net::io_context client_ioc;
-    httplib::client::ws_client ws_client(client_ioc, server.host(), server.port());
+    net::thread_pool client_ioc;
+    httplib::client::ws_client ws_client(client_ioc.get_executor(), server.host(), server.port());
     bool send_done = false;
 
     ws_client.set_handler(
@@ -380,9 +372,10 @@ TEST_CASE("WebSocket is_open flag", "[websocket]")
         },
         []() -> net::awaitable<void> { co_return; });
 
-    auto work = net::make_work_guard(client_ioc);
     ws_client.run("/ws-is-open");
-    client_ioc.run_for(std::chrono::seconds(5));
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+    server.server.stop().wait();
+    client_ioc.join();
 
     REQUIRE(send_done);
     REQUIRE(open_is_open);
@@ -418,8 +411,8 @@ TEST_CASE("WebSocket middleware: before() runs during upgrade", "[websocket]")
         test_mw { &mw_called });
     ts.start();
 
-    net::io_context client_ioc;
-    httplib::client::ws_client ws_client(client_ioc, ts.host(), ts.port());
+    net::thread_pool client_ioc;
+    httplib::client::ws_client ws_client(client_ioc.get_executor(), ts.host(), ts.port());
 
     bool connected = false;
     ws_client.set_handler(
@@ -431,13 +424,14 @@ TEST_CASE("WebSocket middleware: before() runs during upgrade", "[websocket]")
         [&](std::string_view, bool) -> net::awaitable<void> { co_return; },
         []() -> net::awaitable<void> { co_return; });
 
-    auto work = net::make_work_guard(client_ioc);
     ws_client.run("/ws-mw");
-    client_ioc.run_for(std::chrono::seconds(3));
+    std::this_thread::sleep_for(std::chrono::seconds(3));
+    ts.server.stop().wait();
+    client_ioc.join();
 
     REQUIRE(connected);
     REQUIRE(open_ok);
     REQUIRE(mw_called);
 
-    client_ioc.stop();
+    client_ioc.join();
 }
