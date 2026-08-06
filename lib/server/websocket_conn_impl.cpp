@@ -43,6 +43,11 @@ namespace httplib::server
 
                 boost::system::error_code ec;
                 co_await ws_.async_write(net::buffer(msg), util::net_awaitable[ec]);
+                if (ec)
+                {
+                    ws_.socket().shutdown(net::socket_base::shutdown_both, ec);
+                    ws_.socket().close(ec);
+                }
             });
     };
     void
@@ -58,6 +63,11 @@ namespace httplib::server
             {
                 boost::system::error_code ec;
                 co_await ws_.async_ping(beast::websocket::ping_data(std::string_view(msg)), util::net_awaitable[ec]);
+                if (ec)
+                {
+                    ws_.socket().shutdown(net::socket_base::shutdown_both, ec);
+                    ws_.socket().close(ec);
+                }
             });
     }
 
@@ -144,11 +154,16 @@ namespace httplib::server
             auto bytes = co_await ws_.async_read(buffer_, util::net_awaitable[ec]);
             if (ec)
             {
+
+                ws_.socket().shutdown(net::socket_base::shutdown_both, ec);
+                ws_.socket().close(ec);
+
                 shutting_down_.store(true, std::memory_order_release);
                 server_impl_->logger()->debug("websocket disconnect: [{}:{}] what: {}",
                                               remote_endp.address().to_string(),
                                               remote_endp.port(),
                                               ec.message());
+                ac_que_.clear();
                 co_await ac_que_.async_shutdown();
                 try
                 {
