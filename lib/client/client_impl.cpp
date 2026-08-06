@@ -66,12 +66,12 @@ namespace httplib::client
     void
     http_client::impl::close()
     {
-        resolver_.cancel();
+        finish_io();
 
         std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
+        resolver_.cancel();
         if (stream_)
         {
-            stream_->expires_never();
             stream_->close();
         }
         buffer_.clear();
@@ -194,46 +194,38 @@ namespace httplib::client
         co_return boost::system::errc::make_error_code(boost::system::errc::too_many_symbolic_link_levels);
     }
     void
-    http_client::impl::begin_io(bool first)
+    http_client::impl::begin_io()
     {
         std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
-        if (!stream_)
+        if (stream_)
         {
-            return;
-        }
-
-        if (timeout_policy_ == timeout_policy::step)
-        {
-            stream_->expires_after(timeout_);
-        }
-        else if (timeout_policy_ == timeout_policy::never)
-        {
-            stream_->expires_never();
-        }
-        else if (timeout_policy_ == timeout_policy::overall)
-        {
-            if (!first)
+            if (timeout_policy_ == timeout_policy::step)
             {
-                return;
+                stream_->expires_after(timeout_);
             }
-            stream_->expires_after(timeout_);
+            else if (timeout_policy_ == timeout_policy::never)
+            {
+                stream_->expires_never();
+            }
+            else if (timeout_policy_ == timeout_policy::overall)
+            {
+                if (!overall_timer_active_)
+                {
+                    stream_->expires_after(timeout_);
+                    overall_timer_active_ = true;
+                }
+            }
         }
     }
 
     void
     http_client::impl::end_io()
     {
-        std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
-        if (!stream_)
-        {
-            return;
-        }
-
         switch (timeout_policy_)
         {
             case http_client::timeout_policy::step:
             case http_client::timeout_policy::never:
-                stream_->expires_never();
+                finish_io();
                 break;
             default:
                 break;
@@ -244,18 +236,18 @@ namespace httplib::client
     http_client::impl::finish_io()
     {
         std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
-        if (!stream_)
+        overall_timer_active_ = false;
+        if (stream_)
         {
-            return;
+            stream_->expires_never();
         }
-
-        stream_->expires_never();
     }
 
     net::awaitable<boost::system::error_code>
     http_client::impl::co_connect()
     {
-        begin_io(true);
+        finish_io();
+        begin_io();
         std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
         if (!is_open())
         {

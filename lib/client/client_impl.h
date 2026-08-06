@@ -68,7 +68,7 @@ namespace httplib::client
         net::awaitable<http_client::response_result> co_read_response(body_setup_fn const& body_setup = {},
                                                                       bool is_head = false);
 
-        void begin_io(bool first = false);
+        void begin_io();
         void end_io();
         void finish_io();
 
@@ -142,6 +142,7 @@ namespace httplib::client
         tcp::resolver resolver_;
         timeout_policy timeout_policy_ = timeout_policy::overall;
         std::chrono::steady_clock::duration timeout_ = std::chrono::seconds(30);
+        bool overall_timer_active_ = false;
 
         std::string const host_;
         std::string const host_value_;
