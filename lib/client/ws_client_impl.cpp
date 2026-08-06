@@ -24,7 +24,17 @@ namespace httplib::client
     }
 
     net::awaitable<boost::system::error_code>
-    ws_client::impl::async_connect(std::string_view target, http::fields const& headers)
+    ws_client::impl::async_connect(std::string_view target, http::fields const& headers /*= {}*/)
+    {
+        if (auto ec = co_await async_ping("ping"); !ec)
+        {
+            co_return boost::system::error_code {};
+        }
+        auto ec = co_await _async_connect(target, headers);
+        co_return ec;
+    }
+    net::awaitable<boost::system::error_code>
+    ws_client::impl::_async_connect(std::string_view target, http::fields const& headers)
     {
         logger()->trace("connecting ws://{}:{}{}", host_, port_, target);
         boost::system::error_code ec;
@@ -138,8 +148,12 @@ namespace httplib::client
     void
     ws_client::impl::send(std::string&& data, bool binary /*= false*/)
     {
+        if (!is_open())
+        {
+            return;
+        }
         ac_que_.push(
-            [this, data = std::move(data), binary]() mutable -> net::awaitable<void>
+            [this, self = shared_from_this(), data = std::move(data), binary]() mutable -> net::awaitable<void>
             {
                 auto ec = co_await async_send(std::move(data), binary);
                 if (ec)
@@ -152,8 +166,12 @@ namespace httplib::client
     void
     ws_client::impl::ping(std::string&& msg /*= std::string()*/)
     {
+        if (!is_open())
+        {
+            return;
+        }
         ac_que_.push(
-            [this, data = std::move(msg)]() mutable -> net::awaitable<void>
+            [this, self = shared_from_this(), data = std::move(msg)]() mutable -> net::awaitable<void>
             {
                 auto ec = co_await async_ping(std::move(data));
                 if (ec)
@@ -166,8 +184,12 @@ namespace httplib::client
     void
     ws_client::impl::pong(std::string&& msg /*= std::string()*/)
     {
+        if (!is_open())
+        {
+            return;
+        }
         ac_que_.push(
-            [this, data = std::move(msg)]() mutable -> net::awaitable<void>
+            [this, self = shared_from_this(), data = std::move(msg)]() mutable -> net::awaitable<void>
             {
                 auto ec = co_await async_pong(std::move(data));
                 if (ec)
@@ -180,9 +202,13 @@ namespace httplib::client
     void
     ws_client::impl::close()
     {
-        ac_que_.clear();
+        if (!is_open())
+        {
+            return;
+        }
+
         ac_que_.push(
-            [this]() mutable -> net::awaitable<void>
+            [this, self = shared_from_this()]() mutable -> net::awaitable<void>
             {
                 auto ec = co_await async_close();
                 if (ec)
@@ -195,20 +221,7 @@ namespace httplib::client
     httplib::net::awaitable<boost::system::error_code>
     ws_client::impl::async_read()
     {
-        if (!is_open())
-        {
-            co_return boost::system::errc::make_error_code(boost::system::errc::not_connected);
-        }
-        buffer_.consume(buffer_.size());
-
-        boost::system::error_code ec;
-        co_await stream_->async_read(buffer_, util::net_awaitable[ec]);
-
-        if (ec && ec != beast::websocket::error::closed)
-        {
-            logger()->warn("ws read failed: {}", ec.message());
-        }
-        co_return ec;
+        co_return co_await _async_read();
     }
 
     httplib::net::awaitable<boost::system::error_code>
@@ -271,50 +284,29 @@ namespace httplib::client
     }
 
     void
-    ws_client::impl::set_handler_impl(coro_open_handler_type&& open_handler,
-                                      coro_message_handler_type&& message_handler,
-                                      coro_close_handler_type&& close_handler)
-    {
-        open_handler_ = std::move(open_handler);
-        message_handler_ = std::move(message_handler);
-        close_handler_ = std::move(close_handler);
-    }
-
-    void
-    ws_client::impl::run(std::string_view path, http::fields const& headers /*= {}*/)
+    ws_client::impl::run(std::string_view target, http::fields const& headers /*= {}*/)
     {
         boost::asio::co_spawn(
             executor_,
-            [this, self = shared_from_this(), path = std::string(path), headers]() -> net::awaitable<void>
+            [this, self = shared_from_this(), target = std::string(target), headers]() -> net::awaitable<void>
             {
                 try
                 {
-                    auto ec = co_await async_connect(path, headers);
-                    co_await open_handler_(ec);
-                    if (ec)
+
+                    if (auto ec = co_await async_connect(target, headers); ec)
                     {
-                        logger()->debug("ws open handler reported error, not reading");
                         co_return;
                     }
 
-                    while (is_open())
+                    for (;;)
                     {
                         auto read_ec = co_await async_read();
                         if (read_ec)
                         {
-                            logger()->debug("ws read loop ended: {}", read_ec.message());
                             break;
-                        }
-                        if (message_handler_)
-                        {
-                            co_await message_handler_(got_data(), got_binary());
                         }
                     }
 
-                    if (close_handler_)
-                    {
-                        co_await close_handler_();
-                    }
                     logger()->debug("ws connection closed");
                 }
                 catch (std::exception const& e)
@@ -327,6 +319,109 @@ namespace httplib::client
                 }
             },
             boost::asio::detached);
+    }
+
+    void
+    ws_client::impl::run(std::string_view target,
+                         coro_open_handler_type&& open_handler,
+                         coro_message_handler_type&& message_handler,
+                         coro_close_handler_type&& close_handler,
+                         http::fields const& headers /*= {}*/)
+    {
+        boost::asio::co_spawn(
+            executor_,
+            [this,
+             self = shared_from_this(),
+             target = std::string(target),
+             headers,
+             open_handler = std::move(open_handler),
+             message_handler = std::move(message_handler),
+             close_handler = std::move(close_handler)]() mutable -> net::awaitable<void>
+            {
+                auto ec = co_await async_run(target, std::move(message_handler), std::move(close_handler), headers);
+                try
+                {
+                    co_await open_handler(ec);
+                }
+                catch (std::exception const& e)
+                {
+                    logger()->trace("ws open handler error: {}", e.what());
+                }
+            },
+            boost::asio::detached);
+    }
+
+    net::awaitable<boost::system::error_code>
+    ws_client::impl::_async_read()
+    {
+        if (!is_open())
+        {
+            co_return boost::system::errc::make_error_code(boost::system::errc::not_connected);
+        }
+
+        buffer_.consume(buffer_.size());
+
+        boost::system::error_code ec;
+        co_await stream_->async_read(buffer_, util::net_awaitable[ec]);
+
+        if (ec)
+        {
+            boost::system::error_code ignore_error;
+            stream_->socket().close(ignore_error);
+            if (ec != beast::websocket::error::closed)
+            {
+                logger()->warn("ws read failed: {}", ec.message());
+            }
+        }
+        co_return ec;
+    }
+
+    net::awaitable<boost::system::error_code>
+    ws_client::impl::async_run(std::string_view target,
+                               coro_message_handler_type&& message_handler,
+                               coro_close_handler_type&& close_handler,
+                               http::fields const& headers /*= {}*/)
+    {
+        if (auto ec = co_await _async_connect(target, headers); ec)
+        {
+            co_return ec;
+        }
+        boost::asio::co_spawn(
+            executor_,
+            [this,
+             self = shared_from_this(),
+             message_handler = std::move(message_handler),
+             close_handler = std::move(close_handler)]() -> net::awaitable<void>
+            {
+                for (;;)
+                {
+                    auto read_ec = co_await _async_read();
+                    if (read_ec)
+                    {
+                        break;
+                    }
+                    try
+                    {
+                        co_await message_handler(got_data(), got_binary());
+                    }
+                    catch (std::exception const& e)
+                    {
+                        logger()->error("ws message handler error: {}", e.what());
+                    }
+                }
+                try
+                {
+                    co_await close_handler();
+                }
+                catch (std::exception const& e)
+                {
+                    logger()->error("ws close handler error: {}", e.what());
+                }
+                logger()->debug("ws connection closed");
+            },
+            boost::asio::detached);
+
+        co_return boost::system::error_code {};
     }
 
 } // namespace httplib::client

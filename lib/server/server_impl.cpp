@@ -607,21 +607,18 @@ namespace httplib::server
                 response_hdrs.erase(http::field::trailer);
                 response_hdrs.erase(http::field::upgrade);
 
-                if (result >= http::status::moved_permanently
-                    && result <= http::status::permanent_redirect
+                if (result >= http::status::moved_permanently && result <= http::status::permanent_redirect
                     && result != http::status::not_modified)
                 {
                     auto upstream_base = util::make_url_value(u.host(), port, ssl);
                     std::string location(response_hdrs[http::field::location]);
                     if (location.starts_with(upstream_base))
                     {
-                        response_hdrs.set(http::field::location,
-                                         prefix + location.substr(upstream_base.size()));
+                        response_hdrs.set(http::field::location, prefix + location.substr(upstream_base.size()));
                     }
                 }
 
-                if (auto rel_ec = co_await resp.get_chunk_writer()->write_header(result, response_hdrs);
-                    rel_ec)
+                if (auto rel_ec = co_await resp.get_chunk_writer()->write_header(result, response_hdrs); rel_ec)
                 {
                     logger()->trace("[proxy] write response header failed: {}", rel_ec.message());
                     co_return;
@@ -723,7 +720,29 @@ namespace httplib::server
             auto upstream = std::make_shared<client::ws_client>(ex_, host, port, ssl);
             upstream->set_logger(logger());
 
-            auto ec = co_await upstream->async_connect(upstream_target, upstream_headers);
+            auto ec = co_await upstream->async_run(
+                upstream_target,
+                [upstream, interceptor, conn = websocket_conn::weak_ptr(conn)](std::string_view data,
+                                                                               bool binary) -> net::awaitable<void>
+                {
+                    if (interceptor)
+                    {
+                        co_await interceptor->on_upstream_recv(data, binary);
+                    }
+                    if (auto c = conn.lock())
+                    {
+                        c->send(std::move(data), binary);
+                    }
+                },
+                [upstream, conn = websocket_conn::weak_ptr(conn)]() -> net::awaitable<void>
+                {
+                    if (auto c = conn.lock())
+                    {
+                        c->close();
+                    }
+                    co_return;
+                },
+                upstream_headers);
             if (ec)
             {
                 logger()->trace("[ws-forward] upstream connect failed: {}", ec.message());
@@ -736,43 +755,6 @@ namespace httplib::server
             {
                 req.set_custom_data(detail::kWsInterceptorKey, interceptor);
             }
-
-            net::co_spawn(
-                ex_,
-                [self = shared_from_this(), conn = websocket_conn::weak_ptr(conn), upstream]() -> net::awaitable<void>
-                {
-                    for (;;)
-                    {
-                        auto ec = co_await upstream->async_read();
-                        if (ec)
-                        {
-                            break;
-                        }
-                        if (auto c = conn.lock())
-                        {
-                            auto data = std::string(upstream->got_data());
-                            auto binary = upstream->got_binary();
-
-                            auto& req = c->http_request();
-                            if (req.has_custom_data(detail::kWsInterceptorKey))
-                            {
-                                auto wsi = req.custom_data<detail::ws_interceptor_ptr>(detail::kWsInterceptorKey);
-                                co_await wsi->on_upstream_recv(data, binary);
-                            }
-
-                            c->send(std::move(data), binary);
-                        }
-                        else
-                        {
-                            break;
-                        }
-                    }
-                    if (auto c = conn.lock())
-                    {
-                        c->close();
-                    }
-                },
-                net::detached);
         };
 
         auto message_handler

@@ -81,20 +81,6 @@ namespace httplib::client
     }
 
     void
-    ws_client::set_handler_impl(coro_open_handler_type&& open_handler,
-                                coro_message_handler_type&& message_handler,
-                                coro_close_handler_type&& close_handler)
-    {
-        return impl_->set_handler_impl(std::move(open_handler), std::move(message_handler), std::move(close_handler));
-    }
-
-    void
-    ws_client::run(std::string_view path, http::fields const& headers /*= {}*/)
-    {
-        return impl_->run(path, headers);
-    }
-
-    void
     ws_client::send(std::string&& data, bool binary /*= false*/)
     {
         return impl_->send(std::move(data), binary);
@@ -116,6 +102,25 @@ namespace httplib::client
     ws_client::close()
     {
         return impl_->close();
+    }
+
+    net::awaitable<boost::system::error_code>
+    ws_client::async_run_impl(std::string_view target,
+                              coro_message_handler_type&& message_handler,
+                              coro_close_handler_type&& close_handler,
+                              http::fields const& headers /*= {}*/)
+    {
+        co_return co_await impl_->async_run(target, std::move(message_handler), std::move(close_handler), headers);
+    }
+
+    void
+    ws_client::run_impl(std::string_view target,
+                        coro_open_handler_type&& open_handler,
+                        coro_message_handler_type&& message_handler,
+                        coro_close_handler_type&& close_handler,
+                        http::fields const& headers /*= {}*/)
+    {
+        impl_->run(target, std::move(open_handler), std::move(message_handler), std::move(close_handler), headers);
     }
 
 } // namespace httplib::client

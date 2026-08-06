@@ -34,30 +34,54 @@ namespace httplib::client
         std::shared_ptr<spdlog::logger> logger() const;
         void set_logger(std::shared_ptr<spdlog::logger> logger);
 
-        void run(std::string_view path, http::fields const& headers = {});
+        template <typename OpenFunc, typename MessageFunc, typename CloseFunc>
+        void
+        run(std::string_view target,
+            OpenFunc&& open_handler,
+            MessageFunc&& message_handler,
+            CloseFunc&& close_handler,
+            http::fields const& headers = {})
+        {
+            run_impl(target,
+                     httplib::util::make_coro_handler(std::forward<OpenFunc>(open_handler)),
+                     httplib::util::make_coro_handler(std::forward<MessageFunc>(message_handler)),
+                     httplib::util::make_coro_handler(std::forward<CloseFunc>(close_handler)),
+                     headers);
+        }
+
+        template <typename MessageFunc, typename CloseFunc>
+        net::awaitable<boost::system::error_code>
+        async_run(std::string_view target,
+                  MessageFunc&& message_handler,
+                  CloseFunc&& close_handler,
+                  http::fields const& headers = {})
+        {
+            co_return co_await async_run_impl(
+                target,
+                httplib::util::make_coro_handler(std::forward<MessageFunc>(message_handler)),
+                httplib::util::make_coro_handler(std::forward<CloseFunc>(close_handler)),
+                headers);
+        }
 
         void send(std::string&& data, bool binary = false);
         void ping(std::string&& msg = std::string());
         void pong(std::string&& msg = std::string());
         void close();
 
-        template <typename OpenFunc, typename MessageFunc, typename CloseFunc>
-        void
-        set_handler(OpenFunc&& open_handler, MessageFunc&& message_handler, CloseFunc&& close_handler)
-        {
-            set_handler_impl(httplib::util::make_coro_handler(std::forward<OpenFunc>(open_handler)),
-                             httplib::util::make_coro_handler(std::forward<MessageFunc>(message_handler)),
-                             httplib::util::make_coro_handler(std::forward<CloseFunc>(close_handler)));
-        }
-
       private:
         using coro_open_handler_type = std::function<net::awaitable<void>(boost::system::error_code)>;
         using coro_close_handler_type = std::function<net::awaitable<void>()>;
         using coro_message_handler_type = std::function<net::awaitable<void>(std::string_view, bool binary)>;
 
-        void set_handler_impl(coro_open_handler_type&& open_handler,
-                              coro_message_handler_type&& message_handler,
-                              coro_close_handler_type&& close_handler);
+        net::awaitable<boost::system::error_code> async_run_impl(std::string_view target,
+                                                                 coro_message_handler_type&& message_handler,
+                                                                 coro_close_handler_type&& close_handler,
+                                                                 http::fields const& headers = {});
+        void run_impl(std::string_view target,
+                      coro_open_handler_type&& open_handler,
+                      coro_message_handler_type&& message_handler,
+                      coro_close_handler_type&& close_handler,
+                      http::fields const& headers = {});
 
       private:
         ws_client(ws_client const&) = delete;

@@ -350,8 +350,8 @@ TEST_CASE("CookieProxy: via reverse proxy rewrites Cookie header", "[proxy]")
     REQUIRE(body.find("Domain=" + upstream_host) != std::string::npos);
     REQUIRE(body.find("Path=/") != std::string::npos);
 
-    upstream.stop();
-    proxy.stop();
+    upstream.stop().wait();
+    proxy.stop().wait();
     ioc.join();
 }
 
@@ -390,8 +390,8 @@ TEST_CASE("Proxy: rewrites Referer to upstream", "[proxy]")
     REQUIRE(body.find("/some-page?a=1&b=2#sec") != std::string::npos);
     REQUIRE(body.find("/api") == std::string::npos);
 
-    upstream.stop();
-    proxy.stop();
+    upstream.stop().wait();
+    proxy.stop().wait();
     ioc.join();
 }
 
@@ -432,8 +432,8 @@ TEST_CASE("Proxy: forwards X-Forwarded-Proto and X-Forwarded-Host", "[proxy]")
     REQUIRE(body.find("proto=http") != std::string::npos);
     REQUIRE(body.find("host=127.0.0.1:") != std::string::npos);
 
-    upstream.stop();
-    proxy.stop();
+    upstream.stop().wait();
+    proxy.stop().wait();
     ioc.join();
 }
 
@@ -475,7 +475,8 @@ TEST_CASE("ws-forward echo", "[proxy][ws-forward]")
         large_data[i] = static_cast<char>(i % 256);
     }
 
-    ws.set_handler(
+    ws.run(
+        "/ws/extra-path",
         [&](boost::system::error_code ec) -> net::awaitable<void>
         {
             REQUIRE(!ec);
@@ -496,12 +497,10 @@ TEST_CASE("ws-forward echo", "[proxy][ws-forward]")
         },
         []() -> net::awaitable<void> { co_return; });
 
-    ws.run("/ws/extra-path");
-
     std::this_thread::sleep_for(std::chrono::seconds(5));
 
-    upstream.stop();
-    proxy.stop();
+    upstream.stop().wait();
+    proxy.stop().wait();
     ioc.join();
 
     REQUIRE(received.size() == 4);
@@ -569,8 +568,15 @@ TEST_CASE("ws-forward stress: concurrent connections + shutdown", "[proxy][ws-fo
     {
         auto ws
             = std::make_unique<client::ws_client>(ioc.get_executor(), proxy_ep.address().to_string(), proxy_ep.port());
-        ws->set_handler(
-            [&, ws = ws.get()](boost::system::error_code ec) -> net::awaitable<void>
+
+        clients.push_back(std::move(ws));
+    }
+
+    for (auto& c : clients)
+    {
+        c->run(
+            "/ws/echo",
+            [&, ws = c.get()](boost::system::error_code ec) -> net::awaitable<void>
             {
                 if (!ec)
                 {
@@ -589,12 +595,6 @@ TEST_CASE("ws-forward stress: concurrent connections + shutdown", "[proxy][ws-fo
                 ++closed;
                 co_return;
             });
-        clients.push_back(std::move(ws));
-    }
-
-    for (auto& c : clients)
-    {
-        c->run("/ws/echo");
     }
 
     std::this_thread::sleep_for(std::chrono::seconds(3));
@@ -602,9 +602,9 @@ TEST_CASE("ws-forward stress: concurrent connections + shutdown", "[proxy][ws-fo
     stop_flag.store(true);
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
-    upstream.stop();
+    upstream.stop().wait();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    proxy.stop();
+    proxy.stop().wait();
     ioc.join();
 
     REQUIRE(total_sent.load() > 0);
@@ -653,8 +653,8 @@ TEST_CASE("proxy-rewrite-redirect-location", "[proxy]")
     REQUIRE(resp2.result() == http::status::found);
     REQUIRE(std::string(resp2["Location"]) == "/api/");
 
-    upstream.stop();
-    proxy.stop();
+    upstream.stop().wait();
+    proxy.stop().wait();
     ioc.join();
 }
 
@@ -691,8 +691,8 @@ TEST_CASE("proxy-rewrite-redirect-with-base-path", "[proxy]")
     REQUIRE(resp.result() == http::status::moved_permanently);
     REQUIRE(std::string(resp["Location"]) == "/api/new-place");
 
-    upstream.stop();
-    proxy.stop();
+    upstream.stop().wait();
+    proxy.stop().wait();
     ioc.join();
 }
 
@@ -767,8 +767,8 @@ TEST_CASE("proxy-interceptor: all steps called", "[proxy]")
     client.set_timeout(std::chrono::seconds(5));
     auto resp = UNWRAP(client.post("/api/echo", std::string_view("hello")));
 
-    upstream.stop();
-    proxy.stop();
+    upstream.stop().wait();
+    proxy.stop().wait();
     ioc.join();
 
     REQUIRE(resp.result() == http::status::ok);
@@ -848,7 +848,9 @@ TEST_CASE("ws-interceptor: messages intercepted", "[proxy][ws-forward]")
 
     client::ws_client ws(ioc.get_executor(), proxy_ep.address().to_string(), proxy_ep.port());
     std::vector<std::string> received;
-    ws.set_handler(
+
+    ws.run(
+        "/ws/echo",
         [&](boost::system::error_code ec) -> net::awaitable<void>
         {
             REQUIRE(!ec);
@@ -868,11 +870,9 @@ TEST_CASE("ws-interceptor: messages intercepted", "[proxy][ws-forward]")
         },
         []() -> net::awaitable<void> { co_return; });
 
-    ws.run("/ws/echo");
-
     std::this_thread::sleep_for(std::chrono::seconds(5));
-    upstream.stop();
-    proxy.stop();
+    upstream.stop().wait();
+    proxy.stop().wait();
     ioc.join();
 
     REQUIRE(received.size() == 3);

@@ -14,10 +14,9 @@ namespace httplib::client
         impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl);
 
       public:
-        net::awaitable<boost::system::error_code> async_connect(std::string_view path,
-                                                                http::fields const& headers = {});
         net::awaitable<boost::system::error_code> async_send(std::string&& data, bool binary = false);
-
+        net::awaitable<boost::system::error_code> async_connect(std::string_view target,
+                                                                http::fields const& headers = {});
         net::awaitable<boost::system::error_code> async_read();
 
         net::awaitable<boost::system::error_code> async_ping(std::string&& msg);
@@ -25,7 +24,7 @@ namespace httplib::client
 
         net::awaitable<boost::system::error_code> async_close();
 
-        void run(std::string_view path, http::fields const& headers = {});
+        void run(std::string_view target, http::fields const& headers = {});
 
         void send(std::string&& data, bool binary = false);
         void ping(std::string&& msg = std::string());
@@ -41,9 +40,21 @@ namespace httplib::client
         std::shared_ptr<spdlog::logger> logger() const;
         void set_logger(std::shared_ptr<spdlog::logger> logger);
 
-        void set_handler_impl(coro_open_handler_type&& open_handler,
-                              coro_message_handler_type&& message_handler,
-                              coro_close_handler_type&& close_handler);
+        void run(std::string_view target,
+                 coro_open_handler_type&& open_handler,
+                 coro_message_handler_type&& message_handler,
+                 coro_close_handler_type&& close_handler,
+                 http::fields const& headers = {});
+
+        net::awaitable<boost::system::error_code> async_run(std::string_view target,
+                                                            coro_message_handler_type&& message_handler,
+                                                            coro_close_handler_type&& close_handler,
+                                                            http::fields const& headers = {});
+
+      private:
+        net::awaitable<boost::system::error_code> _async_connect(std::string_view target,
+                                                                 http::fields const& headers = {});
+        net::awaitable<boost::system::error_code> _async_read();
 
       private:
         net::any_io_executor executor_;
@@ -56,10 +67,6 @@ namespace httplib::client
 
         beast::flat_buffer buffer_;
         util::action_queue ac_que_;
-
-        ws_client::coro_open_handler_type open_handler_;
-        ws_client::coro_message_handler_type message_handler_;
-        ws_client::coro_close_handler_type close_handler_;
 
         std::shared_ptr<spdlog::logger> default_logger_;
         std::shared_ptr<spdlog::logger> custom_logger_;
