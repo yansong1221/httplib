@@ -44,25 +44,36 @@ namespace httplib::server
                            std::string_view proxy_prefix,
                            std::string_view upstream_base)
         {
-            std::string tail(client_target);
-            tail.erase(0, proxy_prefix.size());
+            if (!client_target.starts_with(proxy_prefix))
+            {
+                return {};
+            }
+
+            auto tail = client_target.substr(proxy_prefix.size());
 
             if (tail.empty())
             {
-                return upstream_base.empty() ? std::string("/") : std::string(upstream_base);
-            }
-
-            if (tail[0] != '/')
-            {
-                tail.insert(0, 1, '/');
+                return upstream_base.empty() ? "/" : std::string(upstream_base);
             }
 
             std::string result(upstream_base);
-            if (result.ends_with('/'))
+
+            if (result.size() > 1 && result.ends_with('/'))
             {
                 result.pop_back();
             }
+
+            if (tail.front() != '/' && tail.front() != '?')
+            {
+                result += '/';
+            }
+            else if (result.ends_with('/') && tail.front() == '/')
+            {
+                tail.remove_prefix(1);
+            }
+
             result += tail;
+
             return result;
         }
 
@@ -610,12 +621,11 @@ namespace httplib::server
 
             auto& req = conn->http_request();
             auto url = co_await resolver(req);
-            logger()->debug("[ws-forward] {} -> {}", req.target(), url);
 
             auto r = boost::urls::parse_uri(url);
             if (!r)
             {
-                logger()->trace("[ws-forward] invalid upstream url: {}", url);
+                logger()->warn("[ws-forward] invalid upstream url: {}", url);
                 conn->close("bad upstream");
                 co_return;
             }
@@ -627,6 +637,11 @@ namespace httplib::server
             auto port = u.port_number() ? u.port_number() : (ssl ? 443 : 80);
 
             auto upstream_path = detail::make_upstream_path(req.target(), prefix, u.encoded_path());
+            logger()->debug("[ws-forward] {} -> {}://{}{}",
+                            req.target(),
+                            scheme,
+                            util::make_host_value(host, port, ssl),
+                            upstream_path);
 
             http::fields upstream_headers(req.base());
             upstream_headers.erase(http::field::host);
@@ -653,7 +668,7 @@ namespace httplib::server
                 co_return;
             }
 
-            req.set_custom_data(detail::kWsForwardKey, std::make_any<detail::ws_client_ptr>(upstream));
+            req.set_custom_data(detail::kWsForwardKey, upstream);
 
             net::co_spawn(
                 ex_,
@@ -694,14 +709,16 @@ namespace httplib::server
             }
 
             auto& req = conn->http_request();
-            auto upstream = req.custom_data<detail::ws_client_ptr>(detail::kWsForwardKey);
-            if (upstream)
+            if (!req.has_custom_data(detail::kWsForwardKey))
             {
-                auto ec = co_await upstream->async_send(std::string(data), binary);
-                if (ec)
-                {
-                    conn->close();
-                }
+                conn->close();
+                co_return;
+            }
+            auto upstream = req.custom_data<detail::ws_client_ptr>(detail::kWsForwardKey);
+            auto ec = co_await upstream->async_send(std::string(data), binary);
+            if (ec)
+            {
+                conn->close();
             }
             co_return;
         };
@@ -715,6 +732,10 @@ namespace httplib::server
             }
 
             auto& req = conn->http_request();
+            if (!req.has_custom_data(detail::kWsForwardKey))
+            {
+                co_return;
+            }
             auto upstream = req.custom_data<detail::ws_client_ptr>(detail::kWsForwardKey);
             if (upstream)
             {
