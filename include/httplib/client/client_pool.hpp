@@ -61,7 +61,7 @@ namespace httplib::client
 
       public:
         explicit http_client_pool(net::any_io_executor const& ex,
-                                  size_t max_size = 20,
+                                  size_t max_size = 100,
                                   std::chrono::seconds idle_timeout = std::chrono::seconds(60));
         ~http_client_pool();
 
