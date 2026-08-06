@@ -1,6 +1,8 @@
 #pragma once
 #include "httplib/config.hpp"
+#include "httplib/server/proxy_interceptor.hpp"
 #include "httplib/server/server_fwd.hpp"
+#include "httplib/server/ws_interceptor.hpp"
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -9,6 +11,7 @@
 #include <filesystem>
 #include <functional>
 #include <future>
+#include <memory>
 #include <span>
 #include <string_view>
 
@@ -57,15 +60,22 @@ namespace httplib::server
 
         void set_upload_dir(fs::path const& dir);
         void set_upload_file_limit(std::uint64_t max_bytes);
-        using proxy_header_callback = std::function<net::awaitable<void>(request& req, http::fields& headers)>;
-        using proxy_resolver = std::function<net::awaitable<std::string>(request& req)>;
 
-        void set_reverse_proxy(std::string_view location, std::string_view url, proxy_header_callback on_headers = {});
+        using proxy_resolver = std::function<net::awaitable<std::string>(request& req)>;
+        using proxy_interceptor_factory = std::function<std::shared_ptr<proxy_interceptor>(request& req)>;
+        using ws_interceptor_factory = std::function<std::shared_ptr<ws_interceptor>(request& req)>;
+
+        void set_reverse_proxy(std::string_view location,
+                               std::string_view url,
+                               proxy_interceptor_factory factory = nullptr);
         void set_reverse_proxy(std::string_view location,
                                proxy_resolver resolver,
-                               proxy_header_callback on_headers = {});
-        void set_ws_forward(std::string_view location, std::string_view url, proxy_header_callback on_headers = {});
-        void set_ws_forward(std::string_view location, proxy_resolver resolver, proxy_header_callback on_headers = {});
+                               proxy_interceptor_factory factory = nullptr);
+
+        void set_ws_forward(std::string_view location, std::string_view url, ws_interceptor_factory factory = nullptr);
+        void set_ws_forward(std::string_view location,
+                            proxy_resolver resolver,
+                            ws_interceptor_factory factory = nullptr);
         void set_proxy_pool_size(size_t max_size);
         void set_ssl(std::span<char const> const& cert_file,
                      std::span<char const> const& key_file,

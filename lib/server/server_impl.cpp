@@ -26,7 +26,9 @@ namespace httplib::server
     {
 
         constexpr auto kWsForwardKey = "ws-forward";
+        constexpr auto kWsInterceptorKey = "ws-interceptor";
         using ws_client_ptr = std::shared_ptr<client::ws_client>;
+        using ws_interceptor_ptr = std::shared_ptr<ws_interceptor>;
 
         static std::string
         strip_proxy_prefix(std::string_view route)
@@ -404,8 +406,20 @@ namespace httplib::server
 
     void
     http_server::impl::set_reverse_proxy(std::string_view location,
+                                         std::string_view upstream_url,
+                                         http_server::proxy_interceptor_factory factory)
+    {
+        auto u = std::string(upstream_url);
+        set_reverse_proxy(
+            location,
+            [u = std::move(u)](request&) -> net::awaitable<std::string> { co_return u; },
+            std::move(factory));
+    }
+
+    void
+    http_server::impl::set_reverse_proxy(std::string_view location,
                                          http_server::proxy_resolver resolver,
-                                         http_server::proxy_header_callback on_headers)
+                                         http_server::proxy_interceptor_factory factory)
     {
         std::string prefix = detail::strip_proxy_prefix(location);
 
@@ -417,12 +431,12 @@ namespace httplib::server
                                          http::verb::delete_,
                                          http::verb::options>(
             location,
-            [self = shared_from_this(),
-             this,
-             prefix,
-             resolver = std::move(resolver),
-             on_headers = std::move(on_headers)](request& req, response& resp) -> net::awaitable<void>
+            [self = shared_from_this(), this, prefix, resolver = std::move(resolver), factory = std::move(factory)](
+                request& req,
+                response& resp) -> net::awaitable<void>
             {
+                auto interceptor = factory ? factory(req) : nullptr;
+
                 auto url = co_await resolver(req);
                 logger()->debug("[proxy] {} {} -> {}", req.method_string(), req.target(), url);
 
@@ -441,6 +455,8 @@ namespace httplib::server
                 auto ssl = u.scheme_id() == boost::urls::scheme::https;
                 std::string upstream_prefix(u.encoded_path());
                 auto upstream_target = detail::make_upstream_path(req.target(), prefix, upstream_prefix);
+                auto upstream_url = util::make_url_value(u.host(), port, ssl, upstream_target);
+
                 http::fields upstream_headers(req.base());
 
                 // Strip and rewrite Cookie Domain/Path before forwarding upstream
@@ -512,9 +528,9 @@ namespace httplib::server
                     }
                 }
 
-                if (on_headers)
+                if (interceptor)
                 {
-                    co_await on_headers(req, upstream_headers);
+                    co_await interceptor->on_upstream_request(req, upstream_headers, upstream_url);
                 }
 
                 auto client = co_await proxy_pool_->async_acquire(host, port, ssl);
@@ -550,6 +566,11 @@ namespace httplib::server
                     auto more = !req.get_chunk_reader()->is_done();
                     auto bytes = bytes_result.value();
 
+                    if (interceptor)
+                    {
+                        co_await interceptor->on_upstream_request_body(relay_buf.data(), bytes, more);
+                    }
+
                     if (auto rel_ec = co_await writer->write_body(net::buffer(relay_buf, bytes), more); rel_ec)
                     {
                         logger()->trace("[proxy] write_body to {}:{} failed: {}", host, port, rel_ec.message());
@@ -573,6 +594,11 @@ namespace httplib::server
                                 static_cast<unsigned>(result),
                                 u.host());
 
+                if (interceptor)
+                {
+                    co_await interceptor->on_upstream_response(req, result, headers);
+                }
+
                 if (auto rel_ec = co_await resp.get_chunk_writer()->write_header(result, headers); rel_ec)
                 {
                     logger()->trace("[proxy] write response header failed: {}", rel_ec.message());
@@ -590,6 +616,11 @@ namespace httplib::server
                     auto bytes = bytes_result.value();
                     auto more = !reader->is_body_done();
 
+                    if (interceptor)
+                    {
+                        co_await interceptor->on_upstream_response_body(relay_buf.data(), bytes, more);
+                    }
+
                     if (auto rel_ec = co_await resp.get_chunk_writer()->write_body(net::buffer(relay_buf, bytes), more);
                         rel_ec)
                     {
@@ -602,16 +633,26 @@ namespace httplib::server
 
     void
     http_server::impl::set_ws_forward(std::string_view location,
+                                      std::string_view upstream_url,
+                                      http_server::ws_interceptor_factory factory)
+    {
+        auto u = std::string(upstream_url);
+        set_ws_forward(
+            location,
+            [u = std::move(u)](request&) -> net::awaitable<std::string> { co_return u; },
+            std::move(factory));
+    }
+
+    void
+    http_server::impl::set_ws_forward(std::string_view location,
                                       http_server::proxy_resolver resolver,
-                                      http_server::proxy_header_callback on_headers)
+                                      http_server::ws_interceptor_factory factory)
     {
         std::string prefix = detail::strip_proxy_prefix(location);
 
-        auto open_handler = [self = shared_from_this(),
-                             this,
-                             prefix,
-                             resolver = std::move(resolver),
-                             on_headers = std::move(on_headers)](websocket_conn::weak_ptr wp) -> net::awaitable<void>
+        auto open_handler
+            = [self = shared_from_this(), this, prefix, resolver = std::move(resolver), factory = std::move(factory)](
+                  websocket_conn::weak_ptr wp) -> net::awaitable<void>
         {
             auto conn = wp.lock();
             if (!conn)
@@ -620,6 +661,8 @@ namespace httplib::server
             }
 
             auto& req = conn->http_request();
+            auto interceptor = factory ? factory(req) : nullptr;
+
             auto url = co_await resolver(req);
 
             auto r = boost::urls::parse_uri(url);
@@ -636,12 +679,10 @@ namespace httplib::server
             auto ssl = (scheme == "wss" || scheme == "https");
             auto port = u.port_number() ? u.port_number() : (ssl ? 443 : 80);
 
-            auto upstream_path = detail::make_upstream_path(req.target(), prefix, u.encoded_path());
-            logger()->debug("[ws-forward] {} -> {}://{}{}",
-                            req.target(),
-                            scheme,
-                            util::make_host_value(host, port, ssl),
-                            upstream_path);
+            auto upstream_target = detail::make_upstream_path(req.target(), prefix, u.encoded_path());
+            auto upstream_url = util::make_url_value(host, port, ssl, upstream_target, scheme);
+
+            logger()->debug("[ws-forward] {} -> {}", req.target(), upstream_url);
 
             http::fields upstream_headers(req.base());
             upstream_headers.erase(http::field::host);
@@ -652,15 +693,15 @@ namespace httplib::server
             upstream_headers.erase(http::field::connection);
             upstream_headers.set(http::field::host, util::make_host_value(host, port, ssl));
 
-            if (on_headers)
+            if (interceptor)
             {
-                on_headers(req, upstream_headers);
+                co_await interceptor->on_upstream_request(req, upstream_headers, upstream_url);
             }
 
             auto upstream = std::make_shared<client::ws_client>(ex_, host, port, ssl);
             upstream->set_logger(logger());
 
-            auto ec = co_await upstream->async_connect(upstream_path, upstream_headers);
+            auto ec = co_await upstream->async_connect(upstream_target, upstream_headers);
             if (ec)
             {
                 logger()->trace("[ws-forward] upstream connect failed: {}", ec.message());
@@ -669,6 +710,10 @@ namespace httplib::server
             }
 
             req.set_custom_data(detail::kWsForwardKey, upstream);
+            if (interceptor)
+            {
+                req.set_custom_data(detail::kWsInterceptorKey, interceptor);
+            }
 
             net::co_spawn(
                 ex_,
@@ -683,7 +728,17 @@ namespace httplib::server
                         }
                         if (auto c = conn.lock())
                         {
-                            c->send(std::string(upstream->got_data()), upstream->got_binary());
+                            auto data = std::string(upstream->got_data());
+                            auto binary = upstream->got_binary();
+
+                            auto& req = c->http_request();
+                            if (req.has_custom_data(detail::kWsInterceptorKey))
+                            {
+                                auto wsi = req.custom_data<detail::ws_interceptor_ptr>(detail::kWsInterceptorKey);
+                                co_await wsi->on_upstream_recv(data, binary);
+                            }
+
+                            c->send(std::move(data), binary);
                         }
                         else
                         {
@@ -698,9 +753,8 @@ namespace httplib::server
                 net::detached);
         };
 
-        auto message_handler = [self = shared_from_this()](websocket_conn::weak_ptr wp,
-                                                           std::string_view data,
-                                                           bool binary) -> net::awaitable<void>
+        auto message_handler
+            = [](websocket_conn::weak_ptr wp, std::string_view data, bool binary) -> net::awaitable<void>
         {
             auto conn = wp.lock();
             if (!conn)
@@ -714,6 +768,13 @@ namespace httplib::server
                 conn->close();
                 co_return;
             }
+
+            if (req.has_custom_data(detail::kWsInterceptorKey))
+            {
+                auto wsi = req.custom_data<detail::ws_interceptor_ptr>(detail::kWsInterceptorKey);
+                co_await wsi->on_upstream_send(data, binary);
+            }
+
             auto upstream = req.custom_data<detail::ws_client_ptr>(detail::kWsForwardKey);
             auto ec = co_await upstream->async_send(std::string(data), binary);
             if (ec)
@@ -723,7 +784,7 @@ namespace httplib::server
             co_return;
         };
 
-        auto close_handler = [self = shared_from_this()](websocket_conn::weak_ptr wp) -> net::awaitable<void>
+        auto close_handler = [](websocket_conn::weak_ptr wp) -> net::awaitable<void>
         {
             auto conn = wp.lock();
             if (!conn)

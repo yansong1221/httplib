@@ -624,3 +624,198 @@ TEST_CASE("ws-forward stress: concurrent connections + shutdown", "[proxy][ws-fo
     REQUIRE(total_sent.load() > 0);
     REQUIRE(total_recv.load() > 0);
 }
+
+TEST_CASE("proxy-interceptor: all steps called", "[proxy]")
+{
+    net::io_context ioc;
+    server::http_server upstream(ioc);
+    server::http_server proxy(ioc);
+
+    upstream.listen("127.0.0.1", 0);
+    proxy.listen("127.0.0.1", 0);
+    upstream.run();
+    proxy.run();
+
+    auto upstream_ep = upstream.local_endpoint();
+    auto proxy_ep = proxy.local_endpoint();
+    std::string upstream_url = std::format("http://{}:{}", upstream_ep.address().to_string(), upstream_ep.port());
+
+    upstream.router().set_http_handler<http::verb::post>(
+        "/echo",
+        [](server::request& req, server::response& resp)
+        { resp.set_string_content(std::string(req.body().as<body::string_body>()), "text/plain"); });
+
+    std::atomic<int> req_called{0}, req_body_called{0}, resp_called{0}, resp_body_called{0};
+
+    struct test_interceptor : server::proxy_interceptor
+    {
+        std::atomic<int>* req_called;
+        std::atomic<int>* req_body_called;
+        std::atomic<int>* resp_called;
+        std::atomic<int>* resp_body_called;
+
+        net::awaitable<void>
+        on_upstream_request(server::request&, http::fields&, const std::string&) override
+        {
+            (*req_called)++;
+            co_return;
+        }
+        net::awaitable<void>
+        on_upstream_request_body(const char*, size_t, bool) override
+        {
+            (*req_body_called)++;
+            co_return;
+        }
+        net::awaitable<void>
+        on_upstream_response(server::request&, http::status, const http::fields&) override
+        {
+            (*resp_called)++;
+            co_return;
+        }
+        net::awaitable<void>
+        on_upstream_response_body(const char*, size_t, bool) override
+        {
+            (*resp_body_called)++;
+            co_return;
+        }
+    };
+
+    proxy.set_reverse_proxy(
+        "/api/*", upstream_url,
+        [&](server::request&) -> std::shared_ptr<server::proxy_interceptor>
+        {
+            auto ti = std::make_shared<test_interceptor>();
+            ti->req_called = &req_called;
+            ti->req_body_called = &req_body_called;
+            ti->resp_called = &resp_called;
+            ti->resp_body_called = &resp_body_called;
+            return ti;
+        });
+
+    std::thread worker([&] { ioc.run(); });
+
+    auto client = client::http_client(ioc, proxy_ep.address().to_string(), proxy_ep.port());
+    client.set_timeout(std::chrono::seconds(5));
+    auto resp = UNWRAP(client.post("/api/echo", std::string_view("hello")));
+
+    upstream.stop().wait();
+    proxy.stop().wait();
+    ioc.stop();
+    worker.join();
+
+    REQUIRE(resp.result() == http::status::ok);
+    REQUIRE(as_string(resp) == "hello");
+    REQUIRE(req_called.load() == 1);
+    REQUIRE(req_body_called.load() >= 1);
+    REQUIRE(resp_called.load() == 1);
+    REQUIRE(resp_body_called.load() >= 1);
+}
+
+TEST_CASE("ws-interceptor: messages intercepted", "[proxy][ws-forward]")
+{
+    net::io_context ioc;
+    server::http_server upstream(ioc);
+    server::http_server proxy(ioc);
+
+    upstream.listen("127.0.0.1", 0);
+    proxy.listen("127.0.0.1", 0);
+    upstream.run();
+    proxy.run();
+
+    auto upstream_ep = upstream.local_endpoint();
+    auto proxy_ep = proxy.local_endpoint();
+    std::string upstream_url = std::format("ws://{}:{}", upstream_ep.address().to_string(), upstream_ep.port());
+
+    upstream.router().set_ws_handler(
+        "/echo",
+        [](server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; },
+        [](server::websocket_conn::weak_ptr wp, std::string_view msg, bool binary) -> net::awaitable<void>
+        {
+            if (auto c = wp.lock())
+            {
+                c->send(msg, binary);
+            }
+            co_return;
+        },
+        [](server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });
+
+    std::atomic<int> req_called{0}, client_msg_called{0}, upstream_msg_called{0};
+
+    struct test_ws_interceptor : server::ws_interceptor
+    {
+        std::atomic<int>* req_called;
+        std::atomic<int>* client_msg_called;
+        std::atomic<int>* upstream_msg_called;
+
+        net::awaitable<void>
+        on_upstream_request(server::request&, http::fields&, const std::string&) override
+        {
+            (*req_called)++;
+            co_return;
+        }
+        net::awaitable<void>
+        on_upstream_send(std::string_view, bool) override
+        {
+            (*client_msg_called)++;
+            co_return;
+        }
+        net::awaitable<void>
+        on_upstream_recv(std::string_view, bool) override
+        {
+            (*upstream_msg_called)++;
+            co_return;
+        }
+    };
+
+    proxy.set_ws_forward(
+        "/ws/*", upstream_url,
+        [&](server::request&) -> std::shared_ptr<server::ws_interceptor>
+        {
+            auto ti = std::make_shared<test_ws_interceptor>();
+            ti->req_called = &req_called;
+            ti->client_msg_called = &client_msg_called;
+            ti->upstream_msg_called = &upstream_msg_called;
+            return ti;
+        });
+
+    std::thread worker([&] { ioc.run(); });
+
+    client::ws_client ws(ioc, proxy_ep.address().to_string(), proxy_ep.port());
+    std::vector<std::string> received;
+    ws.set_handler(
+        [&](boost::system::error_code ec) -> net::awaitable<void>
+        {
+            REQUIRE(!ec);
+            ws.send(std::string("hello"));
+            ws.send(std::string("world"));
+            ws.send(std::string("done"));
+            co_return;
+        },
+        [&](std::string_view msg, bool) -> net::awaitable<void>
+        {
+            received.emplace_back(msg);
+            if (received.size() >= 3)
+            {
+                ws.close();
+            }
+            co_return;
+        },
+        []() -> net::awaitable<void> { co_return; });
+
+    auto work = net::make_work_guard(ioc);
+    ws.run("/ws/echo");
+
+    ioc.run_for(std::chrono::seconds(5));
+    upstream.stop().wait();
+    proxy.stop().wait();
+    ioc.stop();
+    worker.join();
+
+    REQUIRE(received.size() == 3);
+    REQUIRE(received[0] == "hello");
+    REQUIRE(received[1] == "world");
+    REQUIRE(received[2] == "done");
+    REQUIRE(req_called.load() == 1);
+    REQUIRE(client_msg_called.load() == 3);
+    REQUIRE(upstream_msg_called.load() == 3);
+}

@@ -84,12 +84,18 @@ namespace httplib::server
         }
 
         void set_reverse_proxy(std::string_view location,
+                               std::string_view upstream_url,
+                               http_server::proxy_interceptor_factory factory);
+        void set_reverse_proxy(std::string_view location,
                                http_server::proxy_resolver resolver,
-                               http_server::proxy_header_callback on_headers);
+                               http_server::proxy_interceptor_factory factory);
 
         void set_ws_forward(std::string_view location,
+                            std::string_view upstream_url,
+                            http_server::ws_interceptor_factory factory);
+        void set_ws_forward(std::string_view location,
                             http_server::proxy_resolver resolver,
-                            http_server::proxy_header_callback on_headers);
+                            http_server::ws_interceptor_factory factory);
 
         void set_proxy_pool_size(size_t max_size);
 
