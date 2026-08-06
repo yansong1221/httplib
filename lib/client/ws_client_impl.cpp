@@ -203,7 +203,8 @@ namespace httplib::client
 
         boost::system::error_code ec;
         co_await stream_->async_read(buffer_, util::net_awaitable[ec]);
-        if (ec && ec != boost::asio::error::eof)
+
+        if (ec && ec != beast::websocket::error::closed)
         {
             logger()->warn("ws read failed: {}", ec.message());
         }

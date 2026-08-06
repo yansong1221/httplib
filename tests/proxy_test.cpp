@@ -350,8 +350,8 @@ TEST_CASE("CookieProxy: via reverse proxy rewrites Cookie header", "[proxy]")
     REQUIRE(body.find("Domain=" + upstream_host) != std::string::npos);
     REQUIRE(body.find("Path=/") != std::string::npos);
 
-    upstream.stop().wait();
-    proxy.stop().wait();
+    upstream.stop();
+    proxy.stop();
     ioc.join();
 }
 
@@ -390,8 +390,8 @@ TEST_CASE("Proxy: rewrites Referer to upstream", "[proxy]")
     REQUIRE(body.find("/some-page?a=1&b=2#sec") != std::string::npos);
     REQUIRE(body.find("/api") == std::string::npos);
 
-    upstream.stop().wait();
-    proxy.stop().wait();
+    upstream.stop();
+    proxy.stop();
     ioc.join();
 }
 
@@ -432,8 +432,8 @@ TEST_CASE("Proxy: forwards X-Forwarded-Proto and X-Forwarded-Host", "[proxy]")
     REQUIRE(body.find("proto=http") != std::string::npos);
     REQUIRE(body.find("host=127.0.0.1:") != std::string::npos);
 
-    upstream.stop().wait();
-    proxy.stop().wait();
+    upstream.stop();
+    proxy.stop();
     ioc.join();
 }
 
@@ -500,8 +500,8 @@ TEST_CASE("ws-forward echo", "[proxy][ws-forward]")
 
     std::this_thread::sleep_for(std::chrono::seconds(5));
 
-    upstream.stop().wait();
-    proxy.stop().wait();
+    upstream.stop();
+    proxy.stop();
     ioc.join();
 
     REQUIRE(received.size() == 4);
@@ -602,9 +602,9 @@ TEST_CASE("ws-forward stress: concurrent connections + shutdown", "[proxy][ws-fo
     stop_flag.store(true);
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
 
-    upstream.stop().wait();
+    upstream.stop();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    proxy.stop().wait();
+    proxy.stop();
     ioc.join();
 
     REQUIRE(total_sent.load() > 0);
@@ -653,8 +653,8 @@ TEST_CASE("proxy-rewrite-redirect-location", "[proxy]")
     REQUIRE(resp2.result() == http::status::found);
     REQUIRE(std::string(resp2["Location"]) == "/api/");
 
-    upstream.stop().wait();
-    proxy.stop().wait();
+    upstream.stop();
+    proxy.stop();
     ioc.join();
 }
 
@@ -691,8 +691,8 @@ TEST_CASE("proxy-rewrite-redirect-with-base-path", "[proxy]")
     REQUIRE(resp.result() == http::status::moved_permanently);
     REQUIRE(std::string(resp["Location"]) == "/api/new-place");
 
-    upstream.stop().wait();
-    proxy.stop().wait();
+    upstream.stop();
+    proxy.stop();
     ioc.join();
 }
 
@@ -767,8 +767,8 @@ TEST_CASE("proxy-interceptor: all steps called", "[proxy]")
     client.set_timeout(std::chrono::seconds(5));
     auto resp = UNWRAP(client.post("/api/echo", std::string_view("hello")));
 
-    upstream.stop().wait();
-    proxy.stop().wait();
+    upstream.stop();
+    proxy.stop();
     ioc.join();
 
     REQUIRE(resp.result() == http::status::ok);
@@ -871,8 +871,8 @@ TEST_CASE("ws-interceptor: messages intercepted", "[proxy][ws-forward]")
     ws.run("/ws/echo");
 
     std::this_thread::sleep_for(std::chrono::seconds(5));
-    upstream.stop().wait();
-    proxy.stop().wait();
+    upstream.stop();
+    proxy.stop();
     ioc.join();
 
     REQUIRE(received.size() == 3);

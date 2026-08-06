@@ -83,7 +83,6 @@ namespace test_common
         httplib::server::http_server server { workers_.get_executor() };
         httplib::tcp::endpoint endpoint;
         std::unique_ptr<httplib::client::http_client> client;
-        bool started_ = false;
 
         test_scaffold()
         {
@@ -93,11 +92,13 @@ namespace test_common
 
         ~test_scaffold()
         {
-            if (started_)
+
+            if (client)
             {
-                server.stop().wait();
-                workers_.join();
+                client->close();
             }
+            server.stop().wait();
+            workers_.join();
         }
 
         void
@@ -106,7 +107,6 @@ namespace test_common
             server.listen("127.0.0.1", 0);
             endpoint = server.local_endpoint();
             server.run();
-            started_ = true;
 
             client = std::make_unique<httplib::client::http_client>(workers_.get_executor(),
                                                                     endpoint.address().to_string(),
@@ -120,7 +120,6 @@ namespace test_common
             server.listen("127.0.0.1", 0);
             endpoint = server.local_endpoint();
             server.run();
-            started_ = true;
 
             client = std::make_unique<httplib::client::http_client>(workers_.get_executor(),
                                                                     endpoint.address().to_string(),
@@ -137,7 +136,6 @@ namespace test_common
             server.listen("127.0.0.1", 0);
             endpoint = server.local_endpoint();
             server.run();
-            started_ = true;
             ssl_ = true;
 
             client = std::make_unique<httplib::client::http_client>(workers_.get_executor(),
