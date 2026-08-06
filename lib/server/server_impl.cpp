@@ -599,7 +599,29 @@ namespace httplib::server
                     co_await interceptor->on_upstream_response(req, result, headers);
                 }
 
-                if (auto rel_ec = co_await resp.get_chunk_writer()->write_header(result, headers); rel_ec)
+                auto response_hdrs = http::fields(headers);
+                // Strip hop-by-hop headers before relaying to client
+                response_hdrs.erase(http::field::connection);
+                response_hdrs.erase(http::field::keep_alive);
+                response_hdrs.erase(http::field::te);
+                response_hdrs.erase(http::field::trailer);
+                response_hdrs.erase(http::field::upgrade);
+
+                if (result >= http::status::moved_permanently
+                    && result <= http::status::permanent_redirect
+                    && result != http::status::not_modified)
+                {
+                    auto upstream_base = util::make_url_value(u.host(), port, ssl);
+                    std::string location(response_hdrs[http::field::location]);
+                    if (location.starts_with(upstream_base))
+                    {
+                        response_hdrs.set(http::field::location,
+                                         prefix + location.substr(upstream_base.size()));
+                    }
+                }
+
+                if (auto rel_ec = co_await resp.get_chunk_writer()->write_header(result, response_hdrs);
+                    rel_ec)
                 {
                     logger()->trace("[proxy] write response header failed: {}", rel_ec.message());
                     co_return;
