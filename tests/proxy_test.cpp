@@ -133,14 +133,14 @@ TEST_CASE("reverse-proxy", "[proxy]")
 
     ts.start();
 
-    SECTION("GET /api/resource â†?upstream /resource")
+    SECTION("GET /api/resource -> upstream /resource")
     {
         auto resp = UNWRAP(ts.proxy_client->get("/api/resource"));
         REQUIRE(resp.result() == http::status::ok);
         REQUIRE(as_string(resp) == "upstream-resource");
     }
 
-    SECTION("POST /api/echo with body â†?upstream /echo")
+    SECTION("POST /api/echo with body -> upstream /echo")
     {
         // verify upstream handles POST directly
         auto direct = UNWRAP(ts.upstream_client->post("/echo", std::string_view("direct-post")));
@@ -152,7 +152,7 @@ TEST_CASE("reverse-proxy", "[proxy]")
         REQUIRE(as_string(resp) == "hello-proxy");
     }
 
-    SECTION("GET /api/echo â†?upstream /echo (empty body)")
+    SECTION("GET /api/echo -> upstream /echo (empty body)")
     {
         // verify upstream handles GET directly
         auto direct = UNWRAP(ts.upstream_client->get("/echo"));
@@ -164,31 +164,31 @@ TEST_CASE("reverse-proxy", "[proxy]")
         REQUIRE(as_string(resp).empty());
     }
 
-    SECTION("GET /api/status/201 â†?upstream /status/201")
+    SECTION("GET /api/status/201 -> upstream /status/201")
     {
         auto resp = UNWRAP(ts.proxy_client->get("/api/status/201"));
         REQUIRE(resp.result() == http::status::created);
     }
 
-    SECTION("GET /api/status/404 â†?upstream /status/404")
+    SECTION("GET /api/status/404 -> upstream /status/404")
     {
         auto resp = UNWRAP(ts.proxy_client->get("/api/status/404"));
         REQUIRE(resp.result() == http::status::not_found);
     }
 
-    SECTION("GET /api/status/204 â†?upstream /status/204")
+    SECTION("GET /api/status/204 -> upstream /status/204")
     {
         auto resp = UNWRAP(ts.proxy_client->get("/api/status/204"));
         REQUIRE(resp.result() == http::status::no_content);
     }
 
-    SECTION("GET /api/status/304 â†?upstream /status/304")
+    SECTION("GET /api/status/304 -> upstream /status/304")
     {
         auto resp = UNWRAP(ts.proxy_client->get("/api/status/304"));
         REQUIRE(resp.result() == http::status::not_modified);
     }
 
-    SECTION("GET /api/status/102 â†?upstream /status/102 (1xx)")
+    SECTION("GET /api/status/102 -> upstream /status/102 (1xx)")
     {
         auto resp = UNWRAP(ts.proxy_client->get("/api/status/102"));
         REQUIRE(resp.result() == http::status::processing);
@@ -335,7 +335,6 @@ TEST_CASE("CookieProxy: via reverse proxy rewrites Cookie header", "[proxy]")
 
     upstream.run();
     proxy.run();
-    
 
     auto client = std::make_unique<httplib::client::http_client>(ioc.get_executor(), "127.0.0.1", proxy_port);
     client->set_timeout(std::chrono::seconds(5));
@@ -378,7 +377,6 @@ TEST_CASE("Proxy: rewrites Referer to upstream", "[proxy]")
 
     upstream.run();
     proxy.run();
-    
 
     auto client = std::make_unique<httplib::client::http_client>(ioc.get_executor(), "127.0.0.1", proxy_port);
     client->set_timeout(std::chrono::seconds(5));
@@ -424,7 +422,6 @@ TEST_CASE("Proxy: forwards X-Forwarded-Proto and X-Forwarded-Host", "[proxy]")
 
     upstream.run();
     proxy.run();
-    
 
     auto client = std::make_unique<httplib::client::http_client>(ioc.get_executor(), "127.0.0.1", proxy_port);
     client->set_timeout(std::chrono::seconds(5));
@@ -499,7 +496,13 @@ TEST_CASE("ws-forward echo", "[proxy][ws-forward]")
         },
         []() -> net::awaitable<void> { co_return; });
 
-    ws.run("/ws/extra-path"); std::thread([](auto* u, auto* p) { std::this_thread::sleep_for(std::chrono::seconds(5)); u->stop(); p->stop(); }, &upstream, &proxy).detach(); ioc.join(); upstream.stop().wait(); proxy.stop().wait();
+    ws.run("/ws/extra-path");
+
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+
+    upstream.stop().wait();
+    proxy.stop().wait();
+    ioc.join();
 
     REQUIRE(received.size() == 4);
     REQUIRE(received[0] == "hello-forward");
@@ -521,8 +524,7 @@ TEST_CASE("ws-forward stress: concurrent connections + shutdown", "[proxy][ws-fo
 
     auto upstream_ep = upstream.local_endpoint();
     auto proxy_ep = proxy.local_endpoint();
-    std::string upstream_url
-        = std::format("ws://{}:{}", upstream_ep.address().to_string(), upstream_ep.port());
+    std::string upstream_url = std::format("ws://{}:{}", upstream_ep.address().to_string(), upstream_ep.port());
 
     upstream.router().set_ws_handler(
         "/echo",
@@ -530,7 +532,9 @@ TEST_CASE("ws-forward stress: concurrent connections + shutdown", "[proxy][ws-fo
         [](server::websocket_conn::weak_ptr wp, std::string_view msg, bool binary) -> net::awaitable<void>
         {
             if (auto c = wp.lock())
+            {
                 c->send(msg, binary);
+            }
             co_return;
         },
         [](server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });
@@ -538,11 +542,11 @@ TEST_CASE("ws-forward stress: concurrent connections + shutdown", "[proxy][ws-fo
     proxy.set_ws_forward("/ws/*", upstream_url);
 
     constexpr int kConnections = 6;
-    std::atomic<int> connected{ 0 };
-    std::atomic<int> total_sent{ 0 };
-    std::atomic<int> total_recv{ 0 };
-    std::atomic<int> closed{ 0 };
-    std::atomic<bool> stop_flag{ false };
+    std::atomic<int> connected { 0 };
+    std::atomic<int> total_sent { 0 };
+    std::atomic<int> total_recv { 0 };
+    std::atomic<int> closed { 0 };
+    std::atomic<bool> stop_flag { false };
     std::vector<std::unique_ptr<client::ws_client>> clients;
 
     upstream.router().set_ws_handler(
@@ -552,7 +556,9 @@ TEST_CASE("ws-forward stress: concurrent connections + shutdown", "[proxy][ws-fo
         {
             ++total_recv;
             if (auto c = wp.lock())
+            {
                 c->send(msg, binary);
+            }
             co_return;
         },
         [](server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });
@@ -561,7 +567,8 @@ TEST_CASE("ws-forward stress: concurrent connections + shutdown", "[proxy][ws-fo
 
     for (int i = 0; i < kConnections; ++i)
     {
-        auto ws = std::make_unique<client::ws_client>(ioc.get_executor(), proxy_ep.address().to_string(), proxy_ep.port());
+        auto ws
+            = std::make_unique<client::ws_client>(ioc.get_executor(), proxy_ep.address().to_string(), proxy_ep.port());
         ws->set_handler(
             [&, ws = ws.get()](boost::system::error_code ec) -> net::awaitable<void>
             {
@@ -586,7 +593,9 @@ TEST_CASE("ws-forward stress: concurrent connections + shutdown", "[proxy][ws-fo
     }
 
     for (auto& c : clients)
+    {
         c->run("/ws/echo");
+    }
 
     std::this_thread::sleep_for(std::chrono::seconds(3));
 
@@ -619,22 +628,18 @@ TEST_CASE("proxy-rewrite-redirect-location", "[proxy]")
 
     upstream.router().set_http_handler<http::verb::get>(
         "/redirect-me",
-        [&](server::request&, server::response& resp) {
-            resp.set_redirect(
-                std::format("http://{}:{}/new-place", upstream_host, upstream_port),
-                http::status::moved_permanently);
+        [&](server::request&, server::response& resp)
+        {
+            resp.set_redirect(std::format("http://{}:{}/new-place", upstream_host, upstream_port),
+                              http::status::moved_permanently);
         });
 
     upstream.router().set_http_handler<http::verb::get>(
         "/redirect-root",
-        [&](server::request&, server::response& resp) {
-            resp.set_redirect(
-                std::format("http://{}:{}/", upstream_host, upstream_port),
-                http::status::found);
-        });
+        [&](server::request&, server::response& resp)
+        { resp.set_redirect(std::format("http://{}:{}/", upstream_host, upstream_port), http::status::found); });
 
-    proxy.set_reverse_proxy(
-        "/api/*", std::format("http://{}:{}", upstream_host, upstream_port));
+    proxy.set_reverse_proxy("/api/*", std::format("http://{}:{}", upstream_host, upstream_port));
 
     auto client = client::http_client(ioc.get_executor(), "127.0.0.1", proxy.local_endpoint().port());
     client.set_timeout(std::chrono::seconds(5));
@@ -670,14 +675,13 @@ TEST_CASE("proxy-rewrite-redirect-with-base-path", "[proxy]")
 
     upstream.router().set_http_handler<http::verb::get>(
         "/qqq/redirect-me",
-        [&](server::request&, server::response& resp) {
-            resp.set_redirect(
-                std::format("http://{}:{}/new-place", upstream_host, upstream_port),
-                http::status::moved_permanently);
+        [&](server::request&, server::response& resp)
+        {
+            resp.set_redirect(std::format("http://{}:{}/new-place", upstream_host, upstream_port),
+                              http::status::moved_permanently);
         });
 
-    proxy.set_reverse_proxy(
-        "/api/*", std::format("http://{}:{}/qqq", upstream_host, upstream_port));
+    proxy.set_reverse_proxy("/api/*", std::format("http://{}:{}/qqq", upstream_host, upstream_port));
 
     auto client = client::http_client(ioc.get_executor(), "127.0.0.1", proxy.local_endpoint().port());
     client.set_timeout(std::chrono::seconds(5));
@@ -712,7 +716,7 @@ TEST_CASE("proxy-interceptor: all steps called", "[proxy]")
         [](server::request& req, server::response& resp)
         { resp.set_string_content(std::string(req.body().as<body::string_body>()), "text/plain"); });
 
-    std::atomic<int> req_called{0}, req_body_called{0}, resp_called{0}, resp_body_called{0};
+    std::atomic<int> req_called { 0 }, req_body_called { 0 }, resp_called { 0 }, resp_body_called { 0 };
 
     struct test_interceptor : server::proxy_interceptor
     {
@@ -722,7 +726,7 @@ TEST_CASE("proxy-interceptor: all steps called", "[proxy]")
         std::atomic<int>* resp_body_called;
 
         net::awaitable<void>
-        on_upstream_request(server::request&, http::fields&, const std::string&) override
+        on_upstream_request(server::request&, http::fields&, std::string const&) override
         {
             (*req_called)++;
             co_return;
@@ -734,7 +738,7 @@ TEST_CASE("proxy-interceptor: all steps called", "[proxy]")
             co_return;
         }
         net::awaitable<void>
-        on_upstream_response(server::request&, http::status, const http::fields&) override
+        on_upstream_response(server::request&, http::status, http::fields const&) override
         {
             (*resp_called)++;
             co_return;
@@ -747,17 +751,17 @@ TEST_CASE("proxy-interceptor: all steps called", "[proxy]")
         }
     };
 
-    proxy.set_reverse_proxy(
-        "/api/*", upstream_url,
-        [&](server::request&) -> std::shared_ptr<server::proxy_interceptor>
-        {
-            auto ti = std::make_shared<test_interceptor>();
-            ti->req_called = &req_called;
-            ti->req_body_called = &req_body_called;
-            ti->resp_called = &resp_called;
-            ti->resp_body_called = &resp_body_called;
-            return ti;
-        });
+    proxy.set_reverse_proxy("/api/*",
+                            upstream_url,
+                            [&](server::request&) -> std::shared_ptr<server::proxy_interceptor>
+                            {
+                                auto ti = std::make_shared<test_interceptor>();
+                                ti->req_called = &req_called;
+                                ti->req_body_called = &req_body_called;
+                                ti->resp_called = &resp_called;
+                                ti->resp_body_called = &resp_body_called;
+                                return ti;
+                            });
 
     auto client = client::http_client(ioc.get_executor(), proxy_ep.address().to_string(), proxy_ep.port());
     client.set_timeout(std::chrono::seconds(5));
@@ -803,7 +807,7 @@ TEST_CASE("ws-interceptor: messages intercepted", "[proxy][ws-forward]")
         },
         [](server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });
 
-    std::atomic<int> req_called{0}, client_msg_called{0}, upstream_msg_called{0};
+    std::atomic<int> req_called { 0 }, client_msg_called { 0 }, upstream_msg_called { 0 };
 
     struct test_ws_interceptor : server::ws_interceptor
     {
@@ -812,7 +816,7 @@ TEST_CASE("ws-interceptor: messages intercepted", "[proxy][ws-forward]")
         std::atomic<int>* upstream_msg_called;
 
         net::awaitable<void>
-        on_upstream_request(server::request&, http::fields&, const std::string&) override
+        on_upstream_request(server::request&, http::fields&, std::string const&) override
         {
             (*req_called)++;
             co_return;
@@ -831,16 +835,16 @@ TEST_CASE("ws-interceptor: messages intercepted", "[proxy][ws-forward]")
         }
     };
 
-    proxy.set_ws_forward(
-        "/ws/*", upstream_url,
-        [&](server::request&) -> std::shared_ptr<server::ws_interceptor>
-        {
-            auto ti = std::make_shared<test_ws_interceptor>();
-            ti->req_called = &req_called;
-            ti->client_msg_called = &client_msg_called;
-            ti->upstream_msg_called = &upstream_msg_called;
-            return ti;
-        });
+    proxy.set_ws_forward("/ws/*",
+                         upstream_url,
+                         [&](server::request&) -> std::shared_ptr<server::ws_interceptor>
+                         {
+                             auto ti = std::make_shared<test_ws_interceptor>();
+                             ti->req_called = &req_called;
+                             ti->client_msg_called = &client_msg_called;
+                             ti->upstream_msg_called = &upstream_msg_called;
+                             return ti;
+                         });
 
     client::ws_client ws(ioc.get_executor(), proxy_ep.address().to_string(), proxy_ep.port());
     std::vector<std::string> received;
@@ -864,7 +868,12 @@ TEST_CASE("ws-interceptor: messages intercepted", "[proxy][ws-forward]")
         },
         []() -> net::awaitable<void> { co_return; });
 
-    ws.run("/ws/echo"); std::thread([](auto* u, auto* p) { std::this_thread::sleep_for(std::chrono::seconds(5)); u->stop(); p->stop(); }, &upstream, &proxy).detach(); ioc.join(); upstream.stop().wait(); proxy.stop().wait();
+    ws.run("/ws/echo");
+
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+    upstream.stop().wait();
+    proxy.stop().wait();
+    ioc.join();
 
     REQUIRE(received.size() == 3);
     REQUIRE(received[0] == "hello");
@@ -874,6 +883,3 @@ TEST_CASE("ws-interceptor: messages intercepted", "[proxy][ws-forward]")
     REQUIRE(client_msg_called.load() == 3);
     REQUIRE(upstream_msg_called.load() == 3);
 }
-
-
-
