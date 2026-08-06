@@ -568,7 +568,7 @@ namespace httplib::server
 
                     if (interceptor)
                     {
-                        co_await interceptor->on_upstream_request_body(relay_buf.data(), bytes, more);
+                        co_await interceptor->on_upstream_request_body(net::buffer(relay_buf, bytes), more);
                     }
 
                     if (auto rel_ec = co_await writer->write_body(net::buffer(relay_buf, bytes), more); rel_ec)
@@ -618,7 +618,7 @@ namespace httplib::server
 
                     if (interceptor)
                     {
-                        co_await interceptor->on_upstream_response_body(relay_buf.data(), bytes, more);
+                        co_await interceptor->on_upstream_response_body(net::buffer(relay_buf, bytes), more);
                     }
 
                     if (auto rel_ec = co_await resp.get_chunk_writer()->write_body(net::buffer(relay_buf, bytes), more);

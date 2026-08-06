@@ -2,6 +2,7 @@
 #include "httplib/config.hpp"
 #include "httplib/server/server_fwd.hpp"
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/buffer.hpp>
 #include <boost/beast/http/fields.hpp>
 #include <boost/beast/http/status.hpp>
 
@@ -18,7 +19,7 @@ namespace httplib::server
         {
             co_return;
         }
-        virtual net::awaitable<void> on_upstream_request_body(const char* data, size_t bytes, bool more)
+        virtual net::awaitable<void> on_upstream_request_body(net::const_buffer buffer, bool more)
         {
             co_return;
         }
@@ -28,7 +29,7 @@ namespace httplib::server
         {
             co_return;
         }
-        virtual net::awaitable<void> on_upstream_response_body(const char* data, size_t bytes, bool more)
+        virtual net::awaitable<void> on_upstream_response_body(net::const_buffer buffer, bool more)
         {
             co_return;
         }

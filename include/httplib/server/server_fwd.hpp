@@ -17,4 +17,7 @@ namespace httplib::server
     class sse_writer;
     class ndjson_writer;
 
+    class proxy_interceptor;
+    class ws_interceptor;
+
 } // namespace httplib::server

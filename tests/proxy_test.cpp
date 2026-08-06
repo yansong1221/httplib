@@ -661,7 +661,7 @@ TEST_CASE("proxy-interceptor: all steps called", "[proxy]")
             co_return;
         }
         net::awaitable<void>
-        on_upstream_request_body(const char*, size_t, bool) override
+        on_upstream_request_body(net::const_buffer, bool) override
         {
             (*req_body_called)++;
             co_return;
@@ -673,7 +673,7 @@ TEST_CASE("proxy-interceptor: all steps called", "[proxy]")
             co_return;
         }
         net::awaitable<void>
-        on_upstream_response_body(const char*, size_t, bool) override
+        on_upstream_response_body(net::const_buffer, bool) override
         {
             (*resp_body_called)++;
             co_return;
