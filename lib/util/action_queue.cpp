@@ -21,15 +21,15 @@ namespace httplib::util
     }
 
     httplib::net::awaitable<void>
-    action_queue::async_shutdown(bool cancel_signal /*= true*/)
+    action_queue::async_shutdown()
     {
-        co_return co_await impl_->async_shutdown(cancel_signal);
+        co_return co_await impl_->async_shutdown();
     }
 
     std::shared_future<void>
-    action_queue::shutdown(bool cancel_signal /*= true*/)
+    action_queue::shutdown()
     {
-        return impl_->shutdown(cancel_signal);
+        return impl_->shutdown();
     }
 
 } // namespace httplib::util

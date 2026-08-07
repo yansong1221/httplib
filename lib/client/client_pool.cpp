@@ -166,6 +166,7 @@ namespace httplib::client
                 return;
             }
             cleanup_timer_.cancel();
+            cleanup_timer_.expires_after(std::chrono::seconds(0));
 
             waiters_list waiters;
             waiters.swap(waiters_);

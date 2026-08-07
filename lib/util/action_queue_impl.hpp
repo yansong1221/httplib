@@ -4,8 +4,6 @@
 #include "httplib/util/use_awaitable.hpp"
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
-#include <boost/asio/bind_cancellation_slot.hpp>
-#include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/dispatch.hpp>
@@ -41,14 +39,13 @@ namespace httplib::util
 
                 net::co_spawn(executor_,
                               perform(),
-                              boost::asio::bind_cancellation_slot(cs_.slot(),
-                                                                  [](std::exception_ptr e)
-                                                                  {
-                                                                      if (e)
-                                                                      {
-                                                                          std::rethrow_exception(e);
-                                                                      }
-                                                                  }));
+                              [](std::exception_ptr e)
+                              {
+                                  if (e)
+                                  {
+                                      std::rethrow_exception(e);
+                                  }
+                              });
             }
         }
         void
@@ -65,7 +62,7 @@ namespace httplib::util
         }
 
         net::awaitable<void>
-        async_shutdown(bool cancel_signal)
+        async_shutdown()
         {
             std::unique_lock<std::mutex> lck(que_mutex_);
             if (!shutting_down_.exchange(true))
@@ -73,11 +70,6 @@ namespace httplib::util
                 co_return;
             }
             lck.unlock();
-
-            if (cancel_signal)
-            {
-                cs_.emit(boost::asio::cancellation_type::all);
-            }
 
             boost::system::error_code ec;
             boost::asio::steady_timer wait_timer(executor_);
@@ -92,12 +84,11 @@ namespace httplib::util
             }
         }
         std::shared_future<void>
-        shutdown(bool cancel_signal)
+        shutdown()
         {
             return boost::asio::co_spawn(
                 executor_,
-                [this, self = shared_from_this(), cancel_signal]() -> net::awaitable<void>
-                { co_return co_await async_shutdown(cancel_signal); },
+                [this, self = shared_from_this()]() -> net::awaitable<void> { co_return co_await async_shutdown(); },
                 boost::asio::use_future);
         }
 
@@ -107,12 +98,7 @@ namespace httplib::util
         {
             auto self = shared_from_this();
 
-            co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::enable_total_cancellation(),
-                                                                      boost::asio::enable_terminal_cancellation());
-
-            co_await boost::asio::this_coro::throw_if_cancelled(false);
-
-            for (auto cs = co_await net::this_coro::cancellation_state;;)
+            for (;;)
             {
                 std::unique_lock<std::mutex> lck(que_mutex_);
                 if (que_.empty())
@@ -125,20 +111,17 @@ namespace httplib::util
                 que_.pop();
                 lck.unlock();
 
-                if (!cs.cancelled())
+                try
                 {
-                    try
-                    {
-                        co_await handler();
-                    }
-                    catch (std::exception const& e)
-                    {
-                        spdlog::error("action_queue handler exception: {}", e.what());
-                    }
-                    catch (...)
-                    {
-                        spdlog::error("action_queue handler unknown exception");
-                    }
+                    co_await handler();
+                }
+                catch (std::exception const& e)
+                {
+                    spdlog::error("action_queue handler exception: {}", e.what());
+                }
+                catch (...)
+                {
+                    spdlog::error("action_queue handler unknown exception");
                 }
             }
         }
@@ -151,7 +134,5 @@ namespace httplib::util
 
         std::atomic_bool running_ = false;
         std::atomic_bool shutting_down_ = false;
-
-        boost::asio::cancellation_signal cs_;
     };
 } // namespace httplib::util

@@ -19,8 +19,8 @@ namespace httplib::util
         void push(act_t&& handler);
         void clear();
 
-        std::shared_future<void> shutdown(bool cancel_signal = false);
-        net::awaitable<void> async_shutdown(bool cancel_signal = false);
+        std::shared_future<void> shutdown();
+        net::awaitable<void> async_shutdown();
 
       private:
         action_queue(action_queue const&) = delete;
