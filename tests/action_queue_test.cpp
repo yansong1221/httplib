@@ -32,7 +32,7 @@ TEST_CASE("ActionQueue: push and execute", "[action_queue]")
             co_return;
         });
 
-    auto f = aq.shutdown(false);
+    auto f = aq.shutdown();
     ioc.run();
     f.get();
 
@@ -45,7 +45,7 @@ TEST_CASE("ActionQueue: push after shutdown is ignored", "[action_queue]")
     httplib::util::action_queue aq(ioc.get_executor());
 
     int count = 0;
-    auto f = aq.shutdown(false);
+    auto f = aq.shutdown();
     ioc.run();
     f.get();
 
@@ -80,7 +80,7 @@ TEST_CASE("ActionQueue: clear drops pending items", "[action_queue]")
         });
     aq.clear();
 
-    auto f = aq.shutdown(false);
+    auto f = aq.shutdown();
     ioc.run();
     f.get();
 
@@ -92,8 +92,8 @@ TEST_CASE("ActionQueue: double shutdown is safe", "[action_queue]")
     boost::asio::io_context ioc;
     httplib::util::action_queue aq(ioc.get_executor());
 
-    auto f1 = aq.shutdown(false);
-    auto f2 = aq.shutdown(false);
+    auto f1 = aq.shutdown();
+    auto f2 = aq.shutdown();
 
     ioc.run();
     f1.get();
@@ -122,7 +122,7 @@ TEST_CASE("ActionQueue: async_shutdown works", "[action_queue]")
             co_return;
         });
 
-    auto fut = aq.shutdown(false);
+    auto fut = aq.shutdown();
     ioc.run();
     fut.get();
 
@@ -145,7 +145,7 @@ TEST_CASE("ActionQueue: order is preserved", "[action_queue]")
             });
     }
 
-    auto f = aq.shutdown(false);
+    auto f = aq.shutdown();
     ioc.run();
     f.get();
 
