@@ -76,7 +76,7 @@ namespace httplib::server
         void set_ws_forward(std::string_view location,
                             proxy_resolver resolver,
                             ws_interceptor_factory factory = nullptr);
-        void set_proxy_pool_size(size_t max_size);
+
         void set_ssl(std::span<char const> const& cert_file,
                      std::span<char const> const& key_file,
                      std::string passwd = {});

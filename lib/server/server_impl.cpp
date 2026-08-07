@@ -93,8 +93,6 @@ namespace httplib::server
 
     http_server::impl::impl(net::any_io_executor const& ex) : ex_(ex), acceptor_(ex)
     {
-        proxy_pool_ = std::make_unique<client::http_client_pool>(ex_);
-
         auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
         spdlog::sinks_init_list sink_list = { console_sink };
         default_logger_ = std::make_shared<spdlog::logger>("httplib.server", sink_list);
@@ -142,22 +140,12 @@ namespace httplib::server
     void
     http_server::impl::stop()
     {
-        if (!is_open())
-        {
-            return;
-        }
-
-        if (shutting_down_.exchange(true))
-        {
-            return;
-        }
         if (acceptor_.is_open())
         {
             boost::system::error_code ec;
             acceptor_.cancel(ec);
             acceptor_.close(ec);
         }
-        proxy_pool_->stop();
         {
             std::lock_guard lck(session_mutex_);
             auto count = sessions_.size();
@@ -176,16 +164,8 @@ namespace httplib::server
         boost::system::error_code ec;
         boost::asio::steady_timer wait_timer(ex_);
 
-        while (true)
+        while (running_)
         {
-            {
-                std::lock_guard lck(session_mutex_);
-                if (sessions_.empty())
-                {
-                    break;
-                }
-            }
-
             wait_timer.expires_after(std::chrono::milliseconds(100));
             co_await wait_timer.async_wait(util::net_awaitable[ec]);
             if (ec)
@@ -204,7 +184,7 @@ namespace httplib::server
     net::awaitable<boost::system::error_code>
     http_server::impl::async_run()
     {
-        shutting_down_ = false;
+        running_ = true;
 
         std::vector<net::awaitable<boost::system::error_code>> ops;
         for (int i = 0; i < acceptor_count_; ++i)
@@ -214,8 +194,30 @@ namespace httplib::server
 
         auto&& results = co_await util::when_all(std::move(ops));
 
-        co_await async_stop();
+        // stop();
 
+        boost::system::error_code ec;
+        boost::asio::steady_timer wait_timer(ex_);
+        while (true)
+        {
+            {
+                std::lock_guard lck(session_mutex_);
+                if (sessions_.empty())
+                {
+                    break;
+                }
+            }
+
+            wait_timer.expires_after(std::chrono::milliseconds(100));
+            co_await wait_timer.async_wait(util::net_awaitable[ec]);
+            if (ec)
+            {
+                break;
+            }
+        }
+
+        router_.reset();
+        running_ = false;
         for (auto const& ec : results)
         {
             if (ec)
@@ -223,7 +225,6 @@ namespace httplib::server
                 co_return ec;
             }
         }
-
         co_return boost::system::error_code {};
     }
     net::awaitable<boost::system::error_code>
@@ -432,6 +433,9 @@ namespace httplib::server
                                          http_server::proxy_resolver resolver,
                                          http_server::proxy_interceptor_factory factory)
     {
+
+        auto proxy_pool = std::make_shared<client::http_client_pool>(ex_);
+
         std::string prefix = detail::strip_proxy_prefix(location);
 
         router_.set_chunked_http_handler<http::verb::get,
@@ -442,9 +446,12 @@ namespace httplib::server
                                          http::verb::delete_,
                                          http::verb::options>(
             location,
-            [self = shared_from_this(), this, prefix, resolver = std::move(resolver), factory = std::move(factory)](
-                request& req,
-                response& resp) -> net::awaitable<void>
+            [this,
+             self = shared_from_this(),
+             proxy_pool,
+             prefix,
+             resolver = std::move(resolver),
+             factory = std::move(factory)](request& req, response& resp) -> net::awaitable<void>
             {
                 auto interceptor = factory ? factory(req) : nullptr;
 
@@ -544,7 +551,7 @@ namespace httplib::server
                     co_await interceptor->on_upstream_request(req, upstream_headers, upstream_url);
                 }
 
-                auto client = co_await proxy_pool_->async_acquire(host, port, ssl);
+                auto client = co_await proxy_pool->async_acquire(host, port, ssl);
                 if (!client)
                 {
                     logger()->trace("[proxy] acquire client failed for {}:{}", host, port);
@@ -822,16 +829,10 @@ namespace httplib::server
         router_.set_ws_handler(location, std::move(open_handler), std::move(message_handler), std::move(close_handler));
     }
 
-    void
-    http_server::impl::set_proxy_pool_size(size_t max_size)
-    {
-        proxy_pool_->set_max_size(max_size);
-    }
-
     bool
     http_server::impl::is_open() const
     {
-        return !shutting_down_ && acceptor_.is_open();
+        return acceptor_.is_open();
     }
 
 } // namespace httplib::server

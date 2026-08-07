@@ -353,6 +353,15 @@ namespace httplib::server
     }
 
     void
+    router_impl::reset()
+    {
+        root_ = std::make_unique<Node>();
+        post_routing_handler_ = nullptr;
+        not_found_handler_ = nullptr;
+        global_before_.clear();
+        global_after_.clear();
+    }
+    void
     router_impl::set_post_routing_handler_impl(coro_http_handler_type&& handler)
     {
         post_routing_handler_ = std::move(handler);

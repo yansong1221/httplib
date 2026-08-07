@@ -98,7 +98,6 @@ namespace httplib::server
                             http_server::proxy_resolver resolver,
                             http_server::ws_interceptor_factory factory);
 
-        void set_proxy_pool_size(size_t max_size);
 
         void use_ssl(net::const_buffer const& cert_file, net::const_buffer const& key_file, std::string passwd = {});
 #ifdef HTTPLIB_ENABLED_SSL
@@ -135,9 +134,7 @@ namespace httplib::server
         fs::path upload_dir_;
         std::uint64_t upload_file_limit_ = 10 * 1024 * 1024;
 
-        std::unique_ptr<client::http_client_pool> proxy_pool_;
-
-        std::atomic<bool> shutting_down_ = false;
+        std::atomic<bool> running_ = false;
 
 #ifdef HTTPLIB_ENABLED_SSL
         std::shared_ptr<ssl::context> ssl_context_;
