@@ -122,7 +122,7 @@ TEST_CASE("WebSocket echo server and client", "[websocket]")
         },
         []() -> net::awaitable<void> { co_return; });
     std::this_thread::sleep_for(std::chrono::seconds(5));
-    server.server.stop().wait();
+    server.server.stop();
     client_ioc.join();
 
     REQUIRE(open_called);
@@ -180,7 +180,7 @@ TEST_CASE("WebSocket binary message", "[websocket]")
         },
         []() -> net::awaitable<void> { co_return; });
     std::this_thread::sleep_for(std::chrono::seconds(5));
-    server.server.stop().wait();
+    server.server.stop();
     client_ioc.join();
 
     REQUIRE(received_binary);
@@ -233,7 +233,7 @@ TEST_CASE("WebSocket close propagates to server", "[websocket]")
             co_return;
         });
     std::this_thread::sleep_for(std::chrono::seconds(5));
-    server.server.stop().wait();
+    server.server.stop();
     client_ioc.join();
 
     REQUIRE(server_close_called);
@@ -270,7 +270,7 @@ TEST_CASE("WebSocket client ping", "[websocket]")
         []() -> net::awaitable<void> { co_return; });
 
     std::this_thread::sleep_for(std::chrono::seconds(5));
-    server.server.stop().wait();
+    server.server.stop();
     client_ioc.join();
 
     REQUIRE(ping_result);
@@ -367,7 +367,7 @@ TEST_CASE("WebSocket is_open flag", "[websocket]")
         },
         []() -> net::awaitable<void> { co_return; });
     std::this_thread::sleep_for(std::chrono::seconds(5));
-    server.server.stop().wait();
+    server.server.stop();
     client_ioc.join();
 
     REQUIRE(send_done);

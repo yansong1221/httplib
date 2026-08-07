@@ -32,10 +32,6 @@ namespace httplib::server
         ac_que_.push(
             [this, msg = std::move(msg), binary, self = shared_from_this()]() -> net::awaitable<void>
             {
-                if (!is_open())
-                {
-                    co_return;
-                }
                 if (binary)
                 {
                     ws_.binary(true);
@@ -176,8 +172,6 @@ namespace httplib::server
                                               ec.message());
 
                 abort();
-
-                ac_que_.clear();
                 co_await ac_que_.async_shutdown();
                 try
                 {

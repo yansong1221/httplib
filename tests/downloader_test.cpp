@@ -40,7 +40,7 @@ namespace
             if (started_)
             {
                 pool->stop();
-                server.stop().wait();
+                server.stop();
                 ioc_.stop();
                 if (worker_.joinable())
                 {

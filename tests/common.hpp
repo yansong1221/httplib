@@ -95,15 +95,18 @@ namespace test_common
 
         ~test_scaffold()
         {
-
             if (client)
             {
                 client->close();
             }
-            server.stop().wait();
+            server.stop();
             workers_.join();
         }
-
+        void
+        join()
+        {
+            workers_.join();
+        }
         void
         start()
         {

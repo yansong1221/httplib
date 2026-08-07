@@ -34,7 +34,7 @@ namespace
 
         ~test_scaffold()
         {
-            server.stop().wait();
+            server.stop();
             ioc.stop();
             workers_.join();
         }

@@ -24,8 +24,6 @@ namespace httplib::client
 
         net::awaitable<boost::system::error_code> async_close();
 
-        void run(std::string_view target, http::fields const& headers = {});
-
         void send(std::string&& data, bool binary = false);
         void ping(std::string&& msg = std::string());
         void pong(std::string&& msg = std::string());

@@ -142,6 +142,11 @@ namespace httplib::client
 
         boost::system::error_code ec;
         co_await stream_->async_write(net::buffer(data), util::net_awaitable[ec]);
+        if (ec)
+        {
+            logger()->error("Failed to send message: {}", ec.message());
+            abort();
+        }
         co_return ec;
     }
 
@@ -152,20 +157,8 @@ namespace httplib::client
         {
             return;
         }
-        ac_que_.push(
-            [this, self = shared_from_this(), data = std::move(data), binary]() mutable -> net::awaitable<void>
-            {
-                if (!is_open())
-                {
-                    co_return;
-                }
-                auto ec = co_await async_send(std::move(data), binary);
-                if (ec)
-                {
-                    logger()->error("Failed to send message: {}", ec.message());
-                    abort();
-                }
-            });
+        ac_que_.push([this, self = shared_from_this(), data = std::move(data), binary]() mutable -> net::awaitable<void>
+                     { co_await async_send(std::move(data), binary); });
     }
 
     void
@@ -175,20 +168,8 @@ namespace httplib::client
         {
             return;
         }
-        ac_que_.push(
-            [this, self = shared_from_this(), data = std::move(msg)]() mutable -> net::awaitable<void>
-            {
-                if (!is_open())
-                {
-                    co_return;
-                }
-                auto ec = co_await async_ping(std::move(data));
-                if (ec)
-                {
-                    logger()->error("Failed to send ping: {}", ec.message());
-                    abort();
-                }
-            });
+        ac_que_.push([this, self = shared_from_this(), data = std::move(msg)]() mutable -> net::awaitable<void>
+                     { co_await async_ping(std::move(data)); });
     }
 
     void
@@ -198,20 +179,8 @@ namespace httplib::client
         {
             return;
         }
-        ac_que_.push(
-            [this, self = shared_from_this(), data = std::move(msg)]() mutable -> net::awaitable<void>
-            {
-                if (!is_open())
-                {
-                    co_return;
-                }
-                auto ec = co_await async_pong(std::move(data));
-                if (ec)
-                {
-                    logger()->error("Failed to send pong: {}", ec.message());
-                    abort();
-                }
-            });
+        ac_que_.push([this, self = shared_from_this(), data = std::move(msg)]() mutable -> net::awaitable<void>
+                     { co_await async_pong(std::move(data)); });
     }
 
     void
@@ -222,20 +191,7 @@ namespace httplib::client
             return;
         }
 
-        ac_que_.push(
-            [this, self = shared_from_this()]() mutable -> net::awaitable<void>
-            {
-                if (!is_open())
-                {
-                    co_return;
-                }
-                auto ec = co_await async_close();
-                if (ec)
-                {
-                    logger()->error("Failed to close: {}", ec.message());
-                }
-                abort();
-            });
+        ac_que_.push([this, self = shared_from_this()]() mutable -> net::awaitable<void> { co_await async_close(); });
     }
 
     httplib::net::awaitable<boost::system::error_code>
@@ -254,6 +210,11 @@ namespace httplib::client
 
         boost::system::error_code ec;
         co_await stream_->async_ping(beast::websocket::ping_data(std::string_view(msg)), util::net_awaitable[ec]);
+        if (ec)
+        {
+            logger()->error("Failed to send ping: {}", ec.message());
+            abort();
+        }
         co_return ec;
     }
 
@@ -267,6 +228,11 @@ namespace httplib::client
 
         boost::system::error_code ec;
         co_await stream_->async_pong(beast::websocket::ping_data(std::string_view(msg)), util::net_awaitable[ec]);
+        if (ec)
+        {
+            logger()->error("Failed to send pong: {}", ec.message());
+            abort();
+        }
         co_return ec;
     }
 
@@ -287,13 +253,11 @@ namespace httplib::client
         boost::system::error_code ec;
         websocket::close_reason reason("normal");
         co_await (stream_->async_close(reason, util::net_awaitable[ec]) || timer.async_wait(util::net_awaitable[ec]));
-        if (!ec || ec == boost::asio::error::operation_aborted)
+        if (ec)
         {
-            stream_->socket().shutdown(net::socket_base::shutdown_both, ec);
-            stream_->socket().close(ec);
-            co_return boost::system::error_code {};
+            logger()->error("Failed to close: {}", ec.message());
         }
-
+        abort();
         co_return ec;
     }
 
@@ -301,44 +265,6 @@ namespace httplib::client
     ws_client::impl::got_data() const noexcept
     {
         return util::buffer_to_string_view(buffer_.data());
-    }
-
-    void
-    ws_client::impl::run(std::string_view target, http::fields const& headers /*= {}*/)
-    {
-        boost::asio::co_spawn(
-            executor_,
-            [this, self = shared_from_this(), target = std::string(target), headers]() -> net::awaitable<void>
-            {
-                try
-                {
-
-                    if (auto ec = co_await async_connect(target, headers); ec)
-                    {
-                        co_return;
-                    }
-
-                    for (;;)
-                    {
-                        auto read_ec = co_await async_read();
-                        if (read_ec)
-                        {
-                            break;
-                        }
-                    }
-
-                    logger()->debug("ws connection closed");
-                }
-                catch (std::exception const& e)
-                {
-                    logger()->warn("ws run exception: {}", e.what());
-                }
-                catch (...)
-                {
-                    logger()->warn("ws run unknown exception");
-                }
-            },
-            boost::asio::detached);
     }
 
     void
@@ -386,8 +312,7 @@ namespace httplib::client
 
         if (ec)
         {
-            boost::system::error_code ignore_error;
-            stream_->socket().close(ignore_error);
+            abort();
             if (ec != beast::websocket::error::closed)
             {
                 logger()->warn("ws read failed: {}", ec.message());
@@ -415,11 +340,9 @@ namespace httplib::client
             {
                 for (;;)
                 {
-                    auto read_ec = co_await _async_read();
-                    if (read_ec)
+                    if (auto read_ec = co_await _async_read(); read_ec)
                     {
-                        abort();
-                        ac_que_.clear();
+                        co_await ac_que_.async_shutdown();
                         break;
                     }
                     try

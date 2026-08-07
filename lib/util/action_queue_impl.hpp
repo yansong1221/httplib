@@ -65,7 +65,7 @@ namespace httplib::util
         async_shutdown()
         {
             std::unique_lock<std::mutex> lck(que_mutex_);
-            if (!shutting_down_.exchange(true))
+            if (shutting_down_.exchange(true))
             {
                 co_return;
             }
