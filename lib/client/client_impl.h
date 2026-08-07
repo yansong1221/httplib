@@ -19,7 +19,6 @@ namespace httplib::client
         using body_setup_fn = std::function<void(http_client::response&)>;
 
         impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl);
-        ~impl();
 
         void
         set_timeout_policy(timeout_policy const& policy)

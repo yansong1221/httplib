@@ -13,7 +13,7 @@ namespace httplib::client
         : impl_(std::make_shared<ws_client::impl>(ex, host, port, ssl))
     {
     }
-    ws_client::~ws_client() {}
+    ws_client::~ws_client() { abort(); }
     net::awaitable<boost::system::error_code>
     ws_client::async_connect(std::string_view target, http::fields const& headers)
     {

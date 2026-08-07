@@ -39,7 +39,6 @@ namespace httplib::client
         default_logger_ = std::make_shared<spdlog::logger>("httplib.client", sink_list);
         default_logger_->set_level(spdlog::level::info);
     }
-    http_client::impl::~impl() { close(); }
 
     http_client::request
     http_client::impl::make_http_request(http::verb method, std::string_view target, http::fields const& headers) const
