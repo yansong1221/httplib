@@ -25,6 +25,7 @@ namespace httplib::server
         void send(std::string&& msg, bool binary) override;
         void ping(std::string&& msg) override;
         void close(std::string_view reason) override;
+        void abort() override;
         bool is_open() const override;
 
         request const&
@@ -49,7 +50,6 @@ namespace httplib::server
         beast::flat_buffer buffer_;
 
         util::action_queue ac_que_;
-        std::atomic_bool shutting_down_ { false };
     };
 
 } // namespace httplib::server

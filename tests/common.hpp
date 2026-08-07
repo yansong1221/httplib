@@ -11,6 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <memory>
 #include <spdlog/sinks/null_sink.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 #include <string>
 #include <vector>
@@ -86,8 +87,10 @@ namespace test_common
 
         test_scaffold()
         {
-            auto null_sink = std::make_shared<spdlog::sinks::null_sink_mt>();
-            server.set_logger(std::make_shared<spdlog::logger>("httplib.tests", null_sink));
+            auto sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+            auto lg = std::make_shared<spdlog::logger>("httplib.tests", sink);
+            lg->set_level(spdlog::level::debug);
+            server.set_logger(lg);
         }
 
         ~test_scaffold()

@@ -22,6 +22,7 @@ namespace httplib::server
         virtual ~websocket_conn() = default;
 
         virtual void close(std::string_view reason) = 0;
+        virtual void abort() = 0;
         virtual bool is_open() const = 0;
         virtual request const& http_request() const = 0;
         virtual request& http_request() = 0;

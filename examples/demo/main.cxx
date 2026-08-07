@@ -309,8 +309,9 @@ setup_http_routes(httplib::server::router& router)
                 { "secret", "admin data" }
             });
         },
-        mw::basic_auth_middleware([](std::string_view user, std::string_view pass) { return user == "admin" && pass == "secret"; },
-                       "Admin Area"));
+        mw::basic_auth_middleware([](std::string_view user, std::string_view pass)
+                                  { return user == "admin" && pass == "secret"; },
+                                  "Admin Area"));
 
     // ---- Built-in middleware: Bearer Token Auth ----
     router.set_http_handler<http::verb::get>(
@@ -329,7 +330,9 @@ setup_http_routes(httplib::server::router& router)
         "/api/limited",
         [](httplib::server::request&, httplib::server::response& resp)
         {
-            resp.set_json_content({ { "message", "you are not rate-limited... yet" } });
+            resp.set_json_content({
+                { "message", "you are not rate-limited... yet" }
+            });
         },
         *limiter);
 
@@ -608,8 +611,8 @@ static void
 run_ws_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 {
     httplib::client::ws_client ws(ex, host, port);
-
-    ws.set_handler(
+    ws.run(
+        "/ws",
         [&](boost::system::error_code ec) -> net::awaitable<void>
         {
             if (!ec)
@@ -634,8 +637,6 @@ run_ws_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
             spdlog::info("WS client disconnected");
             co_return;
         });
-
-    ws.run("/ws");
 }
 
 // ===== Main =====

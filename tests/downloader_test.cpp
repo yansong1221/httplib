@@ -6,9 +6,11 @@
 #include "httplib/server/response.hpp"
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <mutex>
 #include <thread>
 
 using namespace test_common;
@@ -411,15 +413,32 @@ TEST_CASE("Downloader: cancel stops download", "[downloader]")
     httplib::client::downloader dl(ts.ioc_, ts.pool);
     dl.set_config({ .segments = 2 });
 
-    std::thread cancel_thread(
-        [&]()
+    std::mutex cv_mtx;
+    std::condition_variable cv;
+    bool download_started = false;
+
+    dl.set_state_callback([&](httplib::client::downloader::state st, std::string_view)
+    {
+        if (st == httplib::client::downloader::state::downloading)
         {
-            std::this_thread::sleep_for(std::chrono::milliseconds(30));
-            dl.cancel();
-        });
+            {
+                std::lock_guard<std::mutex> lk(cv_mtx);
+                download_started = true;
+            }
+            cv.notify_one();
+        }
+    });
+
+    std::thread cancel_thread([&]()
+    {
+        std::unique_lock<std::mutex> lk(cv_mtx);
+        cv.wait(lk, [&] { return download_started; });
+        dl.cancel();
+    });
 
     auto ec = dl.download(ts.url_for_path("/bigcancel"), dl_path);
     REQUIRE(ec);
+    REQUIRE(dl.current_state() == httplib::client::downloader::state::cancelled);
     cancel_thread.join();
 
     std::error_code rm_ec;

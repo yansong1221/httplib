@@ -179,15 +179,17 @@ TEST_CASE("Response: set_file_content serves a file", "[response]")
         f << "hello from test file\n";
     }
 
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/file",
-                                                  [&](httplib::server::request&, httplib::server::response& resp)
-                                                  { resp.set_file_content(tmp_path); });
-    ts.start();
+    {
+        test_scaffold ts;
+        ts.router().set_http_handler<http::verb::get>("/file",
+                                                      [&](httplib::server::request&, httplib::server::response& resp)
+                                                      { resp.set_file_content(tmp_path); });
+        ts.start();
 
-    auto resp = UNWRAP(ts.client->get("/file"));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(as_string(resp) == "hello from test file\n");
+        auto resp = UNWRAP(ts.client->get("/file"));
+        REQUIRE(resp.result() == http::status::ok);
+        REQUIRE(as_string(resp) == "hello from test file\n");
+    }
 
     std::filesystem::remove(tmp_path);
 }
@@ -200,18 +202,20 @@ TEST_CASE("Response: set_file_content with Range request", "[response]")
         f << "0123456789";
     }
 
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/file-range",
-                                                  [&](httplib::server::request& req, httplib::server::response& resp)
-                                                  { resp.set_file_content(tmp_path, req.base()); });
-    ts.start();
+    {
+        test_scaffold ts;
+        ts.router().set_http_handler<http::verb::get>("/file-range",
+                                                      [&](httplib::server::request& req, httplib::server::response& resp)
+                                                      { resp.set_file_content(tmp_path, req.base()); });
+        ts.start();
 
-    auto range_headers = httplib::http::fields();
-    range_headers.set(http::field::range, "bytes=0-4");
+        auto range_headers = httplib::http::fields();
+        range_headers.set(http::field::range, "bytes=0-4");
 
-    auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-range", range_headers));
-    REQUIRE(resp.result() == http::status::partial_content);
-    REQUIRE(as_string(resp) == "01234");
+        auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-range", range_headers));
+        REQUIRE(resp.result() == http::status::partial_content);
+        REQUIRE(as_string(resp) == "01234");
+    }
 
     std::filesystem::remove(tmp_path);
 }
@@ -224,18 +228,20 @@ TEST_CASE("Response: Range request open-ended (bytes=N-)", "[response]")
         f << "0123456789";
     }
 
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/file-range-open",
-                                                  [&](httplib::server::request& req, httplib::server::response& resp)
-                                                  { resp.set_file_content(tmp_path, req.base()); });
-    ts.start();
+    {
+        test_scaffold ts;
+        ts.router().set_http_handler<http::verb::get>("/file-range-open",
+                                                      [&](httplib::server::request& req, httplib::server::response& resp)
+                                                      { resp.set_file_content(tmp_path, req.base()); });
+        ts.start();
 
-    auto range_headers = httplib::http::fields();
-    range_headers.set(http::field::range, "bytes=7-");
+        auto range_headers = httplib::http::fields();
+        range_headers.set(http::field::range, "bytes=7-");
 
-    auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-range-open", range_headers));
-    REQUIRE(resp.result() == http::status::partial_content);
-    REQUIRE(as_string(resp) == "789");
+        auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-range-open", range_headers));
+        REQUIRE(resp.result() == http::status::partial_content);
+        REQUIRE(as_string(resp) == "789");
+    }
 
     std::filesystem::remove(tmp_path);
 }
@@ -248,18 +254,20 @@ TEST_CASE("Response: Range request suffix (bytes=-N)", "[response]")
         f << "0123456789";
     }
 
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/file-range-suffix",
-                                                  [&](httplib::server::request& req, httplib::server::response& resp)
-                                                  { resp.set_file_content(tmp_path, req.base()); });
-    ts.start();
+    {
+        test_scaffold ts;
+        ts.router().set_http_handler<http::verb::get>("/file-range-suffix",
+                                                      [&](httplib::server::request& req, httplib::server::response& resp)
+                                                      { resp.set_file_content(tmp_path, req.base()); });
+        ts.start();
 
-    auto range_headers = httplib::http::fields();
-    range_headers.set(http::field::range, "bytes=-4");
+        auto range_headers = httplib::http::fields();
+        range_headers.set(http::field::range, "bytes=-4");
 
-    auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-range-suffix", range_headers));
-    REQUIRE(resp.result() == http::status::partial_content);
-    REQUIRE(as_string(resp) == "6789");
+        auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-range-suffix", range_headers));
+        REQUIRE(resp.result() == http::status::partial_content);
+        REQUIRE(as_string(resp) == "6789");
+    }
 
     std::filesystem::remove(tmp_path);
 }
@@ -272,20 +280,22 @@ TEST_CASE("Response: Range request Content-Range header", "[response]")
         f << "abcdefghij";
     }
 
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/file-cr",
-                                                  [&](httplib::server::request& req, httplib::server::response& resp)
-                                                  { resp.set_file_content(tmp_path, req.base()); });
-    ts.start();
+    {
+        test_scaffold ts;
+        ts.router().set_http_handler<http::verb::get>("/file-cr",
+                                                      [&](httplib::server::request& req, httplib::server::response& resp)
+                                                      { resp.set_file_content(tmp_path, req.base()); });
+        ts.start();
 
-    auto range_headers = httplib::http::fields();
-    range_headers.set(http::field::range, "bytes=2-5");
+        auto range_headers = httplib::http::fields();
+        range_headers.set(http::field::range, "bytes=2-5");
 
-    auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-cr", range_headers));
-    REQUIRE(resp.result() == http::status::partial_content);
-    REQUIRE(as_string(resp) == "cdef");
-    REQUIRE(resp.base().find(http::field::content_range) != resp.base().end());
-    REQUIRE_FALSE(std::string(resp[http::field::content_range]).empty());
+        auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-cr", range_headers));
+        REQUIRE(resp.result() == http::status::partial_content);
+        REQUIRE(as_string(resp) == "cdef");
+        REQUIRE(resp.base().find(http::field::content_range) != resp.base().end());
+        REQUIRE_FALSE(std::string(resp[http::field::content_range]).empty());
+    }
 
     std::filesystem::remove(tmp_path);
 }
@@ -298,18 +308,20 @@ TEST_CASE("Response: Range request out of bounds returns 416", "[response]")
         f << "01234";
     }
 
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/file-range-oob",
-                                                  [&](httplib::server::request& req, httplib::server::response& resp)
-                                                  { resp.set_file_content(tmp_path, req.base()); });
-    ts.start();
+    {
+        test_scaffold ts;
+        ts.router().set_http_handler<http::verb::get>("/file-range-oob",
+                                                      [&](httplib::server::request& req, httplib::server::response& resp)
+                                                      { resp.set_file_content(tmp_path, req.base()); });
+        ts.start();
 
-    auto range_headers = httplib::http::fields();
-    range_headers.set(http::field::range, "bytes=10-20");
+        auto range_headers = httplib::http::fields();
+        range_headers.set(http::field::range, "bytes=10-20");
 
-    auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-range-oob", range_headers));
-    REQUIRE(resp.result() == http::status::range_not_satisfiable);
-    REQUIRE(resp.base().find(http::field::content_range) != resp.base().end());
+        auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-range-oob", range_headers));
+        REQUIRE(resp.result() == http::status::range_not_satisfiable);
+        REQUIRE(resp.base().find(http::field::content_range) != resp.base().end());
+    }
 
     std::filesystem::remove(tmp_path);
 }
@@ -322,23 +334,24 @@ TEST_CASE("Response: If-None-Match returns 304 for matching ETag", "[response]")
         f << "etag-content";
     }
 
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/file-etag",
-                                                  [&](httplib::server::request& req, httplib::server::response& resp)
-                                                  { resp.set_file_content(tmp_path, req.base()); });
-    ts.start();
+    std::string etag;
+    {
+        test_scaffold ts;
+        ts.router().set_http_handler<http::verb::get>("/file-etag",
+                                                      [&](httplib::server::request& req, httplib::server::response& resp)
+                                                      { resp.set_file_content(tmp_path, req.base()); });
+        ts.start();
 
-    // First request to get the ETag
-    auto resp1 = UNWRAP(ts.client->get("/file-etag"));
-    REQUIRE(resp1.result() == http::status::ok);
-    REQUIRE(resp1.base().find(http::field::etag) != resp1.base().end());
-    auto etag = std::string(resp1[http::field::etag]);
+        auto resp1 = UNWRAP(ts.client->get("/file-etag"));
+        REQUIRE(resp1.result() == http::status::ok);
+        REQUIRE(resp1.base().find(http::field::etag) != resp1.base().end());
+        etag = std::string(resp1[http::field::etag]);
 
-    // Second request with If-None-Match
-    auto hdrs = httplib::http::fields();
-    hdrs.set(http::field::if_none_match, etag);
-    auto resp2 = UNWRAP(ts.client->send_request(http::verb::get, "/file-etag", hdrs));
-    REQUIRE(resp2.result() == http::status::not_modified);
+        auto hdrs = httplib::http::fields();
+        hdrs.set(http::field::if_none_match, etag);
+        auto resp2 = UNWRAP(ts.client->send_request(http::verb::get, "/file-etag", hdrs));
+        REQUIRE(resp2.result() == http::status::not_modified);
+    }
 
     std::filesystem::remove(tmp_path);
 }
@@ -351,23 +364,24 @@ TEST_CASE("Response: If-Modified-Since returns 304 for unmodified", "[response]"
         f << "ims-content";
     }
 
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/file-ims",
-                                                  [&](httplib::server::request& req, httplib::server::response& resp)
-                                                  { resp.set_file_content(tmp_path, req.base()); });
-    ts.start();
+    std::string last_mod;
+    {
+        test_scaffold ts;
+        ts.router().set_http_handler<http::verb::get>("/file-ims",
+                                                      [&](httplib::server::request& req, httplib::server::response& resp)
+                                                      { resp.set_file_content(tmp_path, req.base()); });
+        ts.start();
 
-    // First request to get Last-Modified
-    auto resp1 = UNWRAP(ts.client->get("/file-ims"));
-    REQUIRE(resp1.result() == http::status::ok);
-    REQUIRE(resp1.base().find(http::field::last_modified) != resp1.base().end());
-    auto last_mod = std::string(resp1[http::field::last_modified]);
+        auto resp1 = UNWRAP(ts.client->get("/file-ims"));
+        REQUIRE(resp1.result() == http::status::ok);
+        REQUIRE(resp1.base().find(http::field::last_modified) != resp1.base().end());
+        last_mod = std::string(resp1[http::field::last_modified]);
 
-    // Second request with If-Modified-Since
-    auto hdrs = httplib::http::fields();
-    hdrs.set(http::field::if_modified_since, last_mod);
-    auto resp2 = UNWRAP(ts.client->send_request(http::verb::get, "/file-ims", hdrs));
-    REQUIRE(resp2.result() == http::status::not_modified);
+        auto hdrs = httplib::http::fields();
+        hdrs.set(http::field::if_modified_since, last_mod);
+        auto resp2 = UNWRAP(ts.client->send_request(http::verb::get, "/file-ims", hdrs));
+        REQUIRE(resp2.result() == http::status::not_modified);
+    }
 
     std::filesystem::remove(tmp_path);
 }
@@ -380,16 +394,18 @@ TEST_CASE("Response: Accept-Ranges header present on full response", "[response]
         f << "test";
     }
 
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/file-ar",
-                                                  [&](httplib::server::request& req, httplib::server::response& resp)
-                                                  { resp.set_file_content(tmp_path, req.base()); });
-    ts.start();
+    {
+        test_scaffold ts;
+        ts.router().set_http_handler<http::verb::get>("/file-ar",
+                                                      [&](httplib::server::request& req, httplib::server::response& resp)
+                                                      { resp.set_file_content(tmp_path, req.base()); });
+        ts.start();
 
-    auto resp = UNWRAP(ts.client->get("/file-ar"));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(resp.base().find(http::field::accept_ranges) != resp.base().end());
-    REQUIRE(std::string(resp[http::field::accept_ranges]) == "bytes");
+        auto resp = UNWRAP(ts.client->get("/file-ar"));
+        REQUIRE(resp.result() == http::status::ok);
+        REQUIRE(resp.base().find(http::field::accept_ranges) != resp.base().end());
+        REQUIRE(std::string(resp[http::field::accept_ranges]) == "bytes");
+    }
 
     std::filesystem::remove(tmp_path);
 }
@@ -402,22 +418,24 @@ TEST_CASE("Response: Multi-range request returns multipart/byteranges", "[respon
         f << "0123456789";
     }
 
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/file-multi-range",
-                                                  [&](httplib::server::request& req, httplib::server::response& resp)
-                                                  { resp.set_file_content(tmp_path, req.base()); });
-    ts.start();
+    {
+        test_scaffold ts;
+        ts.router().set_http_handler<http::verb::get>("/file-multi-range",
+                                                      [&](httplib::server::request& req, httplib::server::response& resp)
+                                                      { resp.set_file_content(tmp_path, req.base()); });
+        ts.start();
 
-    auto range_headers = httplib::http::fields();
-    range_headers.set(http::field::range, "bytes=0-2,5-7");
+        auto range_headers = httplib::http::fields();
+        range_headers.set(http::field::range, "bytes=0-2,5-7");
 
-    auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-multi-range", range_headers));
-    REQUIRE(resp.result() == http::status::partial_content);
-    auto ct = std::string(resp[http::field::content_type]);
-    REQUIRE(ct.starts_with("multipart/byteranges"));
+        auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-multi-range", range_headers));
+        REQUIRE(resp.result() == http::status::partial_content);
+        auto ct = std::string(resp[http::field::content_type]);
+        REQUIRE(ct.starts_with("multipart/byteranges"));
 
-    // The boundary is part of the content-type for multi-range responses
-    REQUIRE_FALSE(ct.find("boundary=") == std::string::npos);
+        // The boundary is part of the content-type for multi-range responses
+        REQUIRE_FALSE(ct.find("boundary=") == std::string::npos);
+    }
 
     std::filesystem::remove(tmp_path);
 }
@@ -506,13 +524,15 @@ TEST_CASE("Static mount: serves a file", "[response]")
         f << "static content";
     }
 
-    test_scaffold ts;
-    ts.router().set_static_mount_point("/static", tmp_dir);
-    ts.start();
+    {
+        test_scaffold ts;
+        ts.router().set_static_mount_point("/static", tmp_dir);
+        ts.start();
 
-    auto resp = UNWRAP(ts.client->get("/static/test.txt"));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(as_string(resp) == "static content");
+        auto resp = UNWRAP(ts.client->get("/static/test.txt"));
+        REQUIRE(resp.result() == http::status::ok);
+        REQUIRE(as_string(resp) == "static content");
+    }
 
     std::filesystem::remove_all(tmp_dir);
 }
@@ -556,13 +576,15 @@ TEST_CASE("Static mount: default document index.html", "[response]")
         f << "<h1>hello</h1>";
     }
 
-    test_scaffold ts;
-    ts.router().set_static_mount_point("/", tmp_dir);
-    ts.start();
+    {
+        test_scaffold ts;
+        ts.router().set_static_mount_point("/", tmp_dir);
+        ts.start();
 
-    auto resp = UNWRAP(ts.client->get("/"));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(as_string(resp) == "<h1>hello</h1>");
+        auto resp = UNWRAP(ts.client->get("/"));
+        REQUIRE(resp.result() == http::status::ok);
+        REQUIRE(as_string(resp) == "<h1>hello</h1>");
+    }
 
     std::filesystem::remove_all(tmp_dir);
 }
@@ -581,12 +603,14 @@ TEST_CASE("Static mount: directory listing via subpath", "[response]")
     entry.set_enabled_directory(true);
     entry.set_directory_format(httplib::server::mount_point_entry::dir_format_type::json);
 
-    test_scaffold ts;
-    ts.router().set_static_mount_point(std::move(entry));
-    ts.start();
+    {
+        test_scaffold ts;
+        ts.router().set_static_mount_point(std::move(entry));
+        ts.start();
 
-    auto resp = UNWRAP(ts.client->get("/dir/data/"));
-    REQUIRE(resp.result() == http::status::ok);
+        auto resp = UNWRAP(ts.client->get("/dir/data/"));
+        REQUIRE(resp.result() == http::status::ok);
+    }
 
     std::filesystem::remove_all(tmp_dir);
 }
@@ -616,13 +640,15 @@ TEST_CASE("Static mount: file in subdirectory", "[response]")
         f << "nested";
     }
 
-    test_scaffold ts;
-    ts.router().set_static_mount_point("/pub", tmp_dir);
-    ts.start();
+    {
+        test_scaffold ts;
+        ts.router().set_static_mount_point("/pub", tmp_dir);
+        ts.start();
 
-    auto resp = UNWRAP(ts.client->get("/pub/sub/deep.txt"));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(as_string(resp) == "nested");
+        auto resp = UNWRAP(ts.client->get("/pub/sub/deep.txt"));
+        REQUIRE(resp.result() == http::status::ok);
+        REQUIRE(as_string(resp) == "nested");
+    }
 
     std::filesystem::remove_all(tmp_dir);
 }

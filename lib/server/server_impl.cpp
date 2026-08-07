@@ -158,6 +158,8 @@ namespace httplib::server
         }
         {
             std::lock_guard lck(session_mutex_);
+            auto count = sessions_.size();
+            logger()->info("[server] stopping, {} sessions remaining", count);
             for (auto const& v : sessions_)
             {
                 v->abort();
@@ -258,6 +260,7 @@ namespace httplib::server
             std::lock_guard lck(session_mutex_);
             sessions_.insert(conn);
         }
+        logger()->trace("[session] running, total={}", sessions_.size());
         try
         {
             co_await conn->run();
@@ -274,7 +277,7 @@ namespace httplib::server
             std::lock_guard lck(session_mutex_);
             sessions_.erase(conn);
         }
-        logger()->trace("close connection [{}:{}]", remote_endp.address().to_string(), remote_endp.port());
+        logger()->trace("[session] done, total={}", sessions_.size());
     }
 
     void

@@ -67,6 +67,8 @@ namespace httplib::client
         void ping(std::string&& msg = std::string());
         void pong(std::string&& msg = std::string());
         void close();
+        void abort();
+        bool is_open() const noexcept;
 
       private:
         using coro_open_handler_type = std::function<net::awaitable<void>(boost::system::error_code)>;

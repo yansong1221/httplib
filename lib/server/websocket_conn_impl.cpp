@@ -24,7 +24,7 @@ namespace httplib::server
     void
     websocket_conn_impl::send(std::string&& msg, bool binary)
     {
-        if (shutting_down_.load(std::memory_order_acquire) || !ws_.is_open())
+        if (!is_open())
         {
             return;
         }
@@ -32,6 +32,10 @@ namespace httplib::server
         ac_que_.push(
             [this, msg = std::move(msg), binary, self = shared_from_this()]() -> net::awaitable<void>
             {
+                if (!is_open())
+                {
+                    co_return;
+                }
                 if (binary)
                 {
                     ws_.binary(true);
@@ -45,15 +49,14 @@ namespace httplib::server
                 co_await ws_.async_write(net::buffer(msg), util::net_awaitable[ec]);
                 if (ec)
                 {
-                    ws_.socket().shutdown(net::socket_base::shutdown_both, ec);
-                    ws_.socket().close(ec);
+                    abort();
                 }
             });
     };
     void
     websocket_conn_impl::ping(std::string&& msg)
     {
-        if (shutting_down_.load(std::memory_order_acquire) || !ws_.is_open())
+        if (!is_open())
         {
             return;
         }
@@ -61,12 +64,15 @@ namespace httplib::server
         ac_que_.push(
             [this, msg = std::move(msg), self = shared_from_this()]() -> net::awaitable<void>
             {
+                if (!is_open())
+                {
+                    co_return;
+                }
                 boost::system::error_code ec;
                 co_await ws_.async_ping(beast::websocket::ping_data(std::string_view(msg)), util::net_awaitable[ec]);
                 if (ec)
                 {
-                    ws_.socket().shutdown(net::socket_base::shutdown_both, ec);
-                    ws_.socket().close(ec);
+                    abort();
                 }
             });
     }
@@ -74,7 +80,7 @@ namespace httplib::server
     void
     websocket_conn_impl::close(std::string_view reason)
     {
-        if (shutting_down_.exchange(true, std::memory_order_acq_rel) || !ws_.is_open())
+        if (!is_open())
         {
             return;
         }
@@ -82,6 +88,10 @@ namespace httplib::server
         ac_que_.push(
             [this, self = shared_from_this(), reason = std::string(reason)]() -> net::awaitable<void>
             {
+                if (!is_open())
+                {
+                    co_return;
+                }
                 using namespace boost::asio::experimental::awaitable_operators;
                 using namespace std::chrono_literals;
 
@@ -97,15 +107,28 @@ namespace httplib::server
                     server_impl_->logger()->debug("websocket async_close failed: {}", ec.message());
                 }
 
-                ws_.socket().shutdown(net::socket_base::shutdown_both, ec);
-                ws_.socket().close(ec);
+                abort();
             });
+    }
+
+    void
+    websocket_conn_impl::abort()
+    {
+        if (!ws_.is_open())
+        {
+            return;
+        }
+
+        boost::system::error_code ec;
+        ws_.socket().cancel(ec);
+        ws_.socket().shutdown(net::socket_base::shutdown_both, ec);
+        ws_.socket().close(ec);
     }
 
     bool
     websocket_conn_impl::is_open() const
     {
-        return !shutting_down_.load(std::memory_order_acquire) && ws_.is_open();
+        return ws_.is_open();
     }
     httplib::net::awaitable<void>
     websocket_conn_impl::run()
@@ -154,15 +177,13 @@ namespace httplib::server
             auto bytes = co_await ws_.async_read(buffer_, util::net_awaitable[ec]);
             if (ec)
             {
-
-                ws_.socket().shutdown(net::socket_base::shutdown_both, ec);
-                ws_.socket().close(ec);
-
-                shutting_down_.store(true, std::memory_order_release);
                 server_impl_->logger()->debug("websocket disconnect: [{}:{}] what: {}",
                                               remote_endp.address().to_string(),
                                               remote_endp.port(),
                                               ec.message());
+
+                abort();
+
                 ac_que_.clear();
                 co_await ac_que_.async_shutdown();
                 try

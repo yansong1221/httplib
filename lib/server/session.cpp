@@ -447,7 +447,7 @@ namespace httplib::server
     void
     session::websocket_task::abort()
     {
-        conn_->close("abort");
+        conn_->abort();
     }
 
     session::http_proxy_task::http_proxy_task(http_stream&& stream, request&& req, std::shared_ptr<http_server::impl> server_impl)

@@ -123,4 +123,16 @@ namespace httplib::client
         impl_->run(target, std::move(open_handler), std::move(message_handler), std::move(close_handler), headers);
     }
 
+    bool
+    ws_client::is_open() const noexcept
+    {
+        return impl_->is_open();
+    }
+
+    void
+    ws_client::abort()
+    {
+        impl_->abort();
+    }
+
 } // namespace httplib::client

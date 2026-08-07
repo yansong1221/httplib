@@ -90,7 +90,7 @@ namespace httplib::client
     }
 
     bool
-    ws_client::impl::is_open() const
+    ws_client::impl::is_open() const noexcept
     {
         return stream_ && stream_->is_open();
     }
@@ -155,10 +155,15 @@ namespace httplib::client
         ac_que_.push(
             [this, self = shared_from_this(), data = std::move(data), binary]() mutable -> net::awaitable<void>
             {
+                if (!is_open())
+                {
+                    co_return;
+                }
                 auto ec = co_await async_send(std::move(data), binary);
                 if (ec)
                 {
                     logger()->error("Failed to send message: {}", ec.message());
+                    abort();
                 }
             });
     }
@@ -173,10 +178,15 @@ namespace httplib::client
         ac_que_.push(
             [this, self = shared_from_this(), data = std::move(msg)]() mutable -> net::awaitable<void>
             {
+                if (!is_open())
+                {
+                    co_return;
+                }
                 auto ec = co_await async_ping(std::move(data));
                 if (ec)
                 {
                     logger()->error("Failed to send ping: {}", ec.message());
+                    abort();
                 }
             });
     }
@@ -191,10 +201,15 @@ namespace httplib::client
         ac_que_.push(
             [this, self = shared_from_this(), data = std::move(msg)]() mutable -> net::awaitable<void>
             {
+                if (!is_open())
+                {
+                    co_return;
+                }
                 auto ec = co_await async_pong(std::move(data));
                 if (ec)
                 {
                     logger()->error("Failed to send pong: {}", ec.message());
+                    abort();
                 }
             });
     }
@@ -210,11 +225,16 @@ namespace httplib::client
         ac_que_.push(
             [this, self = shared_from_this()]() mutable -> net::awaitable<void>
             {
+                if (!is_open())
+                {
+                    co_return;
+                }
                 auto ec = co_await async_close();
                 if (ec)
                 {
                     logger()->error("Failed to close: {}", ec.message());
                 }
+                abort();
             });
     }
 
@@ -398,6 +418,8 @@ namespace httplib::client
                     auto read_ec = co_await _async_read();
                     if (read_ec)
                     {
+                        abort();
+                        ac_que_.clear();
                         break;
                     }
                     try
@@ -422,6 +444,20 @@ namespace httplib::client
             boost::asio::detached);
 
         co_return boost::system::error_code {};
+    }
+
+    void
+    ws_client::impl::abort()
+    {
+        if (!is_open())
+        {
+            return;
+        }
+
+        boost::system::error_code ec;
+        stream_->socket().cancel(ec);
+        stream_->socket().shutdown(net::socket_base::shutdown_both, ec);
+        stream_->socket().close(ec);
     }
 
 } // namespace httplib::client

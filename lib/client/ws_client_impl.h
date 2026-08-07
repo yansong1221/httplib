@@ -35,7 +35,8 @@ namespace httplib::client
         bool got_text() const noexcept;
         std::string_view got_data() const noexcept;
 
-        bool is_open() const;
+        bool is_open() const noexcept;
+        void abort();
 
         std::shared_ptr<spdlog::logger> logger() const;
         void set_logger(std::shared_ptr<spdlog::logger> logger);

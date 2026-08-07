@@ -1095,7 +1095,14 @@ namespace httplib::client
 
         if (ec)
         {
-            set_state(downloader::state::failed, ec.message());
+            if (ec == boost::asio::error::operation_aborted)
+            {
+                set_state(downloader::state::cancelled);
+            }
+            else
+            {
+                set_state(downloader::state::failed, ec.message());
+            }
             co_return ec;
         }
 
