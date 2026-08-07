@@ -139,23 +139,25 @@ namespace httplib::server
             boost::asio::use_future);
     }
 
-    std::shared_future<void>
+    void
     http_server::impl::stop()
     {
-        return net::co_spawn(
-            ex_,
-            [self = shared_from_this(), this]() -> net::awaitable<void> { co_return co_await async_stop(); },
-            boost::asio::use_future);
-    }
-    httplib::net::awaitable<void>
-    http_server::impl::async_stop()
-    {
+        if (!is_open())
+        {
+            return;
+        }
+
+        if (shutting_down_.exchange(true))
+        {
+            return;
+        }
         if (acceptor_.is_open())
         {
             boost::system::error_code ec;
             acceptor_.cancel(ec);
             acceptor_.close(ec);
         }
+        proxy_pool_->stop();
         {
             std::lock_guard lck(session_mutex_);
             auto count = sessions_.size();
@@ -165,7 +167,11 @@ namespace httplib::server
                 v->abort();
             }
         }
-        proxy_pool_->stop();
+    }
+    httplib::net::awaitable<void>
+    http_server::impl::async_stop()
+    {
+        stop();
 
         boost::system::error_code ec;
         boost::asio::steady_timer wait_timer(ex_);
@@ -198,6 +204,8 @@ namespace httplib::server
     net::awaitable<boost::system::error_code>
     http_server::impl::async_run()
     {
+        shutting_down_ = false;
+
         std::vector<net::awaitable<boost::system::error_code>> ops;
         for (int i = 0; i < acceptor_count_; ++i)
         {
@@ -818,6 +826,12 @@ namespace httplib::server
     http_server::impl::set_proxy_pool_size(size_t max_size)
     {
         proxy_pool_->set_max_size(max_size);
+    }
+
+    bool
+    http_server::impl::is_open() const
+    {
+        return !shutting_down_ && acceptor_.is_open();
     }
 
 } // namespace httplib::server

@@ -37,7 +37,7 @@ namespace httplib::server
         std::shared_future<boost::system::error_code> run();
         net::awaitable<boost::system::error_code> async_run();
 
-        std::shared_future<void> stop();
+        void stop();
         net::awaitable<void> async_stop();
 
         httplib::server::router& router();

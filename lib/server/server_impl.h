@@ -38,8 +38,9 @@ namespace httplib::server
         std::shared_future<boost::system::error_code> run();
         net::awaitable<boost::system::error_code> async_run();
 
-        std::shared_future<void> stop();
+        void stop();
         net::awaitable<void> async_stop();
+        bool is_open() const;
 
         router_impl& router();
 
@@ -113,7 +114,8 @@ namespace httplib::server
         net::awaitable<void> handle_accept(tcp::socket sock);
 
       private:
-        net::any_io_executor ex_;int acceptor_count_ = 32;
+        net::any_io_executor ex_;
+        int acceptor_count_ = 32;
         int proxy_buffer_size_ = 512 * 1024;
 
         router_impl router_;
@@ -134,6 +136,8 @@ namespace httplib::server
         std::uint64_t upload_file_limit_ = 10 * 1024 * 1024;
 
         std::unique_ptr<client::http_client_pool> proxy_pool_;
+
+        std::atomic<bool> shutting_down_ = false;
 
 #ifdef HTTPLIB_ENABLED_SSL
         std::shared_ptr<ssl::context> ssl_context_;

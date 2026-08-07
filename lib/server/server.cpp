@@ -68,7 +68,7 @@ namespace httplib::server
         return impl_->run();
     }
 
-    std::shared_future<void>
+    void
     http_server::stop()
     {
         return impl_->stop();
