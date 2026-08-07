@@ -184,8 +184,7 @@ namespace httplib::server
     router_impl::set_ws_handler_impl(std::string_view path,
                                      websocket_conn::coro_open_handler_type&& open_handler,
                                      websocket_conn::coro_message_handler_type&& message_handler,
-                                     websocket_conn::coro_close_handler_type&& close_handler,
-                                     coro_http_handler_type&& aspect_handler)
+                                     websocket_conn::coro_close_handler_type&& close_handler)
     {
         std::unique_lock lock(mutex_);
         auto segments = detail::split_segments(path);
@@ -196,7 +195,6 @@ namespace httplib::server
         entry.open_handler = std::move(open_handler);
         entry.message_handler = std::move(message_handler);
         entry.close_handler = std::move(close_handler);
-        entry.aspect_handler = std::move(aspect_handler);
         node->ws_handler = std::move(entry);
     }
 

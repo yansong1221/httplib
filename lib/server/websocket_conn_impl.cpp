@@ -139,13 +139,6 @@ namespace httplib::server
             co_return;
         }
 
-        if (entry->aspect_handler)
-        {
-            auto& req_impl = get_impl(req_);
-            auto resp = response::impl::make_response(req_impl.version(), req_impl.keep_alive());
-            co_await entry->aspect_handler(req_, resp);
-        }
-
         boost::system::error_code ec;
         auto remote_endp = ws_.socket().remote_endpoint(ec);
 
