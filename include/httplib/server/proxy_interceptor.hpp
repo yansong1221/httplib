@@ -13,23 +13,23 @@ namespace httplib::server
       public:
         virtual ~proxy_interceptor() = default;
 
-        virtual net::awaitable<void> on_upstream_request(request& req,
-                                                         http::fields& upstream_headers,
-                                                         const std::string& upstream_url)
+        virtual net::awaitable<void>
+        on_upstream_request(request& req, http::fields& upstream_headers, std::string const& upstream_url)
         {
             co_return;
         }
-        virtual net::awaitable<void> on_upstream_request_body(net::const_buffer buffer, bool more)
+        virtual net::awaitable<void>
+        on_upstream_request_body(net::const_buffer buffer, bool more)
         {
             co_return;
         }
-        virtual net::awaitable<void> on_upstream_response(request& req,
-                                                          http::status upstream_status,
-                                                          const http::fields& upstream_resp_headers)
+        virtual net::awaitable<void>
+        on_upstream_response(request& req, http::status upstream_status, http::fields const& upstream_resp_headers)
         {
             co_return;
         }
-        virtual net::awaitable<void> on_upstream_response_body(net::const_buffer buffer, bool more)
+        virtual net::awaitable<void>
+        on_upstream_response_body(net::const_buffer buffer, bool more)
         {
             co_return;
         }

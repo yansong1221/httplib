@@ -44,6 +44,7 @@ namespace httplib::server
         net::awaitable<void> post_routing(request& req, response& resp) const;
 
         void reset();
+
       protected:
         void set_http_handler_impl(http::verb method, std::string_view key, coro_http_handler_type&& handler) override;
         void set_not_found_handler_impl(coro_http_handler_type&& handler) override;

@@ -1,12 +1,12 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
-#    include "httplib/db/db_session.hpp"
-#    include "db/db_result_impl.h"
-#    include "db/db_session_impl.h"
-#    include "httplib/db/db_pool.hpp"
-#    include <boost/asio/redirect_error.hpp>
-#    include <boost/asio/use_awaitable.hpp>
-#    include <boost/mysql.hpp>
-#    include <stdexcept>
+#include "httplib/db/db_session.hpp"
+#include "db/db_result_impl.h"
+#include "db/db_session_impl.h"
+#include "httplib/db/db_pool.hpp"
+#include <boost/asio/redirect_error.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <boost/mysql.hpp>
+#include <stdexcept>
 
 namespace httplib::db
 {

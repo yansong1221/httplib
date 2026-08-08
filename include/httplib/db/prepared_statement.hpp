@@ -1,13 +1,13 @@
 #pragma once
 #ifdef HTTPLIB_ENABLED_DATABASE
 
-#    include "httplib/config.hpp"
-#    include "httplib/db/db_fwd.hpp"
-#    include "httplib/db/db_result.hpp"
-#    include <cstdint>
-#    include <memory>
-#    include <string>
-#    include <string_view>
+#include "httplib/config.hpp"
+#include "httplib/db/db_fwd.hpp"
+#include "httplib/db/db_result.hpp"
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <string_view>
 
 namespace httplib::db
 {

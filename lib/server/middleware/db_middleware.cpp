@@ -7,7 +7,7 @@
 namespace httplib::server::middleware
 {
 
-    static constexpr const char* k_tx_key = "httplib.db.tx";
+    static constexpr char const* k_tx_key = "httplib.db.tx";
 
     class db_middleware::impl
     {
@@ -15,10 +15,7 @@ namespace httplib::server::middleware
         std::shared_ptr<db::db_pool> pool;
         db_middleware_options opts;
 
-        impl(std::shared_ptr<db::db_pool> p, db_middleware_options o)
-            : pool(std::move(p)), opts(std::move(o))
-        {
-        }
+        impl(std::shared_ptr<db::db_pool> p, db_middleware_options o) : pool(std::move(p)), opts(std::move(o)) {}
     };
 
     db_middleware::db_middleware(std::shared_ptr<db::db_pool> pool, db_middleware_options opts)
@@ -44,8 +41,7 @@ namespace httplib::server::middleware
     }
 
     db_middleware::db_middleware(db_middleware&&) noexcept = default;
-    db_middleware&
-    db_middleware::operator=(db_middleware&&) noexcept = default;
+    db_middleware& db_middleware::operator=(db_middleware&&) noexcept = default;
 
     net::awaitable<bool>
     db_middleware::before(request& req, response&)

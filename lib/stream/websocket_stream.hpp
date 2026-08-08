@@ -1,6 +1,6 @@
 #pragma once
 #ifdef HTTPLIB_ENABLED_SSL
-#    include "ssl_stream.hpp"
+#include "ssl_stream.hpp"
 #endif
 #include "http_stream.hpp"
 #include <boost/beast/websocket/stream.hpp>

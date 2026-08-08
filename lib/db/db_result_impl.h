@@ -1,10 +1,10 @@
 #pragma once
 #ifdef HTTPLIB_ENABLED_DATABASE
 
-#    include "httplib/db/db_result.hpp"
-#    include <boost/mysql.hpp>
-#    include <string>
-#    include <vector>
+#include "httplib/db/db_result.hpp"
+#include <boost/mysql.hpp>
+#include <string>
+#include <vector>
 
 namespace httplib::db
 {

@@ -1,9 +1,9 @@
 #pragma once
 #ifdef HTTPLIB_ENABLED_DATABASE
 
-#    include "httplib/db/db_config.hpp"
-#    include <boost/mysql/connection_pool.hpp>
-#    include <memory>
+#include "httplib/db/db_config.hpp"
+#include <boost/mysql/connection_pool.hpp>
+#include <memory>
 
 namespace httplib::db
 {

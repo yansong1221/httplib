@@ -102,7 +102,6 @@ namespace httplib::server
                             http_server::proxy_resolver resolver,
                             http_server::ws_interceptor_factory factory);
 
-
         void use_ssl(net::const_buffer const& cert_file, net::const_buffer const& key_file, std::string passwd = {});
 #ifdef HTTPLIB_ENABLED_SSL
         const std::shared_ptr<ssl::context>&

@@ -66,7 +66,9 @@ namespace httplib::server
     class session::http_task : public session::task
     {
       public:
-        explicit http_task(http_stream&& stream, beast::flat_buffer&& buffer, std::shared_ptr<http_server::impl> server_impl);
+        explicit http_task(http_stream&& stream,
+                           beast::flat_buffer&& buffer,
+                           std::shared_ptr<http_server::impl> server_impl);
 
         net::awaitable<task::ptr> then() override;
         void abort() override;
@@ -84,7 +86,9 @@ namespace httplib::server
     class session::websocket_task : public session::task
     {
       public:
-        explicit websocket_task(websocket_stream&& stream, request&& req, std::shared_ptr<http_server::impl> server_impl);
+        explicit websocket_task(websocket_stream&& stream,
+                                request&& req,
+                                std::shared_ptr<http_server::impl> server_impl);
 
       public:
         net::awaitable<task::ptr> then() override;

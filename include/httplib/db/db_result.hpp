@@ -1,13 +1,13 @@
 #pragma once
 #ifdef HTTPLIB_ENABLED_DATABASE
 
-#    include "httplib/config.hpp"
-#    include "httplib/db/row.hpp"
-#    include <cstddef>
-#    include <cstdint>
-#    include <memory>
-#    include <string>
-#    include <string_view>
+#include "httplib/config.hpp"
+#include "httplib/db/row.hpp"
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <string_view>
 
 namespace httplib::db
 {
@@ -91,8 +91,6 @@ namespace httplib::db
         iterator begin() const;
 
         iterator end() const;
-
-        static constexpr size_t npos = static_cast<size_t>(-1);
 
         struct impl;
 

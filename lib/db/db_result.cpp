@@ -1,8 +1,8 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
-#    include "httplib/db/db_result.hpp"
-#    include "db/db_result_impl.h"
-#    include "db/row_impl.h"
-#    include <charconv>
+#include "httplib/db/db_result.hpp"
+#include "db/db_result_impl.h"
+#include "db/row_impl.h"
+#include <charconv>
 
 namespace httplib::db
 {
@@ -226,17 +226,17 @@ namespace httplib::db
     row& row::operator=(row&&) noexcept = default;
     row::~row() = default;
 
-#    define ROW_NULL_CHECK throw std::runtime_error("db: NULL")
-#    define ROW_FIELD                                           \
-        auto f = ff(get_impl(*impl_->parent), impl_->idx, col); \
-        if (f.is_null())                                        \
-        {                                                       \
-            if (d)                                              \
-                return *d;                                      \
-            ROW_NULL_CHECK;                                     \
-        }
-#    define ROW_NAMED(name)   return as_##name(column(name), d)
-#    define ROW_BODY(T, conv) ROW_FIELD return conv(f)
+#define ROW_NULL_CHECK throw std::runtime_error("db: NULL")
+#define ROW_FIELD                                           \
+    auto f = ff(get_impl(*impl_->parent), impl_->idx, col); \
+    if (f.is_null())                                        \
+    {                                                       \
+        if (d)                                              \
+            return *d;                                      \
+        ROW_NULL_CHECK;                                     \
+    }
+#define ROW_NAMED(name)   return as_##name(column(name), d)
+#define ROW_BODY(T, conv) ROW_FIELD return conv(f)
 
     std::string
     row::operator[](size_t col) const
@@ -473,12 +473,7 @@ namespace httplib::db
     size_t
     row::impl::col_of(std::string_view name) const
     {
-        auto idx = parent->column_index(name);
-        if (idx == db_result::npos)
-        {
-            throw std::runtime_error("db: column not found: " + std::string(name));
-        }
-        return idx;
+        return parent->column_index(name);
     }
 
     db_result::db_result() : impl_(std::make_unique<impl>()) {}
@@ -539,7 +534,7 @@ namespace httplib::db
                 return j;
             }
         }
-        return npos;
+        throw std::runtime_error("db: column not found: " + std::string(n));
     }
     std::string const&
     db_result::column_name(size_t c) const

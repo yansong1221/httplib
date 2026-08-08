@@ -5,7 +5,7 @@
 #include <string>
 
 #ifdef HTTPLIB_ENABLED_SSL
-#    include <openssl/hmac.h>
+#include <openssl/hmac.h>
 #endif
 
 namespace httplib::jwt

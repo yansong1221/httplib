@@ -13,13 +13,12 @@ namespace httplib::server::middleware
 
     struct query_log_options
     {
-        using log_callback
-            = std::function<void(const request& req, const std::vector<db::query_log_entry>& entries)>;
+        using log_callback = std::function<void(request const& req, std::vector<db::query_log_entry> const& entries)>;
         log_callback on_request_complete;
 
-        std::chrono::microseconds slow_query_threshold {0};
+        std::chrono::microseconds slow_query_threshold { 0 };
 
-        using slow_query_callback = std::function<void(const db::query_log_entry& entry)>;
+        using slow_query_callback = std::function<void(db::query_log_entry const& entry)>;
         slow_query_callback on_slow_query;
     };
 

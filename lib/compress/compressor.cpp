@@ -1,12 +1,12 @@
 #include "compress/compressor.hpp"
 
 #ifdef HTTPLIB_ENABLED_COMPRESS
-#    include "compress/brotli.hpp"
-#    include <boost/asio/streambuf.hpp>
-#    include <boost/iostreams/filter/gzip.hpp>
-#    include <boost/iostreams/filter/zlib.hpp>
-#    include <boost/iostreams/filter/zstd.hpp>
-#    include <boost/iostreams/filtering_stream.hpp>
+#include "compress/brotli.hpp"
+#include <boost/asio/streambuf.hpp>
+#include <boost/iostreams/filter/gzip.hpp>
+#include <boost/iostreams/filter/zlib.hpp>
+#include <boost/iostreams/filter/zstd.hpp>
+#include <boost/iostreams/filtering_stream.hpp>
 #endif
 
 namespace httplib::compress

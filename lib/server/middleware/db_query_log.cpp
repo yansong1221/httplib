@@ -8,17 +8,14 @@
 namespace httplib::server::middleware
 {
 
-    static constexpr const char* k_query_log_key = "httplib.db.query_log";
+    static constexpr char const* k_query_log_key = "httplib.db.query_log";
 
     class db_query_log_middleware::impl
     {
       public:
         query_log_options opts;
 
-        explicit impl(query_log_options o)
-            : opts(std::move(o))
-        {
-        }
+        explicit impl(query_log_options o) : opts(std::move(o)) {}
     };
 
     db_query_log_middleware::db_query_log_middleware(query_log_options opts)
@@ -44,8 +41,7 @@ namespace httplib::server::middleware
     }
 
     db_query_log_middleware::db_query_log_middleware(db_query_log_middleware&&) noexcept = default;
-    db_query_log_middleware&
-    db_query_log_middleware::operator=(db_query_log_middleware&&) noexcept = default;
+    db_query_log_middleware& db_query_log_middleware::operator=(db_query_log_middleware&&) noexcept = default;
 
     bool
     db_query_log_middleware::before(request& req, response&)
@@ -60,7 +56,7 @@ namespace httplib::server::middleware
 
         auto& sess = get_db_session(req);
         sess.set_query_logger(
-            [log, opts](const db::query_log_entry& entry) mutable
+            [log, opts](db::query_log_entry const& entry) mutable
             {
                 if (opts.slow_query_threshold.count() > 0 && entry.duration >= opts.slow_query_threshold
                     && opts.on_slow_query)
@@ -82,8 +78,7 @@ namespace httplib::server::middleware
             return true;
         }
 
-        auto log
-            = req.custom_data<std::shared_ptr<std::vector<db::query_log_entry>>>(k_query_log_key);
+        auto log = req.custom_data<std::shared_ptr<std::vector<db::query_log_entry>>>(k_query_log_key);
 
         if (impl_->opts.on_request_complete)
         {

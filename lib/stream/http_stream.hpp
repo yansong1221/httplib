@@ -1,7 +1,7 @@
 #pragma once
 #include <variant>
 #ifdef HTTPLIB_ENABLED_SSL
-#    include "ssl_stream.hpp"
+#include "ssl_stream.hpp"
 #endif
 #include "boost/asio/use_awaitable.hpp"
 #include "httplib/util/use_awaitable.hpp"

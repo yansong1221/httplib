@@ -16,8 +16,8 @@
 #include <spdlog/spdlog.h>
 
 #ifdef HTTPLIB_ENABLED_SSL
-#    include <openssl/err.h>
-#    include <openssl/ssl.h>
+#include <openssl/err.h>
+#include <openssl/ssl.h>
 #endif
 
 namespace httplib::server
@@ -215,7 +215,7 @@ namespace httplib::server
             }
         }
 
-        //router_.reset();
+        router_.reset();
         running_ = false;
         for (auto const& ec : results)
         {

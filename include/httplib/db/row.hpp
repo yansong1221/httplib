@@ -1,13 +1,13 @@
 #pragma once
 #ifdef HTTPLIB_ENABLED_DATABASE
 
-#    include "db_fwd.hpp"
-#    include <chrono>
-#    include <cstdint>
-#    include <memory>
-#    include <optional>
-#    include <string>
-#    include <string_view>
+#include "db_fwd.hpp"
+#include <chrono>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
 
 namespace httplib::db
 {
@@ -120,11 +120,11 @@ namespace httplib::db
             }
             else if constexpr (std::is_same_v<T, db_date>)
             {
-                return as_date(col, d);
+                return as_date(col);
             }
             else if constexpr (std::is_same_v<T, db_datetime>)
             {
-                return as_datetime(col, d);
+                return as_datetime(col);
             }
             else if constexpr (std::is_same_v<T, std::chrono::microseconds>)
             {

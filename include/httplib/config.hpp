@@ -44,15 +44,15 @@ namespace httplib
 
 } // namespace httplib
 #ifdef HTTPLIB_SHARED_LIBRARY
-#    if defined(_WIN32)
-#        if defined(HTTPLIB_EXPORTS)
-#            define HTTPLIB_API __declspec(dllexport)
-#        else
-#            define HTTPLIB_API __declspec(dllimport)
-#        endif
-#    else
-#        define HTTPLIB_API
-#    endif
+#if defined(_WIN32)
+#if defined(HTTPLIB_EXPORTS)
+#define HTTPLIB_API __declspec(dllexport)
 #else
-#    define HTTPLIB_API
+#define HTTPLIB_API __declspec(dllimport)
+#endif
+#else
+#define HTTPLIB_API
+#endif
+#else
+#define HTTPLIB_API
 #endif

@@ -1,7 +1,7 @@
 #pragma once
 #ifdef HTTPLIB_ENABLED_DATABASE
 
-#    include "httplib/db/row.hpp"
+#include "httplib/db/row.hpp"
 
 namespace httplib::db
 {

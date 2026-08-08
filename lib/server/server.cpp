@@ -154,7 +154,9 @@ namespace httplib::server
     }
 
     void
-    http_server::set_reverse_proxy(std::string_view location, proxy_resolver resolver, proxy_interceptor_factory factory)
+    http_server::set_reverse_proxy(std::string_view location,
+                                   proxy_resolver resolver,
+                                   proxy_interceptor_factory factory)
     {
         impl_->set_reverse_proxy(location, std::move(resolver), std::move(factory));
     }
