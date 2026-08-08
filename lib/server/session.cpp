@@ -61,7 +61,9 @@ namespace httplib::server
     class session::ssl_handshake_task : public session::task
     {
       public:
-        explicit ssl_handshake_task(http_stream::tls_stream&& stream, beast::flat_buffer&& buffer, std::shared_ptr<http_server::impl> server_impl)
+        explicit ssl_handshake_task(http_stream::tls_stream&& stream,
+                                    beast::flat_buffer&& buffer,
+                                    std::shared_ptr<http_server::impl> server_impl)
             : server_impl_(std::move(server_impl))
             , stream_(std::move(stream))
             , buffer_(std::move(buffer))
@@ -167,7 +169,9 @@ namespace httplib::server
             }
         }
 #endif
-        co_return std::make_unique<session::http_task>(http_stream(std::move(stream_)), std::move(buffer), server_impl_);
+        co_return std::make_unique<session::http_task>(http_stream(std::move(stream_)),
+                                                       std::move(buffer),
+                                                       server_impl_);
     }
     void
     session::detect_ssl_task::abort()
@@ -175,7 +179,9 @@ namespace httplib::server
         stream_.close();
     }
 
-    session::http_task::http_task(http_stream&& stream, beast::flat_buffer&& buffer, std::shared_ptr<http_server::impl> server_impl)
+    session::http_task::http_task(http_stream&& stream,
+                                  beast::flat_buffer&& buffer,
+                                  std::shared_ptr<http_server::impl> server_impl)
         : server_impl_(std::move(server_impl))
         , buffer_(std::move(buffer))
         , stream_(std::move(stream))
@@ -192,7 +198,7 @@ namespace httplib::server
         auto local_endp = stream_.socket().local_endpoint(ec);
         auto remote_endp = stream_.socket().remote_endpoint(ec);
 
-        auto log_endp_format = fmt::format("{}:{} -> {}:{}",
+        auto log_endp_format = fmt::format("({}:{} -> {}:{})",
                                            remote_endp.address().to_string(),
                                            remote_endp.port(),
                                            local_endp.address().to_string(),
@@ -227,11 +233,15 @@ namespace httplib::server
             {
                 server_impl_->logger()->trace("ws upgrade {}", req_target);
                 auto req = request::impl::make_request(local_endp, remote_endp, std::move(header_parser.release()));
-                co_return std::make_unique<websocket_task>(websocket_stream(std::move(stream_)), std::move(req), server_impl_);
+                co_return std::make_unique<websocket_task>(websocket_stream(std::move(stream_)),
+                                                           std::move(req),
+                                                           server_impl_);
             }
 
-            auto resp
-                = response::impl::make_response(header.version(), header.keep_alive(), &stream_, server_impl_->write_timeout());
+            auto resp = response::impl::make_response(header.version(),
+                                                      header.keep_alive(),
+                                                      &stream_,
+                                                      server_impl_->write_timeout());
             auto req = request::impl::make_request(local_endp, remote_endp, http::request<http::empty_body>(header));
 
             auto h_start = std::chrono::steady_clock::time_point {};
@@ -263,11 +273,11 @@ namespace httplib::server
                     {
                         resp.set_error_content(httplib::http::status::not_found);
                     }
-                    server_impl_->logger()->debug("{} {} {} ({}) not matched",
-                                          header.method_string(),
-                                          req_target,
-                                          resp.result_int(),
-                                          log_endp_format);
+                    server_impl_->logger()->debug("{} {} {} {} not matched",
+                                                  header.method_string(),
+                                                  req_target,
+                                                  resp.result_int(),
+                                                  log_endp_format);
                 }
                 else
                 {
@@ -329,12 +339,19 @@ namespace httplib::server
             }
             catch (std::exception const& e)
             {
-                server_impl_->logger()->error("exception in handler for {} {}: {}", req.method_string(), req_target, e.what());
+                server_impl_->logger()->error("exception in handler for {} {} {}: {}",
+                                              req.method_string(),
+                                              req_target,
+                                              log_endp_format,
+                                              e.what());
                 resp.set_string_content(std::string(e.what()), "text/plain", http::status::internal_server_error);
             }
             catch (...)
             {
-                server_impl_->logger()->error("unknown exception in handler for {} {}", req.method_string(), req_target);
+                server_impl_->logger()->error("unknown exception in handler for {} {} {}",
+                                              req.method_string(),
+                                              req_target,
+                                              log_endp_format);
                 using namespace std::string_view_literals;
                 resp.set_string_content(std::string("unknown exception"),
                                         "text/plain",
@@ -348,13 +365,14 @@ namespace httplib::server
 
             auto total_ms
                 = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time);
-
-            server_impl_->logger()->debug("{} {} {} handler={}ms total={}ms",
-                                  req.method_string(),
-                                  req_target,
-                                  resp.result_int(),
-                                  handler_ms.count(),
-                                  total_ms.count());
+            using namespace std::chrono_literals;
+            server_impl_->logger()->debug("{} {} {} {} handler={}ms total={}ms",
+                                          req.method_string(),
+                                          req_target,
+                                          resp.result_int(),
+                                          log_endp_format,
+                                          handler_ms.count(),
+                                          total_ms.count());
 
             if (!get_impl(resp).keep_alive())
             {
@@ -409,7 +427,7 @@ namespace httplib::server
         boost::system::error_code ec;
         http::response_serializer<body::any_body> serializer((get_impl(resp)));
 
-        auto send_chunk = [&]() -> net::awaitable<bool>
+        while (!serializer.is_done())
         {
             stream_.expires_after(server_impl_->write_timeout());
             co_await http::async_write_some(stream_, serializer, util::net_awaitable[ec]);
@@ -419,20 +437,13 @@ namespace httplib::server
                 server_impl_->logger()->trace("write http body failed: {}", ec.message());
                 co_return false;
             }
-            co_return true;
-        };
-
-        while (!serializer.is_done())
-        {
-            if (!co_await send_chunk())
-            {
-                co_return false;
-            }
         }
         co_return true;
     }
 
-    session::websocket_task::websocket_task(websocket_stream&& stream, request&& req, std::shared_ptr<http_server::impl> server_impl)
+    session::websocket_task::websocket_task(websocket_stream&& stream,
+                                            request&& req,
+                                            std::shared_ptr<http_server::impl> server_impl)
         : conn_(std::make_shared<websocket_conn_impl>(server_impl, std::move(stream), std::move(req)))
     {
     }
@@ -450,7 +461,9 @@ namespace httplib::server
         conn_->abort();
     }
 
-    session::http_proxy_task::http_proxy_task(http_stream&& stream, request&& req, std::shared_ptr<http_server::impl> server_impl)
+    session::http_proxy_task::http_proxy_task(http_stream&& stream,
+                                              request&& req,
+                                              std::shared_ptr<http_server::impl> server_impl)
         : stream_(std::move(stream))
         , req_(std::move(req))
         , server_impl_(std::move(server_impl))

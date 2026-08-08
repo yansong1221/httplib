@@ -1,4 +1,5 @@
 #include "websocket_conn_impl.hpp"
+#include "httplib/client/ws_client.hpp"
 #include "request_impl.hpp"
 #include "response_impl.hpp"
 #include <boost/asio/co_spawn.hpp>
@@ -113,6 +114,15 @@ namespace httplib::server
         if (!ws_.is_open())
         {
             return;
+        }
+
+        if (req_.has_custom_data(detail::kWsForwardKey))
+        {
+            auto upstream = req_.custom_data<std::shared_ptr<client::ws_client>>(detail::kWsForwardKey);
+            if (upstream)
+            {
+                upstream->abort();
+            }
         }
 
         boost::system::error_code ec;

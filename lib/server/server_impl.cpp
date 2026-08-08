@@ -25,7 +25,6 @@ namespace httplib::server
     namespace detail
     {
 
-        constexpr auto kWsForwardKey = "ws-forward";
         constexpr auto kWsInterceptorKey = "ws-interceptor";
         using ws_client_ptr = std::shared_ptr<client::ws_client>;
         using ws_interceptor_ptr = std::shared_ptr<ws_interceptor>;
@@ -216,7 +215,7 @@ namespace httplib::server
             }
         }
 
-        router_.reset();
+        //router_.reset();
         running_ = false;
         for (auto const& ec : results)
         {
