@@ -1,60 +1,108 @@
 #pragma once
 #ifdef HTTPLIB_ENABLED_DATABASE
 
-#include <cstdint>
-#include <string>
-#include <string_view>
-#include <vector>
+#    include "httplib/config.hpp"
+#    include "httplib/db/row.hpp"
+#    include <cstddef>
+#    include <cstdint>
+#    include <memory>
+#    include <string>
+#    include <string_view>
 
 namespace httplib::db
 {
 
-    struct db_result
+    class HTTPLIB_API db_result
     {
-        std::vector<std::string> columns;
-        std::vector<std::vector<std::string>> rows;
+      public:
+        db_result();
+        db_result(db_result&&) noexcept;
+        db_result& operator=(db_result&&) noexcept;
+        ~db_result();
 
-        uint64_t affected_rows = 0;
-        uint64_t insert_id = 0;
+        db_result(db_result const&) = delete;
+        db_result& operator=(db_result const&) = delete;
 
-        [[nodiscard]] bool
-        empty() const
+        bool empty() const;
+
+        size_t row_count() const;
+
+        uint64_t affected_rows() const;
+
+        uint64_t last_insert_id() const;
+
+        uint64_t warning_count() const;
+
+        size_t column_count() const;
+
+        size_t column_index(std::string_view name) const;
+
+        std::string const& column_name(size_t col) const;
+
+        column_type column_type(size_t col) const;
+
+        row operator[](size_t index) const;
+
+        class iterator
         {
-            return rows.empty();
-        }
+          public:
+            using value_type = row;
+            using reference = row;
+            using pointer = void;
+            using difference_type = std::ptrdiff_t;
+            using iterator_category = std::input_iterator_tag;
 
-        [[nodiscard]] size_t
-        size() const
-        {
-            return rows.size();
-        }
+            row
+            operator*() const
+            {
+                return (*result_)[idx_];
+            }
+            iterator&
+            operator++()
+            {
+                ++idx_;
+                return *this;
+            }
+            iterator
+            operator++(int)
+            {
+                auto tmp = *this;
+                ++idx_;
+                return tmp;
+            }
+            bool
+            operator==(iterator const& other) const
+            {
+                return idx_ == other.idx_;
+            }
+            bool
+            operator!=(iterator const& other) const
+            {
+                return idx_ != other.idx_;
+            }
 
-        const std::vector<std::string>&
-        operator[](size_t index) const
-        {
-            return rows[index];
-        }
+          private:
+            db_result const* result_;
+            size_t idx_;
+            iterator(db_result const* result, size_t idx) : result_(result), idx_(idx) {}
+            friend class db_result;
+        };
 
-        std::vector<std::string>&
-        operator[](size_t index)
-        {
-            return rows[index];
-        }
+        iterator begin() const;
+
+        iterator end() const;
 
         static constexpr size_t npos = static_cast<size_t>(-1);
 
-        [[nodiscard]] size_t
-        column_index(std::string_view name) const
-        {
-            for (size_t i = 0; i < columns.size(); ++i)
-            {
-                if (columns[i] == name)
-                {
-                    return i;
-                }
-            }
-            return npos;
-        }
+        struct impl;
+
+        explicit db_result(std::unique_ptr<impl> p);
+
+      private:
+        std::unique_ptr<impl> impl_;
+
+        friend impl& get_impl(db_result& self);
+        friend impl const& get_impl(db_result const& self);
     };
 
 } // namespace httplib::db

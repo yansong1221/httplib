@@ -1,9 +1,9 @@
 #pragma once
 #ifdef HTTPLIB_ENABLED_DATABASE
 
-#include <chrono>
-#include <cstdint>
-#include <string>
+#    include <chrono>
+#    include <cstdint>
+#    include <string>
 
 namespace httplib::db
 {
@@ -20,16 +20,9 @@ namespace httplib::db
         size_t min_connections = 2;
         size_t max_connections = 16;
 
-        std::chrono::seconds idle_timeout {300};
-        std::chrono::seconds acquire_timeout {5};
-        std::chrono::seconds query_timeout {30};
-        bool auto_reconnect = true;
-
-        std::chrono::seconds idle_check_interval {60};
-        std::chrono::seconds health_check_interval {30};
-        std::chrono::seconds ping_grace_period {15};
-
-        size_t stmt_cache_size = 64;
+        std::chrono::seconds connect_timeout { 5 };
+        std::chrono::seconds ping_interval { 30 };
+        std::chrono::seconds ping_timeout { 5 };
     };
 
 } // namespace httplib::db

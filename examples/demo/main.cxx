@@ -761,8 +761,8 @@ main(int argc, char** argv)
         setup_ws(router);
         setup_static_files(router);
 
-        svr.set_reverse_proxy("/*", "http://192.168.101.8:80");
-        svr.set_ws_forward("/ws/forward", "ws://192.168.101.8:18808/ws");
+        svr.set_reverse_proxy("/proxy", "http://127.0.0.1:18080");
+        svr.set_ws_forward("/ws/forward", "ws://127.0.0.1:18080/ws");
 
         router.set_http_handler<http::verb::post>("/api/shutdown",
                                                   [&](httplib::server::request&, httplib::server::response& resp)

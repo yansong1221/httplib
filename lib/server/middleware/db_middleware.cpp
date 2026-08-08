@@ -7,19 +7,21 @@
 namespace httplib::server::middleware
 {
 
+    static constexpr const char* k_tx_key = "httplib.db.tx";
+
     class db_middleware::impl
     {
       public:
-        std::shared_ptr<db::db_connection_pool> pool;
+        std::shared_ptr<db::db_pool> pool;
         db_middleware_options opts;
 
-        impl(std::shared_ptr<db::db_connection_pool> p, db_middleware_options o)
+        impl(std::shared_ptr<db::db_pool> p, db_middleware_options o)
             : pool(std::move(p)), opts(std::move(o))
         {
         }
     };
 
-    db_middleware::db_middleware(std::shared_ptr<db::db_connection_pool> pool, db_middleware_options opts)
+    db_middleware::db_middleware(std::shared_ptr<db::db_pool> pool, db_middleware_options opts)
         : impl_(std::make_unique<impl>(std::move(pool), std::move(opts)))
     {
     }
@@ -48,17 +50,15 @@ namespace httplib::server::middleware
     net::awaitable<bool>
     db_middleware::before(request& req, response&)
     {
-        auto conn = co_await impl_->pool->acquire();
-        req.set_custom_data(db::db_connection_pool::conn_key, std::any(conn));
-
-        if (impl_->opts.inject_pool)
-        {
-            req.set_custom_data(db::db_connection_pool::pool_key, std::any(impl_->pool));
-        }
+        auto session = co_await impl_->pool->get_session();
+        auto* ptr = new db::db_session(std::move(session));
+        req.set_custom_data(db::db_pool::conn_key, std::any(ptr));
+        req.set_custom_data("httplib.db.pool_ref", std::any(impl_->pool));
 
         if (impl_->opts.auto_transaction)
         {
-            co_await conn->begin_transaction();
+            auto tx = co_await get_db_session(req).begin();
+            req.set_custom_data(k_tx_key, std::any(new db::transaction(std::move(tx))));
         }
 
         co_return true;
@@ -67,28 +67,30 @@ namespace httplib::server::middleware
     net::awaitable<bool>
     db_middleware::after(request& req, response&)
     {
-        if (!req.has_custom_data(db::db_connection_pool::conn_key))
+        if (impl_->opts.auto_transaction && req.has_custom_data(k_tx_key))
         {
-            co_return true;
+            auto* tx = req.custom_data<db::transaction*>(k_tx_key);
+            if (tx)
+            {
+                try
+                {
+                    co_await tx->commit();
+                }
+                catch (...)
+                {
+                }
+                delete tx;
+            }
+            req.erase_custom_data(k_tx_key);
         }
 
-        auto conn
-            = req.custom_data<std::shared_ptr<db::db_connection>>(db::db_connection_pool::conn_key);
-
-        if (impl_->opts.auto_transaction && conn->in_transaction())
+        if (req.has_custom_data(db::db_pool::conn_key))
         {
-            try
-            {
-                co_await conn->commit();
-            }
-            catch (...)
-            {
-            }
+            delete req.custom_data<db::db_session*>(db::db_pool::conn_key);
+            req.erase_custom_data(db::db_pool::conn_key);
+            req.erase_custom_data("httplib.db.pool_ref");
         }
 
-        impl_->pool->release(std::move(conn));
-        req.erase_custom_data(db::db_connection_pool::conn_key);
-        req.erase_custom_data(db::db_connection_pool::pool_key);
         co_return true;
     }
 

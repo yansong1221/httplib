@@ -66,10 +66,10 @@ if(HTTPLIB_ENABLED_COMPRESS)
     target_link_libraries(${MODULE} PRIVATE Boost::iostreams unofficial::brotli::brotlidec unofficial::brotli::brotlienc)
 endif()
 if(HTTPLIB_ENABLED_DATABASE)
-    find_package(Boost REQUIRED COMPONENTS charconv CONFIG)
+    find_package(Boost REQUIRED COMPONENTS mysql charconv CONFIG)
 
     target_compile_definitions(${MODULE} PUBLIC HTTPLIB_ENABLED_DATABASE)
-    target_link_libraries(${MODULE} PUBLIC Boost::charconv)
+    target_link_libraries(${MODULE} PUBLIC Boost::mysql Boost::charconv)
 endif()
 
 
