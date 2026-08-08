@@ -25,7 +25,7 @@ namespace
 
     struct ws_test_server
     {
-        net::thread_pool ioc{2};
+        net::thread_pool ioc { 2 };
         httplib::server::http_server server;
         httplib::tcp::endpoint endpoint;
 

@@ -417,24 +417,26 @@ TEST_CASE("Downloader: cancel stops download", "[downloader]")
     std::condition_variable cv;
     bool download_started = false;
 
-    dl.set_state_callback([&](httplib::client::downloader::state st, std::string_view)
-    {
-        if (st == httplib::client::downloader::state::downloading)
+    dl.set_state_callback(
+        [&](httplib::client::downloader::state st, std::string_view)
         {
+            if (st == httplib::client::downloader::state::downloading)
             {
-                std::lock_guard<std::mutex> lk(cv_mtx);
-                download_started = true;
+                {
+                    std::lock_guard<std::mutex> lk(cv_mtx);
+                    download_started = true;
+                }
+                cv.notify_one();
             }
-            cv.notify_one();
-        }
-    });
+        });
 
-    std::thread cancel_thread([&]()
-    {
-        std::unique_lock<std::mutex> lk(cv_mtx);
-        cv.wait(lk, [&] { return download_started; });
-        dl.cancel();
-    });
+    std::thread cancel_thread(
+        [&]()
+        {
+            std::unique_lock<std::mutex> lk(cv_mtx);
+            cv.wait(lk, [&] { return download_started; });
+            dl.cancel();
+        });
 
     auto ec = dl.download(ts.url_for_path("/bigcancel"), dl_path);
     REQUIRE(ec);

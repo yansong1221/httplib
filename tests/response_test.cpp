@@ -204,9 +204,10 @@ TEST_CASE("Response: set_file_content with Range request", "[response]")
 
     {
         test_scaffold ts;
-        ts.router().set_http_handler<http::verb::get>("/file-range",
-                                                      [&](httplib::server::request& req, httplib::server::response& resp)
-                                                      { resp.set_file_content(tmp_path, req.base()); });
+        ts.router().set_http_handler<http::verb::get>(
+            "/file-range",
+            [&](httplib::server::request& req, httplib::server::response& resp)
+            { resp.set_file_content(tmp_path, req.base()); });
         ts.start();
 
         auto range_headers = httplib::http::fields();
@@ -230,9 +231,10 @@ TEST_CASE("Response: Range request open-ended (bytes=N-)", "[response]")
 
     {
         test_scaffold ts;
-        ts.router().set_http_handler<http::verb::get>("/file-range-open",
-                                                      [&](httplib::server::request& req, httplib::server::response& resp)
-                                                      { resp.set_file_content(tmp_path, req.base()); });
+        ts.router().set_http_handler<http::verb::get>(
+            "/file-range-open",
+            [&](httplib::server::request& req, httplib::server::response& resp)
+            { resp.set_file_content(tmp_path, req.base()); });
         ts.start();
 
         auto range_headers = httplib::http::fields();
@@ -256,9 +258,10 @@ TEST_CASE("Response: Range request suffix (bytes=-N)", "[response]")
 
     {
         test_scaffold ts;
-        ts.router().set_http_handler<http::verb::get>("/file-range-suffix",
-                                                      [&](httplib::server::request& req, httplib::server::response& resp)
-                                                      { resp.set_file_content(tmp_path, req.base()); });
+        ts.router().set_http_handler<http::verb::get>(
+            "/file-range-suffix",
+            [&](httplib::server::request& req, httplib::server::response& resp)
+            { resp.set_file_content(tmp_path, req.base()); });
         ts.start();
 
         auto range_headers = httplib::http::fields();
@@ -282,9 +285,10 @@ TEST_CASE("Response: Range request Content-Range header", "[response]")
 
     {
         test_scaffold ts;
-        ts.router().set_http_handler<http::verb::get>("/file-cr",
-                                                      [&](httplib::server::request& req, httplib::server::response& resp)
-                                                      { resp.set_file_content(tmp_path, req.base()); });
+        ts.router().set_http_handler<http::verb::get>(
+            "/file-cr",
+            [&](httplib::server::request& req, httplib::server::response& resp)
+            { resp.set_file_content(tmp_path, req.base()); });
         ts.start();
 
         auto range_headers = httplib::http::fields();
@@ -310,9 +314,10 @@ TEST_CASE("Response: Range request out of bounds returns 416", "[response]")
 
     {
         test_scaffold ts;
-        ts.router().set_http_handler<http::verb::get>("/file-range-oob",
-                                                      [&](httplib::server::request& req, httplib::server::response& resp)
-                                                      { resp.set_file_content(tmp_path, req.base()); });
+        ts.router().set_http_handler<http::verb::get>(
+            "/file-range-oob",
+            [&](httplib::server::request& req, httplib::server::response& resp)
+            { resp.set_file_content(tmp_path, req.base()); });
         ts.start();
 
         auto range_headers = httplib::http::fields();
@@ -337,9 +342,10 @@ TEST_CASE("Response: If-None-Match returns 304 for matching ETag", "[response]")
     std::string etag;
     {
         test_scaffold ts;
-        ts.router().set_http_handler<http::verb::get>("/file-etag",
-                                                      [&](httplib::server::request& req, httplib::server::response& resp)
-                                                      { resp.set_file_content(tmp_path, req.base()); });
+        ts.router().set_http_handler<http::verb::get>(
+            "/file-etag",
+            [&](httplib::server::request& req, httplib::server::response& resp)
+            { resp.set_file_content(tmp_path, req.base()); });
         ts.start();
 
         auto resp1 = UNWRAP(ts.client->get("/file-etag"));
@@ -367,9 +373,10 @@ TEST_CASE("Response: If-Modified-Since returns 304 for unmodified", "[response]"
     std::string last_mod;
     {
         test_scaffold ts;
-        ts.router().set_http_handler<http::verb::get>("/file-ims",
-                                                      [&](httplib::server::request& req, httplib::server::response& resp)
-                                                      { resp.set_file_content(tmp_path, req.base()); });
+        ts.router().set_http_handler<http::verb::get>(
+            "/file-ims",
+            [&](httplib::server::request& req, httplib::server::response& resp)
+            { resp.set_file_content(tmp_path, req.base()); });
         ts.start();
 
         auto resp1 = UNWRAP(ts.client->get("/file-ims"));
@@ -396,9 +403,10 @@ TEST_CASE("Response: Accept-Ranges header present on full response", "[response]
 
     {
         test_scaffold ts;
-        ts.router().set_http_handler<http::verb::get>("/file-ar",
-                                                      [&](httplib::server::request& req, httplib::server::response& resp)
-                                                      { resp.set_file_content(tmp_path, req.base()); });
+        ts.router().set_http_handler<http::verb::get>(
+            "/file-ar",
+            [&](httplib::server::request& req, httplib::server::response& resp)
+            { resp.set_file_content(tmp_path, req.base()); });
         ts.start();
 
         auto resp = UNWRAP(ts.client->get("/file-ar"));
@@ -420,9 +428,10 @@ TEST_CASE("Response: Multi-range request returns multipart/byteranges", "[respon
 
     {
         test_scaffold ts;
-        ts.router().set_http_handler<http::verb::get>("/file-multi-range",
-                                                      [&](httplib::server::request& req, httplib::server::response& resp)
-                                                      { resp.set_file_content(tmp_path, req.base()); });
+        ts.router().set_http_handler<http::verb::get>(
+            "/file-multi-range",
+            [&](httplib::server::request& req, httplib::server::response& resp)
+            { resp.set_file_content(tmp_path, req.base()); });
         ts.start();
 
         auto range_headers = httplib::http::fields();

@@ -11,7 +11,7 @@ namespace
 
     struct test_scaffold
     {
-        net::thread_pool ioc{2};
+        net::thread_pool ioc { 2 };
         server::http_server upstream_server;
         server::http_server proxy_server;
 
@@ -315,7 +315,7 @@ TEST_CASE("reverse-proxy", "[proxy]")
 
 TEST_CASE("CookieProxy: via reverse proxy rewrites Cookie header", "[proxy]")
 {
-    net::thread_pool ioc{2};
+    net::thread_pool ioc { 2 };
     httplib::server::http_server upstream(ioc.get_executor());
     httplib::server::http_server proxy(ioc.get_executor());
 
@@ -357,7 +357,7 @@ TEST_CASE("CookieProxy: via reverse proxy rewrites Cookie header", "[proxy]")
 
 TEST_CASE("Proxy: rewrites Referer to upstream", "[proxy]")
 {
-    net::thread_pool ioc{2};
+    net::thread_pool ioc { 2 };
     httplib::server::http_server upstream(ioc.get_executor());
     httplib::server::http_server proxy(ioc.get_executor());
 
@@ -397,7 +397,7 @@ TEST_CASE("Proxy: rewrites Referer to upstream", "[proxy]")
 
 TEST_CASE("Proxy: forwards X-Forwarded-Proto and X-Forwarded-Host", "[proxy]")
 {
-    net::thread_pool ioc{2};
+    net::thread_pool ioc { 2 };
     httplib::server::http_server upstream(ioc.get_executor());
     httplib::server::http_server proxy(ioc.get_executor());
 
@@ -439,7 +439,7 @@ TEST_CASE("Proxy: forwards X-Forwarded-Proto and X-Forwarded-Host", "[proxy]")
 
 TEST_CASE("ws-forward echo", "[proxy][ws-forward]")
 {
-    net::thread_pool ioc{2};
+    net::thread_pool ioc { 2 };
     server::http_server upstream(ioc.get_executor());
     server::http_server proxy(ioc.get_executor());
 
@@ -512,7 +512,7 @@ TEST_CASE("ws-forward echo", "[proxy][ws-forward]")
 
 TEST_CASE("ws-forward stress: concurrent connections + shutdown", "[proxy][ws-forward]")
 {
-    net::thread_pool ioc{2};
+    net::thread_pool ioc { 2 };
     server::http_server upstream(ioc.get_executor());
     server::http_server proxy(ioc.get_executor());
 
@@ -613,7 +613,7 @@ TEST_CASE("ws-forward stress: concurrent connections + shutdown", "[proxy][ws-fo
 
 TEST_CASE("proxy-rewrite-redirect-location", "[proxy]")
 {
-    net::thread_pool ioc{2};
+    net::thread_pool ioc { 2 };
     server::http_server upstream(ioc.get_executor());
     server::http_server proxy(ioc.get_executor());
 
@@ -660,7 +660,7 @@ TEST_CASE("proxy-rewrite-redirect-location", "[proxy]")
 
 TEST_CASE("proxy-rewrite-redirect-with-base-path", "[proxy]")
 {
-    net::thread_pool ioc{2};
+    net::thread_pool ioc { 2 };
     server::http_server upstream(ioc.get_executor());
     server::http_server proxy(ioc.get_executor());
 
@@ -698,7 +698,7 @@ TEST_CASE("proxy-rewrite-redirect-with-base-path", "[proxy]")
 
 TEST_CASE("proxy-interceptor: all steps called", "[proxy]")
 {
-    net::thread_pool ioc{2};
+    net::thread_pool ioc { 2 };
     server::http_server upstream(ioc.get_executor());
     server::http_server proxy(ioc.get_executor());
 
@@ -781,7 +781,7 @@ TEST_CASE("proxy-interceptor: all steps called", "[proxy]")
 
 TEST_CASE("ws-interceptor: messages intercepted", "[proxy][ws-forward]")
 {
-    net::thread_pool ioc{2};
+    net::thread_pool ioc { 2 };
     server::http_server upstream(ioc.get_executor());
     server::http_server proxy(ioc.get_executor());
 
