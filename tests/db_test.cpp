@@ -21,10 +21,10 @@ namespace net = httplib::net;
 namespace
 {
 
-    mysql::config
+    mysql::pool_params
     make_config()
     {
-        mysql::config config;
+        mysql::pool_params config;
         config.user = "root";
         config.password = "123456";
         return config;
@@ -45,13 +45,15 @@ TEST_CASE("result: basics", "[db]")
 
 TEST_CASE("config: defaults", "[db]")
 {
-    mysql::config c;
+    mysql::connect_params c;
     REQUIRE(c.host == "127.0.0.1");
     REQUIRE(c.port == 3306);
-    REQUIRE(c.min_connections == 2);
-    REQUIRE(c.max_connections == 16);
     REQUIRE(c.connect_timeout == std::chrono::seconds(5));
-    REQUIRE(c.ping_interval == std::chrono::seconds(30));
+
+    mysql::pool_params p;
+    REQUIRE(p.min_connections == 2);
+    REQUIRE(p.max_connections == 16);
+    REQUIRE(p.ping_interval == std::chrono::seconds(30));
 }
 
 TEST_CASE("db: direct connection", "[db][integration]")

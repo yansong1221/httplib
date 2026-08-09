@@ -13,6 +13,26 @@ namespace httplib::mysql
 
     session::session(std::unique_ptr<impl> p) : impl_(std::move(p)) {}
 
+    net::awaitable<session>
+    session::connect(net::any_io_executor ex, connect_params cfg)
+    {
+        boost::mysql::any_connection conn(ex);
+        boost::mysql::connect_params params;
+        params.server_address.emplace_host_and_port(cfg.host, cfg.port);
+        params.username = cfg.user;
+        params.password = cfg.password;
+        if (!cfg.database.empty())
+        {
+            params.database = cfg.database;
+        }
+        co_await conn.async_connect(params, boost::asio::use_awaitable);
+
+        auto imp = std::make_unique<impl>();
+        imp->params = std::move(cfg);
+        imp->standalone = std::make_unique<boost::mysql::any_connection>(std::move(conn));
+        co_return session(std::move(imp));
+    }
+
     session::session(session&&) noexcept = default;
     session& session::operator=(session&&) noexcept = default;
 
@@ -42,12 +62,35 @@ namespace httplib::mysql
         return prepared_statement(*this, std::string(sql));
     }
 
+    net::awaitable<void>
+    session::reconnect()
+    {
+        auto& imp = get_impl(*this);
+        if (!imp.standalone)
+        {
+            throw std::runtime_error("reconnect only available on standalone sessions");
+        }
+
+        imp.standalone->close();
+        imp.standalone = std::make_unique<boost::mysql::any_connection>(imp.standalone->get_executor());
+
+        boost::mysql::connect_params params;
+        params.server_address.emplace_host_and_port(imp.params.host, imp.params.port);
+        params.username = imp.params.user;
+        params.password = imp.params.password;
+        if (!imp.params.database.empty())
+        {
+            params.database = imp.params.database;
+        }
+        co_await imp.standalone->async_connect(params, boost::asio::use_awaitable);
+    }
+
     net::awaitable<bool>
     session::ping()
     {
         try
         {
-            co_await get_impl(*this).pooled.get().async_ping(boost::asio::use_awaitable);
+            co_await get_impl(*this).get_conn().async_ping(boost::asio::use_awaitable);
             co_return true;
         }
         catch (...)
@@ -68,22 +111,22 @@ namespace httplib::mysql
         auto start = std::chrono::steady_clock::now();
 
         boost::mysql::results data;
-        pooled.get().set_meta_mode(boost::mysql::metadata_mode::full);
+        get_conn().set_meta_mode(boost::mysql::metadata_mode::full);
 
         if (params.empty())
         {
-            co_await pooled.get().async_execute(std::string(sql), data, boost::asio::use_awaitable);
+            co_await get_conn().async_execute(std::string(sql), data, boost::asio::use_awaitable);
         }
         else
         {
-            auto stmt = co_await pooled.get().async_prepare_statement(std::string(sql), boost::asio::use_awaitable);
+            auto stmt = co_await get_conn().async_prepare_statement(std::string(sql), boost::asio::use_awaitable);
 
-            co_await pooled.get().async_execute(stmt.bind(params.begin(), params.end()),
+            co_await get_conn().async_execute(stmt.bind(params.begin(), params.end()),
                                                 data,
                                                 boost::asio::use_awaitable);
 
             boost::system::error_code ec;
-            co_await pooled.get().async_close_statement(stmt,
+            co_await get_conn().async_close_statement(stmt,
                                                         boost::asio::redirect_error(boost::asio::use_awaitable, ec));
         }
 
@@ -108,7 +151,7 @@ namespace httplib::mysql
     session::impl::begin_transaction()
     {
         boost::mysql::results r;
-        co_await pooled.get().async_execute("START TRANSACTION", r, boost::asio::use_awaitable);
+        co_await get_conn().async_execute("START TRANSACTION", r, boost::asio::use_awaitable);
         in_transaction = true;
     }
 
@@ -116,7 +159,7 @@ namespace httplib::mysql
     session::impl::commit()
     {
         boost::mysql::results r;
-        co_await pooled.get().async_execute("COMMIT", r, boost::asio::use_awaitable);
+        co_await get_conn().async_execute("COMMIT", r, boost::asio::use_awaitable);
         in_transaction = false;
     }
 
@@ -124,7 +167,7 @@ namespace httplib::mysql
     session::impl::rollback()
     {
         boost::mysql::results r;
-        co_await pooled.get().async_execute("ROLLBACK", r, boost::asio::use_awaitable);
+        co_await get_conn().async_execute("ROLLBACK", r, boost::asio::use_awaitable);
         in_transaction = false;
     }
 

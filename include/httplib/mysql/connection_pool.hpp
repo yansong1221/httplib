@@ -12,7 +12,7 @@ namespace httplib::mysql
     class HTTPLIB_API connection_pool
     {
       public:
-        connection_pool(net::any_io_executor ex, config cfg);
+        connection_pool(net::any_io_executor ex, pool_params cfg);
         ~connection_pool();
 
         connection_pool(connection_pool const&) = delete;

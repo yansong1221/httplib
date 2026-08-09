@@ -12,12 +12,12 @@ namespace httplib::mysql
 
     struct connection_pool::impl
     {
-        config c;
+        pool_params c;
         std::shared_ptr<boost::mysql::connection_pool> pool;
     };
 
     static boost::mysql::pool_params
-    make_pool_params(config const& cfg)
+    make_pool_params(pool_params const& cfg)
     {
         boost::mysql::pool_params params;
         params.server_address.emplace_host_and_port(cfg.host, cfg.port);
@@ -33,7 +33,7 @@ namespace httplib::mysql
         return params;
     }
 
-    connection_pool::connection_pool(net::any_io_executor ex, config c) : impl_(std::make_unique<impl>())
+    connection_pool::connection_pool(net::any_io_executor ex, pool_params c) : impl_(std::make_unique<impl>())
     {
         impl_->c = std::move(c);
         impl_->pool = std::make_shared<boost::mysql::connection_pool>(ex, make_pool_params(impl_->c));

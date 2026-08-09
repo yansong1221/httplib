@@ -18,8 +18,18 @@ namespace httplib::mysql
     struct session::impl
     {
         boost::mysql::pooled_connection pooled;
+        std::unique_ptr<boost::mysql::any_connection> standalone;
+        connect_params params;
         bool in_transaction = false;
         session::query_logger query_logger;
+
+        boost::mysql::any_connection&
+        get_conn()
+        {
+            if (standalone)
+                return *standalone;
+            return pooled.get();
+        }
 
         net::awaitable<void> begin_transaction();
         net::awaitable<void> commit();

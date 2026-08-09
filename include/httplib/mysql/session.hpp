@@ -2,6 +2,7 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 
 #include "httplib/config.hpp"
+#include "httplib/mysql/config.hpp"
 #include "httplib/mysql/prepared_statement.hpp"
 #include "httplib/mysql/result.hpp"
 #include "httplib/mysql/transaction.hpp"
@@ -33,6 +34,8 @@ namespace httplib::mysql
         session& operator=(session&&) noexcept;
         ~session();
 
+        static net::awaitable<session> connect(net::any_io_executor ex, connect_params cfg);
+
         net::awaitable<result> query(std::string_view sql);
 
         prepared_statement stmt(std::string_view sql);
@@ -40,6 +43,7 @@ namespace httplib::mysql
         net::awaitable<transaction> begin();
 
         net::awaitable<bool> ping();
+        net::awaitable<void> reconnect();
 
         void set_query_logger(query_logger cb);
 
