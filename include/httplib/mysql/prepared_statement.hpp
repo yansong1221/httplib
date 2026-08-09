@@ -37,9 +37,10 @@ namespace httplib::mysql
         prepared_statement& bind(std::nullptr_t);
         prepared_statement& bind(date v);
         prepared_statement& bind(datetime v);
-        prepared_statement& bind(std::chrono::steady_clock::duration v);
-        prepared_statement& bind_timestamp(std::chrono::system_clock::time_point tp);
-        prepared_statement& bind_timestamp(std::string_view name, std::chrono::system_clock::time_point tp);
+        prepared_statement& bind(time v);
+        prepared_statement& bind(net::const_buffer v);
+        prepared_statement& bind(boost::json::value const& v);
+        prepared_statement& bind(std::chrono::system_clock::time_point tp);
 
         prepared_statement& bind(std::string_view name, std::string_view v);
         prepared_statement& bind(std::string_view name, char const* v);
@@ -55,7 +56,10 @@ namespace httplib::mysql
         prepared_statement& bind(std::string_view name, std::nullptr_t);
         prepared_statement& bind(std::string_view name, date v);
         prepared_statement& bind(std::string_view name, datetime v);
-        prepared_statement& bind(std::string_view name, std::chrono::steady_clock::duration v);
+        prepared_statement& bind(std::string_view name, time v);
+        prepared_statement& bind(std::string_view name, net::const_buffer v);
+        prepared_statement& bind(std::string_view name, boost::json::value const& v);
+        prepared_statement& bind(std::string_view name, std::chrono::system_clock::time_point tp);
 
         net::awaitable<result> execute();
 
@@ -65,6 +69,12 @@ namespace httplib::mysql
         prepared_statement& into(float& v, size_t col);
         prepared_statement& into(bool& v, size_t col);
         prepared_statement& into(std::string& v, size_t col);
+        prepared_statement& into(date& v, size_t col);
+        prepared_statement& into(datetime& v, size_t col);
+        prepared_statement& into(time& v, size_t col);
+        prepared_statement& into(std::chrono::system_clock::time_point& v, size_t col);
+        prepared_statement& into(net::const_buffer& v, size_t col);
+        prepared_statement& into(boost::json::value& v, size_t col);
 
         prepared_statement& into(int64_t& v, std::string_view name);
         prepared_statement& into(uint64_t& v, std::string_view name);
@@ -72,6 +82,12 @@ namespace httplib::mysql
         prepared_statement& into(float& v, std::string_view name);
         prepared_statement& into(bool& v, std::string_view name);
         prepared_statement& into(std::string& v, std::string_view name);
+        prepared_statement& into(date& v, std::string_view name);
+        prepared_statement& into(datetime& v, std::string_view name);
+        prepared_statement& into(time& v, std::string_view name);
+        prepared_statement& into(std::chrono::system_clock::time_point& v, std::string_view name);
+        prepared_statement& into(net::const_buffer& v, std::string_view name);
+        prepared_statement& into(boost::json::value& v, std::string_view name);
 
         struct impl;
         explicit prepared_statement(session& sess, std::string sql);

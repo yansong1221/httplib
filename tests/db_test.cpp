@@ -274,71 +274,41 @@ TEST_CASE("db: statement caching", "[db][integration]")
 
 TEST_CASE("db: all types roundtrip", "[db][integration]")
 {
-    net::io_context ioc;
-    auto ex = ioc.get_executor();
     auto cfg = make_config();
+    cfg.min_connections = 1;
+    cfg.max_connections = 4;
+
+    net::io_context ioc;
 
     net::co_spawn(
-        ex,
-        [ex, cfg = std::move(cfg)]() -> net::awaitable<void>
+        ioc,
+        [&]() -> net::awaitable<void>
         {
-            boost::mysql::any_connection conn(ex);
-            boost::mysql::connect_params params;
-            params.server_address.emplace_host_and_port(cfg.host, cfg.port);
-            params.username = cfg.user;
-            params.password = cfg.password;
-            co_await conn.async_connect(params, boost::asio::use_awaitable);
+            mysql::connection_pool pool(ioc.get_executor(), cfg);
+            pool.start();
 
-            // setup
-            {
-                boost::mysql::results r;
-                co_await conn.async_execute("CREATE DATABASE IF NOT EXISTS test", r, boost::asio::use_awaitable);
-                co_await conn.async_execute("USE test", r, boost::asio::use_awaitable);
-                co_await conn.async_execute("DROP TABLE IF EXISTS __httplib_types", r, boost::asio::use_awaitable);
-                co_await conn.async_execute("CREATE TABLE __httplib_types ("
-                                            "  i64 BIGINT,"
-                                            "  u64 BIGINT UNSIGNED,"
-                                            "  f64 DOUBLE,"
-                                            "  str VARCHAR(100),"
-                                            "  bin BLOB,"
-                                            "  dt_date DATE,"
-                                            "  dt_dt DATETIME,"
-                                            "  dt_ts TIMESTAMP NULL,"
-                                            "  dt_t TIME"
-                                            ")",
-                                            r,
-                                            boost::asio::use_awaitable);
-            }
+            auto sess = co_await pool.async_acquire();
+            co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
+            co_await sess.query("USE test");
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_types");
+            co_await sess.query("CREATE TABLE __httplib_types ("
+                                "  i64 BIGINT,"
+                                "  u64 BIGINT UNSIGNED,"
+                                "  f64 DOUBLE,"
+                                "  str VARCHAR(100),"
+                                "  bin BLOB,"
+                                "  dt_date DATE,"
+                                "  dt_dt DATETIME,"
+                                "  dt_ts TIMESTAMP NULL,"
+                                "  dt_t TIME"
+                                ")");
 
-            // insert a value row
-            {
-                boost::mysql::results ins;
-                co_await conn.async_execute("INSERT INTO __httplib_types VALUES (42, 99, 3.14, 'hello', 'world', "
-                                            "'2024-01-15', '2024-06-20 18:30:45', '2024-06-20 18:30:45', '12:34:56')",
-                                            ins,
-                                            boost::asio::use_awaitable);
-                REQUIRE(ins.affected_rows() == 1);
-            }
+            co_await sess.query("INSERT INTO __httplib_types VALUES (42, 99, 3.14, 'hello', 'world', "
+                                "'2024-01-15', '2024-06-20 18:30:45', '2024-06-20 18:30:45', '12:34:56')");
+            co_await sess.query("INSERT INTO __httplib_types VALUES "
+                                "(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)");
 
-            // insert a NULL row
-            {
-                boost::mysql::results ins;
-                co_await conn.async_execute("INSERT INTO __httplib_types VALUES "
-                                            "(NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL)",
-                                            ins,
-                                            boost::asio::use_awaitable);
-            }
-
-            // set meta mode before querying
-            conn.set_meta_mode(boost::mysql::metadata_mode::full);
-
-            // query both rows
-            auto result_impl = std::make_unique<mysql::result::impl>();
-            co_await conn.async_execute("SELECT * FROM __httplib_types ORDER BY i64 IS NULL, i64",
-                                        result_impl->data,
-                                        boost::asio::use_awaitable);
-            build_result_impl(*result_impl);
-            mysql::result r(std::move(result_impl));
+            auto r = co_await sess.query("SELECT * FROM __httplib_types ORDER BY i64 IS NULL, i64");
 
             REQUIRE(r.row_count() == 2);
             REQUIRE(r.column_count() == 9);
@@ -390,8 +360,10 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
             REQUIRE(ts > std::chrono::system_clock::from_time_t(0));
             REQUIRE(ts < std::chrono::system_clock::from_time_t(4102444800LL)); // within year 2100
 
-            auto dur = row0.as_duration("dt_t");
-            REQUIRE(std::chrono::duration_cast<std::chrono::seconds>(dur).count() == 45296);
+            auto t = row0.as_time("dt_t");
+            REQUIRE(t.hour == 12);
+            REQUIRE(t.minute == 34);
+            REQUIRE(t.second == 56);
 
             // is_null
             REQUIRE_FALSE(row0.is_null("i64"));
@@ -447,8 +419,8 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
                 REQUIRE(row.get<std::string>("str") == "hello");
                 REQUIRE(row.get<mysql::date>("dt_date").year == 2024);
                 REQUIRE(row.get<mysql::datetime>("dt_dt").year == 2024);
-                auto dur = row.get<std::chrono::steady_clock::duration>("dt_t");
-                REQUIRE(std::chrono::duration_cast<std::chrono::seconds>(dur).count() == 45296);
+                auto t = row.get<mysql::time>("dt_t");
+                REQUIRE(t.hour == 12);
 
                 // get<T> with default for NULL
                 auto row1 = r[1];
@@ -457,19 +429,14 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
                 REQUIRE_THROWS_AS(row1.get<int64_t>("i64"), std::runtime_error);
             }
 
-            // cleanup
-            {
-                boost::mysql::results r;
-                co_await conn.async_execute("DROP TABLE IF EXISTS __httplib_types", r, boost::asio::use_awaitable);
-            }
-
             // ===== type mismatch → throw =====
             REQUIRE_THROWS_AS(row0.as_int64("str"), std::runtime_error);
             REQUIRE_THROWS_AS(row0.as_double("str"), std::runtime_error);
             REQUIRE_THROWS_AS(row0.as_date("i64"), std::runtime_error);
             REQUIRE_THROWS_AS(row0.as_datetime("i64"), std::runtime_error);
-            REQUIRE_THROWS_AS(row0.as_duration("i64"), std::runtime_error);
+            REQUIRE_THROWS_AS(row0.as_time("i64"), std::runtime_error);
             REQUIRE_THROWS_AS(row0.as_timestamp("str"), std::runtime_error);
+            REQUIRE_THROWS_AS(row0.as_json("i64"), std::runtime_error);
 
             // column not found → throw via column_index
             REQUIRE_THROWS_AS(row0.as_string("no_such_col"), std::runtime_error);
@@ -487,6 +454,8 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
                 REQUIRE(strs[0] == "hello");
                 REQUIRE(strs[1] == "(null)");
             }
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_types");
         },
         [](std::exception_ptr e)
         {
@@ -571,6 +540,46 @@ TEST_CASE("db: multi-statement query", "[db][integration]")
             REQUIRE(r[1].as_string("val") == "b");
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_batch");
+        },
+        [](std::exception_ptr e)
+        {
+            if (e)
+            {
+                std::rethrow_exception(e);
+            }
+        });
+
+    ioc.run();
+}
+
+TEST_CASE("db: json column", "[db][integration]")
+{
+    auto cfg = make_config();
+    cfg.min_connections = 1;
+    cfg.max_connections = 4;
+
+    net::io_context ioc;
+
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            mysql::connection_pool pool(ioc.get_executor(), cfg);
+            pool.start();
+
+            auto sess = co_await pool.async_acquire();
+            co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
+            co_await sess.query("USE test");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_json (id INT, data JSON)");
+            co_await sess.query("DELETE FROM __httplib_json");
+            co_await sess.query("INSERT INTO __httplib_json VALUES (1, '{\"x\":1,\"y\":\"hi\"}')");
+
+            auto r = co_await sess.query("SELECT data FROM __httplib_json WHERE id = 1");
+            auto val = r[0].as_json("data");
+            REQUIRE(val.as_object().at("x").as_int64() == 1);
+            REQUIRE(val.as_object().at("y").as_string() == "hi");
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_json");
         },
         [](std::exception_ptr e)
         {

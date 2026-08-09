@@ -6,257 +6,229 @@
 
 namespace httplib::mysql
 {
-    static column_type
-    detail_map_column_type(boost::mysql::column_type t, bool u)
+    namespace detail
     {
-        using b = boost::mysql::column_type;
-        switch (t)
+        static column_type
+        map_column_type(boost::mysql::column_type t, bool u)
         {
-            case b::tinyint:
-            case b::smallint:
-            case b::mediumint:
-            case b::int_:
-            case b::bigint:
-            case b::year:
-                return u ? column_type::uint64 : column_type::int64;
-            case b::bit:
-                return column_type::uint64;
-            case b::float_:
-            case b::double_:
-            case b::decimal:
-                return column_type::double_;
-            case b::varchar:
-            case b::char_:
-            case b::text:
-            case b::enum_:
-            case b::set:
-            case b::json:
-                return column_type::string;
-            case b::blob:
-            case b::geometry:
-                return column_type::blob;
-            case b::date:
-                return column_type::date;
-            case b::datetime:
-            case b::timestamp:
-                return column_type::datetime;
-            case b::time:
-                return column_type::time;
-            default:
-                return column_type::unknown;
+            using b = boost::mysql::column_type;
+            switch (t)
+            {
+                case b::tinyint:
+                case b::smallint:
+                case b::mediumint:
+                case b::int_:
+                case b::bigint:
+                case b::year:
+                    return u ? column_type::uint64 : column_type::int64;
+                case b::bit:
+                    return column_type::uint64;
+                case b::float_:
+                case b::double_:
+                case b::decimal:
+                    return column_type::double_;
+                case b::varchar:
+                case b::char_:
+                case b::text:
+                case b::enum_:
+                case b::set:
+                case b::json:
+                    return column_type::string;
+                case b::blob:
+                case b::geometry:
+                    return column_type::blob;
+                case b::date:
+                    return column_type::date;
+                case b::datetime:
+                case b::timestamp:
+                    return column_type::datetime;
+                case b::time:
+                    return column_type::time;
+                default:
+                    return column_type::unknown;
+            }
         }
-    }
-    static std::string
-    detail_fs(boost::mysql::field_view const& f)
-    {
-        if (f.is_null())
+        static std::string
+        fs(boost::mysql::field_view const& f)
         {
+            if (f.is_null())
+            {
+                return {};
+            }
+            if (f.is_string())
+            {
+                return std::string(f.as_string());
+            }
+            if (f.is_int64())
+            {
+                char b[24];
+                auto [p, _] = std::to_chars(b, b + 24, f.as_int64());
+                return { b, p };
+            }
+            if (f.is_uint64())
+            {
+                char b[24];
+                auto [p, _] = std::to_chars(b, b + 24, f.as_uint64());
+                return { b, p };
+            }
+            if (f.is_double())
+            {
+                char b[32];
+                auto [p, _] = std::to_chars(b, b + 32, f.as_double());
+                return { b, p };
+            }
+            if (f.is_blob())
+            {
+                auto x = f.as_blob();
+                return { reinterpret_cast<char const*>(x.data()), x.size() };
+            }
+            if (f.is_date())
+            {
+                auto d = f.as_date();
+                char b[16];
+                snprintf(b, 16, "%04u-%02u-%02u", d.year(), d.month(), d.day());
+                return b;
+            }
+            if (f.is_datetime())
+            {
+                auto d = f.as_datetime();
+                char b[32];
+                snprintf(b,
+                         32,
+                         "%04u-%02u-%02u %02u:%02u:%02u",
+                         d.year(),
+                         d.month(),
+                         d.day(),
+                         d.hour(),
+                         d.minute(),
+                         d.second());
+                return b;
+            }
+            if (f.is_time())
+            {
+                auto t = f.as_time();
+                auto s = std::chrono::duration_cast<std::chrono::seconds>(t).count();
+                bool n = s < 0;
+                if (n)
+                {
+                    s = -s;
+                }
+                auto h = s / 3600, m = (s % 3600) / 60, sec = s % 60;
+                char b[24];
+                if (n)
+                {
+                    snprintf(b, 24, "-%02lld:%02lld:%02lld", h, m, sec);
+                }
+                else
+                {
+                    snprintf(b, 24, "%02lld:%02lld:%02lld", h, m, sec);
+                }
+                return b;
+            }
             return {};
         }
-        if (f.is_string())
+        static boost::mysql::field_view
+        ff(result::impl const& i, size_t r, size_t c)
         {
-            return std::string(f.as_string());
+            return i.data.rows().at(r).at(c);
         }
-        if (f.is_int64())
+        static int64_t
+        fi(boost::mysql::field_view const& f)
         {
-            char b[24];
-            auto [p, _] = std::to_chars(b, b + 24, f.as_int64());
-            return { b, p };
-        }
-        if (f.is_uint64())
-        {
-            char b[24];
-            auto [p, _] = std::to_chars(b, b + 24, f.as_uint64());
-            return { b, p };
-        }
-        if (f.is_double())
-        {
-            char b[32];
-            auto [p, _] = std::to_chars(b, b + 32, f.as_double());
-            return { b, p };
-        }
-        if (f.is_blob())
-        {
-            auto x = f.as_blob();
-            return { reinterpret_cast<char const*>(x.data()), x.size() };
-        }
-        if (f.is_date())
-        {
-            auto d = f.as_date();
-            char b[16];
-            snprintf(b, 16, "%04u-%02u-%02u", d.year(), d.month(), d.day());
-            return b;
-        }
-        if (f.is_datetime())
-        {
-            auto d = f.as_datetime();
-            char b[32];
-            snprintf(b,
-                     32,
-                     "%04u-%02u-%02u %02u:%02u:%02u",
-                     d.year(),
-                     d.month(),
-                     d.day(),
-                     d.hour(),
-                     d.minute(),
-                     d.second());
-            return b;
-        }
-        if (f.is_time())
-        {
-            auto t = f.as_time();
-            auto s = std::chrono::duration_cast<std::chrono::seconds>(t).count();
-            bool n = s < 0;
-            if (n)
+            if (f.is_int64())
             {
-                s = -s;
+                return f.as_int64();
             }
-            auto h = s / 3600, m = (s % 3600) / 60, sec = s % 60;
-            char b[24];
-            if (n)
+            if (f.is_uint64())
             {
-                snprintf(b, 24, "-%02lld:%02lld:%02lld", h, m, sec);
+                return (int64_t)f.as_uint64();
             }
-            else
+            if (f.is_double())
             {
-                snprintf(b, 24, "%02lld:%02lld:%02lld", h, m, sec);
+                return (int64_t)f.as_double();
             }
-            return b;
+            throw std::runtime_error("db: cannot convert to int64");
         }
-        return {};
-    }
-    static boost::mysql::field_view
-    detail_ff(result::impl const& i, size_t r, size_t c)
-    {
-        return i.data.rows().at(r).at(c);
-    }
-    static int64_t
-    detail_fi(boost::mysql::field_view const& f)
-    {
-        if (f.is_int64())
+        static uint64_t
+        fu(boost::mysql::field_view const& f)
         {
-            return f.as_int64();
+            if (f.is_uint64())
+            {
+                return f.as_uint64();
+            }
+            if (f.is_int64())
+            {
+                return (uint64_t)f.as_int64();
+            }
+            if (f.is_double())
+            {
+                return (uint64_t)f.as_double();
+            }
+            throw std::runtime_error("db: cannot convert to uint64");
         }
-        if (f.is_uint64())
+        static double
+        fd(boost::mysql::field_view const& f)
         {
-            return (int64_t)f.as_uint64();
+            if (f.is_double())
+            {
+                return f.as_double();
+            }
+            if (f.is_int64())
+            {
+                return (double)f.as_int64();
+            }
+            if (f.is_uint64())
+            {
+                return (double)f.as_uint64();
+            }
+            throw std::runtime_error("db: cannot convert to double");
         }
-        if (f.is_double())
+        static std::chrono::system_clock::time_point
+        d2e(datetime const& dt)
         {
-            return (int64_t)f.as_double();
+            auto ymd = std::chrono::year(dt.year) / std::chrono::month(dt.month) / std::chrono::day(dt.day);
+            auto tp = std::chrono::sys_days(ymd) + std::chrono::hours(dt.hour) + std::chrono::minutes(dt.minute)
+                      + std::chrono::seconds(dt.second) + std::chrono::microseconds(dt.microsecond);
+            return tp;
         }
-        throw std::runtime_error("db: cannot convert to int64");
-    }
-    static uint64_t
-    detail_fu(boost::mysql::field_view const& f)
-    {
-        if (f.is_uint64())
+
+        static void
+        throw_null_error(row::impl const& imp, size_t col)
         {
-            return f.as_uint64();
+            throw std::runtime_error("db: NULL in column '" + imp.parent->column_name(col) + "'");
         }
-        if (f.is_int64())
+
+        template <typename T, typename Conv>
+        static T
+        field_cast(row::impl const& imp, size_t col, std::optional<T> const& d, Conv&& conv)
         {
-            return (uint64_t)f.as_int64();
+            auto f = ff(get_impl(*imp.parent), imp.idx, col);
+            if (f.is_null())
+            {
+                if (d)
+                {
+                    return *d;
+                }
+                throw_null_error(imp, col);
+            }
+            return conv(f);
         }
-        if (f.is_double())
-        {
-            return (uint64_t)f.as_double();
-        }
-        throw std::runtime_error("db: cannot convert to uint64");
-    }
-    static double
-    detail_fd(boost::mysql::field_view const& f)
-    {
-        if (f.is_double())
-        {
-            return f.as_double();
-        }
-        if (f.is_int64())
-        {
-            return (double)f.as_int64();
-        }
-        if (f.is_uint64())
-        {
-            return (double)f.as_uint64();
-        }
-        throw std::runtime_error("db: cannot convert to double");
-    }
-    void
-    build_result_impl(result::impl& i)
-    {
-        if (!i.data.has_value())
-        {
-            return;
-        }
-        i.affected = i.data.affected_rows();
-        i.insert_id = i.data.last_insert_id();
-        i.warnings = i.data.warning_count();
-        auto m = i.data.meta();
-        i.col_names.reserve(m.size());
-        i.col_types.reserve(m.size());
-        for (auto& c : m)
-        {
-            auto s = c.column_name();
-            i.col_names.emplace_back(s.data(), s.size());
-            i.col_types.push_back(detail_map_column_type(c.type(), c.is_unsigned()));
-        }
-    }
-    static std::chrono::system_clock::time_point
-    detail_d2e(datetime const& dt)
-    {
-        static constexpr int md[] = { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
-        auto y = (int64_t)dt.year, m = (int64_t)dt.month, d = (int64_t)dt.day;
-        if (m <= 2)
-        {
-            --y;
-        }
-        auto era = (y >= 0 ? y : y - 399) / 400;
-        auto yoe = (unsigned)(y - era * 400);
-        auto doy = md[m - 1] + d - 1;
-        if (m > 2 && (yoe % 4 == 0 && (yoe % 100 != 0 || yoe == 0)))
-        {
-            ++doy;
-        }
-        auto secs = (era * 146097 + (int64_t)(yoe * 365 + yoe / 4 - yoe / 100 + doy) - 719468) * 86400
-                    + dt.hour * 3600 + dt.minute * 60 + dt.second;
-        return std::chrono::system_clock::from_time_t((std::time_t)secs)
-               + std::chrono::microseconds(dt.microsecond);
-    }
+    } // namespace detail
 
     row::row(std::unique_ptr<impl> p) : impl_(std::move(p)) {}
     row::row(row&&) noexcept = default;
     row& row::operator=(row&&) noexcept = default;
     row::~row() = default;
 
-    static void
-    detail_throw_null_error(row::impl const& imp, size_t col)
-    {
-        throw std::runtime_error("db: NULL in column '" + imp.parent->column_name(col) + "'");
-    }
-
-    template <typename T, typename Conv>
-    static T
-    detail_field_cast(row::impl const& imp, size_t col, std::optional<T> const& d, Conv&& conv)
-    {
-        auto f = detail_ff(get_impl(*imp.parent), imp.idx, col);
-        if (f.is_null())
-        {
-            if (d)
-                return *d;
-            detail_throw_null_error(imp, col);
-        }
-        return conv(f);
-    }
-
     std::string
     row::operator[](size_t col) const
     {
-        auto f = detail_ff(get_impl(*impl_->parent), impl_->idx, col);
+        auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
         {
-            detail_throw_null_error(*impl_, col);
+            detail::throw_null_error(*impl_, col);
         }
-        return detail_fs(f);
+        return detail::fs(f);
     }
     std::string
     row::operator[](std::string_view name) const
@@ -276,7 +248,7 @@ namespace httplib::mysql
     bool
     row::is_null(size_t col) const
     {
-        return detail_ff(get_impl(*impl_->parent), impl_->idx, col).is_null();
+        return detail::ff(get_impl(*impl_->parent), impl_->idx, col).is_null();
     }
     bool
     row::is_null(std::string_view name) const
@@ -287,16 +259,16 @@ namespace httplib::mysql
     std::string
     row::as_string(size_t col, std::optional<std::string_view> d) const
     {
-        auto f = detail_ff(get_impl(*impl_->parent), impl_->idx, col);
+        auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
         {
             if (d)
             {
                 return std::string(*d);
             }
-            detail_throw_null_error(*impl_, col);
+            detail::throw_null_error(*impl_, col);
         }
-        return detail_fs(f);
+        return detail::fs(f);
     }
     std::string
     row::as_string(std::string_view name, std::optional<std::string_view> d) const
@@ -307,7 +279,7 @@ namespace httplib::mysql
     int64_t
     row::as_int64(size_t col, std::optional<int64_t> d) const
     {
-        return detail_field_cast(*impl_, col, d, detail_fi);
+        return detail::field_cast(*impl_, col, d, detail::fi);
     }
     int64_t
     row::as_int64(std::string_view name, std::optional<int64_t> d) const
@@ -318,7 +290,7 @@ namespace httplib::mysql
     uint64_t
     row::as_uint64(size_t col, std::optional<uint64_t> d) const
     {
-        return detail_field_cast(*impl_, col, d, detail_fu);
+        return detail::field_cast(*impl_, col, d, detail::fu);
     }
     uint64_t
     row::as_uint64(std::string_view name, std::optional<uint64_t> d) const
@@ -329,7 +301,7 @@ namespace httplib::mysql
     double
     row::as_double(size_t col, std::optional<double> d) const
     {
-        return detail_field_cast(*impl_, col, d, detail_fd);
+        return detail::field_cast(*impl_, col, d, detail::fd);
     }
     double
     row::as_double(std::string_view name, std::optional<double> d) const
@@ -340,7 +312,7 @@ namespace httplib::mysql
     float
     row::as_float(size_t col, std::optional<float> d) const
     {
-        return detail_field_cast<float>(*impl_, col, d, [](auto& f) { return (float)detail_fd(f); });
+        return detail::field_cast<float>(*impl_, col, d, [](auto& f) { return (float)detail::fd(f); });
     }
     float
     row::as_float(std::string_view name, std::optional<float> d) const
@@ -351,7 +323,7 @@ namespace httplib::mysql
     bool
     row::as_bool(size_t col, std::optional<bool> d) const
     {
-        return detail_field_cast(*impl_, col, d, detail_fi) != 0;
+        return detail::field_cast(*impl_, col, d, detail::fi) != 0;
     }
     bool
     row::as_bool(std::string_view name, std::optional<bool> d) const
@@ -362,10 +334,10 @@ namespace httplib::mysql
     net::const_buffer
     row::as_blob(size_t col) const
     {
-        auto f = detail_ff(get_impl(*impl_->parent), impl_->idx, col);
+        auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
         {
-            detail_throw_null_error(*impl_, col);
+            detail::throw_null_error(*impl_, col);
         }
         if (!f.is_blob())
         {
@@ -383,10 +355,10 @@ namespace httplib::mysql
     date
     row::as_date(size_t col) const
     {
-        auto f = detail_ff(get_impl(*impl_->parent), impl_->idx, col);
+        auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
         {
-            detail_throw_null_error(*impl_, col);
+            detail::throw_null_error(*impl_, col);
         }
         if (!f.is_date())
         {
@@ -404,10 +376,10 @@ namespace httplib::mysql
     datetime
     row::as_datetime(size_t col) const
     {
-        auto f = detail_ff(get_impl(*impl_->parent), impl_->idx, col);
+        auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
         {
-            detail_throw_null_error(*impl_, col);
+            detail::throw_null_error(*impl_, col);
         }
         if (!f.is_datetime())
         {
@@ -422,53 +394,81 @@ namespace httplib::mysql
         return as_datetime(column(name));
     }
 
-    std::chrono::steady_clock::duration
-    row::as_duration(size_t col, std::optional<std::chrono::steady_clock::duration> d) const
+    time
+    row::as_time(size_t col) const
     {
-        auto f = detail_ff(get_impl(*impl_->parent), impl_->idx, col);
+        auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
         {
-            if (d)
-            {
-                return *d;
-            }
-            detail_throw_null_error(*impl_, col);
+            detail::throw_null_error(*impl_, col);
         }
         if (!f.is_time())
         {
             throw std::runtime_error("db: cannot convert to time");
         }
-        return std::chrono::duration_cast<std::chrono::steady_clock::duration>(f.as_time());
+        auto t = f.as_time();
+        auto dur = std::chrono::duration_cast<std::chrono::microseconds>(t);
+        auto s = std::chrono::duration_cast<std::chrono::seconds>(dur).count();
+        return { (unsigned)(s / 3600),
+                 (unsigned)((s % 3600) / 60),
+                 (unsigned)(s % 60),
+                 (unsigned long)(dur.count() % 1000000) };
     }
-    std::chrono::steady_clock::duration
-    row::as_duration(std::string_view name, std::optional<std::chrono::steady_clock::duration> d) const
+    time
+    row::as_time(std::string_view name) const
     {
-        return as_duration(column(name), d);
+        return as_time(column(name));
+    }
+
+    boost::json::value
+    row::as_json(size_t col) const
+    {
+        auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
+        if (f.is_null())
+        {
+            detail::throw_null_error(*impl_, col);
+        }
+        if (!f.is_string())
+        {
+            throw std::runtime_error("db: cannot convert to json");
+        }
+        boost::system::error_code ec;
+        boost::json::value jv = boost::json::parse(f.as_string(), ec);
+        if (ec)
+        {
+            throw std::runtime_error("db: json parse error: " + ec.message());
+        }
+        return jv;
+    }
+    boost::json::value
+    row::as_json(std::string_view name) const
+    {
+        return as_json(column(name));
     }
 
     std::chrono::system_clock::time_point
     row::as_timestamp(size_t col, std::optional<std::chrono::system_clock::time_point> d) const
     {
-        auto f = detail_ff(get_impl(*impl_->parent), impl_->idx, col);
+        auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
         {
             if (d)
             {
                 return *d;
             }
-            detail_throw_null_error(*impl_, col);
+            detail::throw_null_error(*impl_, col);
         }
         if (!f.is_datetime())
         {
             throw std::runtime_error("db: cannot convert to timestamp");
         }
-        return detail_d2e({ f.as_datetime().year(),
-                     f.as_datetime().month(),
-                     f.as_datetime().day(),
-                     f.as_datetime().hour(),
-                     f.as_datetime().minute(),
-                     f.as_datetime().second(),
-                     f.as_datetime().microsecond() });
+        return detail::d2e({ f.as_datetime().year(),
+                             f.as_datetime().month(),
+                             f.as_datetime().day(),
+                             f.as_datetime().hour(),
+                             f.as_datetime().minute(),
+                             f.as_datetime().second(),
+                             f.as_datetime().microsecond() });
     }
     std::chrono::system_clock::time_point
     row::as_timestamp(std::string_view name, std::optional<std::chrono::system_clock::time_point> d) const
@@ -480,6 +480,26 @@ namespace httplib::mysql
     row::impl::col_of(std::string_view name) const
     {
         return parent->column_index(name);
+    }
+
+    result::impl::impl(boost::mysql::results&& r) : data(std::move(r))
+    {
+        if (!data.has_value())
+        {
+            return;
+        }
+        affected = data.affected_rows();
+        insert_id = data.last_insert_id();
+        warnings = data.warning_count();
+        auto m = data.meta();
+        col_names.reserve(m.size());
+        col_types.reserve(m.size());
+        for (auto& c : m)
+        {
+            auto s = c.column_name();
+            col_names.emplace_back(s.data(), s.size());
+            col_types.push_back(detail::map_column_type(c.type(), c.is_unsigned()));
+        }
     }
 
     result::result() : impl_(std::make_unique<impl>()) {}

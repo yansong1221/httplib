@@ -19,9 +19,10 @@ namespace httplib::mysql
         uint64_t affected = 0;
         uint64_t insert_id = 0;
         uint64_t warnings = 0;
-    };
 
-    HTTPLIB_API void build_result_impl(result::impl& imp);
+        impl() = default;
+        explicit impl(boost::mysql::results&& r);
+    };
 
 } // namespace httplib::mysql
 #endif // HTTPLIB_ENABLED_DATABASE

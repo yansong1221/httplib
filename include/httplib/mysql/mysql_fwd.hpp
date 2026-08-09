@@ -5,6 +5,7 @@ namespace httplib::mysql
 {
     struct date;
     struct datetime;
+    struct time;
 
     class result;
     class session;

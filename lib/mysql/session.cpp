@@ -66,20 +66,19 @@ namespace httplib::mysql
     {
         auto start = std::chrono::steady_clock::now();
 
-        auto result_impl = std::make_unique<result::impl>();
-
+        boost::mysql::results data;
         pooled.get().set_meta_mode(boost::mysql::metadata_mode::full);
 
         if (params.empty())
         {
-            co_await pooled.get().async_execute(std::string(sql), result_impl->data, boost::asio::use_awaitable);
+            co_await pooled.get().async_execute(std::string(sql), data, boost::asio::use_awaitable);
         }
         else
         {
             auto stmt = co_await pooled.get().async_prepare_statement(std::string(sql), boost::asio::use_awaitable);
 
             co_await pooled.get().async_execute(stmt.bind(params.begin(), params.end()),
-                                                result_impl->data,
+                                                data,
                                                 boost::asio::use_awaitable);
 
             boost::system::error_code ec;
@@ -87,8 +86,7 @@ namespace httplib::mysql
                                                         boost::asio::redirect_error(boost::asio::use_awaitable, ec));
         }
 
-        build_result_impl(*result_impl);
-        auto res = result(std::move(result_impl));
+        auto res = result(std::make_unique<result::impl>(std::move(data)));
 
         if (query_logger)
         {

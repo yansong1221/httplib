@@ -34,6 +34,11 @@ namespace httplib::mysql
         unsigned year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
         unsigned long microsecond = 0;
     };
+    struct time
+    {
+        unsigned hour = 0, minute = 0, second = 0;
+        unsigned long microsecond = 0;
+    };
 
     class HTTPLIB_API row
     {
@@ -73,18 +78,17 @@ namespace httplib::mysql
         net::const_buffer as_blob(size_t col) const;
         net::const_buffer as_blob(std::string_view name) const;
 
+        boost::json::value as_json(size_t col) const;
+        boost::json::value as_json(std::string_view name) const;
+
         date as_date(size_t col) const;
         date as_date(std::string_view name) const;
 
         datetime as_datetime(size_t col) const;
         datetime as_datetime(std::string_view name) const;
 
-        std::chrono::steady_clock::duration as_duration(size_t col,
-                                                          std::optional<std::chrono::steady_clock::duration> d
-                                                          = {}) const;
-        std::chrono::steady_clock::duration as_duration(std::string_view name,
-                                                         std::optional<std::chrono::steady_clock::duration> d
-                                                         = {}) const;
+        time as_time(size_t col) const;
+        time as_time(std::string_view name) const;
 
         std::chrono::system_clock::time_point as_timestamp(size_t col,
                                                             std::optional<std::chrono::system_clock::time_point> d
@@ -133,13 +137,17 @@ namespace httplib::mysql
             {
                 return as_datetime(col);
             }
-            else if constexpr (std::is_same_v<T, std::chrono::steady_clock::duration>)
+            else if constexpr (std::is_same_v<T, time>)
             {
-                return as_duration(col, d);
+                return as_time(col);
             }
             else if constexpr (std::is_same_v<T, std::chrono::system_clock::time_point>)
             {
                 return as_timestamp(col, d);
+            }
+            else if constexpr (std::is_same_v<T, boost::json::value>)
+            {
+                return as_json(col);
             }
             else
             {

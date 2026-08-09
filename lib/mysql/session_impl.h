@@ -41,6 +41,7 @@ namespace httplib::mysql
 
         std::vector<std::string> param_names;
         std::unordered_map<std::string, size_t> name_to_idx;
+        std::string data_str;
         bool parsed = false;
     };
 
