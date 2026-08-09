@@ -7,7 +7,7 @@
 namespace httplib::mysql
 {
     static column_type
-    map_column_type(boost::mysql::column_type t, bool u)
+    detail_map_column_type(boost::mysql::column_type t, bool u)
     {
         using b = boost::mysql::column_type;
         switch (t)
@@ -47,7 +47,7 @@ namespace httplib::mysql
         }
     }
     static std::string
-    fs(boost::mysql::field_view const& f)
+    detail_fs(boost::mysql::field_view const& f)
     {
         if (f.is_null())
         {
@@ -126,12 +126,12 @@ namespace httplib::mysql
         return {};
     }
     static boost::mysql::field_view
-    ff(result::impl const& i, size_t r, size_t c)
+    detail_ff(result::impl const& i, size_t r, size_t c)
     {
         return i.data.rows().at(r).at(c);
     }
     static int64_t
-    fi(boost::mysql::field_view const& f)
+    detail_fi(boost::mysql::field_view const& f)
     {
         if (f.is_int64())
         {
@@ -148,7 +148,7 @@ namespace httplib::mysql
         throw std::runtime_error("db: cannot convert to int64");
     }
     static uint64_t
-    fu(boost::mysql::field_view const& f)
+    detail_fu(boost::mysql::field_view const& f)
     {
         if (f.is_uint64())
         {
@@ -165,7 +165,7 @@ namespace httplib::mysql
         throw std::runtime_error("db: cannot convert to uint64");
     }
     static double
-    fd(boost::mysql::field_view const& f)
+    detail_fd(boost::mysql::field_view const& f)
     {
         if (f.is_double())
         {
@@ -198,11 +198,11 @@ namespace httplib::mysql
         {
             auto s = c.column_name();
             i.col_names.emplace_back(s.data(), s.size());
-            i.col_types.push_back(map_column_type(c.type(), c.is_unsigned()));
+            i.col_types.push_back(detail_map_column_type(c.type(), c.is_unsigned()));
         }
     }
     static std::chrono::system_clock::time_point
-    d2e(datetime const& dt)
+    detail_d2e(datetime const& dt)
     {
         static constexpr int md[] = { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
         auto y = (int64_t)dt.year, m = (int64_t)dt.month, d = (int64_t)dt.day;
@@ -228,27 +228,35 @@ namespace httplib::mysql
     row& row::operator=(row&&) noexcept = default;
     row::~row() = default;
 
-#define ROW_NULL_CHECK throw std::runtime_error("db: NULL")
-#define ROW_FIELD                                           \
-    auto f = ff(get_impl(*impl_->parent), impl_->idx, col); \
-    if (f.is_null())                                        \
-    {                                                       \
-        if (d)                                              \
-            return *d;                                      \
-        ROW_NULL_CHECK;                                     \
+    static void
+    detail_throw_null_error(row::impl const& imp, size_t col)
+    {
+        throw std::runtime_error("db: NULL in column '" + imp.parent->column_name(col) + "'");
     }
-#define ROW_NAMED(name)   return as_##name(column(name), d)
-#define ROW_BODY(T, conv) ROW_FIELD return conv(f)
+
+    template <typename T, typename Conv>
+    static T
+    detail_field_cast(row::impl const& imp, size_t col, std::optional<T> const& d, Conv&& conv)
+    {
+        auto f = detail_ff(get_impl(*imp.parent), imp.idx, col);
+        if (f.is_null())
+        {
+            if (d)
+                return *d;
+            detail_throw_null_error(imp, col);
+        }
+        return conv(f);
+    }
 
     std::string
     row::operator[](size_t col) const
     {
-        auto f = ff(get_impl(*impl_->parent), impl_->idx, col);
+        auto f = detail_ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
         {
-            ROW_NULL_CHECK;
+            detail_throw_null_error(*impl_, col);
         }
-        return fs(f);
+        return detail_fs(f);
     }
     std::string
     row::operator[](std::string_view name) const
@@ -268,7 +276,7 @@ namespace httplib::mysql
     bool
     row::is_null(size_t col) const
     {
-        return ff(get_impl(*impl_->parent), impl_->idx, col).is_null();
+        return detail_ff(get_impl(*impl_->parent), impl_->idx, col).is_null();
     }
     bool
     row::is_null(std::string_view name) const
@@ -279,16 +287,16 @@ namespace httplib::mysql
     std::string
     row::as_string(size_t col, std::optional<std::string_view> d) const
     {
-        auto f = ff(get_impl(*impl_->parent), impl_->idx, col);
+        auto f = detail_ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
         {
             if (d)
             {
                 return std::string(*d);
             }
-            ROW_NULL_CHECK;
+            detail_throw_null_error(*impl_, col);
         }
-        return fs(f);
+        return detail_fs(f);
     }
     std::string
     row::as_string(std::string_view name, std::optional<std::string_view> d) const
@@ -299,7 +307,7 @@ namespace httplib::mysql
     int64_t
     row::as_int64(size_t col, std::optional<int64_t> d) const
     {
-        ROW_FIELD return fi(f);
+        return detail_field_cast(*impl_, col, d, detail_fi);
     }
     int64_t
     row::as_int64(std::string_view name, std::optional<int64_t> d) const
@@ -310,7 +318,7 @@ namespace httplib::mysql
     uint64_t
     row::as_uint64(size_t col, std::optional<uint64_t> d) const
     {
-        ROW_FIELD return fu(f);
+        return detail_field_cast(*impl_, col, d, detail_fu);
     }
     uint64_t
     row::as_uint64(std::string_view name, std::optional<uint64_t> d) const
@@ -321,7 +329,7 @@ namespace httplib::mysql
     double
     row::as_double(size_t col, std::optional<double> d) const
     {
-        ROW_FIELD return fd(f);
+        return detail_field_cast(*impl_, col, d, detail_fd);
     }
     double
     row::as_double(std::string_view name, std::optional<double> d) const
@@ -332,7 +340,7 @@ namespace httplib::mysql
     float
     row::as_float(size_t col, std::optional<float> d) const
     {
-        ROW_FIELD return (float)fd(f);
+        return detail_field_cast<float>(*impl_, col, d, [](auto& f) { return (float)detail_fd(f); });
     }
     float
     row::as_float(std::string_view name, std::optional<float> d) const
@@ -343,7 +351,7 @@ namespace httplib::mysql
     bool
     row::as_bool(size_t col, std::optional<bool> d) const
     {
-        ROW_FIELD return fi(f) != 0;
+        return detail_field_cast(*impl_, col, d, detail_fi) != 0;
     }
     bool
     row::as_bool(std::string_view name, std::optional<bool> d) const
@@ -351,26 +359,22 @@ namespace httplib::mysql
         return as_bool(column(name), d);
     }
 
-    std::string_view
+    net::const_buffer
     row::as_blob(size_t col) const
     {
-        auto f = ff(get_impl(*impl_->parent), impl_->idx, col);
+        auto f = detail_ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
         {
-            ROW_NULL_CHECK;
+            detail_throw_null_error(*impl_, col);
         }
-        if (f.is_string())
+        if (!f.is_blob())
         {
-            return f.as_string();
+            throw std::runtime_error("db: cannot convert to blob");
         }
-        if (f.is_blob())
-        {
-            auto b = f.as_blob();
-            return { reinterpret_cast<char const*>(b.data()), b.size() };
-        }
-        throw std::runtime_error("db: cannot convert to blob");
+        auto b = f.as_blob();
+        return net::const_buffer(b.data(), b.size());
     }
-    std::string_view
+    net::const_buffer
     row::as_blob(std::string_view name) const
     {
         return as_blob(column(name));
@@ -379,10 +383,10 @@ namespace httplib::mysql
     date
     row::as_date(size_t col) const
     {
-        auto f = ff(get_impl(*impl_->parent), impl_->idx, col);
+        auto f = detail_ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
         {
-            ROW_NULL_CHECK;
+            detail_throw_null_error(*impl_, col);
         }
         if (!f.is_date())
         {
@@ -400,10 +404,10 @@ namespace httplib::mysql
     datetime
     row::as_datetime(size_t col) const
     {
-        auto f = ff(get_impl(*impl_->parent), impl_->idx, col);
+        auto f = detail_ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
         {
-            ROW_NULL_CHECK;
+            detail_throw_null_error(*impl_, col);
         }
         if (!f.is_datetime())
         {
@@ -421,14 +425,14 @@ namespace httplib::mysql
     std::chrono::steady_clock::duration
     row::as_duration(size_t col, std::optional<std::chrono::steady_clock::duration> d) const
     {
-        auto f = ff(get_impl(*impl_->parent), impl_->idx, col);
+        auto f = detail_ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
         {
             if (d)
             {
                 return *d;
             }
-            ROW_NULL_CHECK;
+            detail_throw_null_error(*impl_, col);
         }
         if (!f.is_time())
         {
@@ -445,20 +449,20 @@ namespace httplib::mysql
     std::chrono::system_clock::time_point
     row::as_timestamp(size_t col, std::optional<std::chrono::system_clock::time_point> d) const
     {
-        auto f = ff(get_impl(*impl_->parent), impl_->idx, col);
+        auto f = detail_ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
         {
             if (d)
             {
                 return *d;
             }
-            ROW_NULL_CHECK;
+            detail_throw_null_error(*impl_, col);
         }
         if (!f.is_datetime())
         {
             throw std::runtime_error("db: cannot convert to timestamp");
         }
-        return d2e({ f.as_datetime().year(),
+        return detail_d2e({ f.as_datetime().year(),
                      f.as_datetime().month(),
                      f.as_datetime().day(),
                      f.as_datetime().hour(),

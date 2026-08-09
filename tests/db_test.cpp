@@ -355,9 +355,8 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
             // ===== row 0: values row =====
             auto row0 = r[0];
 
-            // operator[]
-            REQUIRE(row0["i64"] == "42");
-            REQUIRE(row0["str"] == "hello");
+            REQUIRE(row0.as_string("i64") == "42");
+            REQUIRE(row0.as_string("str") == "hello");
 
             // correct type access
             REQUIRE(row0.as_int64("i64") == 42);
@@ -413,7 +412,7 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
             REQUIRE_THROWS_AS(row1.as_bool("i64"), std::runtime_error);
             REQUIRE_THROWS_AS(row1.as_date("dt_date"), std::runtime_error);
             REQUIRE_THROWS_AS(row1.as_blob("bin"), std::runtime_error);
-            REQUIRE_THROWS_AS(row1[0], std::runtime_error);
+            REQUIRE_THROWS_AS(row1.as_string(0), std::runtime_error);
 
             // NULL with default
             REQUIRE(row1.as_int64("i64", -1) == -1);
@@ -473,7 +472,7 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
             REQUIRE_THROWS_AS(row0.as_timestamp("str"), std::runtime_error);
 
             // column not found → throw via column_index
-            REQUIRE_THROWS_AS(row0["no_such_col"], std::runtime_error);
+            REQUIRE_THROWS_AS(row0.as_string("no_such_col"), std::runtime_error);
             REQUIRE_THROWS_AS(row0.as_int64("no_such_col"), std::runtime_error);
             REQUIRE_THROWS_AS(r.column_index("no_such_col"), std::runtime_error);
 
@@ -482,7 +481,7 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
                 std::vector<std::string> strs;
                 for (auto row : r)
                 {
-                    strs.push_back(row.is_null("str") ? "(null)" : row["str"]);
+                    strs.push_back(row.is_null("str") ? "(null)" : row.as_string("str"));
                 }
                 REQUIRE(strs.size() == 2);
                 REQUIRE(strs[0] == "hello");
@@ -525,8 +524,8 @@ TEST_CASE("db: execute() returns result", "[db][integration]")
 
             auto result = co_await sess.stmt("SELECT id, val FROM __httplib_exec WHERE id = ?").bind(1).execute();
             REQUIRE(result.row_count() == 1);
-            REQUIRE(result[0]["id"] == "1");
-            REQUIRE(result[0]["val"] == "one");
+            REQUIRE(result[0].as_string("id") == "1");
+            REQUIRE(result[0].as_string("val") == "one");
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_exec");
         },
@@ -568,8 +567,8 @@ TEST_CASE("db: multi-statement query", "[db][integration]")
                 "SELECT * FROM __httplib_batch ORDER BY id");
 
             REQUIRE(r.row_count() == 2);
-            REQUIRE(r[0]["id"] == "1");
-            REQUIRE(r[1]["val"] == "b");
+            REQUIRE(r[0].as_string("id") == "1");
+            REQUIRE(r[1].as_string("val") == "b");
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_batch");
         },
@@ -685,7 +684,7 @@ TEST_CASE("db: transaction commit", "[db][integration]")
 
             auto r = co_await sess.query("SELECT id FROM __httplib_txn");
             REQUIRE(r.row_count() == 1);
-            REQUIRE(r[0]["id"] == "100");
+            REQUIRE(r[0].as_string("id") == "100");
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_txn");
         },

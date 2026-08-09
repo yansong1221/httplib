@@ -70,8 +70,8 @@ namespace httplib::mysql
         bool as_bool(size_t col, std::optional<bool> d = {}) const;
         bool as_bool(std::string_view name, std::optional<bool> d = {}) const;
 
-        std::string_view as_blob(size_t col) const;
-        std::string_view as_blob(std::string_view name) const;
+        net::const_buffer as_blob(size_t col) const;
+        net::const_buffer as_blob(std::string_view name) const;
 
         date as_date(size_t col) const;
         date as_date(std::string_view name) const;
@@ -121,9 +121,9 @@ namespace httplib::mysql
             {
                 return as_string(col, d);
             }
-            else if constexpr (std::is_same_v<T, std::string_view>)
+            else if constexpr (std::is_same_v<T, net::const_buffer>)
             {
-                return as_blob(col, d);
+                return as_blob(col);
             }
             else if constexpr (std::is_same_v<T, date>)
             {
