@@ -21,10 +21,9 @@ namespace httplib::db
         db_pool& operator=(db_pool&&) noexcept;
 
         void start();
-        net::awaitable<db_session> get_session();
+        net::awaitable<db_session> async_acquire(std::chrono::steady_clock::duration wait_timeout
+                                                 = std::chrono::steady_clock::duration::zero());
         void stop();
-
-        static constexpr char const* conn_key = "httplib.db.conn";
 
       private:
         struct impl;

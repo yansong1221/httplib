@@ -39,10 +39,12 @@ namespace httplib::client
     class http_client_pool::impl : public std::enable_shared_from_this<impl>
     {
       public:
-        impl(net::any_io_executor const& ex, size_t max_size, std::chrono::seconds idle_timeout)
+        impl(net::any_io_executor const& ex, size_t max_size, std::chrono::steady_clock::duration idle_timeout)
             : ex_(ex)
             , max_size_(max_size)
             , idle_timeout_(idle_timeout)
+            , ping_interval_(std::chrono::seconds(30))
+            , health_check_path_("/")
             , cleanup_timer_(ex)
         {
         }
@@ -50,14 +52,12 @@ namespace httplib::client
         ~impl() { stop(); }
 
         void
-        start(std::chrono::seconds ping_interval, std::string_view health_check_path)
+        start()
         {
             if (!stopped_.exchange(false))
             {
                 return;
             }
-            ping_interval_ = ping_interval;
-            health_check_path_ = health_check_path;
             net::co_spawn(
                 ex_,
                 [this, self = shared_from_this()]() -> net::awaitable<void> { co_await co_maintain(); },
@@ -74,7 +74,7 @@ namespace httplib::client
         async_acquire(std::string_view host,
                       uint16_t port,
                       bool ssl,
-                      std::chrono::milliseconds wait_timeout = std::chrono::milliseconds(0))
+                      std::chrono::steady_clock::duration wait_timeout = std::chrono::steady_clock::duration::zero())
         {
             if (stopped_)
             {
@@ -104,7 +104,7 @@ namespace httplib::client
                     self->active_count_++;
                     co_return client_handle(self, std::make_unique<http_client>(self->ex_, url));
                 }
-                if (wait_timeout <= std::chrono::milliseconds(0))
+                if (wait_timeout <= std::chrono::steady_clock::duration::zero())
                 {
                     co_return client_handle(boost::system::errc::make_error_code(boost::system::errc::timed_out));
                 }
@@ -115,7 +115,6 @@ namespace httplib::client
                 self->waiters_.push_back(node);
                 lock.unlock();
 
-                auto wait_start = std::chrono::steady_clock::now();
                 boost::system::error_code ec;
                 co_await node->timer.async_wait(util::net_awaitable[ec]);
 
@@ -242,7 +241,7 @@ namespace httplib::client
         }
 
         void
-        set_idle_timeout(std::chrono::seconds timeout)
+        set_idle_timeout(std::chrono::steady_clock::duration timeout)
         {
             std::lock_guard<std::mutex> lock(mutex_);
             idle_timeout_ = timeout;
@@ -259,6 +258,12 @@ namespace httplib::client
         set_health_check_path(std::string path)
         {
             health_check_path_ = std::move(path);
+        }
+
+        void
+        set_ping_interval(std::chrono::steady_clock::duration interval)
+        {
+            ping_interval_ = interval;
         }
 
       private:
@@ -395,7 +400,7 @@ namespace httplib::client
         mutable std::mutex mutex_;
         std::unordered_map<std::string, pool_list> pools_;
         size_t max_size_;
-        std::chrono::seconds idle_timeout_;
+        std::chrono::steady_clock::duration idle_timeout_;
         size_t active_count_ = 0;
 
         waiters_list waiters_;
@@ -405,8 +410,8 @@ namespace httplib::client
 
       private:
         std::atomic<bool> stopped_ { true };
-        std::chrono::seconds ping_interval_ { 30 };
-        std::string health_check_path_ { "/" };
+        std::chrono::steady_clock::duration ping_interval_;
+        std::string health_check_path_;
         size_t min_connections_ = 0;
         net::steady_timer cleanup_timer_;
     };
@@ -520,7 +525,7 @@ namespace httplib::client
 
     http_client_pool::http_client_pool(net::any_io_executor const& ex,
                                        size_t max_size,
-                                       std::chrono::seconds idle_timeout)
+                                       std::chrono::steady_clock::duration idle_timeout)
         : impl_(std::make_shared<impl>(ex, max_size, idle_timeout))
     {
     }
@@ -528,9 +533,9 @@ namespace httplib::client
     http_client_pool::~http_client_pool() { impl_->stop(); }
 
     void
-    http_client_pool::start(std::chrono::seconds ping_interval, std::string_view health_check_path)
+    http_client_pool::start()
     {
-        impl_->start(ping_interval, health_check_path);
+        impl_->start();
     }
 
     void
@@ -545,11 +550,18 @@ namespace httplib::client
         impl_->set_health_check_path(std::move(path));
     }
 
+    void
+    http_client_pool::set_ping_interval(std::chrono::steady_clock::duration interval)
+    {
+        impl_->set_ping_interval(interval);
+    }
+
     std::future<http_client_pool::client_handle>
-    http_client_pool::acquire(std::string_view host,
-                              uint16_t port,
-                              bool ssl /*= false*/,
-                              std::chrono::milliseconds wait_timeout /*= std::chrono::milliseconds(0)*/)
+    http_client_pool::acquire(
+        std::string_view host,
+        uint16_t port,
+        bool ssl /*= false*/,
+        std::chrono::steady_clock::duration wait_timeout /*= std::chrono::steady_clock::duration::zero()*/)
     {
         return net::co_spawn(
             get_executor(),
@@ -559,17 +571,19 @@ namespace httplib::client
     }
 
     net::awaitable<http_client_pool::client_handle>
-    http_client_pool::async_acquire(std::string_view host,
-                                    uint16_t port,
-                                    bool ssl /*= false*/,
-                                    std::chrono::milliseconds wait_timeout /*= std::chrono::milliseconds(0)*/)
+    http_client_pool::async_acquire(
+        std::string_view host,
+        uint16_t port,
+        bool ssl /*= false*/,
+        std::chrono::steady_clock::duration wait_timeout /*= std::chrono::steady_clock::duration::zero()*/)
     {
         co_return co_await impl_->async_acquire(host, port, ssl, wait_timeout);
     }
 
     std::future<http_client_pool::client_handle>
-    http_client_pool::acquire(std::string_view url,
-                              std::chrono::milliseconds wait_timeout /*= std::chrono::milliseconds(0)*/)
+    http_client_pool::acquire(
+        std::string_view url,
+        std::chrono::steady_clock::duration wait_timeout /*= std::chrono::steady_clock::duration::zero()*/)
     {
         return net::co_spawn(
             get_executor(),
@@ -579,8 +593,9 @@ namespace httplib::client
     }
 
     net::awaitable<http_client_pool::client_handle>
-    http_client_pool::async_acquire(std::string_view url,
-                                    std::chrono::milliseconds wait_timeout /*= std::chrono::milliseconds(0)*/)
+    http_client_pool::async_acquire(
+        std::string_view url,
+        std::chrono::steady_clock::duration wait_timeout /*= std::chrono::steady_clock::duration::zero()*/)
     {
         auto r = boost::urls::parse_uri(url);
         if (!r)
@@ -607,7 +622,7 @@ namespace httplib::client
     }
 
     void
-    http_client_pool::set_idle_timeout(std::chrono::seconds timeout)
+    http_client_pool::set_idle_timeout(std::chrono::steady_clock::duration timeout)
     {
         impl_->set_idle_timeout(timeout);
     }

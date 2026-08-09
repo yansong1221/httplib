@@ -150,7 +150,7 @@ TEST_CASE("db: into() extraction", "[db][integration]")
         {
             db::db_pool dbpool(ex, cfg);
             dbpool.start();
-            auto sess = co_await dbpool.get_session();
+            auto sess = co_await dbpool.async_acquire();
             co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
             co_await sess.query("USE test");
             co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_into (id INT, name VARCHAR(100))");
@@ -193,7 +193,7 @@ TEST_CASE("db: named parameters", "[db][integration]")
             db::db_pool dbpool(ioc.get_executor(), cfg);
             dbpool.start();
 
-            auto sess = co_await dbpool.get_session();
+            auto sess = co_await dbpool.async_acquire();
 
             co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
             co_await sess.query("USE test");
@@ -241,7 +241,7 @@ TEST_CASE("db: statement caching", "[db][integration]")
             db::db_pool dbpool(ioc.get_executor(), cfg);
             dbpool.start();
 
-            auto sess = co_await dbpool.get_session();
+            auto sess = co_await dbpool.async_acquire();
             co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
             co_await sess.query("USE test");
             co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_cache (id INT)");
@@ -514,7 +514,7 @@ TEST_CASE("db: execute() returns db_result", "[db][integration]")
             db::db_pool dbpool(ioc.get_executor(), cfg);
             dbpool.start();
 
-            auto sess = co_await dbpool.get_session();
+            auto sess = co_await dbpool.async_acquire();
             co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
             co_await sess.query("USE test");
             co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_exec (id INT, val VARCHAR(50))");
@@ -555,7 +555,7 @@ TEST_CASE("db: ping", "[db][integration]")
             db::db_pool dbpool(ioc.get_executor(), cfg);
             dbpool.start();
 
-            auto sess = co_await dbpool.get_session();
+            auto sess = co_await dbpool.async_acquire();
             auto ok = co_await sess.ping();
             REQUIRE(ok);
         },
@@ -585,7 +585,7 @@ TEST_CASE("db: query_logger", "[db][integration]")
             db::db_pool dbpool(ioc.get_executor(), cfg);
             dbpool.start();
 
-            auto sess = co_await dbpool.get_session();
+            auto sess = co_await dbpool.async_acquire();
 
             std::string logged_sql;
             size_t logged_rows = 0;
@@ -627,7 +627,7 @@ TEST_CASE("db: transaction commit", "[db][integration]")
             db::db_pool dbpool(ioc.get_executor(), cfg);
             dbpool.start();
 
-            auto sess = co_await dbpool.get_session();
+            auto sess = co_await dbpool.async_acquire();
             co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
             co_await sess.query("USE test");
             co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_txn (id INT)");
@@ -671,7 +671,7 @@ TEST_CASE("db: transaction rollback on drop", "[db][integration]")
             db::db_pool dbpool(ioc.get_executor(), cfg);
             dbpool.start();
 
-            auto sess = co_await dbpool.get_session();
+            auto sess = co_await dbpool.async_acquire();
             co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
             co_await sess.query("USE test");
             co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_rollback (id INT)");

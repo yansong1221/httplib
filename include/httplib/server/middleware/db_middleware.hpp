@@ -11,6 +11,8 @@
 namespace httplib::server::middleware
 {
 
+    inline constexpr char const* db_conn_key = "httplib.db.conn";
+
     struct db_middleware_options
     {
         bool auto_transaction = false;
@@ -37,12 +39,12 @@ namespace httplib::server::middleware
     inline db::db_session&
     get_db_session(request& req)
     {
-        if (!req.has_custom_data(db::db_pool::conn_key))
+        if (!req.has_custom_data(db_conn_key))
         {
             throw std::runtime_error("No DB session in request. "
                                      "Did you register db_middleware?");
         }
-        return *req.custom_data<db::db_session*>(db::db_pool::conn_key);
+        return *req.custom_data<db::db_session*>(db_conn_key);
     }
 
     inline std::shared_ptr<db::db_pool>

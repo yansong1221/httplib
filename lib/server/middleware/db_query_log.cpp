@@ -46,7 +46,7 @@ namespace httplib::server::middleware
     bool
     db_query_log_middleware::before(request& req, response&)
     {
-        if (!req.has_custom_data(db::db_pool::conn_key))
+        if (!req.has_custom_data(db_conn_key))
         {
             return true;
         }
@@ -85,7 +85,7 @@ namespace httplib::server::middleware
             impl_->opts.on_request_complete(req, *log);
         }
 
-        if (req.has_custom_data(db::db_pool::conn_key))
+        if (req.has_custom_data(db_conn_key))
         {
             auto& sess = get_db_session(req);
             sess.set_query_logger({});

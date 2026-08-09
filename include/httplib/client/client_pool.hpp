@@ -62,7 +62,7 @@ namespace httplib::client
       public:
         explicit http_client_pool(net::any_io_executor const& ex,
                                   size_t max_size = 100,
-                                  std::chrono::seconds idle_timeout = std::chrono::seconds(60));
+                                  std::chrono::steady_clock::duration idle_timeout = std::chrono::seconds(60));
         ~http_client_pool();
 
         http_client_pool(http_client_pool const&) = delete;
@@ -71,30 +71,32 @@ namespace httplib::client
         std::future<client_handle> acquire(std::string_view host,
                                            uint16_t port,
                                            bool ssl,
-                                           std::chrono::milliseconds wait_timeout = std::chrono::milliseconds(0));
+                                           std::chrono::steady_clock::duration wait_timeout
+                                           = std::chrono::steady_clock::duration::zero());
 
         std::future<client_handle> acquire(std::string_view url,
-                                           std::chrono::milliseconds wait_timeout = std::chrono::milliseconds(0));
+                                           std::chrono::steady_clock::duration wait_timeout
+                                           = std::chrono::steady_clock::duration::zero());
 
         net::awaitable<client_handle> async_acquire(std::string_view host,
                                                     uint16_t port,
                                                     bool ssl,
-                                                    std::chrono::milliseconds wait_timeout
-                                                    = std::chrono::milliseconds(0));
+                                                    std::chrono::steady_clock::duration wait_timeout
+                                                    = std::chrono::steady_clock::duration::zero());
 
         net::awaitable<client_handle> async_acquire(std::string_view url,
-                                                    std::chrono::milliseconds wait_timeout
-                                                    = std::chrono::milliseconds(0));
+                                                    std::chrono::steady_clock::duration wait_timeout
+                                                    = std::chrono::steady_clock::duration::zero());
 
         net::any_io_executor get_executor() noexcept;
 
         void set_max_size(size_t n);
-        void set_idle_timeout(std::chrono::seconds timeout);
+        void set_idle_timeout(std::chrono::steady_clock::duration timeout);
 
-        void start(std::chrono::seconds ping_interval = std::chrono::seconds(30),
-                   std::string_view health_check_path = "/");
+        void start();
         void set_min_connections(size_t n);
         void set_health_check_path(std::string path);
+        void set_ping_interval(std::chrono::steady_clock::duration interval);
 
         void stop();
 

@@ -3,8 +3,6 @@
 
 namespace httplib::db
 {
-
-    enum class column_type : int;
     struct db_date;
     struct db_datetime;
 

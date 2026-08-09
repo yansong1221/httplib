@@ -46,9 +46,9 @@ namespace httplib::server::middleware
     net::awaitable<bool>
     db_middleware::before(request& req, response&)
     {
-        auto session = co_await impl_->pool->get_session();
+        auto session = co_await impl_->pool->async_acquire();
         auto* ptr = new db::db_session(std::move(session));
-        req.set_custom_data(db::db_pool::conn_key, std::any(ptr));
+        req.set_custom_data(db_conn_key, std::any(ptr));
         req.set_custom_data("httplib.db.pool_ref", std::any(impl_->pool));
 
         if (impl_->opts.auto_transaction)
@@ -80,10 +80,10 @@ namespace httplib::server::middleware
             req.erase_custom_data(k_tx_key);
         }
 
-        if (req.has_custom_data(db::db_pool::conn_key))
+        if (req.has_custom_data(db_conn_key))
         {
-            delete req.custom_data<db::db_session*>(db::db_pool::conn_key);
-            req.erase_custom_data(db::db_pool::conn_key);
+            delete req.custom_data<db::db_session*>(db_conn_key);
+            req.erase_custom_data(db_conn_key);
             req.erase_custom_data("httplib.db.pool_ref");
         }
 

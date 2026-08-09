@@ -45,9 +45,13 @@ namespace httplib::db
     }
 
     net::awaitable<db_session>
-    db_pool::get_session()
+    db_pool::async_acquire(std::chrono::steady_clock::duration wait_timeout)
     {
-        auto pooled = co_await impl_->pool->async_get_connection(boost::asio::use_awaitable);
+        auto pooled = co_await (wait_timeout <= std::chrono::steady_clock::duration::zero()
+                                    ? impl_->pool->async_get_connection(boost::asio::use_awaitable)
+                                    : impl_->pool->async_get_connection(
+                                          boost::asio::cancel_after(wait_timeout, boost::asio::use_awaitable)));
+
         auto sess_impl = std::make_unique<db_session::impl>();
         sess_impl->pooled = std::move(pooled);
         co_return db_session(std::move(sess_impl));
