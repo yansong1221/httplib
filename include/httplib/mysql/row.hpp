@@ -79,12 +79,19 @@ namespace httplib::mysql
         datetime as_datetime(size_t col) const;
         datetime as_datetime(std::string_view name) const;
 
-        std::chrono::microseconds as_duration(size_t col, std::optional<std::chrono::microseconds> d = {}) const;
-        std::chrono::microseconds as_duration(std::string_view name,
-                                              std::optional<std::chrono::microseconds> d = {}) const;
+        std::chrono::steady_clock::duration as_duration(size_t col,
+                                                          std::optional<std::chrono::steady_clock::duration> d
+                                                          = {}) const;
+        std::chrono::steady_clock::duration as_duration(std::string_view name,
+                                                         std::optional<std::chrono::steady_clock::duration> d
+                                                         = {}) const;
 
-        int64_t as_timestamp(size_t col, std::optional<int64_t> d = {}) const;
-        int64_t as_timestamp(std::string_view name, std::optional<int64_t> d = {}) const;
+        std::chrono::system_clock::time_point as_timestamp(size_t col,
+                                                            std::optional<std::chrono::system_clock::time_point> d
+                                                            = {}) const;
+        std::chrono::system_clock::time_point as_timestamp(std::string_view name,
+                                                            std::optional<std::chrono::system_clock::time_point> d
+                                                            = {}) const;
 
         template <typename T>
         T
@@ -126,9 +133,13 @@ namespace httplib::mysql
             {
                 return as_datetime(col);
             }
-            else if constexpr (std::is_same_v<T, std::chrono::microseconds>)
+            else if constexpr (std::is_same_v<T, std::chrono::steady_clock::duration>)
             {
                 return as_duration(col, d);
+            }
+            else if constexpr (std::is_same_v<T, std::chrono::system_clock::time_point>)
+            {
+                return as_timestamp(col, d);
             }
             else
             {

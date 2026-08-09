@@ -201,7 +201,7 @@ namespace httplib::mysql
             i.col_types.push_back(map_column_type(c.type(), c.is_unsigned()));
         }
     }
-    static int64_t
+    static std::chrono::system_clock::time_point
     d2e(datetime const& dt)
     {
         static constexpr int md[] = { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
@@ -217,8 +217,10 @@ namespace httplib::mysql
         {
             ++doy;
         }
-        return (era * 146097 + (int64_t)(yoe * 365 + yoe / 4 - yoe / 100 + doy) - 719468) * 86400 + dt.hour * 3600
-               + dt.minute * 60 + dt.second;
+        auto secs = (era * 146097 + (int64_t)(yoe * 365 + yoe / 4 - yoe / 100 + doy) - 719468) * 86400
+                    + dt.hour * 3600 + dt.minute * 60 + dt.second;
+        return std::chrono::system_clock::from_time_t((std::time_t)secs)
+               + std::chrono::microseconds(dt.microsecond);
     }
 
     row::row(std::unique_ptr<impl> p) : impl_(std::move(p)) {}
@@ -416,8 +418,8 @@ namespace httplib::mysql
         return as_datetime(column(name));
     }
 
-    std::chrono::microseconds
-    row::as_duration(size_t col, std::optional<std::chrono::microseconds> d) const
+    std::chrono::steady_clock::duration
+    row::as_duration(size_t col, std::optional<std::chrono::steady_clock::duration> d) const
     {
         auto f = ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
@@ -432,16 +434,16 @@ namespace httplib::mysql
         {
             throw std::runtime_error("db: cannot convert to time");
         }
-        return std::chrono::duration_cast<std::chrono::microseconds>(f.as_time());
+        return std::chrono::duration_cast<std::chrono::steady_clock::duration>(f.as_time());
     }
-    std::chrono::microseconds
-    row::as_duration(std::string_view name, std::optional<std::chrono::microseconds> d) const
+    std::chrono::steady_clock::duration
+    row::as_duration(std::string_view name, std::optional<std::chrono::steady_clock::duration> d) const
     {
         return as_duration(column(name), d);
     }
 
-    int64_t
-    row::as_timestamp(size_t col, std::optional<int64_t> d) const
+    std::chrono::system_clock::time_point
+    row::as_timestamp(size_t col, std::optional<std::chrono::system_clock::time_point> d) const
     {
         auto f = ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
@@ -464,8 +466,8 @@ namespace httplib::mysql
                      f.as_datetime().second(),
                      f.as_datetime().microsecond() });
     }
-    int64_t
-    row::as_timestamp(std::string_view name, std::optional<int64_t> d) const
+    std::chrono::system_clock::time_point
+    row::as_timestamp(std::string_view name, std::optional<std::chrono::system_clock::time_point> d) const
     {
         return as_timestamp(column(name), d);
     }

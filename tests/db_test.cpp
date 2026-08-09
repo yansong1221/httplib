@@ -388,8 +388,8 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
 
             // timestamp from DATETIME (no timezone conversion)
             auto ts = row0.as_timestamp("dt_dt");
-            REQUIRE(ts > 0);
-            REQUIRE(ts < 4102444800LL); // within year 2100
+            REQUIRE(ts > std::chrono::system_clock::from_time_t(0));
+            REQUIRE(ts < std::chrono::system_clock::from_time_t(4102444800LL)); // within year 2100
 
             auto dur = row0.as_duration("dt_t");
             REQUIRE(std::chrono::duration_cast<std::chrono::seconds>(dur).count() == 45296);
@@ -423,7 +423,8 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
             REQUIRE(row1.as_string("str", "n/a") == "n/a");
             REQUIRE(row1.as_bool("i64", true) == true);
             REQUIRE(row1.as_bool("i64", false) == false);
-            REQUIRE(row1.as_timestamp("dt_ts", 42) == 42);
+            REQUIRE(row1.as_timestamp("dt_ts", std::chrono::system_clock::from_time_t(42))
+                    == std::chrono::system_clock::from_time_t(42));
 
             // ===== column_type =====
             REQUIRE(r.column_type(0) == mysql::column_type::int64);
@@ -447,7 +448,7 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
                 REQUIRE(row.get<std::string>("str") == "hello");
                 REQUIRE(row.get<mysql::date>("dt_date").year == 2024);
                 REQUIRE(row.get<mysql::datetime>("dt_dt").year == 2024);
-                auto dur = row.get<std::chrono::microseconds>("dt_t");
+                auto dur = row.get<std::chrono::steady_clock::duration>("dt_t");
                 REQUIRE(std::chrono::duration_cast<std::chrono::seconds>(dur).count() == 45296);
 
                 // get<T> with default for NULL
@@ -528,6 +529,49 @@ TEST_CASE("db: execute() returns result", "[db][integration]")
             REQUIRE(result[0]["val"] == "one");
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_exec");
+        },
+        [](std::exception_ptr e)
+        {
+            if (e)
+            {
+                std::rethrow_exception(e);
+            }
+        });
+
+    ioc.run();
+}
+
+TEST_CASE("db: multi-statement query", "[db][integration]")
+{
+    auto cfg = make_config();
+    cfg.min_connections = 1;
+    cfg.max_connections = 4;
+
+    net::io_context ioc;
+
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            mysql::connection_pool pool(ioc.get_executor(), cfg);
+            pool.start();
+
+            auto sess = co_await pool.async_acquire();
+            co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
+            co_await sess.query("USE test");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_batch (id INT, val VARCHAR(50))");
+            co_await sess.query("DELETE FROM __httplib_batch");
+
+            auto r = co_await sess.query(
+                "INSERT INTO __httplib_batch VALUES (1, 'a');"
+                "INSERT INTO __httplib_batch VALUES (2, 'b');"
+                "SELECT * FROM __httplib_batch ORDER BY id");
+
+            REQUIRE(r.row_count() == 2);
+            REQUIRE(r[0]["id"] == "1");
+            REQUIRE(r[1]["val"] == "b");
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_batch");
         },
         [](std::exception_ptr e)
         {

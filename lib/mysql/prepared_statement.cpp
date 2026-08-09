@@ -127,15 +127,16 @@ namespace httplib::mysql
     }
 
     prepared_statement&
-    prepared_statement::bind(std::chrono::microseconds v)
+    prepared_statement::bind(std::chrono::steady_clock::duration v)
     {
-        impl_->params.emplace_back(v);
+        impl_->params.emplace_back(std::chrono::duration_cast<std::chrono::microseconds>(v));
         return *this;
     }
 
     static boost::mysql::datetime
-    epoch_to_datetime(int64_t epoch)
+    to_datetime(std::chrono::system_clock::time_point tp)
     {
+        auto epoch = std::chrono::duration_cast<std::chrono::seconds>(tp.time_since_epoch()).count();
         auto days = epoch / 86400;
         auto secs = epoch % 86400;
         if (secs < 0)
@@ -364,23 +365,23 @@ namespace httplib::mysql
     }
 
     prepared_statement&
-    prepared_statement::bind(std::string_view name, std::chrono::microseconds v)
+    prepared_statement::bind(std::string_view name, std::chrono::steady_clock::duration v)
     {
-        bind_named(*impl_, name, boost::mysql::field_view(v));
+        bind_named(*impl_, name, boost::mysql::field_view(std::chrono::duration_cast<std::chrono::microseconds>(v)));
         return *this;
     }
 
     prepared_statement&
-    prepared_statement::bind_timestamp(int64_t epoch)
+    prepared_statement::bind_timestamp(std::chrono::system_clock::time_point tp)
     {
-        impl_->params.emplace_back(epoch_to_datetime(epoch));
+        impl_->params.emplace_back(to_datetime(tp));
         return *this;
     }
 
     prepared_statement&
-    prepared_statement::bind_timestamp(std::string_view name, int64_t epoch)
+    prepared_statement::bind_timestamp(std::string_view name, std::chrono::system_clock::time_point tp)
     {
-        bind_named(*impl_, name, boost::mysql::field_view(epoch_to_datetime(epoch)));
+        bind_named(*impl_, name, boost::mysql::field_view(to_datetime(tp)));
         return *this;
     }
 

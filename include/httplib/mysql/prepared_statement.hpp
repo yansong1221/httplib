@@ -37,9 +37,9 @@ namespace httplib::mysql
         prepared_statement& bind(std::nullptr_t);
         prepared_statement& bind(date v);
         prepared_statement& bind(datetime v);
-        prepared_statement& bind(std::chrono::microseconds v);
-        prepared_statement& bind_timestamp(int64_t epoch);
-        prepared_statement& bind_timestamp(std::string_view name, int64_t epoch);
+        prepared_statement& bind(std::chrono::steady_clock::duration v);
+        prepared_statement& bind_timestamp(std::chrono::system_clock::time_point tp);
+        prepared_statement& bind_timestamp(std::string_view name, std::chrono::system_clock::time_point tp);
 
         prepared_statement& bind(std::string_view name, std::string_view v);
         prepared_statement& bind(std::string_view name, char const* v);
@@ -55,7 +55,7 @@ namespace httplib::mysql
         prepared_statement& bind(std::string_view name, std::nullptr_t);
         prepared_statement& bind(std::string_view name, date v);
         prepared_statement& bind(std::string_view name, datetime v);
-        prepared_statement& bind(std::string_view name, std::chrono::microseconds v);
+        prepared_statement& bind(std::string_view name, std::chrono::steady_clock::duration v);
 
         net::awaitable<result> execute();
 

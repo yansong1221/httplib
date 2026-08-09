@@ -29,6 +29,7 @@ namespace httplib::mysql
         params.connect_timeout = cfg.connect_timeout;
         params.ping_interval = cfg.ping_interval;
         params.ping_timeout = cfg.ping_timeout;
+        params.multi_queries = true;
         return params;
     }
 

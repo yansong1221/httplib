@@ -18,7 +18,7 @@ namespace httplib::mysql
     struct query_log_entry
     {
         std::string sql;
-        std::chrono::microseconds duration { 0 };
+        std::chrono::steady_clock::duration duration { 0 };
         size_t row_count = 0;
         uint64_t affected_rows = 0;
         bool is_parameterized = false;
