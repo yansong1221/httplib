@@ -2,8 +2,8 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 
 #include "httplib/config.hpp"
-#include "httplib/mysql/result.hpp"
 #include "httplib/mysql/prepared_statement.hpp"
+#include "httplib/mysql/result.hpp"
 #include "httplib/mysql/transaction.hpp"
 #include <chrono>
 #include <cstdint>
@@ -29,9 +29,6 @@ namespace httplib::mysql
       public:
         using query_logger = std::function<void(query_log_entry const&)>;
 
-        session() = delete;
-        session(session const&) = delete;
-        session& operator=(session const&) = delete;
         session(session&&) noexcept;
         session& operator=(session&&) noexcept;
         ~session();

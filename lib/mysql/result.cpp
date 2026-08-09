@@ -48,85 +48,6 @@ namespace httplib::mysql
                     return column_type::unknown;
             }
         }
-        static std::string
-        fs(boost::mysql::field_view const& f)
-        {
-            if (f.is_null())
-            {
-                return {};
-            }
-            if (f.is_string())
-            {
-                return std::string(f.as_string());
-            }
-            if (f.is_int64())
-            {
-                char b[24];
-                auto [p, _] = std::to_chars(b, b + 24, f.as_int64());
-                return { b, p };
-            }
-            if (f.is_uint64())
-            {
-                char b[24];
-                auto [p, _] = std::to_chars(b, b + 24, f.as_uint64());
-                return { b, p };
-            }
-            if (f.is_double())
-            {
-                char b[32];
-                auto [p, _] = std::to_chars(b, b + 32, f.as_double());
-                return { b, p };
-            }
-            if (f.is_blob())
-            {
-                auto x = f.as_blob();
-                return { reinterpret_cast<char const*>(x.data()), x.size() };
-            }
-            if (f.is_date())
-            {
-                auto d = f.as_date();
-                char b[16];
-                snprintf(b, 16, "%04u-%02u-%02u", d.year(), d.month(), d.day());
-                return b;
-            }
-            if (f.is_datetime())
-            {
-                auto d = f.as_datetime();
-                char b[32];
-                snprintf(b,
-                         32,
-                         "%04u-%02u-%02u %02u:%02u:%02u",
-                         d.year(),
-                         d.month(),
-                         d.day(),
-                         d.hour(),
-                         d.minute(),
-                         d.second());
-                return b;
-            }
-            if (f.is_time())
-            {
-                auto t = f.as_time();
-                auto s = std::chrono::duration_cast<std::chrono::seconds>(t).count();
-                bool n = s < 0;
-                if (n)
-                {
-                    s = -s;
-                }
-                auto h = s / 3600, m = (s % 3600) / 60, sec = s % 60;
-                char b[24];
-                if (n)
-                {
-                    snprintf(b, 24, "-%02lld:%02lld:%02lld", h, m, sec);
-                }
-                else
-                {
-                    snprintf(b, 24, "%02lld:%02lld:%02lld", h, m, sec);
-                }
-                return b;
-            }
-            return {};
-        }
         static boost::mysql::field_view
         ff(result::impl const& i, size_t r, size_t c)
         {
@@ -216,25 +137,12 @@ namespace httplib::mysql
     } // namespace detail
 
     row::row(std::unique_ptr<impl> p) : impl_(std::move(p)) {}
+
     row::row(row&&) noexcept = default;
     row& row::operator=(row&&) noexcept = default;
+
     row::~row() = default;
 
-    std::string
-    row::operator[](size_t col) const
-    {
-        auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
-        if (f.is_null())
-        {
-            detail::throw_null_error(*impl_, col);
-        }
-        return detail::fs(f);
-    }
-    std::string
-    row::operator[](std::string_view name) const
-    {
-        return (*this)[column(name)];
-    }
     size_t
     row::size() const
     {
@@ -256,7 +164,7 @@ namespace httplib::mysql
         return is_null(column(name));
     }
 
-    std::string
+    std::string_view
     row::as_string(size_t col, std::optional<std::string_view> d) const
     {
         auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
@@ -264,13 +172,17 @@ namespace httplib::mysql
         {
             if (d)
             {
-                return std::string(*d);
+                return *d;
             }
             detail::throw_null_error(*impl_, col);
         }
-        return detail::fs(f);
+        if (!f.is_string())
+        {
+            throw std::runtime_error("db: cannot convert to string");
+        }
+        return f.as_string();
     }
-    std::string
+    std::string_view
     row::as_string(std::string_view name, std::optional<std::string_view> d) const
     {
         return as_string(column(name), d);

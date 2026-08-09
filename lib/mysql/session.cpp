@@ -15,6 +15,7 @@ namespace httplib::mysql
 
     session::session(session&&) noexcept = default;
     session& session::operator=(session&&) noexcept = default;
+
     session::~session() = default;
 
     session::impl&

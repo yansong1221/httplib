@@ -325,7 +325,7 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
             // ===== row 0: values row =====
             auto row0 = r[0];
 
-            REQUIRE(row0.as_string("i64") == "42");
+            REQUIRE(row0.as_int64("i64") == 42);
             REQUIRE(row0.as_string("str") == "hello");
 
             // correct type access
@@ -448,7 +448,7 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
                 std::vector<std::string> strs;
                 for (auto row : r)
                 {
-                    strs.push_back(row.is_null("str") ? "(null)" : row.as_string("str"));
+                    strs.push_back(row.is_null("str") ? "(null)" : std::string(row.as_string("str")));
                 }
                 REQUIRE(strs.size() == 2);
                 REQUIRE(strs[0] == "hello");
@@ -493,7 +493,7 @@ TEST_CASE("db: execute() returns result", "[db][integration]")
 
             auto result = co_await sess.stmt("SELECT id, val FROM __httplib_exec WHERE id = ?").bind(1).execute();
             REQUIRE(result.row_count() == 1);
-            REQUIRE(result[0].as_string("id") == "1");
+            REQUIRE(result[0].as_int64("id") == 1);
             REQUIRE(result[0].as_string("val") == "one");
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_exec");
@@ -536,7 +536,7 @@ TEST_CASE("db: multi-statement query", "[db][integration]")
                 "SELECT * FROM __httplib_batch ORDER BY id");
 
             REQUIRE(r.row_count() == 2);
-            REQUIRE(r[0].as_string("id") == "1");
+            REQUIRE(r[0].as_int64("id") == 1);
             REQUIRE(r[1].as_string("val") == "b");
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_batch");

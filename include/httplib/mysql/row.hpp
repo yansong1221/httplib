@@ -29,36 +29,31 @@ namespace httplib::mysql
     {
         unsigned year = 0, month = 0, day = 0;
     };
-    struct datetime
-    {
-        unsigned year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
-        unsigned long microsecond = 0;
-    };
     struct time
     {
         unsigned hour = 0, minute = 0, second = 0;
         unsigned long microsecond = 0;
     };
+    struct datetime
+        : date
+        , time
+    {
+    };
 
     class HTTPLIB_API row
     {
       public:
-        row() = delete;
-        row(row const&) = delete;
-        row& operator=(row const&) = delete;
         row(row&&) noexcept;
         row& operator=(row&&) noexcept;
         ~row();
 
-        std::string operator[](size_t col) const;
-        std::string operator[](std::string_view name) const;
         size_t size() const;
         size_t column(std::string_view name) const;
         bool is_null(size_t col) const;
         bool is_null(std::string_view name) const;
 
-        std::string as_string(size_t col, std::optional<std::string_view> d = {}) const;
-        std::string as_string(std::string_view name, std::optional<std::string_view> d = {}) const;
+        std::string_view as_string(size_t col, std::optional<std::string_view> d = {}) const;
+        std::string_view as_string(std::string_view name, std::optional<std::string_view> d = {}) const;
 
         int64_t as_int64(size_t col, std::optional<int64_t> d = {}) const;
         int64_t as_int64(std::string_view name, std::optional<int64_t> d = {}) const;
@@ -91,11 +86,11 @@ namespace httplib::mysql
         time as_time(std::string_view name) const;
 
         std::chrono::system_clock::time_point as_timestamp(size_t col,
-                                                            std::optional<std::chrono::system_clock::time_point> d
-                                                            = {}) const;
+                                                           std::optional<std::chrono::system_clock::time_point> d
+                                                           = {}) const;
         std::chrono::system_clock::time_point as_timestamp(std::string_view name,
-                                                            std::optional<std::chrono::system_clock::time_point> d
-                                                            = {}) const;
+                                                           std::optional<std::chrono::system_clock::time_point> d
+                                                           = {}) const;
 
         template <typename T>
         T
@@ -121,9 +116,13 @@ namespace httplib::mysql
             {
                 return as_bool(col, d);
             }
-            else if constexpr (std::is_same_v<T, std::string>)
+            else if constexpr (std::is_same_v<T, std::string_view>)
             {
                 return as_string(col, d);
+            }
+            else if constexpr (std::is_same_v<T, std::string>)
+            {
+                return std::string(as_string(col, d));
             }
             else if constexpr (std::is_same_v<T, net::const_buffer>)
             {
