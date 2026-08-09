@@ -22,15 +22,15 @@ namespace httplib::server::middleware
         slow_query_callback on_slow_query;
     };
 
-    class HTTPLIB_API db_query_log_middleware
+    class HTTPLIB_API mysql_query_log_middleware
     {
       public:
-        explicit db_query_log_middleware(query_log_options opts = {});
-        ~db_query_log_middleware();
-        db_query_log_middleware(db_query_log_middleware const&);
-        db_query_log_middleware& operator=(db_query_log_middleware const&);
-        db_query_log_middleware(db_query_log_middleware&&) noexcept;
-        db_query_log_middleware& operator=(db_query_log_middleware&&) noexcept;
+        explicit mysql_query_log_middleware(query_log_options opts = {});
+        ~mysql_query_log_middleware();
+        mysql_query_log_middleware(mysql_query_log_middleware const&);
+        mysql_query_log_middleware& operator=(mysql_query_log_middleware const&);
+        mysql_query_log_middleware(mysql_query_log_middleware&&) noexcept;
+        mysql_query_log_middleware& operator=(mysql_query_log_middleware&&) noexcept;
 
         bool before(request& req, response& resp);
         bool after(request& req, response& resp);

@@ -1,6 +1,6 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
-#include "httplib/server/middleware/db_query_log.hpp"
-#include "httplib/server/middleware/db_middleware.hpp"
+#include "httplib/server/middleware/mysql_query_log.hpp"
+#include "httplib/server/middleware/mysql_middleware.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include <any>
@@ -10,7 +10,7 @@ namespace httplib::server::middleware
 
     static constexpr char const* k_query_log_key = "httplib.db.query_log";
 
-    class db_query_log_middleware::impl
+    class mysql_query_log_middleware::impl
     {
       public:
         query_log_options opts;
@@ -18,20 +18,20 @@ namespace httplib::server::middleware
         explicit impl(query_log_options o) : opts(std::move(o)) {}
     };
 
-    db_query_log_middleware::db_query_log_middleware(query_log_options opts)
+    mysql_query_log_middleware::mysql_query_log_middleware(query_log_options opts)
         : impl_(std::make_unique<impl>(std::move(opts)))
     {
     }
 
-    db_query_log_middleware::~db_query_log_middleware() = default;
+    mysql_query_log_middleware::~mysql_query_log_middleware() = default;
 
-    db_query_log_middleware::db_query_log_middleware(db_query_log_middleware const& other)
+    mysql_query_log_middleware::mysql_query_log_middleware(mysql_query_log_middleware const& other)
         : impl_(std::make_unique<impl>(other.impl_->opts))
     {
     }
 
-    db_query_log_middleware&
-    db_query_log_middleware::operator=(db_query_log_middleware const& other)
+    mysql_query_log_middleware&
+    mysql_query_log_middleware::operator=(mysql_query_log_middleware const& other)
     {
         if (this != &other)
         {
@@ -40,13 +40,13 @@ namespace httplib::server::middleware
         return *this;
     }
 
-    db_query_log_middleware::db_query_log_middleware(db_query_log_middleware&&) noexcept = default;
-    db_query_log_middleware& db_query_log_middleware::operator=(db_query_log_middleware&&) noexcept = default;
+    mysql_query_log_middleware::mysql_query_log_middleware(mysql_query_log_middleware&&) noexcept = default;
+    mysql_query_log_middleware& mysql_query_log_middleware::operator=(mysql_query_log_middleware&&) noexcept = default;
 
     bool
-    db_query_log_middleware::before(request& req, response&)
+    mysql_query_log_middleware::before(request& req, response&)
     {
-        if (!req.has_custom_data(conn_key))
+        if (!req.has_custom_data(mysql_conn_key))
         {
             return true;
         }
@@ -54,7 +54,7 @@ namespace httplib::server::middleware
         auto log = std::make_shared<std::vector<mysql::query_log_entry>>();
         auto opts = impl_->opts;
 
-        auto& sess = get_session(req);
+        auto& sess = get_mysql_session(req);
         sess.set_query_logger(
             [log, opts](mysql::query_log_entry const& entry) mutable
             {
@@ -71,7 +71,7 @@ namespace httplib::server::middleware
     }
 
     bool
-    db_query_log_middleware::after(request& req, response&)
+    mysql_query_log_middleware::after(request& req, response&)
     {
         if (!req.has_custom_data(k_query_log_key))
         {
@@ -85,9 +85,9 @@ namespace httplib::server::middleware
             impl_->opts.on_request_complete(req, *log);
         }
 
-        if (req.has_custom_data(conn_key))
+        if (req.has_custom_data(mysql_conn_key))
         {
-            auto& sess = get_session(req);
+            auto& sess = get_mysql_session(req);
             sess.set_query_logger({});
         }
 

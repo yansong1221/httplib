@@ -6,7 +6,7 @@
 #include "httplib/mysql/connection_pool.hpp"
 #include "httplib/mysql/result.hpp"
 #include "httplib/mysql/session.hpp"
-#include "httplib/server/middleware/db_middleware.hpp"
+#include "httplib/server/middleware/mysql_middleware.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include <boost/asio/co_spawn.hpp>
@@ -699,14 +699,14 @@ TEST_CASE("db: transaction rollback on drop", "[db][integration]")
     ioc.run();
 }
 
-TEST_CASE("db_middleware: throws when no middleware registered", "[db][middleware]")
+TEST_CASE("mysql_middleware: throws when no middleware registered", "[db][middleware]")
 {
     test_common::test_scaffold ts;
     ts.router().set_http_handler<http::verb::get>(
         "/db/nomw",
         [](httplib::server::request& req, httplib::server::response& resp)
         {
-            REQUIRE_THROWS_AS(httplib::server::middleware::get_session(req), std::runtime_error);
+            REQUIRE_THROWS_AS(httplib::server::middleware::get_mysql_session(req), std::runtime_error);
             resp.set_string_content("ok"sv, "text/plain"sv);
         });
 
