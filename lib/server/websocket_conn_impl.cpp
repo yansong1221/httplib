@@ -3,7 +3,6 @@
 #include "request_impl.hpp"
 #include "response_impl.hpp"
 #include <boost/asio/co_spawn.hpp>
-#include <boost/asio/detached.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <spdlog/spdlog.h>
 

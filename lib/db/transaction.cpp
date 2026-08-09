@@ -3,7 +3,6 @@
 #include "db/db_session_impl.h"
 #include "httplib/db/db_session.hpp"
 #include <boost/asio/co_spawn.hpp>
-#include <boost/asio/detached.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/mysql.hpp>
 
@@ -25,17 +24,23 @@ namespace httplib::db
                 auto ex = si.pooled.get().get_executor();
                 net::co_spawn(
                     ex,
-                    [&si]() -> net::awaitable<void>
+                    [sess = impl_->session]() -> net::awaitable<void>
                     {
                         try
                         {
-                            co_await si.rollback();
+                            co_await get_impl(*sess).rollback();
                         }
                         catch (...)
                         {
                         }
                     },
-                    net::detached);
+                    [](std::exception_ptr e)
+                    {
+                        if (e)
+                        {
+                            std::rethrow_exception(e);
+                        }
+                    });
             }
         }
     }

@@ -22,7 +22,7 @@ namespace httplib::db
 
         void start();
         net::awaitable<db_session> get_session();
-        void cancel();
+        void stop();
 
         static constexpr char const* conn_key = "httplib.db.conn";
 

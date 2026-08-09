@@ -1,7 +1,6 @@
 #include "ws_client_impl.h"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
-#include <boost/asio/detached.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/beast/core/buffers_to_string.hpp>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -294,7 +293,13 @@ namespace httplib::client
                     logger()->trace("ws open handler error: {}", e.what());
                 }
             },
-            boost::asio::detached);
+            [](std::exception_ptr e)
+            {
+                if (e)
+                {
+                    std::rethrow_exception(e);
+                }
+            });
     }
 
     net::awaitable<boost::system::error_code>
@@ -364,7 +369,13 @@ namespace httplib::client
                 }
                 logger()->debug("ws connection closed");
             },
-            boost::asio::detached);
+            [](std::exception_ptr e)
+            {
+                if (e)
+                {
+                    std::rethrow_exception(e);
+                }
+            });
 
         co_return boost::system::error_code {};
     }

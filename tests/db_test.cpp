@@ -10,7 +10,6 @@
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include <boost/asio/co_spawn.hpp>
-#include <boost/asio/detached.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/use_future.hpp>
 #include <boost/mysql.hpp>
@@ -111,7 +110,13 @@ TEST_CASE("db: connection_pool direct", "[db][integration]")
             net::co_spawn(
                 ex,
                 [&pool]() -> net::awaitable<void> { co_await pool.async_run(boost::asio::use_awaitable); },
-                net::detached);
+                [](std::exception_ptr e)
+                {
+                    if (e)
+                    {
+                        std::rethrow_exception(e);
+                    }
+                });
 
             auto conn = co_await pool.async_get_connection(boost::asio::use_awaitable);
             boost::mysql::results r;

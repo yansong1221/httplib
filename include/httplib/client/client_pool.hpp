@@ -91,6 +91,11 @@ namespace httplib::client
         void set_max_size(size_t n);
         void set_idle_timeout(std::chrono::seconds timeout);
 
+        void start(std::chrono::seconds ping_interval = std::chrono::seconds(30),
+                   std::string_view health_check_path = "/");
+        void set_min_connections(size_t n);
+        void set_health_check_path(std::string path);
+
         void stop();
 
         pool_stats stats(std::string_view host, uint16_t port, bool ssl) const;

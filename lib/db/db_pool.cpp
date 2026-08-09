@@ -54,7 +54,7 @@ namespace httplib::db
     }
 
     void
-    db_pool::cancel()
+    db_pool::stop()
     {
         impl_->pool->cancel();
     }

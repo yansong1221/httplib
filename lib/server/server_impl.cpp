@@ -251,7 +251,15 @@ namespace httplib::server
                 }
                 break;
             }
-            net::co_spawn(ex_, handle_accept(std::move(sock)), net::detached);
+            net::co_spawn(ex_,
+                          handle_accept(std::move(sock)),
+                          [](std::exception_ptr e)
+                          {
+                              if (e)
+                              {
+                                  std::rethrow_exception(e);
+                              }
+                          });
         }
         logger()->trace("async_accept: {}", ec.message());
         co_return ec;
@@ -434,6 +442,7 @@ namespace httplib::server
     {
 
         auto proxy_pool = std::make_shared<client::http_client_pool>(ex_);
+        proxy_pool->start();
 
         std::string prefix = detail::strip_proxy_prefix(location);
 
