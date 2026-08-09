@@ -1,10 +1,10 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
-#include "httplib/db/db_result.hpp"
-#include "db/db_result_impl.h"
-#include "db/row_impl.h"
+#include "httplib/mysql/result.hpp"
+#include "mysql/result_impl.h"
+#include "mysql/row_impl.h"
 #include <charconv>
 
-namespace httplib::db
+namespace httplib::mysql
 {
     static column_type
     map_column_type(boost::mysql::column_type t, bool u)
@@ -126,7 +126,7 @@ namespace httplib::db
         return {};
     }
     static boost::mysql::field_view
-    ff(db_result::impl const& i, size_t r, size_t c)
+    ff(result::impl const& i, size_t r, size_t c)
     {
         return i.data.rows().at(r).at(c);
     }
@@ -182,7 +182,7 @@ namespace httplib::db
         throw std::runtime_error("db: cannot convert to double");
     }
     void
-    build_result_impl(db_result::impl& i)
+    build_result_impl(result::impl& i)
     {
         if (!i.data.has_value())
         {
@@ -202,7 +202,7 @@ namespace httplib::db
         }
     }
     static int64_t
-    d2e(db_datetime const& dt)
+    d2e(datetime const& dt)
     {
         static constexpr int md[] = { 0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334 };
         auto y = (int64_t)dt.year, m = (int64_t)dt.month, d = (int64_t)dt.day;
@@ -374,7 +374,7 @@ namespace httplib::db
         return as_blob(column(name));
     }
 
-    db_date
+    date
     row::as_date(size_t col) const
     {
         auto f = ff(get_impl(*impl_->parent), impl_->idx, col);
@@ -389,13 +389,13 @@ namespace httplib::db
         auto d = f.as_date();
         return { d.year(), d.month(), d.day() };
     }
-    db_date
+    date
     row::as_date(std::string_view name) const
     {
         return as_date(column(name));
     }
 
-    db_datetime
+    datetime
     row::as_datetime(size_t col) const
     {
         auto f = ff(get_impl(*impl_->parent), impl_->idx, col);
@@ -410,7 +410,7 @@ namespace httplib::db
         auto d = f.as_datetime();
         return { d.year(), d.month(), d.day(), d.hour(), d.minute(), d.second(), d.microsecond() };
     }
-    db_datetime
+    datetime
     row::as_datetime(std::string_view name) const
     {
         return as_datetime(column(name));
@@ -476,55 +476,55 @@ namespace httplib::db
         return parent->column_index(name);
     }
 
-    db_result::db_result() : impl_(std::make_unique<impl>()) {}
-    db_result::db_result(std::unique_ptr<impl> p) : impl_(std::move(p)) {}
-    db_result::db_result(db_result&&) noexcept = default;
-    db_result& db_result::operator=(db_result&&) noexcept = default;
-    db_result::~db_result() = default;
-    db_result::impl&
-    get_impl(db_result& s)
+    result::result() : impl_(std::make_unique<impl>()) {}
+    result::result(std::unique_ptr<impl> p) : impl_(std::move(p)) {}
+    result::result(result&&) noexcept = default;
+    result& result::operator=(result&&) noexcept = default;
+    result::~result() = default;
+    result::impl&
+    get_impl(result& s)
     {
         return *s.impl_;
     };
-    db_result::impl const&
-    get_impl(db_result const& s)
+    result::impl const&
+    get_impl(result const& s)
     {
         return *s.impl_;
     }
     bool
-    db_result::empty() const
+    result::empty() const
     {
         auto& i = get_impl(*this);
         return !i.data.has_value() || i.data.rows().empty();
     }
     size_t
-    db_result::row_count() const
+    result::row_count() const
     {
         auto& i = get_impl(*this);
         return i.data.has_value() ? i.data.rows().size() : 0;
     }
     uint64_t
-    db_result::affected_rows() const
+    result::affected_rows() const
     {
         return get_impl(*this).affected;
     }
     uint64_t
-    db_result::last_insert_id() const
+    result::last_insert_id() const
     {
         return get_impl(*this).insert_id;
     }
     uint64_t
-    db_result::warning_count() const
+    result::warning_count() const
     {
         return get_impl(*this).warnings;
     }
     size_t
-    db_result::column_count() const
+    result::column_count() const
     {
         return get_impl(*this).col_names.size();
     }
     size_t
-    db_result::column_index(std::string_view n) const
+    result::column_index(std::string_view n) const
     {
         auto& i = get_impl(*this);
         for (size_t j = 0; j < i.col_names.size(); ++j)
@@ -537,32 +537,32 @@ namespace httplib::db
         throw std::runtime_error("db: column not found: " + std::string(n));
     }
     std::string const&
-    db_result::column_name(size_t c) const
+    result::column_name(size_t c) const
     {
         return get_impl(*this).col_names[c];
     }
     column_type
-    db_result::column_type(size_t c) const
+    result::column_type(size_t c) const
     {
         return get_impl(*this).col_types[c];
     }
     row
-    db_result::operator[](size_t i) const
+    result::operator[](size_t i) const
     {
         auto imp = std::make_unique<row::impl>();
         imp->parent = this;
         imp->idx = i;
         return row(std::move(imp));
     }
-    db_result::iterator
-    db_result::begin() const
+    result::iterator
+    result::begin() const
     {
         return iterator(this, 0);
     }
-    db_result::iterator
-    db_result::end() const
+    result::iterator
+    result::end() const
     {
         return iterator(this, row_count());
     }
-} // namespace httplib::db
+} // namespace httplib::mysql
 #endif

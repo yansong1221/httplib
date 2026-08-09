@@ -1,19 +1,19 @@
 #pragma once
 #ifdef HTTPLIB_ENABLED_DATABASE
 
-namespace httplib::db
+namespace httplib::mysql
 {
-    struct db_date;
-    struct db_datetime;
+    struct date;
+    struct datetime;
 
-    class db_result;
-    class db_session;
-    class db_pool;
+    class result;
+    class session;
+    class connection_pool;
     class row;
     class prepared_statement;
     class transaction;
 
     struct query_log_entry;
 
-} // namespace httplib::db
+} // namespace httplib::mysql
 #endif // HTTPLIB_ENABLED_DATABASE

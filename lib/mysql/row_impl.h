@@ -1,18 +1,18 @@
 #pragma once
 #ifdef HTTPLIB_ENABLED_DATABASE
 
-#include "httplib/db/row.hpp"
+#include "httplib/mysql/row.hpp"
 
-namespace httplib::db
+namespace httplib::mysql
 {
 
     struct row::impl
     {
-        db_result const* parent = nullptr;
+        result const* parent = nullptr;
         size_t idx = 0;
 
         size_t col_of(std::string_view name) const;
     };
 
-} // namespace httplib::db
+} // namespace httplib::mysql
 #endif // HTTPLIB_ENABLED_DATABASE

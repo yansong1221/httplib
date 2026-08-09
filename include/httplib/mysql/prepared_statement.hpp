@@ -2,14 +2,14 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 
 #include "httplib/config.hpp"
-#include "httplib/db/db_fwd.hpp"
-#include "httplib/db/db_result.hpp"
+#include "httplib/mysql/mysql_fwd.hpp"
+#include "httplib/mysql/result.hpp"
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
 
-namespace httplib::db
+namespace httplib::mysql
 {
 
     class HTTPLIB_API prepared_statement
@@ -35,8 +35,8 @@ namespace httplib::db
         prepared_statement& bind(float v);
         prepared_statement& bind(bool v);
         prepared_statement& bind(std::nullptr_t);
-        prepared_statement& bind(db_date v);
-        prepared_statement& bind(db_datetime v);
+        prepared_statement& bind(date v);
+        prepared_statement& bind(datetime v);
         prepared_statement& bind(std::chrono::microseconds v);
         prepared_statement& bind_timestamp(int64_t epoch);
         prepared_statement& bind_timestamp(std::string_view name, int64_t epoch);
@@ -53,11 +53,11 @@ namespace httplib::db
         prepared_statement& bind(std::string_view name, float v);
         prepared_statement& bind(std::string_view name, bool v);
         prepared_statement& bind(std::string_view name, std::nullptr_t);
-        prepared_statement& bind(std::string_view name, db_date v);
-        prepared_statement& bind(std::string_view name, db_datetime v);
+        prepared_statement& bind(std::string_view name, date v);
+        prepared_statement& bind(std::string_view name, datetime v);
         prepared_statement& bind(std::string_view name, std::chrono::microseconds v);
 
-        net::awaitable<db_result> execute();
+        net::awaitable<result> execute();
 
         prepared_statement& into(int64_t& v, size_t col);
         prepared_statement& into(uint64_t& v, size_t col);
@@ -74,10 +74,10 @@ namespace httplib::db
         prepared_statement& into(std::string& v, std::string_view name);
 
         struct impl;
-        explicit prepared_statement(db_session& sess, std::string sql);
+        explicit prepared_statement(session& sess, std::string sql);
 
       private:
         std::unique_ptr<impl> impl_;
     };
-} // namespace httplib::db
+} // namespace httplib::mysql
 #endif // HTTPLIB_ENABLED_DATABASE

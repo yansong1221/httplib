@@ -1,15 +1,15 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
-#include "httplib/db/transaction.hpp"
-#include "db/db_session_impl.h"
-#include "httplib/db/db_session.hpp"
+#include "httplib/mysql/transaction.hpp"
+#include "mysql/session_impl.h"
+#include "httplib/mysql/session.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/mysql.hpp>
 
-namespace httplib::db
+namespace httplib::mysql
 {
 
-    transaction::transaction(db_session& sess) : impl_(std::make_unique<impl>()) { impl_->session = &sess; }
+    transaction::transaction(session& sess) : impl_(std::make_unique<impl>()) { impl_->session = &sess; }
 
     transaction::transaction(transaction&&) noexcept = default;
     transaction& transaction::operator=(transaction&&) noexcept = default;
@@ -53,11 +53,11 @@ namespace httplib::db
     }
 
     net::awaitable<transaction>
-    db_session::begin()
+    session::begin()
     {
         co_await get_impl(*this).begin_transaction();
         co_return transaction(*this);
     }
 
-} // namespace httplib::db
+} // namespace httplib::mysql
 #endif // HTTPLIB_ENABLED_DATABASE

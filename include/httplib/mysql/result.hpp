@@ -2,26 +2,26 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 
 #include "httplib/config.hpp"
-#include "httplib/db/row.hpp"
+#include "httplib/mysql/row.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
 
-namespace httplib::db
+namespace httplib::mysql
 {
 
-    class HTTPLIB_API db_result
+    class HTTPLIB_API result
     {
       public:
-        db_result();
-        db_result(db_result&&) noexcept;
-        db_result& operator=(db_result&&) noexcept;
-        ~db_result();
+        result();
+        result(result&&) noexcept;
+        result& operator=(result&&) noexcept;
+        ~result();
 
-        db_result(db_result const&) = delete;
-        db_result& operator=(db_result const&) = delete;
+        result(result const&) = delete;
+        result& operator=(result const&) = delete;
 
         bool empty() const;
 
@@ -82,10 +82,10 @@ namespace httplib::db
             }
 
           private:
-            db_result const* result_;
+            result const* result_;
             size_t idx_;
-            iterator(db_result const* result, size_t idx) : result_(result), idx_(idx) {}
-            friend class db_result;
+            iterator(result const* result, size_t idx) : result_(result), idx_(idx) {}
+            friend class result;
         };
 
         iterator begin() const;
@@ -94,14 +94,14 @@ namespace httplib::db
 
         struct impl;
 
-        explicit db_result(std::unique_ptr<impl> p);
+        explicit result(std::unique_ptr<impl> p);
 
       private:
         std::unique_ptr<impl> impl_;
 
-        friend impl& get_impl(db_result& self);
-        friend impl const& get_impl(db_result const& self);
+        friend impl& get_impl(result& self);
+        friend impl const& get_impl(result const& self);
     };
 
-} // namespace httplib::db
+} // namespace httplib::mysql
 #endif // HTTPLIB_ENABLED_DATABASE

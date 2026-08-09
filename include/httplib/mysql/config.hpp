@@ -5,10 +5,10 @@
 #include <cstdint>
 #include <string>
 
-namespace httplib::db
+namespace httplib::mysql
 {
 
-    struct db_config
+    struct config
     {
         std::string host = "127.0.0.1";
         uint16_t port = 3306;
@@ -25,5 +25,5 @@ namespace httplib::db
         std::chrono::seconds ping_timeout { 5 };
     };
 
-} // namespace httplib::db
+} // namespace httplib::mysql
 #endif // HTTPLIB_ENABLED_DATABASE

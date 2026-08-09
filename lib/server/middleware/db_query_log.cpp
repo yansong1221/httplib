@@ -46,17 +46,17 @@ namespace httplib::server::middleware
     bool
     db_query_log_middleware::before(request& req, response&)
     {
-        if (!req.has_custom_data(db_conn_key))
+        if (!req.has_custom_data(conn_key))
         {
             return true;
         }
 
-        auto log = std::make_shared<std::vector<db::query_log_entry>>();
+        auto log = std::make_shared<std::vector<mysql::query_log_entry>>();
         auto opts = impl_->opts;
 
-        auto& sess = get_db_session(req);
+        auto& sess = get_session(req);
         sess.set_query_logger(
-            [log, opts](db::query_log_entry const& entry) mutable
+            [log, opts](mysql::query_log_entry const& entry) mutable
             {
                 if (opts.slow_query_threshold.count() > 0 && entry.duration >= opts.slow_query_threshold
                     && opts.on_slow_query)
@@ -78,16 +78,16 @@ namespace httplib::server::middleware
             return true;
         }
 
-        auto log = req.custom_data<std::shared_ptr<std::vector<db::query_log_entry>>>(k_query_log_key);
+        auto log = req.custom_data<std::shared_ptr<std::vector<mysql::query_log_entry>>>(k_query_log_key);
 
         if (impl_->opts.on_request_complete)
         {
             impl_->opts.on_request_complete(req, *log);
         }
 
-        if (req.has_custom_data(db_conn_key))
+        if (req.has_custom_data(conn_key))
         {
-            auto& sess = get_db_session(req);
+            auto& sess = get_session(req);
             sess.set_query_logger({});
         }
 

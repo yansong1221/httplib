@@ -1,11 +1,11 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 #include "common.hpp"
-#include "db/db_result_impl.h"
+#include "mysql/result_impl.h"
 #include "httplib/config.hpp"
-#include "httplib/db/db_config.hpp"
-#include "httplib/db/db_pool.hpp"
-#include "httplib/db/db_result.hpp"
-#include "httplib/db/db_session.hpp"
+#include "httplib/mysql/config.hpp"
+#include "httplib/mysql/connection_pool.hpp"
+#include "httplib/mysql/result.hpp"
+#include "httplib/mysql/session.hpp"
 #include "httplib/server/middleware/db_middleware.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
@@ -15,16 +15,16 @@
 #include <boost/mysql.hpp>
 #include <catch2/catch_test_macros.hpp>
 
-namespace db = httplib::db;
+namespace mysql = httplib::mysql;
 namespace net = httplib::net;
 
 namespace
 {
 
-    db::db_config
+    mysql::config
     make_config()
     {
-        db::db_config config;
+        mysql::config config;
         config.user = "root";
         config.password = "123456";
         return config;
@@ -32,9 +32,9 @@ namespace
 
 } // namespace
 
-TEST_CASE("db_result: basics", "[db]")
+TEST_CASE("result: basics", "[db]")
 {
-    db::db_result r;
+    mysql::result r;
     REQUIRE(r.empty());
     REQUIRE(r.row_count() == 0);
     REQUIRE(r.affected_rows() == 0);
@@ -43,9 +43,9 @@ TEST_CASE("db_result: basics", "[db]")
     REQUIRE_THROWS_AS(r.column_index("any"), std::runtime_error);
 }
 
-TEST_CASE("db_config: defaults", "[db]")
+TEST_CASE("config: defaults", "[db]")
 {
-    db::db_config c;
+    mysql::config c;
     REQUIRE(c.host == "127.0.0.1");
     REQUIRE(c.port == 3306);
     REQUIRE(c.min_connections == 2);
@@ -148,7 +148,7 @@ TEST_CASE("db: into() extraction", "[db][integration]")
         ex,
         [&]() -> net::awaitable<void>
         {
-            db::db_pool dbpool(ex, cfg);
+            mysql::connection_pool dbpool(ex, cfg);
             dbpool.start();
             auto sess = co_await dbpool.async_acquire();
             co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
@@ -190,7 +190,7 @@ TEST_CASE("db: named parameters", "[db][integration]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            db::db_pool dbpool(ioc.get_executor(), cfg);
+            mysql::connection_pool dbpool(ioc.get_executor(), cfg);
             dbpool.start();
 
             auto sess = co_await dbpool.async_acquire();
@@ -238,7 +238,7 @@ TEST_CASE("db: statement caching", "[db][integration]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            db::db_pool dbpool(ioc.get_executor(), cfg);
+            mysql::connection_pool dbpool(ioc.get_executor(), cfg);
             dbpool.start();
 
             auto sess = co_await dbpool.async_acquire();
@@ -333,12 +333,12 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
             conn.set_meta_mode(boost::mysql::metadata_mode::full);
 
             // query both rows
-            auto result_impl = std::make_unique<db::db_result::impl>();
+            auto result_impl = std::make_unique<mysql::result::impl>();
             co_await conn.async_execute("SELECT * FROM __httplib_types ORDER BY i64 IS NULL, i64",
                                         result_impl->data,
                                         boost::asio::use_awaitable);
             build_result_impl(*result_impl);
-            db::db_result r(std::move(result_impl));
+            mysql::result r(std::move(result_impl));
 
             REQUIRE(r.row_count() == 2);
             REQUIRE(r.column_count() == 9);
@@ -426,15 +426,15 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
             REQUIRE(row1.as_timestamp("dt_ts", 42) == 42);
 
             // ===== column_type =====
-            REQUIRE(r.column_type(0) == db::column_type::int64);
-            REQUIRE(r.column_type(1) == db::column_type::uint64);
-            REQUIRE(r.column_type(2) == db::column_type::double_);
-            REQUIRE(r.column_type(3) == db::column_type::string);
-            REQUIRE(r.column_type(4) == db::column_type::blob);
-            REQUIRE(r.column_type(5) == db::column_type::date);
-            REQUIRE(r.column_type(6) == db::column_type::datetime);
-            REQUIRE(r.column_type(7) == db::column_type::datetime);
-            REQUIRE(r.column_type(8) == db::column_type::time);
+            REQUIRE(r.column_type(0) == mysql::column_type::int64);
+            REQUIRE(r.column_type(1) == mysql::column_type::uint64);
+            REQUIRE(r.column_type(2) == mysql::column_type::double_);
+            REQUIRE(r.column_type(3) == mysql::column_type::string);
+            REQUIRE(r.column_type(4) == mysql::column_type::blob);
+            REQUIRE(r.column_type(5) == mysql::column_type::date);
+            REQUIRE(r.column_type(6) == mysql::column_type::datetime);
+            REQUIRE(r.column_type(7) == mysql::column_type::datetime);
+            REQUIRE(r.column_type(8) == mysql::column_type::time);
 
             // ===== row::get<T> =====
             {
@@ -445,8 +445,8 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
                 REQUIRE(row.get<float>("f64") == 3.14f);
                 REQUIRE(row.get<bool>("i64") == true);
                 REQUIRE(row.get<std::string>("str") == "hello");
-                REQUIRE(row.get<db::db_date>("dt_date").year == 2024);
-                REQUIRE(row.get<db::db_datetime>("dt_dt").year == 2024);
+                REQUIRE(row.get<mysql::date>("dt_date").year == 2024);
+                REQUIRE(row.get<mysql::datetime>("dt_dt").year == 2024);
                 auto dur = row.get<std::chrono::microseconds>("dt_t");
                 REQUIRE(std::chrono::duration_cast<std::chrono::seconds>(dur).count() == 45296);
 
@@ -499,7 +499,7 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
     ioc.run();
 }
 
-TEST_CASE("db: execute() returns db_result", "[db][integration]")
+TEST_CASE("db: execute() returns result", "[db][integration]")
 {
     auto cfg = make_config();
     cfg.min_connections = 1;
@@ -511,7 +511,7 @@ TEST_CASE("db: execute() returns db_result", "[db][integration]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            db::db_pool dbpool(ioc.get_executor(), cfg);
+            mysql::connection_pool dbpool(ioc.get_executor(), cfg);
             dbpool.start();
 
             auto sess = co_await dbpool.async_acquire();
@@ -552,7 +552,7 @@ TEST_CASE("db: ping", "[db][integration]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            db::db_pool dbpool(ioc.get_executor(), cfg);
+            mysql::connection_pool dbpool(ioc.get_executor(), cfg);
             dbpool.start();
 
             auto sess = co_await dbpool.async_acquire();
@@ -582,7 +582,7 @@ TEST_CASE("db: query_logger", "[db][integration]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            db::db_pool dbpool(ioc.get_executor(), cfg);
+            mysql::connection_pool dbpool(ioc.get_executor(), cfg);
             dbpool.start();
 
             auto sess = co_await dbpool.async_acquire();
@@ -590,7 +590,7 @@ TEST_CASE("db: query_logger", "[db][integration]")
             std::string logged_sql;
             size_t logged_rows = 0;
             sess.set_query_logger(
-                [&](db::query_log_entry const& e)
+                [&](mysql::query_log_entry const& e)
                 {
                     logged_sql = e.sql;
                     logged_rows = e.row_count;
@@ -624,7 +624,7 @@ TEST_CASE("db: transaction commit", "[db][integration]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            db::db_pool dbpool(ioc.get_executor(), cfg);
+            mysql::connection_pool dbpool(ioc.get_executor(), cfg);
             dbpool.start();
 
             auto sess = co_await dbpool.async_acquire();
@@ -668,7 +668,7 @@ TEST_CASE("db: transaction rollback on drop", "[db][integration]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            db::db_pool dbpool(ioc.get_executor(), cfg);
+            mysql::connection_pool dbpool(ioc.get_executor(), cfg);
             dbpool.start();
 
             auto sess = co_await dbpool.async_acquire();
@@ -706,7 +706,7 @@ TEST_CASE("db_middleware: throws when no middleware registered", "[db][middlewar
         "/db/nomw",
         [](httplib::server::request& req, httplib::server::response& resp)
         {
-            REQUIRE_THROWS_AS(httplib::server::middleware::get_db_session(req), std::runtime_error);
+            REQUIRE_THROWS_AS(httplib::server::middleware::get_session(req), std::runtime_error);
             resp.set_string_content("ok"sv, "text/plain"sv);
         });
 

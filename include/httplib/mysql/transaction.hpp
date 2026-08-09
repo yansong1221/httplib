@@ -2,10 +2,10 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 
 #include "httplib/config.hpp"
-#include "httplib/db/db_fwd.hpp"
+#include "httplib/mysql/mysql_fwd.hpp"
 #include <memory>
 
-namespace httplib::db
+namespace httplib::mysql
 {
 
     class HTTPLIB_API transaction
@@ -21,11 +21,11 @@ namespace httplib::db
         net::awaitable<void> commit();
 
         struct impl;
-        explicit transaction(db_session& sess);
+        explicit transaction(session& sess);
 
       private:
         std::unique_ptr<impl> impl_;
     };
 
-} // namespace httplib::db
+} // namespace httplib::mysql
 #endif // HTTPLIB_ENABLED_DATABASE

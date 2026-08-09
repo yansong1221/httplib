@@ -1,7 +1,7 @@
 #pragma once
 #ifdef HTTPLIB_ENABLED_DATABASE
 
-#include "db_fwd.hpp"
+#include "mysql_fwd.hpp"
 #include <chrono>
 #include <cstdint>
 #include <memory>
@@ -9,7 +9,7 @@
 #include <string>
 #include <string_view>
 
-namespace httplib::db
+namespace httplib::mysql
 {
 
     enum class column_type
@@ -25,11 +25,11 @@ namespace httplib::db
         null,
         unknown
     };
-    struct db_date
+    struct date
     {
         unsigned year = 0, month = 0, day = 0;
     };
-    struct db_datetime
+    struct datetime
     {
         unsigned year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
         unsigned long microsecond = 0;
@@ -73,11 +73,11 @@ namespace httplib::db
         std::string_view as_blob(size_t col) const;
         std::string_view as_blob(std::string_view name) const;
 
-        db_date as_date(size_t col) const;
-        db_date as_date(std::string_view name) const;
+        date as_date(size_t col) const;
+        date as_date(std::string_view name) const;
 
-        db_datetime as_datetime(size_t col) const;
-        db_datetime as_datetime(std::string_view name) const;
+        datetime as_datetime(size_t col) const;
+        datetime as_datetime(std::string_view name) const;
 
         std::chrono::microseconds as_duration(size_t col, std::optional<std::chrono::microseconds> d = {}) const;
         std::chrono::microseconds as_duration(std::string_view name,
@@ -118,11 +118,11 @@ namespace httplib::db
             {
                 return as_blob(col, d);
             }
-            else if constexpr (std::is_same_v<T, db_date>)
+            else if constexpr (std::is_same_v<T, date>)
             {
                 return as_date(col);
             }
-            else if constexpr (std::is_same_v<T, db_datetime>)
+            else if constexpr (std::is_same_v<T, datetime>)
             {
                 return as_datetime(col);
             }
@@ -149,5 +149,5 @@ namespace httplib::db
         std::unique_ptr<impl> impl_;
     };
 
-} // namespace httplib::db
+} // namespace httplib::mysql
 #endif

@@ -12,13 +12,13 @@ namespace httplib::server::middleware
     class db_middleware::impl
     {
       public:
-        std::shared_ptr<db::db_pool> pool;
+        std::shared_ptr<mysql::connection_pool> pool;
         db_middleware_options opts;
 
-        impl(std::shared_ptr<db::db_pool> p, db_middleware_options o) : pool(std::move(p)), opts(std::move(o)) {}
+        impl(std::shared_ptr<mysql::connection_pool> p, db_middleware_options o) : pool(std::move(p)), opts(std::move(o)) {}
     };
 
-    db_middleware::db_middleware(std::shared_ptr<db::db_pool> pool, db_middleware_options opts)
+    db_middleware::db_middleware(std::shared_ptr<mysql::connection_pool> pool, db_middleware_options opts)
         : impl_(std::make_unique<impl>(std::move(pool), std::move(opts)))
     {
     }
@@ -47,14 +47,14 @@ namespace httplib::server::middleware
     db_middleware::before(request& req, response&)
     {
         auto session = co_await impl_->pool->async_acquire();
-        auto* ptr = new db::db_session(std::move(session));
-        req.set_custom_data(db_conn_key, std::any(ptr));
+        auto* ptr = new mysql::session(std::move(session));
+        req.set_custom_data(conn_key, std::any(ptr));
         req.set_custom_data("httplib.db.pool_ref", std::any(impl_->pool));
 
         if (impl_->opts.auto_transaction)
         {
-            auto tx = co_await get_db_session(req).begin();
-            req.set_custom_data(k_tx_key, std::any(new db::transaction(std::move(tx))));
+            auto tx = co_await get_session(req).begin();
+            req.set_custom_data(k_tx_key, std::any(new mysql::transaction(std::move(tx))));
         }
 
         co_return true;
@@ -65,7 +65,7 @@ namespace httplib::server::middleware
     {
         if (impl_->opts.auto_transaction && req.has_custom_data(k_tx_key))
         {
-            auto* tx = req.custom_data<db::transaction*>(k_tx_key);
+            auto* tx = req.custom_data<mysql::transaction*>(k_tx_key);
             if (tx)
             {
                 try
@@ -80,10 +80,10 @@ namespace httplib::server::middleware
             req.erase_custom_data(k_tx_key);
         }
 
-        if (req.has_custom_data(db_conn_key))
+        if (req.has_custom_data(conn_key))
         {
-            delete req.custom_data<db::db_session*>(db_conn_key);
-            req.erase_custom_data(db_conn_key);
+            delete req.custom_data<mysql::session*>(conn_key);
+            req.erase_custom_data(conn_key);
             req.erase_custom_data("httplib.db.pool_ref");
         }
 
