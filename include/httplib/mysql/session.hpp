@@ -5,13 +5,15 @@
 #include "httplib/mysql/config.hpp"
 #include "httplib/mysql/prepared_statement.hpp"
 #include "httplib/mysql/result.hpp"
-#include "httplib/mysql/transaction.hpp"
 #include <chrono>
+#include <concepts>
 #include <cstdint>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <type_traits>
 
 namespace httplib::mysql
 {
@@ -40,7 +42,33 @@ namespace httplib::mysql
 
         prepared_statement stmt(std::string_view sql);
 
-        net::awaitable<transaction> begin();
+        net::awaitable<void> begin_transaction();
+        net::awaitable<void> commit();
+        net::awaitable<void> rollback();
+
+        template <typename F>
+            requires std::invocable<F, session&>
+                     && std::same_as<std::invoke_result_t<F, session&>, net::awaitable<void>>
+        net::awaitable<void>
+        with_transaction(F&& f)
+        {
+            co_await begin_transaction();
+            std::exception_ptr e;
+            try
+            {
+                co_await std::invoke(std::forward<F>(f), *this);
+            }
+            catch (...)
+            {
+                e = std::current_exception();
+            }
+            if (e)
+            {
+                co_await rollback();
+                std::rethrow_exception(e);
+            }
+            co_await commit();
+        }
 
         net::awaitable<bool> ping();
         net::awaitable<void> reconnect();

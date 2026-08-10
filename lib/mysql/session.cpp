@@ -4,6 +4,8 @@
 #include "mysql/result_impl.h"
 #include "mysql/session_impl.h"
 #include <boost/asio/redirect_error.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/mysql.hpp>
 #include <stdexcept>
@@ -36,7 +38,37 @@ namespace httplib::mysql
     session::session(session&&) noexcept = default;
     session& session::operator=(session&&) noexcept = default;
 
-    session::~session() = default;
+    session::~session()
+    {
+        if (impl_ && impl_->in_transaction)
+        {
+            impl_->in_transaction = false;
+            if (impl_->standalone)
+            {
+                return;
+            }
+            auto pooled = std::move(impl_->pooled);
+            auto ex = pooled.get().get_executor();
+            net::co_spawn(
+                ex,
+                [pooled = std::move(pooled)]() mutable -> net::awaitable<void>
+                {
+                    try
+                    {
+                        boost::mysql::results r;
+                        boost::mysql::diagnostics diag;
+                        co_await pooled.get().async_execute("ROLLBACK",
+                                                            r,
+                                                            diag,
+                                                            boost::asio::use_awaitable);
+                    }
+                    catch (...)
+                    {
+                    }
+                },
+                net::detached);
+        }
+    }
 
     session::impl&
     get_impl(session& self)
@@ -54,6 +86,7 @@ namespace httplib::mysql
     session::query(std::string_view sql)
     {
         auto& imp = get_impl(*this);
+
         auto start = std::chrono::steady_clock::now();
 
         boost::mysql::diagnostics diag;
@@ -84,6 +117,12 @@ namespace httplib::mysql
     session::stmt(std::string_view sql)
     {
         return prepared_statement(*this, std::string(sql));
+    }
+
+    net::awaitable<void>
+    session::begin_transaction()
+    {
+        co_await get_impl(*this).begin_transaction();
     }
 
     net::awaitable<void>
@@ -127,6 +166,18 @@ namespace httplib::mysql
     session::set_query_logger(query_logger cb)
     {
         get_impl(*this).query_logger = std::move(cb);
+    }
+
+    net::awaitable<void>
+    session::commit()
+    {
+        co_await get_impl(*this).commit();
+    }
+
+    net::awaitable<void>
+    session::rollback()
+    {
+        co_await get_impl(*this).rollback();
     }
 
     net::awaitable<void>

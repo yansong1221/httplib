@@ -56,7 +56,7 @@ namespace httplib::server::middleware
 
         if (impl_->opts.auto_transaction)
         {
-            req.data().store(std::make_shared<mysql::transaction>(*session));
+            co_await session->begin_transaction();
         }
 
         co_return true;
@@ -65,20 +65,19 @@ namespace httplib::server::middleware
     net::awaitable<bool>
     mysql_middleware::after(request& req, response&)
     {
-        if (impl_->opts.auto_transaction && req.data().has<tx_type>())
+        if (impl_->opts.auto_transaction && req.data().has<value_type>())
         {
-            auto tx = req.data().fetch<tx_type>();
-            if (tx)
+            auto sess = req.data().fetch<value_type>();
+            if (sess)
             {
                 try
                 {
-                    co_await tx->commit();
+                    co_await sess->commit();
                 }
                 catch (...)
                 {
                 }
             }
-            req.data().erase<tx_type>();
         }
 
         if (req.data().has<value_type>())

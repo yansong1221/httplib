@@ -22,7 +22,6 @@ namespace httplib::server::middleware
       public:
         using value_type = std::shared_ptr<mysql::session>;
         using pool_type = std::shared_ptr<mysql::connection_pool>;
-        using tx_type = std::shared_ptr<mysql::transaction>;
 
         inline static std::shared_ptr<mysql::connection_pool>
         fetch_pool(request& req)

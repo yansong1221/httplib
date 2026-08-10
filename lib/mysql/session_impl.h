@@ -4,7 +4,6 @@
 #include "httplib/mysql/mysql_exception.hpp"
 #include "httplib/mysql/prepared_statement.hpp"
 #include "httplib/mysql/session.hpp"
-#include "httplib/mysql/transaction.hpp"
 #include <boost/mysql/connection_pool.hpp>
 #include <boost/mysql/diagnostics.hpp>
 #include <boost/mysql/field_view.hpp>
@@ -76,12 +75,6 @@ namespace httplib::mysql
         std::unordered_map<std::string, size_t> name_to_idx;
         std::string data_str;
         bool parsed = false;
-    };
-
-    struct transaction::impl
-    {
-        session* session = nullptr;
-        bool committed = false;
     };
 
 } // namespace httplib::mysql

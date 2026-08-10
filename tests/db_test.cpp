@@ -439,7 +439,6 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
                 auto row1 = r[1];
                 REQUIRE(row1.get<int64_t>("i64").value_or(-1) == -1);
                 REQUIRE(row1.get<std::string>("str").value_or("n/a") == "n/a");
-                REQUIRE_THROWS_AS(row1.get<int64_t>("i64"), std::runtime_error);
             }
 
             // ===== type mismatch → throw =====
@@ -547,9 +546,19 @@ TEST_CASE("db: multi-statement query", "[db][integration]")
                                          "INSERT INTO __httplib_batch VALUES (2, 'b');"
                                          "SELECT * FROM __httplib_batch ORDER BY id");
 
+            // Default: first resultset (INSERT)
+            REQUIRE(r.resultset_count() == 3);
+            REQUIRE(r.affected_rows() == 1);
+            // Move to second resultset (INSERT)
+            REQUIRE(r.next_resultset());
+            REQUIRE(r.affected_rows() == 1);
+            // Move to third resultset (SELECT)
+            REQUIRE(r.next_resultset());
             REQUIRE(r.row_count() == 2);
             REQUIRE(r[0].as_int64("id") == 1);
             REQUIRE(*r[1].as_string("val") == "b");
+            // No more resultsets
+            REQUIRE_FALSE(r.next_resultset());
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_batch");
         },
@@ -697,11 +706,9 @@ TEST_CASE("db: transaction commit", "[db][integration]")
             co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_txn (id INT)");
             co_await sess.query("DELETE FROM __httplib_txn");
 
-            {
-                auto txn = co_await sess.begin();
-                co_await sess.query("INSERT INTO __httplib_txn VALUES (100)");
-                co_await txn.commit();
-            }
+            co_await sess.begin_transaction();
+            co_await sess.query("INSERT INTO __httplib_txn VALUES (100)");
+            co_await sess.commit();
 
             auto r = co_await sess.query("SELECT id FROM __httplib_txn");
             REQUIRE(r.row_count() == 1);
@@ -720,7 +727,7 @@ TEST_CASE("db: transaction commit", "[db][integration]")
     ioc.run();
 }
 
-TEST_CASE("db: transaction rollback on drop", "[db][integration]")
+TEST_CASE("db: transaction rollback", "[db][integration]")
 {
     auto cfg = make_config();
     cfg.min_connections = 1;
@@ -741,16 +748,58 @@ TEST_CASE("db: transaction rollback on drop", "[db][integration]")
             co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_rollback (id INT)");
             co_await sess.query("DELETE FROM __httplib_rollback");
 
-            {
-                auto txn = co_await sess.begin();
-                co_await sess.query("INSERT INTO __httplib_rollback VALUES (200)");
-                // txn goes out of scope without commit → rollback in destructor
-            }
+            co_await sess.begin_transaction();
+            co_await sess.query("INSERT INTO __httplib_rollback VALUES (200)");
+            co_await sess.rollback();
 
             auto r = co_await sess.query("SELECT id FROM __httplib_rollback");
             REQUIRE(r.row_count() == 0);
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_rollback");
+        },
+        [](std::exception_ptr e)
+        {
+            if (e)
+            {
+                std::rethrow_exception(e);
+            }
+        });
+
+    ioc.run();
+}
+
+TEST_CASE("db: with_transaction", "[db][integration]")
+{
+    auto cfg = make_config();
+    cfg.min_connections = 1;
+    cfg.max_connections = 4;
+
+    net::io_context ioc;
+
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            mysql::connection_pool dbpool(ioc.get_executor(), cfg);
+            dbpool.start();
+
+            auto sess = co_await dbpool.async_acquire();
+            co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
+            co_await sess.query("USE test");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_wtxn (id INT)");
+            co_await sess.query("DELETE FROM __httplib_wtxn");
+
+            co_await sess.with_transaction(
+                [](mysql::session& s) -> net::awaitable<void>
+                {
+                    co_await s.query("INSERT INTO __httplib_wtxn VALUES (1)");
+                    co_await s.query("INSERT INTO __httplib_wtxn VALUES (2)");
+                });
+
+            auto r = co_await sess.query("SELECT id FROM __httplib_wtxn ORDER BY id");
+            REQUIRE(r.row_count() == 2);
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_wtxn");
         },
         [](std::exception_ptr e)
         {

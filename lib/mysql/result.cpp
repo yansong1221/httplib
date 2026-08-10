@@ -51,7 +51,7 @@ namespace httplib::mysql
         static boost::mysql::field_view
         ff(result::impl const& i, size_t r, size_t c)
         {
-            return i.data.rows().at(r).at(c);
+            return i.rows().at(r).at(c);
         }
         static int64_t
         fi(boost::mysql::field_view const& f)
@@ -158,15 +158,15 @@ namespace httplib::mysql
     row::as_string(size_t col) const
     {
         return detail::detail_value<std::string_view>(*impl_,
-                                                      col,
-                                                      [this](auto& f) -> std::string_view
-                                                      {
-                                                          if (!f.is_string())
-                                                          {
-                                                              throw std::runtime_error("db: cannot convert to string");
-                                                          }
-                                                          return f.as_string();
-                                                      });
+                                                       col,
+                                                       [this](auto& f) -> std::string_view
+                                                       {
+                                                           if (!f.is_string())
+                                                           {
+                                                               throw std::runtime_error("db: cannot convert to string");
+                                                           }
+                                                           return f.as_string();
+                                                       });
     }
     std::optional<std::string_view>
     row::as_string(std::string_view name) const
@@ -377,24 +377,41 @@ namespace httplib::mysql
         return parent->column_index(name);
     }
 
+    void
+    result::impl::load_resultset(size_t idx)
+    {
+        auto rs = data[idx];
+        affected = rs.affected_rows();
+        insert_id = rs.last_insert_id();
+        warnings = rs.warning_count();
+        col_names.clear();
+        col_types.clear();
+        if (rs.has_value())
+        {
+            auto m = rs.meta();
+            col_names.reserve(m.size());
+            col_types.reserve(m.size());
+            for (auto& c : m)
+            {
+                auto s = c.column_name();
+                col_names.emplace_back(s.data(), s.size());
+                col_types.push_back(detail::map_column_type(c.type(), c.is_unsigned()));
+            }
+        }
+    }
+
     result::impl::impl(boost::mysql::results&& r) : data(std::move(r))
     {
-        if (!data.has_value())
+        if (data.has_value())
         {
-            return;
+            load_resultset(0);
         }
-        affected = data.affected_rows();
-        insert_id = data.last_insert_id();
-        warnings = data.warning_count();
-        auto m = data.meta();
-        col_names.reserve(m.size());
-        col_types.reserve(m.size());
-        for (auto& c : m)
-        {
-            auto s = c.column_name();
-            col_names.emplace_back(s.data(), s.size());
-            col_types.push_back(detail::map_column_type(c.type(), c.is_unsigned()));
-        }
+    }
+
+    boost::mysql::rows_view
+    result::impl::rows() const
+    {
+        return data[resultset_index].rows();
     }
 
     result::result() : impl_(std::make_unique<impl>()) {}
@@ -416,13 +433,31 @@ namespace httplib::mysql
     result::empty() const
     {
         auto& i = get_impl(*this);
-        return !i.data.has_value() || i.data.rows().empty();
+        return !i.data.has_value() || i.rows().empty();
+    }
+    size_t
+    result::resultset_count() const
+    {
+        auto& i = get_impl(*this);
+        return i.data.has_value() ? i.data.size() : 0;
+    }
+    bool
+    result::next_resultset()
+    {
+        auto& i = get_impl(*this);
+        if (i.resultset_index + 1 >= i.data.size())
+        {
+            return false;
+        }
+        ++i.resultset_index;
+        i.load_resultset(i.resultset_index);
+        return true;
     }
     size_t
     result::row_count() const
     {
         auto& i = get_impl(*this);
-        return i.data.has_value() ? i.data.rows().size() : 0;
+        return i.data.has_value() ? i.rows().size() : 0;
     }
     uint64_t
     result::affected_rows() const

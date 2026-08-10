@@ -12,7 +12,6 @@ namespace httplib::mysql
     class connection_pool;
     class row;
     class prepared_statement;
-    class transaction;
 
     struct query_log_entry;
 

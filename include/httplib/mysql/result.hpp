@@ -25,6 +25,9 @@ namespace httplib::mysql
 
         bool empty() const;
 
+        size_t resultset_count() const;
+        bool next_resultset();
+
         size_t row_count() const;
 
         uint64_t affected_rows() const;
@@ -39,7 +42,7 @@ namespace httplib::mysql
 
         std::string const& column_name(size_t col) const;
 
-        column_type column_type(size_t col) const;
+        mysql::column_type column_type(size_t col) const;
 
         row operator[](size_t index) const;
 
