@@ -1,4 +1,4 @@
-#ifdef HTTPLIB_ENABLED_DATABASE
+﻿#ifdef HTTPLIB_ENABLED_DATABASE
 #include "httplib/mysql/session.hpp"
 #include "httplib/mysql/connection_pool.hpp"
 #include "mysql/result_impl.h"
@@ -53,7 +53,31 @@ namespace httplib::mysql
     net::awaitable<result>
     session::query(std::string_view sql)
     {
-        co_return co_await stmt(sql).execute();
+        auto& imp = get_impl(*this);
+        auto start = std::chrono::steady_clock::now();
+
+        boost::mysql::diagnostics diag;
+        boost::system::error_code ec;
+        boost::mysql::results data;
+        imp.get_conn().set_meta_mode(boost::mysql::metadata_mode::full);
+        co_await imp.get_conn().async_execute(
+            std::string(sql), data, diag, boost::asio::redirect_error(boost::asio::use_awaitable, ec));
+        raise_mysql_error(ec, diag, sql);
+
+        auto res = result(std::make_unique<result::impl>(std::move(data)));
+
+        if (imp.query_logger)
+        {
+            query_log_entry entry;
+            entry.sql = std::string(sql);
+            entry.duration
+                = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start);
+            entry.row_count = res.row_count();
+            entry.affected_rows = res.affected_rows();
+            imp.query_logger(entry);
+        }
+
+        co_return res;
     }
 
     prepared_statement

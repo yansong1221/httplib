@@ -433,7 +433,7 @@ namespace httplib::mysql
                     impl_->sql,
                     diag,
                     boost::asio::redirect_error(boost::asio::use_awaitable, ec));
-                raise_mysql_error(ec, diag);
+                raise_mysql_error(ec, diag, impl_->sql);
                 impl_->stmt_prepared = true;
             }
 
@@ -452,7 +452,7 @@ namespace httplib::mysql
                                                       diag,
                                                       boost::asio::redirect_error(boost::asio::use_awaitable, ec));
             }
-            raise_mysql_error(ec, diag);
+            raise_mysql_error(ec, diag, impl_->sql);
         }
         catch (...)
         {

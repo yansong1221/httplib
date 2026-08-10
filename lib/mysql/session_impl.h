@@ -18,19 +18,24 @@ namespace httplib::mysql
 {
 
     inline void
-    raise_mysql_error(boost::system::error_code ec, boost::mysql::diagnostics const& diag)
+    raise_mysql_error(boost::system::error_code ec,
+                      boost::mysql::diagnostics const& diag,
+                      std::string_view sql)
     {
         if (!ec)
-        {
             return;
-        }
+        auto what = std::string("[") + std::to_string(ec.value()) + "] " + ec.message() + " (SQL: "
+                    + std::string(sql) + ")";
         auto msg = diag.server_message();
-        auto what = std::string("[") + std::to_string(ec.value()) + "] " + ec.message();
         if (!msg.empty())
-        {
             what += ": " + std::string(msg.data(), msg.size());
-        }
         throw mysql_exception(ec, what);
+    }
+
+    inline void
+    raise_mysql_error(boost::system::error_code ec, boost::mysql::diagnostics const& diag)
+    {
+        raise_mysql_error(ec, diag, {});
     }
 
     struct session::impl
