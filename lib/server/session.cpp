@@ -344,7 +344,7 @@ namespace httplib::server
                                               req_target,
                                               log_endp_format,
                                               e.what());
-                resp.set_string_content(std::string(e.what()), "text/plain", http::status::internal_server_error);
+                resp.set_error_content(http::status::internal_server_error);
             }
             catch (...)
             {
@@ -352,10 +352,7 @@ namespace httplib::server
                                               req.method_string(),
                                               req_target,
                                               log_endp_format);
-                using namespace std::string_view_literals;
-                resp.set_string_content(std::string("unknown exception"),
-                                        "text/plain",
-                                        http::status::internal_server_error);
+                resp.set_error_content(http::status::internal_server_error);
             }
 
             if (!co_await async_write(req, resp))

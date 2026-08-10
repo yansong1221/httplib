@@ -2,6 +2,7 @@
 #include "httplib/mysql/connection_pool.hpp"
 #include "httplib/mysql/session.hpp"
 #include "mysql/session_impl.h"
+#include <atomic>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/use_awaitable.hpp>
@@ -14,6 +15,7 @@ namespace httplib::mysql
     {
         pool_params c;
         std::shared_ptr<boost::mysql::connection_pool> pool;
+        std::atomic<bool> stopped { true };
     };
 
     static boost::mysql::pool_params
@@ -47,12 +49,20 @@ namespace httplib::mysql
     void
     connection_pool::start()
     {
+        if (!impl_->stopped.exchange(false))
+        {
+            return;
+        }
         impl_->pool->async_run(net::detached);
     }
 
     net::awaitable<session>
     connection_pool::async_acquire(std::chrono::steady_clock::duration wait_timeout)
     {
+        if (impl_->stopped)
+        {
+            throw std::runtime_error("connection_pool: not started");
+        }
         auto pooled = co_await (wait_timeout <= std::chrono::steady_clock::duration::zero()
                                     ? impl_->pool->async_get_connection(boost::asio::use_awaitable)
                                     : impl_->pool->async_get_connection(
@@ -66,6 +76,10 @@ namespace httplib::mysql
     void
     connection_pool::stop()
     {
+        if (impl_->stopped.exchange(true))
+        {
+            return;
+        }
         impl_->pool->cancel();
     }
 
