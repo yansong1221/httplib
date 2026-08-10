@@ -1,6 +1,8 @@
 #pragma once
 #include "httplib/config.hpp"
+#include "httplib/util/misc.hpp"
 #include <charconv>
+#include <concepts>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -13,79 +15,52 @@ namespace httplib::html
       public:
         using container_type = std::unordered_multimap<std::string, std::string>;
 
-        std::string_view at(std::string const& key) const;
-
-        template <typename T = int64_t>
-        T
-        at_number(std::string const& key) const
-        {
-            auto v = at(key);
-
-            T out {};
-            auto [p, ec] = std::from_chars(v.data(), v.data() + v.size(), out);
-            if (ec != std::errc {})
-            {
-                throw std::runtime_error("invalid param: " + key);
-            }
-
-            return out;
-        }
-
-        bool at_bool(std::string const& key) const;
-
-        template <typename T,
-                  typename = std::enable_if_t<std::integral<T> || std::floating_point<T> || std::is_same_v<T, bool>>>
+        template <typename T = std::string_view>
+            requires std::integral<T> || std::floating_point<T> || std::same_as<T, bool> || std::same_as<T, std::string>
+                     || std::same_as<T, std::string_view>
         T
         at(std::string const& key) const
         {
-            if constexpr (std::is_same_v<T, bool>)
-            {
-                return at_bool(key);
-            }
-            else
-            {
-                return at_number<T>(key);
-            }
+            return convert<T>(at_raw(key));
         }
 
-        std::vector<std::string_view> all(std::string const& key) const;
-
-        template <typename T = int64_t>
-        std::vector<T>
-        all_number(std::string const& key) const
-        {
-            std::vector<T> result {};
-            for (auto const& v : all(key))
-            {
-                T out {};
-                auto [p, ec] = std::from_chars(v.data(), v.data() + v.size(), out);
-                if (ec != std::errc {})
-                {
-                    throw std::runtime_error("invalid param: " + key);
-                }
-
-                result.push_back(out);
-            }
-
-            return result;
-        }
-
-        template <typename T,
-                  typename = std::enable_if_t<std::integral<T> || std::floating_point<T> || std::is_same_v<T, bool>>>
+        template <typename T = std::string_view>
+            requires std::integral<T> || std::floating_point<T> || std::same_as<T, bool> || std::same_as<T, std::string>
+                     || std::same_as<T, std::string_view>
         std::vector<T>
         all(std::string const& key) const
         {
-            return all_number<T>(key);
+            std::vector<T> result {};
+            for (auto const& sv : all_raw(key))
+            {
+                result.push_back(convert<T>(sv));
+            }
+            return result;
         }
 
-        void add(std::string const& key, std::string const& val);
         template <typename T>
+            requires std::integral<T> || std::floating_point<T> || std::same_as<T, bool>
+                     || std::convertible_to<T, std::string_view>
         void
-        add_number(std::string const& key, T const& val)
+        add(std::string const& key, T const& val)
         {
-            add(key, std::to_string(val));
+            if constexpr (std::same_as<T, bool>)
+            {
+                add_raw(key, val ? "true" : "false");
+            }
+            else if constexpr (std::same_as<T, std::string>)
+            {
+                add_raw(key, std::move(val));
+            }
+            else if constexpr (std::convertible_to<T, std::string_view>)
+            {
+                add_raw(key, std::string(std::string_view(val)));
+            }
+            else
+            {
+                add_raw(key, std::to_string(val));
+            }
         }
-        void add_bool(std::string const& key, bool val);
 
         bool has(std::string const& key) const;
         bool empty() const;
@@ -95,6 +70,42 @@ namespace httplib::html
         std::string encoded() const;
 
       private:
+        void add_raw(std::string const& key, std::string const& val);
+        std::string_view at_raw(std::string const& key) const;
+        std::vector<std::string_view> all_raw(std::string const& key) const;
+
+        template <typename T>
+            requires std::integral<T> || std::floating_point<T> || std::same_as<T, bool> || std::same_as<T, std::string>
+                     || std::same_as<T, std::string_view>
+        static T
+        convert(std::string_view sv)
+        {
+            if constexpr (std::same_as<T, std::string_view>)
+            {
+                return sv;
+            }
+            else if constexpr (std::same_as<T, std::string>)
+            {
+                return std::string(sv);
+            }
+            else if constexpr (std::same_as<T, bool>)
+            {
+                if (sv == "1" || sv == "true")
+                {
+                    return true;
+                }
+                if (sv == "0" || sv == "false")
+                {
+                    return false;
+                }
+                throw std::runtime_error("query_param: invalid bool: " + std::string(sv));
+            }
+            else
+            {
+                return util::from_chars_strict<T>(sv);
+            }
+        }
+
         container_type params_;
     };
 } // namespace httplib::html

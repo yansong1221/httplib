@@ -112,7 +112,7 @@ namespace httplib::server
     void
     mount_point_entry::operator()(request& req, response& res) const
     {
-        auto relative_path = req.path_param("*");
+        auto relative_path = req.path_param<std::string>("*");
         if (!detail::is_valid_path(relative_path))
         {
             res.set_error_content(http::status::bad_request);

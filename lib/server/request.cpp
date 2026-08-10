@@ -116,7 +116,7 @@ namespace httplib::server
     }
 
     std::string_view
-    request::path_param(std::string const& key) const
+    request::path_param_raw(std::string const& key) const
     {
         return impl_->path_param(key);
     }

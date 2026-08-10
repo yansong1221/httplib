@@ -6,7 +6,7 @@
 namespace httplib::html
 {
     std::string_view
-    query_params::at(std::string const& key) const
+    query_params::at_raw(std::string const& key) const
     {
         auto iter = params_.find(key);
         if (iter == params_.end())
@@ -17,7 +17,7 @@ namespace httplib::html
     }
 
     std::vector<std::string_view>
-    query_params::all(std::string const& key) const
+    query_params::all_raw(std::string const& key) const
     {
         std::vector<std::string_view> values;
         auto range = params_.equal_range(key);
@@ -90,30 +90,9 @@ namespace httplib::html
     }
 
     void
-    query_params::add(std::string const& key, std::string const& val)
+    query_params::add_raw(std::string const& key, std::string const& val)
     {
         params_.emplace(key, val);
-    }
-
-    void
-    query_params::add_bool(std::string const& key, bool val)
-    {
-        params_.emplace(key, val ? "true" : "false");
-    }
-
-    bool
-    query_params::at_bool(std::string const& key) const
-    {
-        auto v = at(key);
-        if (v == "true" || v == "1")
-        {
-            return true;
-        }
-        if (v == "false" || v == "0")
-        {
-            return false;
-        }
-        throw std::runtime_error("invalid param: " + key);
     }
 
 } // namespace httplib::html

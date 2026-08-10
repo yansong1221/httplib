@@ -89,7 +89,7 @@ TEST_CASE("query_params: at_number throws on invalid input", "[body-utils]")
     httplib::html::query_params qp;
     REQUIRE(qp.decode("val=not-a-number"));
 
-    REQUIRE_THROWS(qp.at_number<int64_t>("val"));
+    REQUIRE_THROWS(qp.at<int64_t>("val"));
 }
 
 TEST_CASE("form_data: field has_data and is_file", "[body-utils]")

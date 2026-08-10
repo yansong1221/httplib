@@ -3,10 +3,9 @@
 #include "httplib/server/request_data.hpp"
 #include "httplib/server/server_fwd.hpp"
 #include <any>
-#include <charconv>
-#include <type_traits>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/http/message.hpp>
+#include <charconv>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -57,32 +56,35 @@ namespace httplib::server
         request_data& data();
         request_data const& data() const;
 
-        std::string_view path_param(std::string const& key) const;
-
-        template <typename T, typename = std::enable_if_t<std::integral<T> || std::floating_point<T> || std::is_same_v<T, std::string>>>
-        T
-        path_param(std::string const& key) const
-        {
-            auto sv = static_cast<std::string_view>(path_param(key));
-            if constexpr (std::same_as<T, std::string>)
-            {
-                return std::string(sv);
-            }
-            else
-            {
-                T val {};
-                auto [p, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), val);
-                if (ec != std::errc())
-                    throw std::runtime_error("path_param: cannot convert '" + std::string(sv) + "'");
-                return val;
-            }
-        }
-
         httplib::body::any_body::value_type& body();
         httplib::body::any_body::value_type const& body() const;
 
         bool is_chunked() const;
         chunk_reader* get_chunk_reader();
+
+        template <typename T = std::string_view>
+            requires std::integral<T> || std::floating_point<T> || std::same_as<T, std::string>
+                     || std::same_as<T, std::string_view>
+        T
+        path_param(std::string const& key) const
+        {
+            auto sv = this->path_param_raw(key);
+            if constexpr (std::same_as<T, std::string_view>)
+            {
+                return sv;
+            }
+            else if constexpr (std::same_as<T, std::string>)
+            {
+                return std::string(sv);
+            }
+            else
+            {
+                return util::from_chars_strict<T>(sv);
+            }
+        }
+
+      private:
+        std::string_view path_param_raw(std::string const& key) const;
 
       private:
         friend impl&

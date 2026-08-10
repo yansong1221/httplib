@@ -2,6 +2,7 @@
 #include "httplib/config.hpp"
 #include "httplib/util/type_traits.h"
 #include <boost/asio/buffer.hpp>
+#include <charconv>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -24,6 +25,19 @@ namespace httplib::util
             return [handler = std::forward<Func>(handler)](auto&&... args) -> net::awaitable<return_type>
             { co_return std::invoke(handler, args...); };
         }
+    }
+    template <typename T>
+        requires std::integral<T> || std::floating_point<T>
+    T
+    from_chars_strict(std::string_view sv)
+    {
+        T val {};
+        auto [p, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), val);
+        if (ec != std::errc {} || p != sv.data() + sv.size())
+        {
+            throw std::runtime_error("cannot convert '" + std::string(sv) + "'");
+        }
+        return val;
     }
     /**
      * Convert a hex value to a decimal value.
