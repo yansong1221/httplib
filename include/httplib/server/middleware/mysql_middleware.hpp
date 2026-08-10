@@ -14,6 +14,7 @@ namespace httplib::server::middleware
     struct mysql_middleware_options
     {
         bool auto_transaction = false;
+        std::chrono::steady_clock::duration acquire_timeout = std::chrono::seconds(5);
     };
 
     class HTTPLIB_API mysql_middleware

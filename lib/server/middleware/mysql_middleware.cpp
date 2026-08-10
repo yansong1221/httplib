@@ -48,7 +48,8 @@ namespace httplib::server::middleware
     net::awaitable<bool>
     mysql_middleware::before(request& req, response&)
     {
-        auto session = std::make_shared<mysql::session>(co_await impl_->pool->async_acquire());
+        auto session
+            = std::make_shared<mysql::session>(co_await impl_->pool->async_acquire(impl_->opts.acquire_timeout));
 
         req.data().store(session);
         req.data().store(impl_->pool);
