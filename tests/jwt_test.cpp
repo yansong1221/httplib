@@ -243,7 +243,7 @@ TEST_CASE("JWT: middleware auth via Bearer token", "[jwt]")
         "/protected",
         [](httplib::server::request& req, httplib::server::response& resp)
         {
-            auto& jwt = mw::get_data<mw::jwt_auth_middleware>(req);
+            auto& jwt = mw::fetch<mw::jwt_auth_middleware>(req);
             resp.set_string_content(jwt.get_subject(), "text/plain");
         },
         ja);

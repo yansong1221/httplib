@@ -1,5 +1,6 @@
-#ifdef HTTPLIB_ENABLED_DATABASE
+﻿#ifdef HTTPLIB_ENABLED_DATABASE
 #include "httplib/server/middleware/mysql_query_log.hpp"
+#include "httplib/server/middleware/data.hpp"
 #include "httplib/server/middleware/mysql_middleware.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
@@ -7,8 +8,6 @@
 
 namespace httplib::server::middleware
 {
-
-    static constexpr char const* k_query_log_key = "httplib.db.query_log";
 
     class mysql_query_log_middleware::impl
     {
@@ -46,16 +45,16 @@ namespace httplib::server::middleware
     bool
     mysql_query_log_middleware::before(request& req, response&)
     {
-        if (!req.has_custom_data(mysql_conn_key))
+        if (!has<mysql_middleware>(req))
         {
             return true;
         }
 
-        auto log = std::make_shared<std::vector<mysql::query_log_entry>>();
         auto opts = impl_->opts;
+        auto log = std::make_shared<query_log_options::value_type>();
+        auto sess = fetch<mysql_middleware>(req);
 
-        auto& sess = get_mysql_session(req);
-        sess.set_query_logger(
+        sess->set_query_logger(
             [log, opts](mysql::query_log_entry const& entry) mutable
             {
                 if (opts.slow_query_threshold.count() > 0 && entry.duration >= opts.slow_query_threshold
@@ -66,32 +65,30 @@ namespace httplib::server::middleware
                 log->push_back(entry);
             });
 
-        req.set_custom_data(k_query_log_key, std::any(log));
+        store<mysql_query_log_middleware>(req, std::move(log));
         return true;
     }
 
     bool
     mysql_query_log_middleware::after(request& req, response&)
     {
-        if (!req.has_custom_data(k_query_log_key))
+        if (!has<mysql_query_log_middleware>(req))
         {
             return true;
         }
 
-        auto log = req.custom_data<std::shared_ptr<std::vector<mysql::query_log_entry>>>(k_query_log_key);
+        auto log = fetch<mysql_query_log_middleware>(req);
 
         if (impl_->opts.on_request_complete)
         {
             impl_->opts.on_request_complete(req, *log);
         }
 
-        if (req.has_custom_data(mysql_conn_key))
+        if (has<mysql_middleware>(req))
         {
-            auto& sess = get_mysql_session(req);
-            sess.set_query_logger({});
+            auto& sess = fetch<mysql_middleware>(req);
+            sess->set_query_logger({});
         }
-
-        req.erase_custom_data(k_query_log_key);
         return true;
     }
 

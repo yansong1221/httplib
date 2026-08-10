@@ -1,8 +1,8 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 #include "httplib/mysql/prepared_statement.hpp"
+#include "httplib/mysql/session.hpp"
 #include "mysql/result_impl.h"
 #include "mysql/session_impl.h"
-#include "httplib/mysql/session.hpp"
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/mysql.hpp>
@@ -129,17 +129,15 @@ namespace httplib::mysql
     prepared_statement&
     prepared_statement::bind(time v)
     {
-        impl_->params.emplace_back(
-            std::chrono::hours(v.hour) + std::chrono::minutes(v.minute) + std::chrono::seconds(v.second)
-            + std::chrono::microseconds(v.microsecond));
+        impl_->params.emplace_back(std::chrono::hours(v.hour) + std::chrono::minutes(v.minute)
+                                   + std::chrono::seconds(v.second) + std::chrono::microseconds(v.microsecond));
         return *this;
     }
 
     prepared_statement&
     prepared_statement::bind(net::const_buffer v)
     {
-        impl_->params.emplace_back(
-            boost::mysql::blob_view(static_cast<unsigned char const*>(v.data()), v.size()));
+        impl_->params.emplace_back(boost::mysql::blob_view(static_cast<unsigned char const*>(v.data()), v.size()));
         return *this;
     }
 
@@ -378,10 +376,10 @@ namespace httplib::mysql
     prepared_statement::bind(std::string_view name, net::const_buffer v)
     {
         impl_->data_str = std::string(static_cast<char const*>(v.data()), v.size());
-        bind_named(*impl_,
-                   name,
-                   boost::mysql::field_view(
-                       boost::mysql::blob_view(static_cast<unsigned char const*>(v.data()), v.size())));
+        bind_named(
+            *impl_,
+            name,
+            boost::mysql::field_view(boost::mysql::blob_view(static_cast<unsigned char const*>(v.data()), v.size())));
         return *this;
     }
 
@@ -432,9 +430,7 @@ namespace httplib::mysql
         {
             if (params.empty())
             {
-                co_await imp.pooled.get().async_execute(impl_->stmt.bind(),
-                                                        data,
-                                                        boost::asio::use_awaitable);
+                co_await imp.pooled.get().async_execute(impl_->stmt.bind(), data, boost::asio::use_awaitable);
             }
             else
             {
@@ -533,8 +529,7 @@ namespace httplib::mysql
     prepared_statement&
     prepared_statement::into(date& v, std::string_view name)
     {
-        impl_->extractors.push_back(
-            [&v, n = std::string(name)](result const& r) { v = r[0].as_date(n); });
+        impl_->extractors.push_back([&v, n = std::string(name)](result const& r) { v = r[0].as_date(n); });
         return *this;
     }
     prepared_statement&
@@ -607,36 +602,31 @@ namespace httplib::mysql
     prepared_statement&
     prepared_statement::into(datetime& v, std::string_view name)
     {
-        impl_->extractors.push_back(
-            [&v, n = std::string(name)](result const& r) { v = r[0].as_datetime(n); });
+        impl_->extractors.push_back([&v, n = std::string(name)](result const& r) { v = r[0].as_datetime(n); });
         return *this;
     }
     prepared_statement&
     prepared_statement::into(time& v, std::string_view name)
     {
-        impl_->extractors.push_back(
-            [&v, n = std::string(name)](result const& r) { v = r[0].as_time(n); });
+        impl_->extractors.push_back([&v, n = std::string(name)](result const& r) { v = r[0].as_time(n); });
         return *this;
     }
     prepared_statement&
     prepared_statement::into(std::chrono::system_clock::time_point& v, std::string_view name)
     {
-        impl_->extractors.push_back(
-            [&v, n = std::string(name)](result const& r) { v = r[0].as_timestamp(n); });
+        impl_->extractors.push_back([&v, n = std::string(name)](result const& r) { v = r[0].as_timestamp(n); });
         return *this;
     }
     prepared_statement&
     prepared_statement::into(net::const_buffer& v, std::string_view name)
     {
-        impl_->extractors.push_back(
-            [&v, n = std::string(name)](result const& r) { v = r[0].as_blob(n); });
+        impl_->extractors.push_back([&v, n = std::string(name)](result const& r) { v = r[0].as_blob(n); });
         return *this;
     }
     prepared_statement&
     prepared_statement::into(boost::json::value& v, std::string_view name)
     {
-        impl_->extractors.push_back(
-            [&v, n = std::string(name)](result const& r) { v = r[0].as_json(n); });
+        impl_->extractors.push_back([&v, n = std::string(name)](result const& r) { v = r[0].as_json(n); });
         return *this;
     }
 

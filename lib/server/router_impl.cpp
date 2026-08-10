@@ -146,7 +146,7 @@ namespace httplib::server
             co_return;
         }
 
-        req.set_path_param(std::unordered_map<std::string, std::string>(match.params));
+        get_impl(req).set_path_param(std::unordered_map<std::string, std::string>(match.params));
 
         if (match.chunked)
         {

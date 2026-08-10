@@ -336,21 +336,32 @@ setup_http_routes(httplib::server::router& router)
         },
         *limiter);
 
-    // ---- Custom data on request (via custom aspect) ----
+    // ---- Custom middleware: attach pre-computed data ----
+    struct early_data_tag
+    {
+        std::string value;
+    };
+    class early_data_middleware
+    {
+      public:
+        bool
+        before(httplib::server::request& req, httplib::server::response&) const
+        {
+            req.data().store(early_data_tag { "computed-early" });
+            return true;
+        }
+    };
+
     router.set_http_handler<http::verb::get>(
         "/api/custom-data",
         [](httplib::server::request& req, httplib::server::response& resp)
         {
-            auto data = req.custom_data<std::string>("early-data");
+            auto& tag = req.data().fetch<early_data_tag>();
             resp.set_json_content({
-                { "data", data }
+                { "data", tag.value }
             });
         },
-        [](httplib::server::request& req, httplib::server::response&)
-        {
-            req.set_custom_data("early-data", std::any(std::string("computed-early")));
-            return true;
-        });
+        early_data_middleware {});
 
     // ---- 404 handler with log aspect ----
     router.set_http_not_found_handler(
@@ -670,7 +681,7 @@ Built-in middleware on display:
 
 Custom aspects:
   log_t                Request/response logging
-  Anonymous aspect     Attaches computed data via req.set_custom_data()
+   Custom middleware   Attaches computed data via req.data().store()
 
 Press Ctrl+C to stop the server.
 )";

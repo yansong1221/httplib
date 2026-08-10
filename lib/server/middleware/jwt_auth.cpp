@@ -1,4 +1,4 @@
-#include "httplib/server/middleware/jwt_auth.hpp"
+﻿#include "httplib/server/middleware/jwt_auth.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include <spdlog/spdlog.h>
@@ -116,7 +116,7 @@ namespace httplib::server::middleware
             return false;
         }
 
-        req.set_custom_data(key, std::move(decoded));
+        req.data().store(std::move(decoded));
         return true;
     }
 

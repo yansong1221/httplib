@@ -25,7 +25,6 @@ namespace httplib::server
     namespace detail
     {
 
-        constexpr auto kWsInterceptorKey = "ws-interceptor";
         using ws_client_ptr = std::shared_ptr<client::ws_client>;
         using ws_interceptor_ptr = std::shared_ptr<ws_interceptor>;
 
@@ -776,10 +775,10 @@ namespace httplib::server
                 co_return;
             }
 
-            req.set_custom_data(detail::kWsForwardKey, upstream);
+            req.data().store<detail::ws_client_ptr>(std::move(upstream));
             if (interceptor)
             {
-                req.set_custom_data(detail::kWsInterceptorKey, interceptor);
+                req.data().store<detail::ws_interceptor_ptr>(std::move(interceptor));
             }
         };
 
@@ -793,19 +792,19 @@ namespace httplib::server
             }
 
             auto& req = conn->http_request();
-            if (!req.has_custom_data(detail::kWsForwardKey))
+            if (!req.data().has<detail::ws_client_ptr>())
             {
                 conn->close();
                 co_return;
             }
 
-            if (req.has_custom_data(detail::kWsInterceptorKey))
+            if (req.data().has<detail::ws_interceptor_ptr>())
             {
-                auto wsi = req.custom_data<detail::ws_interceptor_ptr>(detail::kWsInterceptorKey);
+                auto wsi = req.data().fetch<detail::ws_interceptor_ptr>();
                 co_await wsi->on_upstream_send(data, binary);
             }
 
-            auto upstream = req.custom_data<detail::ws_client_ptr>(detail::kWsForwardKey);
+            auto upstream = req.data().fetch<detail::ws_client_ptr>();
             auto ec = co_await upstream->async_send(std::string(data), binary);
             if (ec)
             {
@@ -823,11 +822,11 @@ namespace httplib::server
             }
 
             auto& req = conn->http_request();
-            if (!req.has_custom_data(detail::kWsForwardKey))
+            if (!req.data().has<detail::ws_client_ptr>())
             {
                 co_return;
             }
-            auto upstream = req.custom_data<detail::ws_client_ptr>(detail::kWsForwardKey);
+            auto upstream = req.data().fetch<detail::ws_client_ptr>();
             if (upstream)
             {
                 co_await upstream->async_close();

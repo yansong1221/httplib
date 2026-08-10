@@ -1,8 +1,8 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 #include "httplib/mysql/session.hpp"
+#include "httplib/mysql/connection_pool.hpp"
 #include "mysql/result_impl.h"
 #include "mysql/session_impl.h"
-#include "httplib/mysql/connection_pool.hpp"
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/mysql.hpp>
@@ -122,12 +122,12 @@ namespace httplib::mysql
             auto stmt = co_await get_conn().async_prepare_statement(std::string(sql), boost::asio::use_awaitable);
 
             co_await get_conn().async_execute(stmt.bind(params.begin(), params.end()),
-                                                data,
-                                                boost::asio::use_awaitable);
+                                              data,
+                                              boost::asio::use_awaitable);
 
             boost::system::error_code ec;
             co_await get_conn().async_close_statement(stmt,
-                                                        boost::asio::redirect_error(boost::asio::use_awaitable, ec));
+                                                      boost::asio::redirect_error(boost::asio::use_awaitable, ec));
         }
 
         auto res = result(std::make_unique<result::impl>(std::move(data)));

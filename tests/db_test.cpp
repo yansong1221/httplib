@@ -1,6 +1,6 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 #include "common.hpp"
-#include "mysql/result_impl.h"
+#include "httplib/server/middleware/data.hpp"
 #include "httplib/config.hpp"
 #include "httplib/mysql/config.hpp"
 #include "httplib/mysql/connection_pool.hpp"
@@ -9,6 +9,7 @@
 #include "httplib/server/middleware/mysql_middleware.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
+#include "mysql/result_impl.h"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/use_future.hpp>
@@ -16,6 +17,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 namespace mysql = httplib::mysql;
+namespace mw = httplib::server::middleware;
 namespace net = httplib::net;
 
 namespace
@@ -532,10 +534,9 @@ TEST_CASE("db: multi-statement query", "[db][integration]")
             co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_batch (id INT, val VARCHAR(50))");
             co_await sess.query("DELETE FROM __httplib_batch");
 
-            auto r = co_await sess.query(
-                "INSERT INTO __httplib_batch VALUES (1, 'a');"
-                "INSERT INTO __httplib_batch VALUES (2, 'b');"
-                "SELECT * FROM __httplib_batch ORDER BY id");
+            auto r = co_await sess.query("INSERT INTO __httplib_batch VALUES (1, 'a');"
+                                         "INSERT INTO __httplib_batch VALUES (2, 'b');"
+                                         "SELECT * FROM __httplib_batch ORDER BY id");
 
             REQUIRE(r.row_count() == 2);
             REQUIRE(r[0].as_int64("id") == 1);
@@ -760,7 +761,7 @@ TEST_CASE("mysql_middleware: throws when no middleware registered", "[db][middle
         "/db/nomw",
         [](httplib::server::request& req, httplib::server::response& resp)
         {
-            REQUIRE_THROWS_AS(httplib::server::middleware::get_mysql_session(req), std::runtime_error);
+            REQUIRE_THROWS_AS(mw::fetch<mw::mysql_middleware>(req), std::exception);
             resp.set_string_content("ok"sv, "text/plain"sv);
         });
 

@@ -9,7 +9,6 @@ namespace httplib::server::middleware
     class HTTPLIB_API jwt_auth_middleware
     {
       public:
-        static constexpr auto key = "jwt";
         using value_type = jwt::decoded_jwt;
 
         explicit jwt_auth_middleware(jwt::algorithm const& alg);

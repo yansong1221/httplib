@@ -1,4 +1,4 @@
-#include "html/cookie.hpp"
+﻿#include "html/cookie.hpp"
 #include "httplib/server/middleware/session.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
@@ -320,14 +320,14 @@ namespace httplib::server::middleware
             impl_->is_new_ = false;
         }
 
-        req.set_custom_data(key, sess);
+        req.data().store<value_type>(std::move(sess));
         return true;
     }
 
     bool
     session_middleware::after(request& req, response& resp)
     {
-        auto sess = req.custom_data<std::shared_ptr<session>>(key);
+        auto sess = req.data().fetch<value_type>();
 
         impl_->store_->save(*sess);
 

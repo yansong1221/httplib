@@ -23,8 +23,8 @@ TEST_CASE("query_params: at_number returns integer", "[body-utils]")
     httplib::html::query_params qp;
     REQUIRE(qp.decode("count=42&neg=-17"));
 
-    REQUIRE(qp.at_number<int64_t>("count") == 42);
-    REQUIRE(qp.at_number<int64_t>("neg") == -17);
+    REQUIRE(qp.at<int64_t>("count") == 42);
+    REQUIRE(qp.at<int64_t>("neg") == -17);
 }
 
 TEST_CASE("query_params: at_bool returns boolean", "[body-utils]")
@@ -32,10 +32,10 @@ TEST_CASE("query_params: at_bool returns boolean", "[body-utils]")
     httplib::html::query_params qp;
     REQUIRE(qp.decode("flag=true&off=false&yes=1&no=0"));
 
-    REQUIRE(qp.at_bool("flag"));
-    REQUIRE_FALSE(qp.at_bool("off"));
-    REQUIRE(qp.at_bool("yes"));
-    REQUIRE_FALSE(qp.at_bool("no"));
+    REQUIRE(qp.at<bool>("flag"));
+    REQUIRE_FALSE(qp.at<bool>("off"));
+    REQUIRE(qp.at<bool>("yes"));
+    REQUIRE_FALSE(qp.at<bool>("no"));
 }
 
 TEST_CASE("query_params: all returns multiple values", "[body-utils]")

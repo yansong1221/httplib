@@ -7,15 +7,17 @@
 namespace httplib::server::middleware
 {
 
-    static constexpr char const* k_tx_key = "httplib.db.tx";
-
     class mysql_middleware::impl
     {
       public:
         std::shared_ptr<mysql::connection_pool> pool;
         mysql_middleware_options opts;
 
-        impl(std::shared_ptr<mysql::connection_pool> p, mysql_middleware_options o) : pool(std::move(p)), opts(std::move(o)) {}
+        impl(std::shared_ptr<mysql::connection_pool> p, mysql_middleware_options o)
+            : pool(std::move(p))
+            , opts(std::move(o))
+        {
+        }
     };
 
     mysql_middleware::mysql_middleware(std::shared_ptr<mysql::connection_pool> pool, mysql_middleware_options opts)
@@ -46,15 +48,14 @@ namespace httplib::server::middleware
     net::awaitable<bool>
     mysql_middleware::before(request& req, response&)
     {
-        auto session = co_await impl_->pool->async_acquire();
-        auto* ptr = new mysql::session(std::move(session));
-        req.set_custom_data(mysql_conn_key, std::any(ptr));
-        req.set_custom_data("httplib.mysql.pool_ref", std::any(impl_->pool));
+        auto session = std::make_shared<mysql::session>(co_await impl_->pool->async_acquire());
+
+        req.data().store(session);
+        req.data().store(impl_->pool);
 
         if (impl_->opts.auto_transaction)
         {
-            auto tx = co_await get_mysql_session(req).begin();
-            req.set_custom_data(k_tx_key, std::any(new mysql::transaction(std::move(tx))));
+            req.data().store(std::make_shared<mysql::transaction>(*session));
         }
 
         co_return true;
@@ -63,9 +64,9 @@ namespace httplib::server::middleware
     net::awaitable<bool>
     mysql_middleware::after(request& req, response&)
     {
-        if (impl_->opts.auto_transaction && req.has_custom_data(k_tx_key))
+        if (impl_->opts.auto_transaction && req.data().has<tx_type>())
         {
-            auto* tx = req.custom_data<mysql::transaction*>(k_tx_key);
+            auto tx = req.data().fetch<tx_type>();
             if (tx)
             {
                 try
@@ -75,16 +76,14 @@ namespace httplib::server::middleware
                 catch (...)
                 {
                 }
-                delete tx;
             }
-            req.erase_custom_data(k_tx_key);
+            req.data().erase<tx_type>();
         }
 
-        if (req.has_custom_data(mysql_conn_key))
+        if (req.data().has<value_type>())
         {
-            delete req.custom_data<mysql::session*>(mysql_conn_key);
-            req.erase_custom_data(mysql_conn_key);
-            req.erase_custom_data("httplib.mysql.pool_ref");
+            req.data().erase<value_type>();
+            req.data().erase<pool_type>();
         }
 
         co_return true;

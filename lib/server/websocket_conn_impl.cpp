@@ -1,4 +1,4 @@
-#include "websocket_conn_impl.hpp"
+﻿#include "websocket_conn_impl.hpp"
 #include "httplib/client/ws_client.hpp"
 #include "request_impl.hpp"
 #include "response_impl.hpp"
@@ -8,6 +8,8 @@
 
 namespace httplib::server
 {
+
+    using ws_client_ptr = std::shared_ptr<client::ws_client>;
 
     websocket_conn_impl::websocket_conn_impl(std::shared_ptr<http_server::impl> server_impl,
                                              websocket_stream&& stream,
@@ -115,9 +117,9 @@ namespace httplib::server
             return;
         }
 
-        if (req_.has_custom_data(detail::kWsForwardKey))
+        if (req_.data().has<ws_client_ptr>())
         {
-            auto upstream = req_.custom_data<std::shared_ptr<client::ws_client>>(detail::kWsForwardKey);
+            auto upstream = req_.data().fetch<ws_client_ptr>();
             if (upstream)
             {
                 upstream->abort();

@@ -97,30 +97,15 @@ namespace httplib::server
             return this->remote_endpoint_;
         }
 
-        void
-        set_custom_data(std::string key, std::any value)
+        request_data&
+        data()
         {
-            custom_data_[std::move(key)] = std::move(value);
+            return data_;
         }
-        std::any&
-        custom_data(std::string const& key)
+        request_data const&
+        data() const
         {
-            return custom_data_.at(key);
-        }
-        std::any const&
-        custom_data(std::string const& key) const
-        {
-            return custom_data_.at(key);
-        }
-        void
-        erase_custom_data(std::string const& key)
-        {
-            custom_data_.erase(key);
-        }
-        bool
-        has_custom_data(std::string const& key) const
-        {
-            return custom_data_.contains(key);
+            return data_;
         }
 
         struct buffer_body_read_ctx
@@ -259,7 +244,7 @@ namespace httplib::server
         tcp::endpoint remote_endpoint_;
 
         std::unordered_map<std::string, std::string> path_params_;
-        std::unordered_map<std::string, std::any> custom_data_;
+        request_data data_;
 
         std::shared_ptr<buffer_body_read_ctx> buffer_body_ctx_;
     };

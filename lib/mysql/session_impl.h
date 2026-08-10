@@ -1,8 +1,8 @@
 #pragma once
 #ifdef HTTPLIB_ENABLED_DATABASE
 
-#include "httplib/mysql/session.hpp"
 #include "httplib/mysql/prepared_statement.hpp"
+#include "httplib/mysql/session.hpp"
 #include "httplib/mysql/transaction.hpp"
 #include <boost/mysql/connection_pool.hpp>
 #include <boost/mysql/field_view.hpp>
@@ -27,7 +27,9 @@ namespace httplib::mysql
         get_conn()
         {
             if (standalone)
+            {
                 return *standalone;
+            }
             return pooled.get();
         }
 

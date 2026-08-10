@@ -121,51 +121,21 @@ namespace httplib::server
         return impl_->path_param(key);
     }
 
-    void
-    request::set_path_param(std::string const& key, std::string const& val)
+    request_data&
+    request::data()
     {
-        impl_->set_path_param(key, val);
+        return impl_->data();
     }
-    void
-    request::set_path_param(std::unordered_map<std::string, std::string>&& params)
+    request_data const&
+    request::data() const
     {
-        impl_->set_path_param(std::move(params));
+        return impl_->data();
     }
 
     html::query_params const&
     request::query_params() const
     {
         return impl_->query_params();
-    }
-
-    void
-    request::set_custom_data(std::string key, std::any value)
-    {
-        impl_->set_custom_data(std::move(key), std::move(value));
-    }
-
-    std::any&
-    request::custom_data(std::string const& key)
-    {
-        return impl_->custom_data(key);
-    }
-
-    std::any const&
-    request::custom_data(std::string const& key) const
-    {
-        return impl_->custom_data(key);
-    }
-
-    bool
-    request::has_custom_data(std::string const& key) const
-    {
-        return impl_->has_custom_data(key);
-    }
-
-    void
-    request::erase_custom_data(std::string const& key)
-    {
-        impl_->erase_custom_data(key);
     }
 
     httplib::body::any_body::value_type&

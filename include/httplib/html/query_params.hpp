@@ -33,6 +33,21 @@ namespace httplib::html
 
         bool at_bool(std::string const& key) const;
 
+        template <typename T,
+                  typename = std::enable_if_t<std::integral<T> || std::floating_point<T> || std::is_same_v<T, bool>>>
+        T
+        at(std::string const& key) const
+        {
+            if constexpr (std::is_same_v<T, bool>)
+            {
+                return at_bool(key);
+            }
+            else
+            {
+                return at_number<T>(key);
+            }
+        }
+
         std::vector<std::string_view> all(std::string const& key) const;
 
         template <typename T = int64_t>
@@ -54,6 +69,15 @@ namespace httplib::html
 
             return result;
         }
+
+        template <typename T,
+                  typename = std::enable_if_t<std::integral<T> || std::floating_point<T> || std::is_same_v<T, bool>>>
+        std::vector<T>
+        all(std::string const& key) const
+        {
+            return all_number<T>(key);
+        }
+
         void add(std::string const& key, std::string const& val);
         template <typename T>
         void

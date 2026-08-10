@@ -11,8 +11,6 @@
 namespace httplib::server::middleware
 {
 
-    inline constexpr char const* mysql_conn_key = "httplib.mysql.conn";
-
     struct mysql_middleware_options
     {
         bool auto_transaction = false;
@@ -21,6 +19,16 @@ namespace httplib::server::middleware
     class HTTPLIB_API mysql_middleware
     {
       public:
+        using value_type = std::shared_ptr<mysql::session>;
+        using pool_type = std::shared_ptr<mysql::connection_pool>;
+        using tx_type = std::shared_ptr<mysql::transaction>;
+
+        inline static std::shared_ptr<mysql::connection_pool>
+        fetch_pool(request& req)
+        {
+            return req.data().fetch<std::shared_ptr<mysql::connection_pool>>();
+        }
+
         explicit mysql_middleware(std::shared_ptr<mysql::connection_pool> pool, mysql_middleware_options opts = {});
         ~mysql_middleware();
         mysql_middleware(mysql_middleware const&);
@@ -35,23 +43,6 @@ namespace httplib::server::middleware
         class impl;
         std::unique_ptr<impl> impl_;
     };
-
-    inline mysql::session&
-    get_mysql_session(request& req)
-    {
-        if (!req.has_custom_data(mysql_conn_key))
-        {
-            throw std::runtime_error("No MySQL session in request. "
-                                     "Did you register mysql_middleware?");
-        }
-        return *req.custom_data<mysql::session*>(mysql_conn_key);
-    }
-
-    inline std::shared_ptr<mysql::connection_pool>
-    get_mysql_pool(request& req)
-    {
-        return req.custom_data<std::shared_ptr<mysql::connection_pool>>("httplib.mysql.pool_ref");
-    }
 
 } // namespace httplib::server::middleware
 #endif // HTTPLIB_ENABLED_DATABASE

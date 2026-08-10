@@ -23,11 +23,6 @@ namespace httplib::client
 
 namespace httplib::server
 {
-    namespace detail
-    {
-        constexpr auto kWsForwardKey = "ws-forward";
-    }
-
     class http_server::impl : public std::enable_shared_from_this<http_server::impl>
     {
       public:

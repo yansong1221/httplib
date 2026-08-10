@@ -13,7 +13,10 @@ namespace httplib::server::middleware
 
     struct query_log_options
     {
-        using log_callback = std::function<void(request const& req, std::vector<mysql::query_log_entry> const& entries)>;
+        using value_type = std::vector<mysql::query_log_entry>;
+
+        using log_callback
+            = std::function<void(request const& req, value_type const& entries)>;
         log_callback on_request_complete;
 
         std::chrono::microseconds slow_query_threshold { 0 };
@@ -25,6 +28,8 @@ namespace httplib::server::middleware
     class HTTPLIB_API mysql_query_log_middleware
     {
       public:
+        using value_type = std::shared_ptr<query_log_options::value_type>;
+
         explicit mysql_query_log_middleware(query_log_options opts = {});
         ~mysql_query_log_middleware();
         mysql_query_log_middleware(mysql_query_log_middleware const&);

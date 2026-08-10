@@ -127,6 +127,26 @@ TEST_CASE("Router: multiple named parameters", "[router]")
     REQUIRE(resp.result() == http::status::ok);
 }
 
+TEST_CASE("Router: path_param template overload", "[router]")
+{
+    test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>("/user/:id/order/:price",
+                                                   [](httplib::server::request& req, httplib::server::response& resp)
+                                                   {
+                                                       int id = req.path_param<int>("id");
+                                                       double price = req.path_param<double>("price");
+                                                       auto name = req.path_param<std::string>("id");
+                                                       REQUIRE(id == 42);
+                                                       REQUIRE(price == 19.99);
+                                                       REQUIRE(name == "42");
+                                                       resp.set_string_content("ok"sv, "text/plain"sv);
+                                                   });
+    ts.start();
+
+    auto resp = UNWRAP(ts.client->get("/user/42/order/19.99"));
+    REQUIRE(resp.result() == http::status::ok);
+}
+
 TEST_CASE("Router: set_post_routing_handler for CORS", "[router]")
 {
     test_scaffold ts;

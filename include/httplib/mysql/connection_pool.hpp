@@ -22,7 +22,7 @@ namespace httplib::mysql
 
         void start();
         net::awaitable<session> async_acquire(std::chrono::steady_clock::duration wait_timeout
-                                                 = std::chrono::steady_clock::duration::zero());
+                                              = std::chrono::steady_clock::duration::zero());
         void stop();
 
       private:

@@ -1,7 +1,7 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 #include "httplib/mysql/transaction.hpp"
-#include "mysql/session_impl.h"
 #include "httplib/mysql/session.hpp"
+#include "mysql/session_impl.h"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/mysql.hpp>
