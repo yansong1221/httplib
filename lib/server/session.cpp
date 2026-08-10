@@ -93,7 +93,8 @@ namespace httplib::server
         void
         abort() override
         {
-            stream_.shutdown();
+            boost::system::error_code ec;
+            stream_.shutdown(ec);
         }
 
       private:
@@ -113,12 +114,10 @@ namespace httplib::server
     void
     session::abort()
     {
-        if (abort_)
+        if (abort_.exchange(true))
         {
             return;
         }
-        abort_ = true;
-
         std::lock_guard<std::mutex> lck(task_mtx_);
         if (task_)
         {
@@ -176,7 +175,14 @@ namespace httplib::server
     void
     session::detect_ssl_task::abort()
     {
-        stream_.close();
+        try
+        {
+            stream_.cancel();
+            stream_.close();
+        }
+        catch (...)
+        {
+        }
     }
 
     session::http_task::http_task(http_stream&& stream,
