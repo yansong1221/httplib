@@ -147,7 +147,7 @@ namespace httplib::server
         {
             std::lock_guard lck(session_mutex_);
             auto count = sessions_.size();
-            logger()->info("[server] stopping, {} sessions remaining", count);
+            logger()->trace("[server] stopping, {} sessions remaining", count);
             for (auto const& v : sessions_)
             {
                 v->abort();
