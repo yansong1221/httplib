@@ -466,8 +466,7 @@ namespace httplib::mysql
         {
             query_log_entry entry;
             entry.sql = impl_->sql;
-            entry.duration
-                = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start);
+            entry.duration = std::chrono::steady_clock::now() - start;
             entry.row_count = res.row_count();
             entry.affected_rows = res.affected_rows();
             entry.is_parameterized = !params.empty();

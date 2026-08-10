@@ -3,9 +3,9 @@
 #include "httplib/mysql/connection_pool.hpp"
 #include "mysql/result_impl.h"
 #include "mysql/session_impl.h"
-#include <boost/asio/redirect_error.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
+#include <boost/asio/redirect_error.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/mysql.hpp>
 #include <stdexcept>
@@ -57,10 +57,7 @@ namespace httplib::mysql
                     {
                         boost::mysql::results r;
                         boost::mysql::diagnostics diag;
-                        co_await pooled.get().async_execute("ROLLBACK",
-                                                            r,
-                                                            diag,
-                                                            boost::asio::use_awaitable);
+                        co_await pooled.get().async_execute("ROLLBACK", r, diag, boost::asio::use_awaitable);
                     }
                     catch (...)
                     {
@@ -93,8 +90,10 @@ namespace httplib::mysql
         boost::system::error_code ec;
         boost::mysql::results data;
         imp.get_conn().set_meta_mode(boost::mysql::metadata_mode::full);
-        co_await imp.get_conn().async_execute(
-            std::string(sql), data, diag, boost::asio::redirect_error(boost::asio::use_awaitable, ec));
+        co_await imp.get_conn().async_execute(std::string(sql),
+                                              data,
+                                              diag,
+                                              boost::asio::redirect_error(boost::asio::use_awaitable, ec));
         raise_mysql_error(ec, diag, sql);
 
         auto res = result(std::make_unique<result::impl>(std::move(data)));
@@ -103,8 +102,7 @@ namespace httplib::mysql
         {
             query_log_entry entry;
             entry.sql = std::string(sql);
-            entry.duration
-                = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start);
+            entry.duration = std::chrono::steady_clock::now() - start;
             entry.row_count = res.row_count();
             entry.affected_rows = res.affected_rows();
             imp.query_logger(entry);
