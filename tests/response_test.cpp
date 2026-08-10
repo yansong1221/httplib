@@ -1,5 +1,6 @@
 #include "common.hpp"
 #include "httplib/body/file_body.hpp"
+#include "httplib/body/form_data_body.hpp"
 #include "httplib/body/json_body.hpp"
 #include "httplib/body/string_body.hpp"
 #include "httplib/client/write_session.hpp"
@@ -9,18 +10,19 @@
 #include "httplib/server/response.hpp"
 #include <array>
 #include <boost/beast/core/flat_buffer.hpp>
+#include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 
-namespace beast = httplib::beast;
+namespace body = httplib::body;
 namespace http = httplib::http;
 namespace net = httplib::net;
+using test_common::run;
+using test_common::setup_logger;
 
 namespace
 {
-    using test_common::as_string;
-    using test_common::test_scaffold;
 
     void
     set_text(httplib::server::response& resp, std::string_view body, http::status status = http::status::ok)
@@ -32,72 +34,90 @@ namespace
 
 TEST_CASE("Response: set_empty_content", "[response]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/empty",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  { resp.set_empty_content(http::status::no_content); });
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->get("/empty"));
-    REQUIRE(resp.result() == http::status::no_content);
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/empty",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_empty_content(http::status::no_content); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/empty"));
+            REQUIRE(resp.result() == http::status::no_content);
+            co_return;
+        });
 }
 
 TEST_CASE("Response: set_error_content", "[response]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/error",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  { resp.set_error_content(http::status::internal_server_error); });
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->get("/error"));
-    REQUIRE(resp.result() == http::status::internal_server_error);
-    REQUIRE_FALSE(as_string(resp).empty());
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/error",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_error_content(http::status::internal_server_error); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/error"));
+            REQUIRE(resp.result() == http::status::internal_server_error);
+            REQUIRE_FALSE(resp.body().template as<body::string_body>().empty());
+            co_return;
+        });
 }
 
 TEST_CASE("Response: set_redirect", "[response]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/old",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  { resp.set_redirect("/new", http::status::moved_permanently); });
-    ts.router().set_http_handler<http::verb::get>("/new",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  { set_text(resp, "new-location"); });
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->get("/old"));
-    REQUIRE(resp.result() == http::status::moved_permanently);
-    REQUIRE(resp[http::field::location] == "/new");
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/old",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_redirect("/new", http::status::moved_permanently); });
+            server.router().template set_http_handler<http::verb::get>(
+                "/new",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { set_text(resp, "new-location"); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/old"));
+            REQUIRE(resp.result() == http::status::moved_permanently);
+            REQUIRE(resp[http::field::location] == "/new");
+            co_return;
+        });
 }
 
 TEST_CASE("Response: set_chunked_write_handler with multiple chunks", "[response]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/stream",
-        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+    run(
+        [](auto& server)
         {
-            auto cw = resp.get_chunk_writer();
-            http::fields headers;
-            headers.set(http::field::content_type, "text/plain");
-            co_await cw->write_header(http::status::ok, headers, false);
-            constexpr std::string_view chunks[] = { "A", "B", "C" };
-            for (int i = 0; i < 3; ++i)
-            {
-                co_await cw->write_body(net::buffer(chunks[i]), i < 2);
-            }
-        });
-    ts.start();
-
-    std::string streamed;
-    auto writer = ts.client->create_writer();
-    auto reader = ts.client->create_reader();
-
-    boost::asio::co_spawn(
-        ts.executor(),
-        [&]() -> net::awaitable<void>
+            server.router().template set_http_handler<http::verb::get>(
+                "/stream",
+                [](httplib::server::request&,
+                   httplib::server::response& resp) -> net::awaitable<void>
+                {
+                    auto cw = resp.get_chunk_writer();
+                    http::fields headers;
+                    headers.set(http::field::content_type, "text/plain");
+                    co_await cw->write_header(http::status::ok, headers, false);
+                    constexpr std::string_view chunks[] = { "A", "B", "C" };
+                    for (int i = 0; i < 3; ++i)
+                    {
+                        co_await cw->write_body(net::buffer(chunks[i]), i < 2);
+                    }
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
         {
+            auto writer = client.create_writer();
+            auto reader = client.create_reader();
+            std::string streamed;
             co_await writer->write_header(http::verb::get, "/stream", {});
             co_await writer->write_body(net::buffer("", 0), false);
             co_await reader->read_header();
@@ -107,35 +127,38 @@ TEST_CASE("Response: set_chunked_write_handler with multiple chunks", "[response
             {
                 auto result = co_await reader->read_body(net::buffer(buf));
                 if (result.has_error() || result.value() == 0)
-                {
                     break;
-                }
                 streamed.append(buf.data(), result.value());
             }
-        },
-        boost::asio::use_future)
-        .get();
 
-    REQUIRE(reader->result() == http::status::ok);
-    REQUIRE(streamed == "ABC");
+            REQUIRE(reader->result() == http::status::ok);
+            REQUIRE(streamed == "ABC");
+            co_return;
+        });
 }
 
 TEST_CASE("Response: set_form_data_content", "[response]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/form-resp",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  {
-                                                      std::vector<httplib::html::form_data::field> fields;
-                                                      fields.push_back({ "name", "", "text/plain", "test-value" });
-                                                      resp.set_form_data_content(std::move(fields));
-                                                  });
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->get("/form-resp"));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE_FALSE(resp[http::field::content_type].empty());
-    REQUIRE(resp[http::field::content_type].starts_with("multipart/form-data"));
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/form-resp",
+                [](httplib::server::request&, httplib::server::response& resp)
+                {
+                    std::vector<httplib::html::form_data::field> fields;
+                    fields.push_back({ "name", "", "text/plain", "test-value" });
+                    resp.set_form_data_content(std::move(fields));
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/form-resp"));
+            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE_FALSE(resp[http::field::content_type].empty());
+            REQUIRE(resp[http::field::content_type].starts_with("multipart/form-data"));
+            co_return;
+        });
 }
 
 TEST_CASE("Response: set_form_data_content with file_path", "[response]")
@@ -146,27 +169,33 @@ TEST_CASE("Response: set_form_data_content with file_path", "[response]")
         f << "file content from disk";
     }
 
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/form-file",
-                                                  [&](httplib::server::request&, httplib::server::response& resp)
-                                                  {
-                                                      std::vector<httplib::html::form_data::field> fields;
-                                                      auto& fld = fields.emplace_back();
-                                                      fld.name = "file";
-                                                      fld.filename = "test.bin";
-                                                      fld.content_type = "application/octet-stream";
-                                                      fld.file_path = tmp_path;
-                                                      resp.set_form_data_content(std::move(fields));
-                                                  });
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->get("/form-file"));
-    REQUIRE(resp.result() == http::status::ok);
-    auto& fd = resp.body().as<httplib::body::form_data_body>();
-    REQUIRE(fd.fields.size() == 1);
-    REQUIRE(fd.fields[0].name == "file");
-    REQUIRE(fd.fields[0].filename == "test.bin");
-    REQUIRE(fd.fields[0].content == "file content from disk");
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/form-file",
+                [&](httplib::server::request&, httplib::server::response& resp)
+                {
+                    std::vector<httplib::html::form_data::field> fields;
+                    auto& fld = fields.emplace_back();
+                    fld.name = "file";
+                    fld.filename = "test.bin";
+                    fld.content_type = "application/octet-stream";
+                    fld.file_path = tmp_path;
+                    resp.set_form_data_content(std::move(fields));
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/form-file"));
+            REQUIRE(resp.result() == http::status::ok);
+            auto& fd = resp.body().template as<body::form_data_body>();
+            REQUIRE(fd.fields.size() == 1);
+            REQUIRE(fd.fields[0].name == "file");
+            REQUIRE(fd.fields[0].filename == "test.bin");
+            REQUIRE(fd.fields[0].content == "file content from disk");
+            co_return;
+        });
 
     std::filesystem::remove(tmp_path);
 }
@@ -180,15 +209,21 @@ TEST_CASE("Response: set_file_content serves a file", "[response]")
     }
 
     {
-        test_scaffold ts;
-        ts.router().set_http_handler<http::verb::get>("/file",
-                                                      [&](httplib::server::request&, httplib::server::response& resp)
-                                                      { resp.set_file_content(tmp_path); });
-        ts.start();
-
-        auto resp = UNWRAP(ts.client->get("/file"));
-        REQUIRE(resp.result() == http::status::ok);
-        REQUIRE(as_string(resp) == "hello from test file\n");
+        run(
+            [&](auto& server)
+            {
+                server.router().template set_http_handler<http::verb::get>(
+                    "/file",
+                    [&](httplib::server::request&, httplib::server::response& resp)
+                    { resp.set_file_content(tmp_path); });
+            },
+            [](auto& client) -> net::awaitable<void>
+            {
+                auto resp = UNWRAP(co_await client.async_get("/file"));
+                REQUIRE(resp.result() == http::status::ok);
+                REQUIRE(resp.body().template as<body::string_body>() == "hello from test file\n");
+                co_return;
+            });
     }
 
     std::filesystem::remove(tmp_path);
@@ -203,19 +238,25 @@ TEST_CASE("Response: set_file_content with Range request", "[response]")
     }
 
     {
-        test_scaffold ts;
-        ts.router().set_http_handler<http::verb::get>(
-            "/file-range",
-            [&](httplib::server::request& req, httplib::server::response& resp)
-            { resp.set_file_content(tmp_path, req.base()); });
-        ts.start();
+        run(
+            [&](auto& server)
+            {
+                server.router().template set_http_handler<http::verb::get>(
+                    "/file-range",
+                    [&](httplib::server::request& req, httplib::server::response& resp)
+                    { resp.set_file_content(tmp_path, req.base()); });
+            },
+            [](auto& client) -> net::awaitable<void>
+            {
+                auto range_headers = httplib::http::fields();
+                range_headers.set(http::field::range, "bytes=0-4");
 
-        auto range_headers = httplib::http::fields();
-        range_headers.set(http::field::range, "bytes=0-4");
-
-        auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-range", range_headers));
-        REQUIRE(resp.result() == http::status::partial_content);
-        REQUIRE(as_string(resp) == "01234");
+                auto resp = UNWRAP(co_await client.async_send_request(
+                    http::verb::get, "/file-range", range_headers));
+                REQUIRE(resp.result() == http::status::partial_content);
+                REQUIRE(resp.body().template as<body::string_body>() == "01234");
+                co_return;
+            });
     }
 
     std::filesystem::remove(tmp_path);
@@ -230,19 +271,25 @@ TEST_CASE("Response: Range request open-ended (bytes=N-)", "[response]")
     }
 
     {
-        test_scaffold ts;
-        ts.router().set_http_handler<http::verb::get>(
-            "/file-range-open",
-            [&](httplib::server::request& req, httplib::server::response& resp)
-            { resp.set_file_content(tmp_path, req.base()); });
-        ts.start();
+        run(
+            [&](auto& server)
+            {
+                server.router().template set_http_handler<http::verb::get>(
+                    "/file-range-open",
+                    [&](httplib::server::request& req, httplib::server::response& resp)
+                    { resp.set_file_content(tmp_path, req.base()); });
+            },
+            [](auto& client) -> net::awaitable<void>
+            {
+                auto range_headers = httplib::http::fields();
+                range_headers.set(http::field::range, "bytes=7-");
 
-        auto range_headers = httplib::http::fields();
-        range_headers.set(http::field::range, "bytes=7-");
-
-        auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-range-open", range_headers));
-        REQUIRE(resp.result() == http::status::partial_content);
-        REQUIRE(as_string(resp) == "789");
+                auto resp = UNWRAP(co_await client.async_send_request(
+                    http::verb::get, "/file-range-open", range_headers));
+                REQUIRE(resp.result() == http::status::partial_content);
+                REQUIRE(resp.body().template as<body::string_body>() == "789");
+                co_return;
+            });
     }
 
     std::filesystem::remove(tmp_path);
@@ -257,19 +304,25 @@ TEST_CASE("Response: Range request suffix (bytes=-N)", "[response]")
     }
 
     {
-        test_scaffold ts;
-        ts.router().set_http_handler<http::verb::get>(
-            "/file-range-suffix",
-            [&](httplib::server::request& req, httplib::server::response& resp)
-            { resp.set_file_content(tmp_path, req.base()); });
-        ts.start();
+        run(
+            [&](auto& server)
+            {
+                server.router().template set_http_handler<http::verb::get>(
+                    "/file-range-suffix",
+                    [&](httplib::server::request& req, httplib::server::response& resp)
+                    { resp.set_file_content(tmp_path, req.base()); });
+            },
+            [](auto& client) -> net::awaitable<void>
+            {
+                auto range_headers = httplib::http::fields();
+                range_headers.set(http::field::range, "bytes=-4");
 
-        auto range_headers = httplib::http::fields();
-        range_headers.set(http::field::range, "bytes=-4");
-
-        auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-range-suffix", range_headers));
-        REQUIRE(resp.result() == http::status::partial_content);
-        REQUIRE(as_string(resp) == "6789");
+                auto resp = UNWRAP(co_await client.async_send_request(
+                    http::verb::get, "/file-range-suffix", range_headers));
+                REQUIRE(resp.result() == http::status::partial_content);
+                REQUIRE(resp.body().template as<body::string_body>() == "6789");
+                co_return;
+            });
     }
 
     std::filesystem::remove(tmp_path);
@@ -284,21 +337,27 @@ TEST_CASE("Response: Range request Content-Range header", "[response]")
     }
 
     {
-        test_scaffold ts;
-        ts.router().set_http_handler<http::verb::get>(
-            "/file-cr",
-            [&](httplib::server::request& req, httplib::server::response& resp)
-            { resp.set_file_content(tmp_path, req.base()); });
-        ts.start();
+        run(
+            [&](auto& server)
+            {
+                server.router().template set_http_handler<http::verb::get>(
+                    "/file-cr",
+                    [&](httplib::server::request& req, httplib::server::response& resp)
+                    { resp.set_file_content(tmp_path, req.base()); });
+            },
+            [](auto& client) -> net::awaitable<void>
+            {
+                auto range_headers = httplib::http::fields();
+                range_headers.set(http::field::range, "bytes=2-5");
 
-        auto range_headers = httplib::http::fields();
-        range_headers.set(http::field::range, "bytes=2-5");
-
-        auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-cr", range_headers));
-        REQUIRE(resp.result() == http::status::partial_content);
-        REQUIRE(as_string(resp) == "cdef");
-        REQUIRE(resp.base().find(http::field::content_range) != resp.base().end());
-        REQUIRE_FALSE(std::string(resp[http::field::content_range]).empty());
+                auto resp = UNWRAP(co_await client.async_send_request(
+                    http::verb::get, "/file-cr", range_headers));
+                REQUIRE(resp.result() == http::status::partial_content);
+                REQUIRE(resp.body().template as<body::string_body>() == "cdef");
+                REQUIRE(resp.base().find(http::field::content_range) != resp.base().end());
+                REQUIRE_FALSE(std::string(resp[http::field::content_range]).empty());
+                co_return;
+            });
     }
 
     std::filesystem::remove(tmp_path);
@@ -313,19 +372,25 @@ TEST_CASE("Response: Range request out of bounds returns 416", "[response]")
     }
 
     {
-        test_scaffold ts;
-        ts.router().set_http_handler<http::verb::get>(
-            "/file-range-oob",
-            [&](httplib::server::request& req, httplib::server::response& resp)
-            { resp.set_file_content(tmp_path, req.base()); });
-        ts.start();
+        run(
+            [&](auto& server)
+            {
+                server.router().template set_http_handler<http::verb::get>(
+                    "/file-range-oob",
+                    [&](httplib::server::request& req, httplib::server::response& resp)
+                    { resp.set_file_content(tmp_path, req.base()); });
+            },
+            [](auto& client) -> net::awaitable<void>
+            {
+                auto range_headers = httplib::http::fields();
+                range_headers.set(http::field::range, "bytes=10-20");
 
-        auto range_headers = httplib::http::fields();
-        range_headers.set(http::field::range, "bytes=10-20");
-
-        auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-range-oob", range_headers));
-        REQUIRE(resp.result() == http::status::range_not_satisfiable);
-        REQUIRE(resp.base().find(http::field::content_range) != resp.base().end());
+                auto resp = UNWRAP(co_await client.async_send_request(
+                    http::verb::get, "/file-range-oob", range_headers));
+                REQUIRE(resp.result() == http::status::range_not_satisfiable);
+                REQUIRE(resp.base().find(http::field::content_range) != resp.base().end());
+                co_return;
+            });
     }
 
     std::filesystem::remove(tmp_path);
@@ -341,22 +406,28 @@ TEST_CASE("Response: If-None-Match returns 304 for matching ETag", "[response]")
 
     std::string etag;
     {
-        test_scaffold ts;
-        ts.router().set_http_handler<http::verb::get>(
-            "/file-etag",
-            [&](httplib::server::request& req, httplib::server::response& resp)
-            { resp.set_file_content(tmp_path, req.base()); });
-        ts.start();
+        run(
+            [&](auto& server)
+            {
+                server.router().template set_http_handler<http::verb::get>(
+                    "/file-etag",
+                    [&](httplib::server::request& req, httplib::server::response& resp)
+                    { resp.set_file_content(tmp_path, req.base()); });
+            },
+            [&](auto& client) -> net::awaitable<void>
+            {
+                auto resp1 = UNWRAP(co_await client.async_get("/file-etag"));
+                REQUIRE(resp1.result() == http::status::ok);
+                REQUIRE(resp1.base().find(http::field::etag) != resp1.base().end());
+                etag = std::string(resp1[http::field::etag]);
 
-        auto resp1 = UNWRAP(ts.client->get("/file-etag"));
-        REQUIRE(resp1.result() == http::status::ok);
-        REQUIRE(resp1.base().find(http::field::etag) != resp1.base().end());
-        etag = std::string(resp1[http::field::etag]);
-
-        auto hdrs = httplib::http::fields();
-        hdrs.set(http::field::if_none_match, etag);
-        auto resp2 = UNWRAP(ts.client->send_request(http::verb::get, "/file-etag", hdrs));
-        REQUIRE(resp2.result() == http::status::not_modified);
+                auto hdrs = httplib::http::fields();
+                hdrs.set(http::field::if_none_match, etag);
+                auto resp2 = UNWRAP(
+                    co_await client.async_send_request(http::verb::get, "/file-etag", hdrs));
+                REQUIRE(resp2.result() == http::status::not_modified);
+                co_return;
+            });
     }
 
     std::filesystem::remove(tmp_path);
@@ -372,22 +443,28 @@ TEST_CASE("Response: If-Modified-Since returns 304 for unmodified", "[response]"
 
     std::string last_mod;
     {
-        test_scaffold ts;
-        ts.router().set_http_handler<http::verb::get>(
-            "/file-ims",
-            [&](httplib::server::request& req, httplib::server::response& resp)
-            { resp.set_file_content(tmp_path, req.base()); });
-        ts.start();
+        run(
+            [&](auto& server)
+            {
+                server.router().template set_http_handler<http::verb::get>(
+                    "/file-ims",
+                    [&](httplib::server::request& req, httplib::server::response& resp)
+                    { resp.set_file_content(tmp_path, req.base()); });
+            },
+            [&](auto& client) -> net::awaitable<void>
+            {
+                auto resp1 = UNWRAP(co_await client.async_get("/file-ims"));
+                REQUIRE(resp1.result() == http::status::ok);
+                REQUIRE(resp1.base().find(http::field::last_modified) != resp1.base().end());
+                last_mod = std::string(resp1[http::field::last_modified]);
 
-        auto resp1 = UNWRAP(ts.client->get("/file-ims"));
-        REQUIRE(resp1.result() == http::status::ok);
-        REQUIRE(resp1.base().find(http::field::last_modified) != resp1.base().end());
-        last_mod = std::string(resp1[http::field::last_modified]);
-
-        auto hdrs = httplib::http::fields();
-        hdrs.set(http::field::if_modified_since, last_mod);
-        auto resp2 = UNWRAP(ts.client->send_request(http::verb::get, "/file-ims", hdrs));
-        REQUIRE(resp2.result() == http::status::not_modified);
+                auto hdrs = httplib::http::fields();
+                hdrs.set(http::field::if_modified_since, last_mod);
+                auto resp2 = UNWRAP(
+                    co_await client.async_send_request(http::verb::get, "/file-ims", hdrs));
+                REQUIRE(resp2.result() == http::status::not_modified);
+                co_return;
+            });
     }
 
     std::filesystem::remove(tmp_path);
@@ -402,17 +479,22 @@ TEST_CASE("Response: Accept-Ranges header present on full response", "[response]
     }
 
     {
-        test_scaffold ts;
-        ts.router().set_http_handler<http::verb::get>(
-            "/file-ar",
-            [&](httplib::server::request& req, httplib::server::response& resp)
-            { resp.set_file_content(tmp_path, req.base()); });
-        ts.start();
-
-        auto resp = UNWRAP(ts.client->get("/file-ar"));
-        REQUIRE(resp.result() == http::status::ok);
-        REQUIRE(resp.base().find(http::field::accept_ranges) != resp.base().end());
-        REQUIRE(std::string(resp[http::field::accept_ranges]) == "bytes");
+        run(
+            [&](auto& server)
+            {
+                server.router().template set_http_handler<http::verb::get>(
+                    "/file-ar",
+                    [&](httplib::server::request& req, httplib::server::response& resp)
+                    { resp.set_file_content(tmp_path, req.base()); });
+            },
+            [](auto& client) -> net::awaitable<void>
+            {
+                auto resp = UNWRAP(co_await client.async_get("/file-ar"));
+                REQUIRE(resp.result() == http::status::ok);
+                REQUIRE(resp.base().find(http::field::accept_ranges) != resp.base().end());
+                REQUIRE(std::string(resp[http::field::accept_ranges]) == "bytes");
+                co_return;
+            });
     }
 
     std::filesystem::remove(tmp_path);
@@ -427,23 +509,27 @@ TEST_CASE("Response: Multi-range request returns multipart/byteranges", "[respon
     }
 
     {
-        test_scaffold ts;
-        ts.router().set_http_handler<http::verb::get>(
-            "/file-multi-range",
-            [&](httplib::server::request& req, httplib::server::response& resp)
-            { resp.set_file_content(tmp_path, req.base()); });
-        ts.start();
+        run(
+            [&](auto& server)
+            {
+                server.router().template set_http_handler<http::verb::get>(
+                    "/file-multi-range",
+                    [&](httplib::server::request& req, httplib::server::response& resp)
+                    { resp.set_file_content(tmp_path, req.base()); });
+            },
+            [](auto& client) -> net::awaitable<void>
+            {
+                auto range_headers = httplib::http::fields();
+                range_headers.set(http::field::range, "bytes=0-2,5-7");
 
-        auto range_headers = httplib::http::fields();
-        range_headers.set(http::field::range, "bytes=0-2,5-7");
-
-        auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/file-multi-range", range_headers));
-        REQUIRE(resp.result() == http::status::partial_content);
-        auto ct = std::string(resp[http::field::content_type]);
-        REQUIRE(ct.starts_with("multipart/byteranges"));
-
-        // The boundary is part of the content-type for multi-range responses
-        REQUIRE_FALSE(ct.find("boundary=") == std::string::npos);
+                auto resp = UNWRAP(co_await client.async_send_request(
+                    http::verb::get, "/file-multi-range", range_headers));
+                REQUIRE(resp.result() == http::status::partial_content);
+                auto ct = std::string(resp[http::field::content_type]);
+                REQUIRE(ct.starts_with("multipart/byteranges"));
+                REQUIRE_FALSE(ct.find("boundary=") == std::string::npos);
+                co_return;
+            });
     }
 
     std::filesystem::remove(tmp_path);
@@ -451,76 +537,106 @@ TEST_CASE("Response: Multi-range request returns multipart/byteranges", "[respon
 
 TEST_CASE("Response: custom response headers", "[response]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/custom-headers",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  {
-                                                      resp.set("X-Custom-One", "value1");
-                                                      resp.set("X-Custom-Two", "value2");
-                                                      set_text(resp, "ok");
-                                                  });
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->get("/custom-headers"));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(resp["X-Custom-One"] == "value1");
-    REQUIRE(resp["X-Custom-Two"] == "value2");
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/custom-headers",
+                [](httplib::server::request&, httplib::server::response& resp)
+                {
+                    resp.set("X-Custom-One", "value1");
+                    resp.set("X-Custom-Two", "value2");
+                    set_text(resp, "ok");
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/custom-headers"));
+            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp["X-Custom-One"] == "value1");
+            REQUIRE(resp["X-Custom-Two"] == "value2");
+            co_return;
+        });
 }
 
 TEST_CASE("Response: redirect 302", "[response]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/redirect-302",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  { resp.set_redirect("/target", http::status::found); });
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->get("/redirect-302"));
-    REQUIRE(resp.result() == http::status::found);
-    REQUIRE(resp[http::field::location] == "/target");
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/redirect-302",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_redirect("/target", http::status::found); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/redirect-302"));
+            REQUIRE(resp.result() == http::status::found);
+            REQUIRE(resp[http::field::location] == "/target");
+            co_return;
+        });
 }
 
 TEST_CASE("Response: redirect 303", "[response]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/redirect-303",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  { resp.set_redirect("/target", http::status::see_other); });
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->get("/redirect-303"));
-    REQUIRE(resp.result() == http::status::see_other);
-    REQUIRE(resp[http::field::location] == "/target");
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/redirect-303",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_redirect("/target", http::status::see_other); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/redirect-303"));
+            REQUIRE(resp.result() == http::status::see_other);
+            REQUIRE(resp[http::field::location] == "/target");
+            co_return;
+        });
 }
 
 TEST_CASE("Response: redirect 307", "[response]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/redirect-307",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  { resp.set_redirect("/target", http::status::temporary_redirect); });
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->get("/redirect-307"));
-    REQUIRE(resp.result() == http::status::temporary_redirect);
-    REQUIRE(resp[http::field::location] == "/target");
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/redirect-307",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_redirect("/target", http::status::temporary_redirect); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/redirect-307"));
+            REQUIRE(resp.result() == http::status::temporary_redirect);
+            REQUIRE(resp[http::field::location] == "/target");
+            co_return;
+        });
 }
 
 TEST_CASE("Response: keep-alive close response", "[response]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/close-conn",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  {
-                                                      resp.set(http::field::connection, "close");
-                                                      resp.set_string_content("closing"sv, "text/plain"sv);
-                                                  });
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->get("/close-conn"));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(as_string(resp) == "closing");
-    REQUIRE(resp[http::field::connection] == "close");
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/close-conn",
+                [](httplib::server::request&, httplib::server::response& resp)
+                {
+                    resp.set(http::field::connection, "close");
+                    resp.set_string_content("closing"sv, "text/plain"sv);
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/close-conn"));
+            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.body().template as<body::string_body>() == "closing");
+            REQUIRE(resp[http::field::connection] == "close");
+            co_return;
+        });
 }
 
 TEST_CASE("Static mount: serves a file", "[response]")
@@ -534,13 +650,18 @@ TEST_CASE("Static mount: serves a file", "[response]")
     }
 
     {
-        test_scaffold ts;
-        ts.router().set_static_mount_point("/static", tmp_dir);
-        ts.start();
-
-        auto resp = UNWRAP(ts.client->get("/static/test.txt"));
-        REQUIRE(resp.result() == http::status::ok);
-        REQUIRE(as_string(resp) == "static content");
+        run(
+            [&](auto& server)
+            {
+                server.router().set_static_mount_point("/static", tmp_dir);
+            },
+            [](auto& client) -> net::awaitable<void>
+            {
+                auto resp = UNWRAP(co_await client.async_get("/static/test.txt"));
+                REQUIRE(resp.result() == http::status::ok);
+                REQUIRE(resp.body().template as<body::string_body>() == "static content");
+                co_return;
+            });
     }
 
     std::filesystem::remove_all(tmp_dir);
@@ -551,12 +672,17 @@ TEST_CASE("Static mount: returns 404 for non-existent file", "[response]")
     auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_404";
     std::filesystem::create_directories(tmp_dir);
 
-    test_scaffold ts;
-    ts.router().set_static_mount_point("/files", tmp_dir);
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->get("/files/nope.txt"));
-    REQUIRE(resp.result() == http::status::not_found);
+    run(
+        [&](auto& server)
+        {
+            server.router().set_static_mount_point("/files", tmp_dir);
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/files/nope.txt"));
+            REQUIRE(resp.result() == http::status::not_found);
+            co_return;
+        });
 
     std::filesystem::remove_all(tmp_dir);
 }
@@ -566,12 +692,17 @@ TEST_CASE("Static mount: blocks path traversal", "[response]")
     auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_pt";
     std::filesystem::create_directories(tmp_dir);
 
-    test_scaffold ts;
-    ts.router().set_static_mount_point("/files", tmp_dir);
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->get("/files/../../../etc/passwd"));
-    REQUIRE(resp.result() == http::status::bad_request);
+    run(
+        [&](auto& server)
+        {
+            server.router().set_static_mount_point("/files", tmp_dir);
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/files/../../../etc/passwd"));
+            REQUIRE(resp.result() == http::status::bad_request);
+            co_return;
+        });
 
     std::filesystem::remove_all(tmp_dir);
 }
@@ -586,13 +717,18 @@ TEST_CASE("Static mount: default document index.html", "[response]")
     }
 
     {
-        test_scaffold ts;
-        ts.router().set_static_mount_point("/", tmp_dir);
-        ts.start();
-
-        auto resp = UNWRAP(ts.client->get("/"));
-        REQUIRE(resp.result() == http::status::ok);
-        REQUIRE(as_string(resp) == "<h1>hello</h1>");
+        run(
+            [&](auto& server)
+            {
+                server.router().set_static_mount_point("/", tmp_dir);
+            },
+            [](auto& client) -> net::awaitable<void>
+            {
+                auto resp = UNWRAP(co_await client.async_get("/"));
+                REQUIRE(resp.result() == http::status::ok);
+                REQUIRE(resp.body().template as<body::string_body>() == "<h1>hello</h1>");
+                co_return;
+            });
     }
 
     std::filesystem::remove_all(tmp_dir);
@@ -608,17 +744,22 @@ TEST_CASE("Static mount: directory listing via subpath", "[response]")
         f << "a";
     }
 
-    auto entry = httplib::server::mount_point_entry("/dir", tmp_dir);
-    entry.set_enabled_directory(true);
-    entry.set_directory_format(httplib::server::mount_point_entry::dir_format_type::json);
-
     {
-        test_scaffold ts;
-        ts.router().set_static_mount_point(std::move(entry));
-        ts.start();
-
-        auto resp = UNWRAP(ts.client->get("/dir/data/"));
-        REQUIRE(resp.result() == http::status::ok);
+        run(
+            [&](auto& server)
+            {
+                auto entry = httplib::server::mount_point_entry("/dir", tmp_dir);
+                entry.set_enabled_directory(true);
+                entry.set_directory_format(
+                    httplib::server::mount_point_entry::dir_format_type::json);
+                server.router().set_static_mount_point(std::move(entry));
+            },
+            [](auto& client) -> net::awaitable<void>
+            {
+                auto resp = UNWRAP(co_await client.async_get("/dir/data/"));
+                REQUIRE(resp.result() == http::status::ok);
+                co_return;
+            });
     }
 
     std::filesystem::remove_all(tmp_dir);
@@ -629,12 +770,17 @@ TEST_CASE("Static mount: non-existent file returns 404 via mount", "[response]")
     auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_no";
     std::filesystem::create_directories(tmp_dir);
 
-    test_scaffold ts;
-    ts.router().set_static_mount_point("/pub", tmp_dir);
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->get("/pub/nope.txt"));
-    REQUIRE(resp.result() == http::status::not_found);
+    run(
+        [&](auto& server)
+        {
+            server.router().set_static_mount_point("/pub", tmp_dir);
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/pub/nope.txt"));
+            REQUIRE(resp.result() == http::status::not_found);
+            co_return;
+        });
 
     std::filesystem::remove_all(tmp_dir);
 }
@@ -650,13 +796,18 @@ TEST_CASE("Static mount: file in subdirectory", "[response]")
     }
 
     {
-        test_scaffold ts;
-        ts.router().set_static_mount_point("/pub", tmp_dir);
-        ts.start();
-
-        auto resp = UNWRAP(ts.client->get("/pub/sub/deep.txt"));
-        REQUIRE(resp.result() == http::status::ok);
-        REQUIRE(as_string(resp) == "nested");
+        run(
+            [&](auto& server)
+            {
+                server.router().set_static_mount_point("/pub", tmp_dir);
+            },
+            [](auto& client) -> net::awaitable<void>
+            {
+                auto resp = UNWRAP(co_await client.async_get("/pub/sub/deep.txt"));
+                REQUIRE(resp.result() == http::status::ok);
+                REQUIRE(resp.body().template as<body::string_body>() == "nested");
+                co_return;
+            });
     }
 
     std::filesystem::remove_all(tmp_dir);

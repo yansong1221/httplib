@@ -13,6 +13,13 @@ using namespace std::chrono_literals;
 using traits = jwt::traits::boost_json;
 using claim = jwt::basic_claim<traits>;
 
+namespace
+{
+    using test_common::run;
+    using test_common::setup_logger;
+
+} // namespace
+
 TEST_CASE("JWT: build and sign with HS256", "[jwt]")
 {
     auto token
@@ -234,63 +241,76 @@ TEST_CASE("JWT: verifier allow_algorithm explicitly", "[jwt]")
 
 TEST_CASE("JWT: middleware auth via Bearer token", "[jwt]")
 {
-    test_common::test_scaffold ts;
     namespace mw = httplib::server::middleware;
 
     auto ja = mw::jwt_auth_middleware { httplib::jwt::hs256("secret") };
     ja.with_issuer("my-app");
-    ts.router().set_http_handler<http::verb::get>(
-        "/protected",
-        [](httplib::server::request& req, httplib::server::response& resp)
-        {
-            auto& jwt = mw::fetch<mw::jwt_auth_middleware>(req);
-            resp.set_string_content(jwt.get_subject(), "text/plain");
-        },
-        ja);
-
-    ts.start();
 
     auto token = httplib::jwt::create().set_issuer("my-app").set_subject("alice").sign(httplib::jwt::hs256("secret"));
 
-    auto hdrs = httplib::http::fields();
-    hdrs.set(http::field::authorization, "Bearer " + token);
-    auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/protected", hdrs));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(test_common::as_string(resp) == "alice");
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/protected",
+                [](httplib::server::request& req, httplib::server::response& resp)
+                {
+                    auto& jwt = mw::fetch<mw::jwt_auth_middleware>(req);
+                    resp.set_string_content(jwt.get_subject(), "text/plain");
+                },
+                ja);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto hdrs = httplib::http::fields();
+            hdrs.set(http::field::authorization, "Bearer " + token);
+            auto resp = UNWRAP(co_await client.async_send_request(http::verb::get, "/protected", hdrs));
+            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(test_common::as_string(resp) == "alice");
+            co_return;
+        });
 }
 
 TEST_CASE("JWT: middleware rejects invalid token", "[jwt]")
 {
-    test_common::test_scaffold ts;
     namespace mw = httplib::server::middleware;
 
-    ts.router().set_http_handler<http::verb::get>(
-        "/protected",
-        [](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_string_content("ok"sv, "text/plain"sv); },
-        mw::jwt_auth_middleware { httplib::jwt::hs256("secret") });
-
-    ts.start();
-
-    auto hdrs = httplib::http::fields();
-    hdrs.set(http::field::authorization, "Bearer invalid.token.here");
-    auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/protected", hdrs));
-    REQUIRE(resp.result() == http::status::unauthorized);
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/protected",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); },
+                mw::jwt_auth_middleware { httplib::jwt::hs256("secret") });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto hdrs = httplib::http::fields();
+            hdrs.set(http::field::authorization, "Bearer invalid.token.here");
+            auto resp = UNWRAP(co_await client.async_send_request(http::verb::get, "/protected", hdrs));
+            REQUIRE(resp.result() == http::status::unauthorized);
+            co_return;
+        });
 }
 
 TEST_CASE("JWT: middleware rejects missing Bearer", "[jwt]")
 {
-    test_common::test_scaffold ts;
     namespace mw = httplib::server::middleware;
 
-    ts.router().set_http_handler<http::verb::get>(
-        "/protected",
-        [](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_string_content("ok"sv, "text/plain"sv); },
-        mw::jwt_auth_middleware { httplib::jwt::hs256("secret") });
-
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->get("/protected"));
-    REQUIRE(resp.result() == http::status::unauthorized);
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/protected",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); },
+                mw::jwt_auth_middleware { httplib::jwt::hs256("secret") });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/protected"));
+            REQUIRE(resp.result() == http::status::unauthorized);
+            co_return;
+        });
 }

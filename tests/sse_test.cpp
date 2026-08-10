@@ -2,246 +2,243 @@
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/server/sse_writer.hpp"
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/use_future.hpp>
+#include <catch2/catch_test_macros.hpp>
 
-namespace
-{
-    using test_common::test_scaffold;
-} // namespace
+namespace net = httplib::net;
+using test_common::run;
+using test_common::setup_logger;
+
+// ===========================================================================
+// SSE basic
+// ===========================================================================
 
 TEST_CASE("SSE: server sends single event", "[sse]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/events",
-        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+    run(
+        [](auto& server)
         {
-            auto sse = resp.create_sse_writer();
-            co_await sse->begin();
-            co_await sse->send_event("hello world", {}, {}, false);
-        });
-    ts.start();
-
-    std::vector<httplib::client::sse_reader::sse_event> events;
-
-    boost::asio::co_spawn(
-        ts.executor(),
-        [&]() -> net::awaitable<void>
+            server.router().template set_http_handler<http::verb::get>(
+                "/events",
+                [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+                {
+                    auto sse = resp.create_sse_writer();
+                    co_await sse->begin();
+                    co_await sse->send_event("hello world", {}, {}, false);
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
         {
-            auto sse = ts.client->create_sse_reader();
+            std::vector<httplib::client::sse_reader::sse_event> events;
 
-            co_await ts.client->async_get("/events");
+            auto sse = client.create_sse_reader();
+
+            co_await client.async_get("/events");
             auto ec = co_await sse->read_header();
             REQUIRE(!ec);
 
             co_await collect_sse_events(*sse, events);
-        },
-        boost::asio::use_future)
-        .get();
 
-    REQUIRE(events.size() == 1);
-    REQUIRE(events[0].data == "hello world");
+            REQUIRE(events.size() == 1);
+            REQUIRE(events[0].data == "hello world");
+            co_return;
+        });
 }
 
 TEST_CASE("SSE: server sends multiple events", "[sse]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/events",
-        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+    run(
+        [](auto& server)
         {
-            auto sse = resp.create_sse_writer();
-            co_await sse->begin();
-            co_await sse->send_event("first", {}, {}, true);
-            co_await sse->send_event("second", {}, {}, true);
-            co_await sse->send_event("third", {}, {}, false);
-        });
-    ts.start();
-
-    std::vector<httplib::client::sse_reader::sse_event> events;
-
-    boost::asio::co_spawn(
-        ts.executor(),
-        [&]() -> net::awaitable<void>
+            server.router().template set_http_handler<http::verb::get>(
+                "/events",
+                [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+                {
+                    auto sse = resp.create_sse_writer();
+                    co_await sse->begin();
+                    co_await sse->send_event("first", {}, {}, true);
+                    co_await sse->send_event("second", {}, {}, true);
+                    co_await sse->send_event("third", {}, {}, false);
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
         {
-            auto sse = ts.client->create_sse_reader();
+            std::vector<httplib::client::sse_reader::sse_event> events;
 
-            co_await ts.client->async_get("/events");
+            auto sse = client.create_sse_reader();
+
+            co_await client.async_get("/events");
             auto ec = co_await sse->read_header();
             REQUIRE(!ec);
 
             co_await collect_sse_events(*sse, events);
-        },
-        boost::asio::use_future)
-        .get();
 
-    REQUIRE(events.size() == 3);
-    REQUIRE(events[0].data == "first");
-    REQUIRE(events[1].data == "second");
-    REQUIRE(events[2].data == "third");
+            REQUIRE(events.size() == 3);
+            REQUIRE(events[0].data == "first");
+            REQUIRE(events[1].data == "second");
+            REQUIRE(events[2].data == "third");
+            co_return;
+        });
 }
 
 TEST_CASE("SSE: event with id and type", "[sse]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/events",
-        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+    run(
+        [](auto& server)
         {
-            auto sse = resp.create_sse_writer();
-            co_await sse->begin();
-            co_await sse->send_event("payload", "custom_type", "42", false);
-        });
-    ts.start();
-
-    std::vector<httplib::client::sse_reader::sse_event> events;
-
-    boost::asio::co_spawn(
-        ts.executor(),
-        [&]() -> net::awaitable<void>
+            server.router().template set_http_handler<http::verb::get>(
+                "/events",
+                [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+                {
+                    auto sse = resp.create_sse_writer();
+                    co_await sse->begin();
+                    co_await sse->send_event("payload", "custom_type", "42", false);
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
         {
-            auto sse = ts.client->create_sse_reader();
+            std::vector<httplib::client::sse_reader::sse_event> events;
 
-            co_await ts.client->async_get("/events");
+            auto sse = client.create_sse_reader();
+
+            co_await client.async_get("/events");
             auto ec = co_await sse->read_header();
             REQUIRE(!ec);
 
             co_await collect_sse_events(*sse, events);
-        },
-        boost::asio::use_future)
-        .get();
 
-    REQUIRE(events.size() == 1);
-    REQUIRE(events[0].id == "42");
-    REQUIRE(events[0].event == "custom_type");
-    REQUIRE(events[0].data == "payload");
+            REQUIRE(events.size() == 1);
+            REQUIRE(events[0].id == "42");
+            REQUIRE(events[0].event == "custom_type");
+            REQUIRE(events[0].data == "payload");
+            co_return;
+        });
 }
 
 TEST_CASE("SSE: retry interval", "[sse]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/events",
-        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+    run(
+        [](auto& server)
         {
-            auto sse = resp.create_sse_writer();
-            co_await sse->begin();
-            co_await sse->send_retry(std::chrono::milliseconds(3000), false);
-        });
-    ts.start();
-
-    std::vector<httplib::client::sse_reader::sse_event> events;
-
-    boost::asio::co_spawn(
-        ts.executor(),
-        [&]() -> net::awaitable<void>
+            server.router().template set_http_handler<http::verb::get>(
+                "/events",
+                [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+                {
+                    auto sse = resp.create_sse_writer();
+                    co_await sse->begin();
+                    co_await sse->send_retry(std::chrono::milliseconds(3000), false);
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
         {
-            auto sse = ts.client->create_sse_reader();
+            std::vector<httplib::client::sse_reader::sse_event> events;
 
-            co_await ts.client->async_get("/events");
+            auto sse = client.create_sse_reader();
+
+            co_await client.async_get("/events");
             auto ec = co_await sse->read_header();
             REQUIRE(!ec);
 
             co_await collect_sse_events(*sse, events);
-        },
-        boost::asio::use_future)
-        .get();
 
-    REQUIRE(events.size() == 1);
-    REQUIRE(events[0].retry == std::chrono::milliseconds(3000));
-    REQUIRE(events[0].data.empty());
+            REQUIRE(events.size() == 1);
+            REQUIRE(events[0].retry == std::chrono::milliseconds(3000));
+            REQUIRE(events[0].data.empty());
+            co_return;
+        });
 }
 
 TEST_CASE("SSE: comment is ignored", "[sse]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/events",
-        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+    run(
+        [](auto& server)
         {
-            auto sse = resp.create_sse_writer();
-            co_await sse->begin();
-            co_await sse->send_comment("keep-alive", true);
-            co_await sse->send_event("real data", {}, {}, false);
-        });
-    ts.start();
-
-    std::vector<httplib::client::sse_reader::sse_event> events;
-
-    boost::asio::co_spawn(
-        ts.executor(),
-        [&]() -> net::awaitable<void>
+            server.router().template set_http_handler<http::verb::get>(
+                "/events",
+                [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+                {
+                    auto sse = resp.create_sse_writer();
+                    co_await sse->begin();
+                    co_await sse->send_comment("keep-alive", true);
+                    co_await sse->send_event("real data", {}, {}, false);
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
         {
-            auto sse = ts.client->create_sse_reader();
+            std::vector<httplib::client::sse_reader::sse_event> events;
 
-            co_await ts.client->async_get("/events");
+            auto sse = client.create_sse_reader();
+
+            co_await client.async_get("/events");
             auto ec = co_await sse->read_header();
             REQUIRE(!ec);
 
             co_await collect_sse_events(*sse, events);
-        },
-        boost::asio::use_future)
-        .get();
 
-    REQUIRE(events.size() == 1);
-    REQUIRE(events[0].data == "real data");
+            REQUIRE(events.size() == 1);
+            REQUIRE(events[0].data == "real data");
+            co_return;
+        });
 }
+
+// ===========================================================================
+// SSE headers
+// ===========================================================================
 
 TEST_CASE("SSE: Content-Type is text/event-stream", "[sse]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/events",
-        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+    run(
+        [](auto& server)
         {
-            auto sse = resp.create_sse_writer();
-            co_await sse->begin();
-            co_await sse->send_event("test", {}, {}, false);
-        });
-    ts.start();
-
-    boost::asio::co_spawn(
-        ts.executor(),
-        [&]() -> net::awaitable<void>
+            server.router().template set_http_handler<http::verb::get>(
+                "/events",
+                [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+                {
+                    auto sse = resp.create_sse_writer();
+                    co_await sse->begin();
+                    co_await sse->send_event("test", {}, {}, false);
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
         {
-            auto sse = ts.client->create_sse_reader();
+            auto sse = client.create_sse_reader();
 
-            co_await ts.client->async_get("/events");
+            co_await client.async_get("/events");
             auto ec = co_await sse->read_header();
             REQUIRE(!ec);
 
             REQUIRE(sse->headers()[http::field::content_type] == "text/event-stream");
             REQUIRE(sse->headers()[http::field::cache_control] == "no-cache");
-        },
-        boost::asio::use_future)
-        .get();
+            co_return;
+        });
 }
+
+// ===========================================================================
+// SSE client control
+// ===========================================================================
 
 TEST_CASE("SSE: client can stop receiving by returning false", "[sse]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/events",
-        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+    run(
+        [](auto& server)
         {
-            auto sse = resp.create_sse_writer();
-            co_await sse->begin();
-            co_await sse->send_event("first", {}, {}, true);
-            co_await sse->send_event("second", {}, {}, true);
-            co_await sse->send_event("third", {}, {}, false);
-        });
-    ts.start();
-
-    std::vector<httplib::client::sse_reader::sse_event> events;
-
-    boost::asio::co_spawn(
-        ts.executor(),
-        [&]() -> net::awaitable<void>
+            server.router().template set_http_handler<http::verb::get>(
+                "/events",
+                [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+                {
+                    auto sse = resp.create_sse_writer();
+                    co_await sse->begin();
+                    co_await sse->send_event("first", {}, {}, true);
+                    co_await sse->send_event("second", {}, {}, true);
+                    co_await sse->send_event("third", {}, {}, false);
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
         {
-            auto sse = ts.client->create_sse_reader();
+            std::vector<httplib::client::sse_reader::sse_event> events;
 
-            co_await ts.client->async_get("/events");
+            auto sse = client.create_sse_reader();
+
+            co_await client.async_get("/events");
             auto ec = co_await sse->read_header();
             REQUIRE(!ec);
 
@@ -263,45 +260,43 @@ TEST_CASE("SSE: client can stop receiving by returning false", "[sse]")
                     co_return;
                 }
             }
-        },
-        boost::asio::use_future)
-        .get();
 
-    REQUIRE(events.size() == 2);
-    REQUIRE(events[0].data == "first");
-    REQUIRE(events[1].data == "second");
+            co_return;
+        });
 }
+
+// ===========================================================================
+// SSE data
+// ===========================================================================
 
 TEST_CASE("SSE: multi-line data", "[sse]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/events",
-        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+    run(
+        [](auto& server)
         {
-            auto sse = resp.create_sse_writer();
-            co_await sse->begin();
-            co_await sse->send_event("line1\nline2\nline3", {}, {}, false);
-        });
-    ts.start();
-
-    std::vector<httplib::client::sse_reader::sse_event> events;
-
-    boost::asio::co_spawn(
-        ts.executor(),
-        [&]() -> net::awaitable<void>
+            server.router().template set_http_handler<http::verb::get>(
+                "/events",
+                [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+                {
+                    auto sse = resp.create_sse_writer();
+                    co_await sse->begin();
+                    co_await sse->send_event("line1\nline2\nline3", {}, {}, false);
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
         {
-            auto sse = ts.client->create_sse_reader();
+            std::vector<httplib::client::sse_reader::sse_event> events;
 
-            co_await ts.client->async_get("/events");
+            auto sse = client.create_sse_reader();
+
+            co_await client.async_get("/events");
             auto ec = co_await sse->read_header();
             REQUIRE(!ec);
 
             co_await collect_sse_events(*sse, events);
-        },
-        boost::asio::use_future)
-        .get();
 
-    REQUIRE(events.size() == 1);
-    REQUIRE(events[0].data == "line1\nline2\nline3");
+            REQUIRE(events.size() == 1);
+            REQUIRE(events[0].data == "line1\nline2\nline3");
+            co_return;
+        });
 }

@@ -78,6 +78,70 @@ d6jDUgydraEmQvIPiKMpTE18rW+jierv2FlB8AGcwxm2VWxuM25wQ40J2YuZLY7k
 namespace test_common
 {
 
+    inline void
+    setup_logger(httplib::server::http_server& server)
+    {
+        auto null_sink = std::make_shared<spdlog::sinks::null_sink_mt>();
+        server.set_logger(std::make_shared<spdlog::logger>("test", null_sink));
+    }
+
+    template <typename Setup, typename Test>
+    void
+    run(Setup&& setup, Test&& test)
+    {
+        net::thread_pool pool{ 1 };
+        std::exception_ptr err;
+        net::co_spawn(
+            pool.get_executor(),
+            [&]() -> net::awaitable<void>
+            {
+                httplib::server::http_server server(pool.get_executor());
+                setup_logger(server);
+                setup(server);
+                server.listen("127.0.0.1", 0);
+                auto ep = server.local_endpoint();
+                server.run();
+
+                httplib::client::http_client client(pool.get_executor(),
+                                                     ep.address().to_string(),
+                                                     ep.port());
+                client.set_timeout(std::chrono::seconds(5));
+
+                co_await test(client);
+
+                client.close();
+                server.stop();
+            },
+            [&](std::exception_ptr e)
+            {
+                err = e;
+            });
+        pool.join();
+        if (err)
+            std::rethrow_exception(err);
+    }
+
+    template <typename Test>
+    void
+    run_error(Test&& test)
+    {
+        net::thread_pool pool{ 1 };
+        std::exception_ptr err;
+        net::co_spawn(
+            pool.get_executor(),
+            [&]() -> net::awaitable<void>
+            {
+                co_await test(pool);
+            },
+            [&](std::exception_ptr e)
+            {
+                err = e;
+            });
+        pool.join();
+        if (err)
+            std::rethrow_exception(err);
+    }
+
     struct test_scaffold
     {
         net::thread_pool workers_ { 4 };
@@ -173,6 +237,14 @@ namespace test_common
         router()
         {
             return server.router();
+        }
+
+        template <typename Factory>
+        auto
+        run_async(Factory&& factory)
+        {
+            auto future = net::co_spawn(executor(), std::forward<Factory>(factory), net::use_future);
+            return future.get();
         }
 
       private:

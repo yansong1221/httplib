@@ -1,432 +1,616 @@
 #include "common.hpp"
+#include "httplib/body/string_body.hpp"
 #include "httplib/server/middleware/auth.hpp"
 #include "httplib/server/middleware/cors.hpp"
 #include "httplib/server/middleware/rate_limit.hpp"
 #include "httplib/server/response.hpp"
+#include <catch2/catch_test_macros.hpp>
 #include <chrono>
 
+namespace body = httplib::body;
 namespace mw = httplib::server::middleware;
+namespace net = httplib::net;
+namespace http = httplib::http;
+using test_common::run;
+using test_common::setup_logger;
 
 namespace
 {
-    using test_common::as_string;
-    using test_common::test_scaffold;
 
-    TEST_CASE("Global middleware: execution order with route middleware", "[middleware]")
+    template <typename Setup, typename Test>
+    void
+    run_with_ep(Setup&& setup, Test&& test)
     {
-        test_scaffold ts;
-        auto order = std::make_shared<std::vector<std::string>>();
+        net::thread_pool pool{ 1 };
+        std::exception_ptr err;
 
-        struct order_mw
-        {
-            std::string name;
-            std::shared_ptr<std::vector<std::string>> order;
-            bool
-            before(httplib::server::request&, httplib::server::response&)
+        net::co_spawn(
+            pool.get_executor(),
+            [&]() -> net::awaitable<void>
             {
-                order->push_back(name + "_before");
-                return true;
-            }
-            bool
-            after(httplib::server::request&, httplib::server::response&)
-            {
-                order->push_back(name + "_after");
-                return true;
-            }
-        };
+                httplib::server::http_server server(pool.get_executor());
+                setup_logger(server);
+                setup(server);
+                server.listen("127.0.0.1", 0);
+                auto ep = server.local_endpoint();
+                server.run();
 
-        ts.router().use(order_mw { "global", order });
+                httplib::client::http_client client(pool.get_executor(),
+                                                     ep.address().to_string(),
+                                                     ep.port());
+                client.set_timeout(std::chrono::seconds(5));
 
-        ts.router().set_http_handler<http::verb::get>(
-            "/order",
-            [order](httplib::server::request&, httplib::server::response& resp)
-            {
-                order->push_back("handler");
-                resp.set_string_content("ok"sv, "text/plain"sv);
+                co_await test(client, ep, pool);
+
+                client.close();
+                server.stop();
             },
-            order_mw { "route", order });
-        ts.start();
+            [&](std::exception_ptr e)
+            {
+                err = e;
+            });
 
-        auto resp = UNWRAP(ts.client->get("/order"));
-        REQUIRE(resp.result() == http::status::ok);
-        REQUIRE(
-            *order
-            == std::vector<std::string> { "global_before", "route_before", "handler", "route_after", "global_after" });
+        pool.join();
+        if (err)
+            std::rethrow_exception(err);
     }
 
 } // namespace
+
+// ===== middleware execution order =====
+
+TEST_CASE("Global middleware: execution order with route middleware", "[middleware]")
+{
+    struct order_mw
+    {
+        std::string name;
+        std::shared_ptr<std::vector<std::string>> order;
+        bool
+        before(httplib::server::request&, httplib::server::response&)
+        {
+            order->push_back(name + "_before");
+            return true;
+        }
+        bool
+        after(httplib::server::request&, httplib::server::response&)
+        {
+            order->push_back(name + "_after");
+            return true;
+        }
+    };
+
+    auto order = std::make_shared<std::vector<std::string>>();
+    order_mw global { "global", order };
+    order_mw route { "route", order };
+
+    run(
+        [&](auto& server)
+        {
+            server.router().use(global);
+            server.router().template set_http_handler<http::verb::get>(
+                "/order",
+                [order](httplib::server::request&, httplib::server::response& resp)
+                {
+                    order->push_back("handler");
+                    resp.set_string_content("ok"sv, "text/plain"sv);
+                },
+                route);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/order"));
+            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(*order
+                    == std::vector<std::string>{ "global_before", "route_before", "handler",
+                                                 "route_after", "global_after" });
+            co_return;
+        });
+}
+
+TEST_CASE("Global middleware: applies to all routes", "[middleware]")
+{
+    mw::basic_auth_middleware auth([](std::string_view u, std::string_view p)
+                                    { return u == "admin" && p == "secret"; });
+
+    run(
+        [&](auto& server)
+        {
+            server.router().use(auth);
+
+            server.router().template set_http_handler<http::verb::get>(
+                "/public",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); });
+            server.router().template set_http_handler<http::verb::get>(
+                "/private",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("secret"sv, "text/plain"sv); });
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto hdrs = httplib::http::fields();
+            hdrs.set(http::field::authorization, "Basic YWRtaW46c2VjcmV0");
+            auto resp1 = UNWRAP(co_await client.async_send_request(http::verb::get, "/public", hdrs));
+            REQUIRE(resp1.result() == http::status::ok);
+
+            auto resp2 = UNWRAP(co_await client.async_send_request(http::verb::get, "/private", hdrs));
+            REQUIRE(resp2.result() == http::status::ok);
+
+            auto resp3 = UNWRAP(co_await client.async_get("/public"));
+            REQUIRE(resp3.result() == http::status::unauthorized);
+            co_return;
+        });
+}
+
+TEST_CASE("Global middleware: cors_middleware via use()", "[middleware]")
+{
+    auto cors = mw::cors_middleware {}.allow_origin("x");
+
+    run(
+        [&](auto& server)
+        {
+            server.router().use(cors);
+
+            server.router().template set_http_handler<http::verb::get>(
+                "/gc",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); });
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/gc"));
+            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(std::string(resp[http::field::access_control_allow_origin]) == "x");
+            co_return;
+        });
+}
 
 // ===== cors_middleware =====
 
 TEST_CASE("cors_middleware: allows request without Origin", "[middleware]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/data",
-        [](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_string_content("ok"sv, "text/plain"sv); },
-        mw::cors_middleware {});
-    ts.start();
+    mw::cors_middleware cors;
 
-    auto resp = UNWRAP(ts.client->get("/data"));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(resp["Access-Control-Allow-Origin"] == "*");
-    REQUIRE_FALSE(resp["Access-Control-Allow-Methods"].empty());
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/data",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); },
+                cors);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/data"));
+            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp["Access-Control-Allow-Origin"] == "*");
+            REQUIRE_FALSE(resp["Access-Control-Allow-Methods"].empty());
+            co_return;
+        });
 }
 
 TEST_CASE("cors_middleware: OPTIONS preflight is short-circuited", "[middleware]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::options>(
-        "/data",
-        [](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_string_content("should-not-reach"sv, "text/plain"sv); },
-        mw::cors_middleware {});
-    ts.start();
+    mw::cors_middleware cors;
 
-    auto resp = UNWRAP(ts.client->options("/data"));
-    REQUIRE(resp.result() == http::status::no_content);
-    REQUIRE(resp["Access-Control-Allow-Origin"] == "*");
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::options>(
+                "/data",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("should-not-reach"sv, "text/plain"sv); },
+                cors);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_options("/data"));
+            REQUIRE(resp.result() == http::status::no_content);
+            REQUIRE(resp["Access-Control-Allow-Origin"] == "*");
+            co_return;
+        });
 }
 
 TEST_CASE("cors_middleware: custom origin and credentials", "[middleware]")
 {
-    test_scaffold ts;
-    auto cors_middleware
-        = mw::cors_middleware().allow_origin("https://example.com").allow_credentials(true).max_age(3600);
+    auto cors = mw::cors_middleware().allow_origin("https://example.com").allow_credentials(true).max_age(3600);
 
-    ts.router().set_http_handler<http::verb::get>(
-        "/data",
-        [](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_string_content("ok"sv, "text/plain"sv); },
-        std::move(cors_middleware));
-    ts.start();
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/data",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); },
+                std::move(cors));
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/data"));
+            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp["Access-Control-Allow-Origin"] == "https://example.com");
+            REQUIRE(resp["Access-Control-Allow-Credentials"] == "true");
+            REQUIRE(resp["Access-Control-Max-Age"] == "3600");
+            co_return;
+        });
+}
 
-    auto resp = UNWRAP(ts.client->get("/data"));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(resp["Access-Control-Allow-Origin"] == "https://example.com");
-    REQUIRE(resp["Access-Control-Allow-Credentials"] == "true");
-    REQUIRE(resp["Access-Control-Max-Age"] == "3600");
+TEST_CASE("cors_middleware: allow_origins with multiple origins", "[middleware]")
+{
+    mw::cors_middleware cors;
+    cors.allow_origins({ "https://a.com", "https://b.com" });
+
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/cors_middleware-multi",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("cors_middleware-data"sv, "text/plain"sv); },
+                cors);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto hdrs = httplib::http::fields();
+            hdrs.set(http::field::origin, "https://a.com");
+            auto resp = UNWRAP(
+                co_await client.async_send_request(http::verb::get, "/cors_middleware-multi", hdrs));
+            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.body().template as<body::string_body>() == "cors_middleware-data");
+            co_return;
+        });
+}
+
+TEST_CASE("cors_middleware: allow_methods custom", "[middleware]")
+{
+    mw::cors_middleware cors;
+    cors.allow_methods({ "PUT", "PATCH" });
+    cors.allow_origin("https://x.com");
+
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::options>(
+                "/cors_middleware-methods",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_empty_content(http::status::no_content); },
+                cors);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto hdrs = httplib::http::fields();
+            hdrs.set(http::field::origin, "https://x.com");
+            auto resp = UNWRAP(
+                co_await client.async_send_request(http::verb::options, "/cors_middleware-methods", hdrs));
+            REQUIRE(resp.result() == http::status::no_content);
+            auto methods = std::string(resp["Access-Control-Allow-Methods"]);
+            REQUIRE(methods.find("PUT") != std::string::npos);
+            REQUIRE(methods.find("PATCH") != std::string::npos);
+            co_return;
+        });
 }
 
 // ===== Basic Auth =====
 
 TEST_CASE("Basic Auth: valid credentials pass through", "[middleware]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/secret",
-        [](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_string_content("secret-data"sv, "text/plain"sv); },
-        mw::basic_auth_middleware([](std::string_view u, std::string_view p) { return u == "user" && p == "pass"; }));
-    ts.start();
+    mw::basic_auth_middleware auth(
+        [](std::string_view u, std::string_view p) { return u == "user" && p == "pass"; });
 
-    auto hdrs = httplib::http::fields();
-    hdrs.set(http::field::authorization, "Basic dXNlcjpwYXNz");
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/secret",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("secret-data"sv, "text/plain"sv); },
+                auth);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto hdrs = httplib::http::fields();
+            hdrs.set(http::field::authorization, "Basic dXNlcjpwYXNz");
 
-    auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/secret", hdrs));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(as_string(resp) == "secret-data");
+            auto resp = UNWRAP(
+                co_await client.async_send_request(http::verb::get, "/secret", hdrs));
+            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.body().template as<body::string_body>() == "secret-data");
+            co_return;
+        });
 }
 
 TEST_CASE("Basic Auth: invalid credentials return 401", "[middleware]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/secret",
-        [](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_string_content("secret-data"sv, "text/plain"sv); },
-        mw::basic_auth_middleware([](std::string_view u, std::string_view p) { return u == "user" && p == "pass"; }));
-    ts.start();
+    mw::basic_auth_middleware auth(
+        [](std::string_view u, std::string_view p) { return u == "user" && p == "pass"; });
 
-    auto hdrs = httplib::http::fields();
-    hdrs.set(http::field::authorization, "Basic dXNlcjp3cm9uZw==");
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/secret",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("secret-data"sv, "text/plain"sv); },
+                auth);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto hdrs = httplib::http::fields();
+            hdrs.set(http::field::authorization, "Basic dXNlcjp3cm9uZw==");
 
-    auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/secret", hdrs));
-    REQUIRE(resp.result() == http::status::unauthorized);
+            auto resp = UNWRAP(
+                co_await client.async_send_request(http::verb::get, "/secret", hdrs));
+            REQUIRE(resp.result() == http::status::unauthorized);
+            co_return;
+        });
 }
 
 TEST_CASE("Basic Auth: missing header returns 401", "[middleware]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/secret",
-        [](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_string_content("secret-data"sv, "text/plain"sv); },
-        mw::basic_auth_middleware([](std::string_view, std::string_view) { return true; }));
-    ts.start();
+    mw::basic_auth_middleware auth([](std::string_view, std::string_view) { return true; });
 
-    auto resp = UNWRAP(ts.client->get("/secret"));
-    REQUIRE(resp.result() == http::status::unauthorized);
-    REQUIRE_FALSE(std::string(resp[http::field::www_authenticate]).empty());
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/secret",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("secret-data"sv, "text/plain"sv); },
+                auth);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/secret"));
+            REQUIRE(resp.result() == http::status::unauthorized);
+            REQUIRE_FALSE(std::string(resp[http::field::www_authenticate]).empty());
+            co_return;
+        });
 }
 
 // ===== Bearer Auth =====
 
 TEST_CASE("Bearer Auth: valid token passes through", "[middleware]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/token-area",
-        [](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_string_content("ok"sv, "text/plain"sv); },
-        mw::bearer_auth_middleware([](std::string_view t) { return t == "abc-123"; }));
-    ts.start();
+    mw::bearer_auth_middleware auth([](std::string_view t) { return t == "abc-123"; });
 
-    auto hdrs = httplib::http::fields();
-    hdrs.set(http::field::authorization, "Bearer abc-123");
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/token-area",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); },
+                auth);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto hdrs = httplib::http::fields();
+            hdrs.set(http::field::authorization, "Bearer abc-123");
 
-    auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/token-area", hdrs));
-    REQUIRE(resp.result() == http::status::ok);
+            auto resp = UNWRAP(
+                co_await client.async_send_request(http::verb::get, "/token-area", hdrs));
+            REQUIRE(resp.result() == http::status::ok);
+            co_return;
+        });
 }
 
 TEST_CASE("Bearer Auth: invalid token returns 401", "[middleware]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/token-area",
-        [](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_string_content("ok"sv, "text/plain"sv); },
-        mw::bearer_auth_middleware([](std::string_view t) { return t == "abc-123"; }));
-    ts.start();
+    mw::bearer_auth_middleware auth([](std::string_view t) { return t == "abc-123"; });
 
-    auto hdrs = httplib::http::fields();
-    hdrs.set(http::field::authorization, "Bearer wrong-token");
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/token-area",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); },
+                auth);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto hdrs = httplib::http::fields();
+            hdrs.set(http::field::authorization, "Bearer wrong-token");
 
-    auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/token-area", hdrs));
-    REQUIRE(resp.result() == http::status::unauthorized);
+            auto resp = UNWRAP(
+                co_await client.async_send_request(http::verb::get, "/token-area", hdrs));
+            REQUIRE(resp.result() == http::status::unauthorized);
+            co_return;
+        });
+}
+
+TEST_CASE("Bearer Auth: missing header returns 401", "[middleware]")
+{
+    mw::bearer_auth_middleware auth([](std::string_view) { return true; });
+
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/bearer-missing",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("secret"sv, "text/plain"sv); },
+                auth);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/bearer-missing"));
+            REQUIRE(resp.result() == http::status::unauthorized);
+            co_return;
+        });
+}
+
+TEST_CASE("Bearer Auth: non-Bearer scheme returns 401", "[middleware]")
+{
+    mw::bearer_auth_middleware auth([](std::string_view) { return true; });
+
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/bearer-scheme",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("secret"sv, "text/plain"sv); },
+                auth);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto hdrs = httplib::http::fields();
+            hdrs.set(http::field::authorization, "Digest xxx");
+            auto resp = UNWRAP(
+                co_await client.async_send_request(http::verb::get, "/bearer-scheme", hdrs));
+            REQUIRE(resp.result() == http::status::unauthorized);
+            co_return;
+        });
 }
 
 // ===== Rate Limit =====
 
 TEST_CASE("Rate Limit: allows requests within limit", "[middleware]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/limited",
-        [](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_string_content("ok"sv, "text/plain"sv); },
-        mw::rate_limit_middleware(10, std::chrono::seconds(60)));
-    ts.start();
+    mw::rate_limit_middleware limiter(10, std::chrono::seconds(60));
 
-    for (int i = 0; i < 5; ++i)
-    {
-        auto resp = UNWRAP(ts.client->get("/limited"));
-        REQUIRE(resp.result() == http::status::ok);
-    }
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/limited",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); },
+                limiter);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            for (int i = 0; i < 5; ++i)
+            {
+                auto resp = UNWRAP(co_await client.async_get("/limited"));
+                REQUIRE(resp.result() == http::status::ok);
+            }
+            co_return;
+        });
 }
 
 TEST_CASE("Rate Limit: blocks after exceeding limit", "[middleware]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/limited",
-        [](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_string_content("ok"sv, "text/plain"sv); },
-        mw::rate_limit_middleware(3, std::chrono::seconds(60)));
-    ts.start();
+    mw::rate_limit_middleware limiter(3, std::chrono::seconds(60));
 
-    for (int i = 0; i < 3; ++i)
-    {
-        auto resp = UNWRAP(ts.client->get("/limited"));
-        REQUIRE(resp.result() == http::status::ok);
-    }
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/limited",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); },
+                limiter);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            for (int i = 0; i < 3; ++i)
+            {
+                auto resp = UNWRAP(co_await client.async_get("/limited"));
+                REQUIRE(resp.result() == http::status::ok);
+            }
 
-    auto resp = UNWRAP(ts.client->get("/limited"));
-    REQUIRE(resp.result() == http::status::too_many_requests);
-    REQUIRE_FALSE(std::string(resp["Retry-After"]).empty());
+            auto resp = UNWRAP(co_await client.async_get("/limited"));
+            REQUIRE(resp.result() == http::status::too_many_requests);
+            REQUIRE_FALSE(std::string(resp["Retry-After"]).empty());
+            co_return;
+        });
 }
 
 TEST_CASE("Rate Limit: shared instance across routes", "[middleware]")
 {
     auto limiter = mw::rate_limit_middleware(2, std::chrono::seconds(60));
 
-    test_scaffold ts;
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/a",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("a"sv, "text/plain"sv); },
+                limiter);
 
-    ts.router().set_http_handler<http::verb::get>(
-        "/a",
-        [](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_string_content("a"sv, "text/plain"sv); },
-        limiter);
+            server.router().template set_http_handler<http::verb::get>(
+                "/b",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("b"sv, "text/plain"sv); },
+                limiter);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            UNWRAP(co_await client.async_get("/a"));
+            UNWRAP(co_await client.async_get("/b"));
 
-    ts.router().set_http_handler<http::verb::get>(
-        "/b",
-        [](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_string_content("b"sv, "text/plain"sv); },
-        limiter);
+            auto resp = UNWRAP(co_await client.async_get("/a"));
+            REQUIRE(resp.result() == http::status::too_many_requests);
+            co_return;
+        });
+}
 
-    ts.start();
+TEST_CASE("Rate Limit: shared limits apply across routes", "[middleware]")
+{
+    auto limiter = std::make_shared<mw::rate_limit_middleware>(2, std::chrono::seconds(60));
 
-    UNWRAP(ts.client->get("/a"));
-    UNWRAP(ts.client->get("/b"));
+    run_with_ep(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/rl-ip",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); },
+                *limiter);
+        },
+        [&](auto& client, auto& ep, net::thread_pool& pool) -> net::awaitable<void>
+        {
+            UNWRAP(co_await client.async_get("/rl-ip"));
+            UNWRAP(co_await client.async_get("/rl-ip"));
+            auto blocked = co_await client.async_get("/rl-ip");
+            REQUIRE(blocked.has_value());
+            REQUIRE(blocked->result() == http::status::too_many_requests);
 
-    auto resp = UNWRAP(ts.client->get("/a"));
-    REQUIRE(resp.result() == http::status::too_many_requests);
+            auto client2 = std::make_unique<httplib::client::http_client>(
+                pool.get_executor(),
+                ep.address().to_string(),
+                ep.port());
+            client2->set_timeout(std::chrono::seconds(5));
+            auto resp2 = co_await client2->async_get("/rl-ip");
+            REQUIRE(resp2.has_value());
+            REQUIRE(resp2->result() == http::status::too_many_requests);
+            client2->close();
+            co_return;
+        });
 }
 
 // ===== Combined middleware =====
 
 TEST_CASE("Combined: cors_middleware + Auth", "[middleware]")
 {
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/protected",
-        [](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_string_content("protected-data"sv, "text/plain"sv); },
-        mw::cors_middleware {},
-        mw::basic_auth_middleware([](std::string_view u, std::string_view p) { return u == "u" && p == "p"; }));
-    ts.start();
+    mw::cors_middleware cors;
+    mw::basic_auth_middleware auth(
+        [](std::string_view u, std::string_view p) { return u == "u" && p == "p"; });
 
-    auto hdrs = httplib::http::fields();
-    hdrs.set(http::field::authorization, "Basic dTpw");
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/protected",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("protected-data"sv, "text/plain"sv); },
+                cors,
+                auth);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto hdrs = httplib::http::fields();
+            hdrs.set(http::field::authorization, "Basic dTpw");
 
-    auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/protected", hdrs));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(as_string(resp) == "protected-data");
-    REQUIRE(resp["Access-Control-Allow-Origin"] == "*");
-}
-
-TEST_CASE("cors_middleware: allow_origins with multiple origins", "[middleware]")
-{
-    test_scaffold ts;
-    mw::cors_middleware cors_middleware;
-    cors_middleware.allow_origins({ "https://a.com", "https://b.com" });
-
-    ts.router().set_http_handler<http::verb::get>(
-        "/cors_middleware-multi",
-        [](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_string_content("cors_middleware-data"sv, "text/plain"sv); },
-        cors_middleware);
-    ts.start();
-
-    auto hdrs = httplib::http::fields();
-    hdrs.set(http::field::origin, "https://a.com");
-    auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/cors_middleware-multi", hdrs));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(as_string(resp) == "cors_middleware-data");
-}
-
-TEST_CASE("cors_middleware: allow_methods custom", "[middleware]")
-{
-    test_scaffold ts;
-    mw::cors_middleware cors_middleware;
-    cors_middleware.allow_methods({ "PUT", "PATCH" });
-    cors_middleware.allow_origin("https://x.com");
-
-    ts.router().set_http_handler<http::verb::options>(
-        "/cors_middleware-methods",
-        [](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_empty_content(http::status::no_content); },
-        cors_middleware);
-    ts.start();
-
-    auto hdrs = httplib::http::fields();
-    hdrs.set(http::field::origin, "https://x.com");
-    auto resp = UNWRAP(ts.client->send_request(http::verb::options, "/cors_middleware-methods", hdrs));
-    REQUIRE(resp.result() == http::status::no_content);
-    auto methods = std::string(resp["Access-Control-Allow-Methods"]);
-    REQUIRE(methods.find("PUT") != std::string::npos);
-    REQUIRE(methods.find("PATCH") != std::string::npos);
-}
-
-TEST_CASE("Rate Limit: shared limits apply across routes", "[middleware]")
-{
-    test_scaffold ts;
-    auto limiter = std::make_shared<mw::rate_limit_middleware>(2, std::chrono::seconds(60));
-
-    ts.router().set_http_handler<http::verb::get>(
-        "/rl-ip",
-        [](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_string_content("ok"sv, "text/plain"sv); },
-        *limiter);
-    ts.start();
-
-    // First client from default IP (127.0.0.1) uses 2 requests
-    UNWRAP(ts.client->get("/rl-ip"));
-    UNWRAP(ts.client->get("/rl-ip"));
-    auto blocked = ts.client->get("/rl-ip");
-    REQUIRE(blocked.has_value());
-    REQUIRE(blocked->result() == http::status::too_many_requests);
-
-    // Second client from same IP should also be rate-limited (shared bucket)
-    auto client2 = std::make_unique<httplib::client::http_client>(ts.executor(),
-                                                                  ts.endpoint.address().to_string(),
-                                                                  ts.endpoint.port());
-    client2->set_timeout(std::chrono::seconds(5));
-    auto resp2 = client2->get("/rl-ip");
-    REQUIRE(resp2.has_value());
-    REQUIRE(resp2->result() == http::status::too_many_requests);
-}
-
-TEST_CASE("Bearer Auth: missing header returns 401", "[middleware]")
-{
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/bearer-missing",
-        [](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_string_content("secret"sv, "text/plain"sv); },
-        mw::bearer_auth_middleware([](std::string_view) { return true; }));
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->get("/bearer-missing"));
-    REQUIRE(resp.result() == http::status::unauthorized);
-}
-
-TEST_CASE("Bearer Auth: non-Bearer scheme returns 401", "[middleware]")
-{
-    test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/bearer-scheme",
-        [](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_string_content("secret"sv, "text/plain"sv); },
-        mw::bearer_auth_middleware([](std::string_view) { return true; }));
-    ts.start();
-
-    auto hdrs = httplib::http::fields();
-    hdrs.set(http::field::authorization, "Digest xxx");
-    auto resp = UNWRAP(ts.client->send_request(http::verb::get, "/bearer-scheme", hdrs));
-    REQUIRE(resp.result() == http::status::unauthorized);
-}
-
-TEST_CASE("Global middleware: applies to all routes", "[middleware]")
-{
-    test_scaffold ts;
-
-    ts.router().use(mw::basic_auth_middleware([](std::string_view u, std::string_view p)
-                                              { return u == "admin" && p == "secret"; }));
-
-    ts.router().set_http_handler<http::verb::get>("/public",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  { resp.set_string_content("ok"sv, "text/plain"sv); });
-    ts.router().set_http_handler<http::verb::get>("/private",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  { resp.set_string_content("secret"sv, "text/plain"sv); });
-    ts.start();
-
-    auto hdrs = httplib::http::fields();
-    hdrs.set(http::field::authorization, "Basic YWRtaW46c2VjcmV0");
-    auto resp1 = UNWRAP(ts.client->send_request(http::verb::get, "/public", hdrs));
-    REQUIRE(resp1.result() == http::status::ok);
-
-    auto resp2 = UNWRAP(ts.client->send_request(http::verb::get, "/private", hdrs));
-    REQUIRE(resp2.result() == http::status::ok);
-
-    auto resp3 = UNWRAP(ts.client->get("/public"));
-    REQUIRE(resp3.result() == http::status::unauthorized);
-}
-
-TEST_CASE("Global middleware: cors_middleware via use()", "[middleware]")
-{
-    test_scaffold ts;
-
-    ts.router().use(mw::cors_middleware {}.allow_origin("x"));
-
-    ts.router().set_http_handler<http::verb::get>("/gc",
-                                                  [](httplib::server::request&, httplib::server::response& resp)
-                                                  { resp.set_string_content("ok"sv, "text/plain"sv); });
-    ts.start();
-
-    auto resp = UNWRAP(ts.client->get("/gc"));
-    REQUIRE(resp.result() == http::status::ok);
-    REQUIRE(std::string(resp[http::field::access_control_allow_origin]) == "x");
+            auto resp = UNWRAP(
+                co_await client.async_send_request(http::verb::get, "/protected", hdrs));
+            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.body().template as<body::string_body>() == "protected-data");
+            REQUIRE(resp["Access-Control-Allow-Origin"] == "*");
+            co_return;
+        });
 }
