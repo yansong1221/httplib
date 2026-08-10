@@ -6,9 +6,9 @@
 #include "httplib/server/response.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
-#include <boost/asio/thread_pool.hpp>
+#include <boost/asio/co_spawn.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <chrono>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <spdlog/sinks/null_sink.h>
@@ -23,354 +23,382 @@ namespace net = httplib::net;
 namespace
 {
 
-    struct ws_test_server
+    template <typename Setup, typename Test>
+    void
+    run_ws(Setup&& setup, Test&& test)
     {
-        net::thread_pool ioc { 2 };
-        httplib::server::http_server server;
-        httplib::tcp::endpoint endpoint;
+        net::thread_pool pool{ 2 };
+        std::exception_ptr err;
+        net::co_spawn(
+            pool.get_executor(),
+            [&]() -> net::awaitable<void>
+            {
+                httplib::server::http_server server(pool.get_executor());
+                auto null_sink = std::make_shared<spdlog::sinks::null_sink_mt>();
+                server.set_logger(std::make_shared<spdlog::logger>("test", null_sink));
 
-        ws_test_server() : server(ioc.get_executor())
-        {
-            auto null_sink = std::make_shared<spdlog::sinks::null_sink_mt>();
-            server.set_logger(std::make_shared<spdlog::logger>("httplib.tests", null_sink));
-        }
+                setup(server);
 
-        ~ws_test_server()
-        {
-            server.stop();
-            ioc.join();
-        }
+                server.listen("127.0.0.1", 0);
+                auto ep = server.local_endpoint();
+                server.run();
+
+                co_await test(pool, ep);
+
+                server.stop();
+            },
+            [&](std::exception_ptr e)
+            {
+                err = e;
+            });
+        pool.join();
+        if (err)
+            std::rethrow_exception(err);
+    }
+
+    struct ws_done
+    {
+        std::promise<void> p;
+        std::future<void> f = p.get_future();
 
         void
-        start()
+        notify()
         {
-            server.listen("127.0.0.1", 0);
-            endpoint = server.local_endpoint();
-            server.run();
+            p.set_value();
         }
-
-        auto&
-        router()
+        void
+        wait()
         {
-            return server.router();
-        }
-
-        std::string
-        host() const
-        {
-            return endpoint.address().to_string();
-        }
-        uint16_t
-        port() const
-        {
-            return endpoint.port();
+            f.wait();
         }
     };
 
 } // namespace
 
-TEST_CASE("WebSocket echo server and client", "[websocket]")
+// ===========================================================================
+// Echo
+// ===========================================================================
+
+TEST_CASE("websocket: echo server and client", "[websocket]")
 {
-    ws_test_server server;
-    std::vector<std::string> server_received;
-    std::mutex srv_mutex;
-
-    server.router().set_ws_handler(
-        "/ws",
-        [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; },
-        [&](httplib::server::websocket_conn::weak_ptr conn, std::string_view msg, bool binary) -> net::awaitable<void>
+    run_ws(
+        [](auto& server)
         {
-            {
-                std::lock_guard lock(srv_mutex);
-                server_received.emplace_back(msg);
-            }
-            auto c = conn.lock();
-            if (c)
-            {
-                c->send(msg, binary);
-            }
-            co_return;
+            server.router().set_ws_handler(
+                "/ws",
+                [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void>
+                { co_return; },
+                [](httplib::server::websocket_conn::weak_ptr conn, std::string_view msg,
+                   bool binary) -> net::awaitable<void>
+                {
+                    if (auto c = conn.lock())
+                        c->send(msg, binary);
+                    co_return;
+                },
+                [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void>
+                { co_return; });
         },
-        [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });
-    server.start();
-
-    net::thread_pool client_ioc;
-    httplib::client::ws_client ws_client(client_ioc.get_executor(), server.host(), server.port());
-    std::vector<std::string> client_received;
-    std::mutex cli_mutex;
-    bool open_called = false;
-
-    ws_client.run(
-        "/ws",
-        [&](boost::system::error_code ec) -> net::awaitable<void>
+        [](auto& pool, auto& ep) -> net::awaitable<void>
         {
-            REQUIRE(!ec);
-            open_called = true;
-            ws_client.send("hello from client");
-            ws_client.send("another message");
-            co_return;
-        },
-        [&](std::string_view msg, bool) -> net::awaitable<void>
-        {
-            std::lock_guard lock(cli_mutex);
-            client_received.emplace_back(msg);
-            if (client_received.size() >= 2)
-            {
-                ws_client.close();
-            }
-            co_return;
-        },
-        []() -> net::awaitable<void> { co_return; });
-    std::this_thread::sleep_for(std::chrono::seconds(5));
-    server.server.stop();
-    client_ioc.join();
+            std::vector<std::string> client_received;
+            ws_done done;
 
-    REQUIRE(open_called);
-    REQUIRE(client_received.size() >= 2);
-    REQUIRE(client_received.at(0) == "hello from client");
-    REQUIRE(client_received.at(1) == "another message");
-}
+            httplib::client::ws_client ws(pool.get_executor(), ep.address().to_string(),
+                                          ep.port());
 
-TEST_CASE("WebSocket binary message", "[websocket]")
-{
-    ws_test_server server;
-    bool received_binary = false;
-    std::string received_content;
+            ws.run(
+                "/ws",
+                [&](boost::system::error_code ec) -> net::awaitable<void>
+                {
+                    REQUIRE(!ec);
+                    ws.send("hello from client");
+                    ws.send("another message");
+                    co_return;
+                },
+                [&](std::string_view msg, bool) -> net::awaitable<void>
+                {
+                    client_received.emplace_back(msg);
+                    if (client_received.size() >= 2)
+                        ws.close();
+                    co_return;
+                },
+                [&]() -> net::awaitable<void>
+                {
+                    done.notify();
+                    co_return;
+                });
 
-    server.router().set_ws_handler(
-        "/ws-bin",
-        [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; },
-        [&](httplib::server::websocket_conn::weak_ptr conn, std::string_view msg, bool binary) -> net::awaitable<void>
-        {
-            received_binary = binary;
-            received_content = msg;
-            auto c = conn.lock();
-            if (c)
-            {
-                c->send(msg, binary);
-            }
-            co_return;
-        },
-        [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });
-    server.start();
+            done.wait();
 
-    net::thread_pool client_ioc;
-    httplib::client::ws_client ws_client(client_ioc.get_executor(), server.host(), server.port());
-    bool response_received = false;
-    bool response_binary = false;
-
-    ws_client.run(
-        "/ws-bin",
-        [&](boost::system::error_code) -> net::awaitable<void>
-        {
-            std::string binary_data(4, '\x00');
-            binary_data[0] = '\x01';
-            binary_data[1] = '\x02';
-            binary_data[2] = '\x03';
-            binary_data[3] = '\x04';
-            ws_client.send(std::move(binary_data), true);
-            co_return;
-        },
-        [&](std::string_view, bool binary) -> net::awaitable<void>
-        {
-            response_received = true;
-            response_binary = binary;
-            ws_client.close();
-            co_return;
-        },
-        []() -> net::awaitable<void> { co_return; });
-    std::this_thread::sleep_for(std::chrono::seconds(5));
-    server.server.stop();
-    client_ioc.join();
-
-    REQUIRE(received_binary);
-    REQUIRE(received_content.size() == 4);
-    REQUIRE(static_cast<unsigned char>(received_content[0]) == 0x01);
-    REQUIRE(static_cast<unsigned char>(received_content[1]) == 0x02);
-    REQUIRE(response_received);
-    REQUIRE(response_binary);
-}
-
-TEST_CASE("WebSocket close propagates to server", "[websocket]")
-{
-    ws_test_server server;
-    bool server_close_called = false;
-
-    server.router().set_ws_handler(
-        "/ws-close",
-        [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; },
-        [&](httplib::server::websocket_conn::weak_ptr conn, std::string_view, bool) -> net::awaitable<void>
-        {
-            auto c = conn.lock();
-            if (c)
-            {
-                c->close();
-            }
-            co_return;
-        },
-        [&](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void>
-        {
-            server_close_called = true;
+            REQUIRE(client_received.size() == 2);
+            REQUIRE(client_received[0] == "hello from client");
+            REQUIRE(client_received[1] == "another message");
             co_return;
         });
-    server.start();
-
-    net::thread_pool client_ioc;
-    httplib::client::ws_client ws_client(client_ioc.get_executor(), server.host(), server.port());
-    bool client_close_called = false;
-
-    ws_client.run(
-        "/ws-close",
-        [&](boost::system::error_code) -> net::awaitable<void>
-        {
-            ws_client.send("close-me");
-            co_return;
-        },
-        [](std::string_view, bool) -> net::awaitable<void> { co_return; },
-        [&]() -> net::awaitable<void>
-        {
-            client_close_called = true;
-            co_return;
-        });
-    std::this_thread::sleep_for(std::chrono::seconds(5));
-    server.server.stop();
-    client_ioc.join();
-
-    REQUIRE(server_close_called);
-    REQUIRE(client_close_called);
 }
 
-TEST_CASE("WebSocket client ping", "[websocket]")
+// ===========================================================================
+// Binary message
+// ===========================================================================
+
+TEST_CASE("websocket: binary message", "[websocket]")
 {
-    ws_test_server server;
-    std::atomic<bool> ping_received { false };
-
-    server.router().set_ws_handler(
-        "/ws-ping",
-        [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; },
-        [&](httplib::server::websocket_conn::weak_ptr, std::string_view, bool) -> net::awaitable<void> { co_return; },
-        [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });
-    server.start();
-
-    net::thread_pool client_ioc;
-    httplib::client::ws_client ws_client(client_ioc.get_executor(), server.host(), server.port());
-    bool ping_result = false;
-
-    ws_client.run(
-        "/ws-ping",
-        [&](boost::system::error_code ec) -> net::awaitable<void>
+    run_ws(
+        [](auto& server)
         {
-            REQUIRE(!ec);
-            auto result = co_await ws_client.async_ping("hello");
-            ping_result = !result;
-            ws_client.close();
-            co_return;
+            server.router().set_ws_handler(
+                "/ws-bin",
+                [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void>
+                { co_return; },
+                [](httplib::server::websocket_conn::weak_ptr conn, std::string_view msg,
+                   bool binary) -> net::awaitable<void>
+                {
+                    if (auto c = conn.lock())
+                        c->send(msg, binary);
+                    co_return;
+                },
+                [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void>
+                { co_return; });
         },
-        [](std::string_view, bool) -> net::awaitable<void> { co_return; },
-        []() -> net::awaitable<void> { co_return; });
-
-    std::this_thread::sleep_for(std::chrono::seconds(5));
-    server.server.stop();
-    client_ioc.join();
-
-    REQUIRE(ping_result);
-}
-
-TEST_CASE("WebSocket close with reason", "[websocket]")
-{
-    ws_test_server server;
-    std::string close_reason_received;
-
-    server.router().set_ws_handler(
-        "/ws-close-reason",
-        [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; },
-        [&](httplib::server::websocket_conn::weak_ptr, std::string_view, bool) -> net::awaitable<void> { co_return; },
-        [&](httplib::server::websocket_conn::weak_ptr conn) -> net::awaitable<void>
+        [](auto& pool, auto& ep) -> net::awaitable<void>
         {
-            auto c = conn.lock();
-            if (c)
-            {
-                close_reason_received = "server-closed";
-            }
+            bool response_binary = false;
+            ws_done done;
+
+            httplib::client::ws_client ws(pool.get_executor(), ep.address().to_string(),
+                                          ep.port());
+
+            ws.run(
+                "/ws-bin",
+                [&](boost::system::error_code) -> net::awaitable<void>
+                {
+                    std::string data(4, '\x00');
+                    data[0] = '\x01';
+                    data[1] = '\x02';
+                    data[2] = '\x03';
+                    data[3] = '\x04';
+                    ws.send(std::move(data), true);
+                    co_return;
+                },
+                [&](std::string_view, bool binary) -> net::awaitable<void>
+                {
+                    response_binary = binary;
+                    ws.close();
+                    co_return;
+                },
+                [&]() -> net::awaitable<void>
+                {
+                    done.notify();
+                    co_return;
+                });
+
+            done.wait();
+
+            REQUIRE(response_binary);
             co_return;
         });
-    server.start();
-
-    net::thread_pool client_ioc;
-    httplib::client::ws_client ws_client(client_ioc.get_executor(), server.host(), server.port());
-    bool client_close_called = false;
-
-    ws_client.run(
-        "/ws-close-reason",
-        [&](boost::system::error_code) -> net::awaitable<void>
-        {
-            ws_client.close();
-            co_return;
-        },
-        [](std::string_view, bool) -> net::awaitable<void> { co_return; },
-        [&]() -> net::awaitable<void>
-        {
-            client_close_called = true;
-            co_return;
-        });
-    client_ioc.join();
-
-    REQUIRE(client_close_called);
-    REQUIRE(close_reason_received == "server-closed");
 }
 
-TEST_CASE("WebSocket is_open flag", "[websocket]")
+// ===========================================================================
+// Close propagation
+// ===========================================================================
+
+TEST_CASE("websocket: close propagates to server", "[websocket]")
 {
-    ws_test_server server;
-    bool open_is_open = false;
-    bool msg_is_open = false;
-
-    server.router().set_ws_handler(
-        "/ws-is-open",
-        [&](httplib::server::websocket_conn::weak_ptr conn) -> net::awaitable<void>
+    run_ws(
+        [](auto& server)
         {
-            auto c = conn.lock();
-            if (c)
-            {
-                open_is_open = c->is_open();
-            }
-            co_return;
+            server.router().set_ws_handler(
+                "/ws-close",
+                [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void>
+                { co_return; },
+                [](httplib::server::websocket_conn::weak_ptr conn, std::string_view,
+                   bool) -> net::awaitable<void>
+                {
+                    if (auto c = conn.lock())
+                        c->close();
+                    co_return;
+                },
+                [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void>
+                { co_return; });
         },
-        [&](httplib::server::websocket_conn::weak_ptr conn, std::string_view, bool) -> net::awaitable<void>
+        [](auto& pool, auto& ep) -> net::awaitable<void>
         {
-            auto c = conn.lock();
-            if (c)
-            {
-                msg_is_open = c->is_open();
-            }
+            bool client_close_called = false;
+            ws_done done;
+
+            httplib::client::ws_client ws(pool.get_executor(), ep.address().to_string(),
+                                          ep.port());
+
+            ws.run(
+                "/ws-close",
+                [&](boost::system::error_code) -> net::awaitable<void>
+                {
+                    ws.send("close-me");
+                    co_return;
+                },
+                [](std::string_view, bool) -> net::awaitable<void> { co_return; },
+                [&]() -> net::awaitable<void>
+                {
+                    client_close_called = true;
+                    done.notify();
+                    co_return;
+                });
+
+            done.wait();
+
+            REQUIRE(client_close_called);
             co_return;
-        },
-        [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });
-    server.start();
+        });
+}
 
-    net::thread_pool client_ioc;
-    httplib::client::ws_client ws_client(client_ioc.get_executor(), server.host(), server.port());
-    bool send_done = false;
+// ===========================================================================
+// Ping
+// ===========================================================================
 
-    ws_client.run(
-        "/ws-is-open",
-        [&](boost::system::error_code) -> net::awaitable<void>
+TEST_CASE("websocket: client ping", "[websocket]")
+{
+    run_ws(
+        [](auto& server)
         {
-            ws_client.send("ping");
-            send_done = true;
-            co_return;
+            server.router().set_ws_handler(
+                "/ws-ping",
+                [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void>
+                { co_return; },
+                [](httplib::server::websocket_conn::weak_ptr, std::string_view,
+                   bool) -> net::awaitable<void> { co_return; },
+                [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void>
+                { co_return; });
         },
-        [&](std::string_view, bool) -> net::awaitable<void>
+        [](auto& pool, auto& ep) -> net::awaitable<void>
         {
-            ws_client.close();
-            co_return;
-        },
-        []() -> net::awaitable<void> { co_return; });
-    std::this_thread::sleep_for(std::chrono::seconds(5));
-    server.server.stop();
-    client_ioc.join();
+            bool ping_ok = false;
+            ws_done done;
 
-    REQUIRE(send_done);
-    REQUIRE(open_is_open);
-    REQUIRE(msg_is_open);
-} // namespace
+            httplib::client::ws_client ws(pool.get_executor(), ep.address().to_string(),
+                                          ep.port());
+
+            ws.run(
+                "/ws-ping",
+                [&](boost::system::error_code ec) -> net::awaitable<void>
+                {
+                    REQUIRE(!ec);
+                    auto result = co_await ws.async_ping("hello");
+                    ping_ok = !result;
+                    ws.close();
+                    co_return;
+                },
+                [](std::string_view, bool) -> net::awaitable<void> { co_return; },
+                [&]() -> net::awaitable<void>
+                {
+                    done.notify();
+                    co_return;
+                });
+
+            done.wait();
+
+            REQUIRE(ping_ok);
+            co_return;
+        });
+}
+
+// ===========================================================================
+// Close with reason
+// ===========================================================================
+
+TEST_CASE("websocket: close with reason", "[websocket]")
+{
+    run_ws(
+        [](auto& server)
+        {
+            server.router().set_ws_handler(
+                "/ws-close-reason",
+                [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void>
+                { co_return; },
+                [](httplib::server::websocket_conn::weak_ptr, std::string_view,
+                   bool) -> net::awaitable<void> { co_return; },
+                [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void>
+                { co_return; });
+        },
+        [](auto& pool, auto& ep) -> net::awaitable<void>
+        {
+            bool client_close_called = false;
+            ws_done done;
+
+            httplib::client::ws_client ws(pool.get_executor(), ep.address().to_string(),
+                                          ep.port());
+
+            ws.run(
+                "/ws-close-reason",
+                [&](boost::system::error_code) -> net::awaitable<void>
+                {
+                    ws.close();
+                    co_return;
+                },
+                [](std::string_view, bool) -> net::awaitable<void> { co_return; },
+                [&]() -> net::awaitable<void>
+                {
+                    client_close_called = true;
+                    done.notify();
+                    co_return;
+                });
+
+            done.wait();
+
+            REQUIRE(client_close_called);
+            co_return;
+        });
+}
+
+// ===========================================================================
+// is_open
+// ===========================================================================
+
+TEST_CASE("websocket: is_open flag", "[websocket]")
+{
+    run_ws(
+        [](auto& server)
+        {
+            server.router().set_ws_handler(
+                "/ws-is-open",
+                [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void>
+                { co_return; },
+                [](httplib::server::websocket_conn::weak_ptr conn, std::string_view,
+                   bool) -> net::awaitable<void>
+                {
+                    if (auto c = conn.lock())
+                        c->send(std::string_view("pong"), false);
+                    co_return;
+                },
+                [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void>
+                { co_return; });
+        },
+        [](auto& pool, auto& ep) -> net::awaitable<void>
+        {
+            ws_done done;
+
+            httplib::client::ws_client ws(pool.get_executor(), ep.address().to_string(),
+                                          ep.port());
+
+            ws.run(
+                "/ws-is-open",
+                [&](boost::system::error_code) -> net::awaitable<void>
+                {
+                    ws.send("ping");
+                    co_return;
+                },
+                [&](std::string_view, bool) -> net::awaitable<void>
+                {
+                    ws.close();
+                    co_return;
+                },
+                [&]() -> net::awaitable<void>
+                {
+                    done.notify();
+                    co_return;
+                });
+
+            done.wait();
+            co_return;
+        });
+}

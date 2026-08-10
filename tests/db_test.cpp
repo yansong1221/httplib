@@ -727,7 +727,7 @@ TEST_CASE("mysql_middleware: throws when not registered", "[db][middleware]")
             resp.set_string_content("ok"sv, "text/plain"sv);
         });
     ts.start();
-    auto resp = UNWRAP(ts.client->get("/db/nomw"));
+    auto resp = UNWRAP(ts.run_async([&]{ return ts.client->async_get("/db/nomw"); }));
     REQUIRE(resp.result() == http::status::ok);
 }
 

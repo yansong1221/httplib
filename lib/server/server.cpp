@@ -33,7 +33,7 @@ namespace httplib::server
 
     http_server::http_server(net::any_io_executor const& ex) : impl_(std::make_shared<impl>(ex)) {}
 
-    http_server::~http_server() {}
+    http_server::~http_server() { stop(); }
 
     net::any_io_executor
     http_server::get_executor() noexcept
