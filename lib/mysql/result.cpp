@@ -79,7 +79,7 @@ namespace httplib::mysql
     result::next_resultset()
     {
         auto& i = get_impl(*this);
-        if (i.resultset_index + 1 >= i.data.size())
+        if (!i.data.has_value() || i.resultset_index + 1 >= i.data.size())
         {
             return false;
         }
