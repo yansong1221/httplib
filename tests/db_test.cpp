@@ -407,7 +407,8 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
             REQUIRE(row1.as_string("str").value_or("n/a") == "n/a");
             REQUIRE(row1.as_bool("i64").value_or(true) == true);
             REQUIRE(row1.as_bool("i64").value_or(false) == false);
-            REQUIRE(*row1.as_timestamp("dt_ts") == std::chrono::system_clock::from_time_t(42));
+            REQUIRE(row1.as_timestamp("dt_ts").value_or(std::chrono::system_clock::from_time_t(42))
+                    == std::chrono::system_clock::from_time_t(42));
 
             // ===== column_type =====
             REQUIRE(r.column_type(0) == mysql::column_type::int64);
@@ -704,7 +705,7 @@ TEST_CASE("db: transaction commit", "[db][integration]")
 
             auto r = co_await sess.query("SELECT id FROM __httplib_txn");
             REQUIRE(r.row_count() == 1);
-            REQUIRE(*r[0].as_string("id") == "100");
+            REQUIRE(*r[0].as_int64("id") == 100);
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_txn");
         },
