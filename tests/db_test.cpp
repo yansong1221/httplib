@@ -1,11 +1,11 @@
-#ifdef HTTPLIB_ENABLED_DATABASE
+﻿#ifdef HTTPLIB_ENABLED_DATABASE
 #include "common.hpp"
-#include "httplib/server/middleware/data.hpp"
 #include "httplib/config.hpp"
 #include "httplib/mysql/config.hpp"
 #include "httplib/mysql/connection_pool.hpp"
 #include "httplib/mysql/result.hpp"
 #include "httplib/mysql/session.hpp"
+#include "httplib/server/middleware/data.hpp"
 #include "httplib/server/middleware/mysql_middleware.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
@@ -161,8 +161,8 @@ TEST_CASE("db: into() extraction", "[db][integration]")
             co_await sess.query("DELETE FROM __httplib_into");
             co_await sess.query("INSERT INTO __httplib_into VALUES (42, 'alice')");
 
-            int64_t id = 0;
-            std::string name;
+            std::optional<int64_t> id;
+            std::optional<std::string> name;
 
             co_await sess.stmt("SELECT id, name FROM __httplib_into").into(id, "id").into(name, "name").execute();
 
@@ -205,8 +205,8 @@ TEST_CASE("db: named parameters", "[db][integration]")
             co_await sess.query("DELETE FROM __httplib_named");
             co_await sess.query("INSERT INTO __httplib_named VALUES (77, 'named_test')");
 
-            int64_t id = 0;
-            std::string name;
+            std::optional<int64_t> id;
+            std::optional<std::string> name;
 
             co_await sess.stmt("SELECT id, name FROM __httplib_named WHERE name = :name")
                 .bind("name", "named_test")
@@ -255,11 +255,11 @@ TEST_CASE("db: statement caching", "[db][integration]")
 
             auto stmt = sess.stmt("SELECT id FROM __httplib_cache WHERE id = ?");
 
-            int64_t id1 = 0;
+            std::optional<int64_t> id1;
             co_await stmt.bind(1).into(id1, 0).execute();
             REQUIRE(id1 == 1);
 
-            int64_t id2 = 0;
+            std::optional<int64_t> id2;
             co_await stmt.bind(2).into(id2, 0).execute();
             REQUIRE(id2 == 2);
 
@@ -329,29 +329,29 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
             // ===== row 0: values row =====
             auto row0 = r[0];
 
-            REQUIRE(row0.as_int64("i64") == 42);
-            REQUIRE(row0.as_string("str") == "hello");
+            REQUIRE(*row0.as_int64("i64") == 42);
+            REQUIRE(*row0.as_string("str") == "hello");
 
             // correct type access
-            REQUIRE(row0.as_int64("i64") == 42);
-            REQUIRE(row0.as_int64(0) == 42);
-            REQUIRE(row0.as_uint64("u64") == 99);
-            REQUIRE(row0.as_uint64(1) == 99);
-            REQUIRE(row0.as_double("f64") == 3.14);
-            REQUIRE(row0.as_double(2) == 3.14);
-            REQUIRE(row0.as_float("f64") == 3.14f);
-            REQUIRE(row0.as_string("str") == "hello");
-            REQUIRE(row0.as_string(3) == "hello");
-            REQUIRE(row0.as_bool("i64") == true);
-            REQUIRE(row0.as_blob("bin").size() == 5);
+            REQUIRE(*row0.as_int64("i64") == 42);
+            REQUIRE(*row0.as_int64(0) == 42);
+            REQUIRE(*row0.as_uint64("u64") == 99);
+            REQUIRE(*row0.as_uint64(1) == 99);
+            REQUIRE(*row0.as_double("f64") == 3.14);
+            REQUIRE(*row0.as_double(2) == 3.14);
+            REQUIRE(*row0.as_float("f64") == 3.14f);
+            REQUIRE(*row0.as_string("str") == "hello");
+            REQUIRE(*row0.as_string(3) == "hello");
+            REQUIRE(*row0.as_bool("i64") == true);
+            REQUIRE(row0.as_blob("bin")->size() == 5);
 
             // date / datetime / time
-            auto d = row0.as_date("dt_date");
+            auto d = *row0.as_date("dt_date");
             REQUIRE(d.year == 2024);
             REQUIRE(d.month == 1);
             REQUIRE(d.day == 15);
 
-            auto dt = row0.as_datetime("dt_dt");
+            auto dt = *row0.as_datetime("dt_dt");
             REQUIRE(dt.year == 2024);
             REQUIRE(dt.month == 6);
             REQUIRE(dt.day == 20);
@@ -360,11 +360,11 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
             REQUIRE(dt.second == 45);
 
             // timestamp from DATETIME (no timezone conversion)
-            auto ts = row0.as_timestamp("dt_dt");
+            auto ts = *row0.as_timestamp("dt_dt");
             REQUIRE(ts > std::chrono::system_clock::from_time_t(0));
             REQUIRE(ts < std::chrono::system_clock::from_time_t(4102444800LL)); // within year 2100
 
-            auto t = row0.as_time("dt_t");
+            auto t = *row0.as_time("dt_t");
             REQUIRE(t.hour == 12);
             REQUIRE(t.minute == 34);
             REQUIRE(t.second == 56);
@@ -381,25 +381,24 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
             REQUIRE(row1.is_null("dt_date"));
 
             // NULL → throw
-            REQUIRE_THROWS_AS(row1.as_int64("i64"), std::runtime_error);
-            REQUIRE_THROWS_AS(row1.as_uint64("u64"), std::runtime_error);
-            REQUIRE_THROWS_AS(row1.as_double("f64"), std::runtime_error);
-            REQUIRE_THROWS_AS(row1.as_string("str"), std::runtime_error);
-            REQUIRE_THROWS_AS(row1.as_bool("i64"), std::runtime_error);
-            REQUIRE_THROWS_AS(row1.as_date("dt_date"), std::runtime_error);
-            REQUIRE_THROWS_AS(row1.as_blob("bin"), std::runtime_error);
-            REQUIRE_THROWS_AS(row1.as_string(0), std::runtime_error);
+            REQUIRE(!row1.as_int64("i64").has_value());
+            REQUIRE(!row1.as_uint64("u64").has_value());
+            REQUIRE(!row1.as_double("f64").has_value());
+            REQUIRE(!row1.as_string("str").has_value());
+            REQUIRE(!row1.as_bool("i64").has_value());
+            REQUIRE(!row1.as_date("dt_date").has_value());
+            REQUIRE(!row1.as_blob("bin").has_value());
+            REQUIRE(!row1.as_string(0).has_value());
 
             // NULL with default
-            REQUIRE(row1.as_int64("i64", -1) == -1);
-            REQUIRE(row1.as_uint64("u64", 777) == 777);
-            REQUIRE(row1.as_double("f64", 9.9) == 9.9);
-            REQUIRE(row1.as_float("f64", 1.5f) == 1.5f);
-            REQUIRE(row1.as_string("str", "n/a") == "n/a");
-            REQUIRE(row1.as_bool("i64", true) == true);
-            REQUIRE(row1.as_bool("i64", false) == false);
-            REQUIRE(row1.as_timestamp("dt_ts", std::chrono::system_clock::from_time_t(42))
-                    == std::chrono::system_clock::from_time_t(42));
+            REQUIRE(row1.as_int64("i64").value_or(-1) == -1);
+            REQUIRE(row1.as_uint64("u64").value_or(777) == 777);
+            REQUIRE(row1.as_double("f64").value_or(9.9) == 9.9);
+            REQUIRE(row1.as_float("f64").value_or(1.5f) == 1.5f);
+            REQUIRE(row1.as_string("str").value_or("n/a") == "n/a");
+            REQUIRE(row1.as_bool("i64").value_or(true) == true);
+            REQUIRE(row1.as_bool("i64").value_or(false) == false);
+            REQUIRE(*row1.as_timestamp("dt_ts") == std::chrono::system_clock::from_time_t(42));
 
             // ===== column_type =====
             REQUIRE(r.column_type(0) == mysql::column_type::int64);
@@ -415,21 +414,21 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
             // ===== row::get<T> =====
             {
                 auto row = r[0];
-                REQUIRE(row.get<int64_t>("i64") == 42);
-                REQUIRE(row.get<uint64_t>("u64") == 99);
-                REQUIRE(row.get<double>("f64") == 3.14);
-                REQUIRE(row.get<float>("f64") == 3.14f);
-                REQUIRE(row.get<bool>("i64") == true);
-                REQUIRE(row.get<std::string>("str") == "hello");
-                REQUIRE(row.get<mysql::date>("dt_date").year == 2024);
-                REQUIRE(row.get<mysql::datetime>("dt_dt").year == 2024);
-                auto t = row.get<mysql::time>("dt_t");
+                REQUIRE(*row.get<int64_t>("i64") == 42);
+                REQUIRE(*row.get<uint64_t>("u64") == 99);
+                REQUIRE(*row.get<double>("f64") == 3.14);
+                REQUIRE(*row.get<float>("f64") == 3.14f);
+                REQUIRE(*row.get<bool>("i64") == true);
+                REQUIRE(*row.get<std::string>("str") == "hello");
+                REQUIRE(row.get<mysql::date>("dt_date")->year == 2024);
+                REQUIRE(row.get<mysql::datetime>("dt_dt")->year == 2024);
+                auto t = *row.get<mysql::time>("dt_t");
                 REQUIRE(t.hour == 12);
 
                 // get<T> with default for NULL
                 auto row1 = r[1];
-                REQUIRE(row1.get<int64_t>("i64", -1) == -1);
-                REQUIRE(row1.get<std::string>("str", "n/a") == "n/a");
+                REQUIRE(row1.get<int64_t>("i64").value_or(-1) == -1);
+                REQUIRE(row1.get<std::string>("str").value_or("n/a") == "n/a");
                 REQUIRE_THROWS_AS(row1.get<int64_t>("i64"), std::runtime_error);
             }
 
@@ -452,7 +451,7 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
                 std::vector<std::string> strs;
                 for (auto row : r)
                 {
-                    strs.push_back(row.is_null("str") ? "(null)" : std::string(row.as_string("str")));
+                    strs.push_back(row.is_null("str") ? "(null)" : std::string(*row.as_string("str")));
                 }
                 REQUIRE(strs.size() == 2);
                 REQUIRE(strs[0] == "hello");
@@ -498,7 +497,7 @@ TEST_CASE("db: execute() returns result", "[db][integration]")
             auto result = co_await sess.stmt("SELECT id, val FROM __httplib_exec WHERE id = ?").bind(1).execute();
             REQUIRE(result.row_count() == 1);
             REQUIRE(result[0].as_int64("id") == 1);
-            REQUIRE(result[0].as_string("val") == "one");
+            REQUIRE(*result[0].as_string("val") == "one");
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_exec");
         },
@@ -540,7 +539,7 @@ TEST_CASE("db: multi-statement query", "[db][integration]")
 
             REQUIRE(r.row_count() == 2);
             REQUIRE(r[0].as_int64("id") == 1);
-            REQUIRE(r[1].as_string("val") == "b");
+            REQUIRE(*r[1].as_string("val") == "b");
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_batch");
         },
@@ -578,7 +577,7 @@ TEST_CASE("db: json column", "[db][integration]")
             co_await sess.query("INSERT INTO __httplib_json VALUES (1, '{\"x\":1,\"y\":\"hi\"}')");
 
             auto r = co_await sess.query("SELECT data FROM __httplib_json WHERE id = 1");
-            auto val = r[0].as_json("data");
+            auto val = *r[0].as_json("data");
             REQUIRE(val.as_object().at("x").as_int64() == 1);
             REQUIRE(val.as_object().at("y").as_string() == "hi");
 
@@ -696,7 +695,7 @@ TEST_CASE("db: transaction commit", "[db][integration]")
 
             auto r = co_await sess.query("SELECT id FROM __httplib_txn");
             REQUIRE(r.row_count() == 1);
-            REQUIRE(r[0].as_string("id") == "100");
+            REQUIRE(*r[0].as_string("id") == "100");
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_txn");
         },
@@ -757,13 +756,13 @@ TEST_CASE("db: transaction rollback on drop", "[db][integration]")
 TEST_CASE("mysql_middleware: throws when no middleware registered", "[db][middleware]")
 {
     test_common::test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/db/nomw",
-        [](httplib::server::request& req, httplib::server::response& resp)
-        {
-            REQUIRE_THROWS_AS(mw::fetch<mw::mysql_middleware>(req), std::exception);
-            resp.set_string_content("ok"sv, "text/plain"sv);
-        });
+    ts.router().set_http_handler<http::verb::get>("/db/nomw",
+                                                  [](httplib::server::request& req, httplib::server::response& resp)
+                                                  {
+                                                      REQUIRE_THROWS_AS(mw::fetch<mw::mysql_middleware>(req),
+                                                                        std::exception);
+                                                      resp.set_string_content("ok"sv, "text/plain"sv);
+                                                  });
 
     ts.start();
     auto resp = UNWRAP(ts.client->get("/db/nomw"));

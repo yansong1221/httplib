@@ -52,77 +52,74 @@ namespace httplib::mysql
         bool is_null(size_t col) const;
         bool is_null(std::string_view name) const;
 
-        std::string_view as_string(size_t col, std::optional<std::string_view> d = {}) const;
-        std::string_view as_string(std::string_view name, std::optional<std::string_view> d = {}) const;
+        std::optional<std::string_view> as_string(size_t col) const;
+        std::optional<std::string_view> as_string(std::string_view name) const;
 
-        int64_t as_int64(size_t col, std::optional<int64_t> d = {}) const;
-        int64_t as_int64(std::string_view name, std::optional<int64_t> d = {}) const;
+        std::optional<int64_t> as_int64(size_t col) const;
+        std::optional<int64_t> as_int64(std::string_view name) const;
 
-        uint64_t as_uint64(size_t col, std::optional<uint64_t> d = {}) const;
-        uint64_t as_uint64(std::string_view name, std::optional<uint64_t> d = {}) const;
+        std::optional<uint64_t> as_uint64(size_t col) const;
+        std::optional<uint64_t> as_uint64(std::string_view name) const;
 
-        double as_double(size_t col, std::optional<double> d = {}) const;
-        double as_double(std::string_view name, std::optional<double> d = {}) const;
+        std::optional<double> as_double(size_t col) const;
+        std::optional<double> as_double(std::string_view name) const;
 
-        float as_float(size_t col, std::optional<float> d = {}) const;
-        float as_float(std::string_view name, std::optional<float> d = {}) const;
+        std::optional<float> as_float(size_t col) const;
+        std::optional<float> as_float(std::string_view name) const;
 
-        bool as_bool(size_t col, std::optional<bool> d = {}) const;
-        bool as_bool(std::string_view name, std::optional<bool> d = {}) const;
+        std::optional<bool> as_bool(size_t col) const;
+        std::optional<bool> as_bool(std::string_view name) const;
 
-        net::const_buffer as_blob(size_t col) const;
-        net::const_buffer as_blob(std::string_view name) const;
+        std::optional<net::const_buffer> as_blob(size_t col) const;
+        std::optional<net::const_buffer> as_blob(std::string_view name) const;
 
-        boost::json::value as_json(size_t col) const;
-        boost::json::value as_json(std::string_view name) const;
+        std::optional<boost::json::value> as_json(size_t col) const;
+        std::optional<boost::json::value> as_json(std::string_view name) const;
 
-        date as_date(size_t col) const;
-        date as_date(std::string_view name) const;
+        std::optional<date> as_date(size_t col) const;
+        std::optional<date> as_date(std::string_view name) const;
 
-        datetime as_datetime(size_t col) const;
-        datetime as_datetime(std::string_view name) const;
+        std::optional<datetime> as_datetime(size_t col) const;
+        std::optional<datetime> as_datetime(std::string_view name) const;
 
-        time as_time(size_t col) const;
-        time as_time(std::string_view name) const;
+        std::optional<time> as_time(size_t col) const;
+        std::optional<time> as_time(std::string_view name) const;
 
-        std::chrono::system_clock::time_point as_timestamp(size_t col,
-                                                           std::optional<std::chrono::system_clock::time_point> d
-                                                           = {}) const;
-        std::chrono::system_clock::time_point as_timestamp(std::string_view name,
-                                                           std::optional<std::chrono::system_clock::time_point> d
-                                                           = {}) const;
+        std::optional<std::chrono::system_clock::time_point> as_timestamp(size_t col) const;
+        std::optional<std::chrono::system_clock::time_point> as_timestamp(std::string_view name) const;
 
         template <typename T>
-        T
-        get(size_t col, std::optional<T> d = {}) const
+        std::optional<T>
+        get(size_t col) const
         {
             if constexpr (std::is_same_v<T, int64_t>)
             {
-                return as_int64(col, d);
+                return as_int64(col);
             }
             else if constexpr (std::is_same_v<T, uint64_t>)
             {
-                return as_uint64(col, d);
+                return as_uint64(col);
             }
             else if constexpr (std::is_same_v<T, double>)
             {
-                return as_double(col, d);
+                return as_double(col);
             }
             else if constexpr (std::is_same_v<T, float>)
             {
-                return as_float(col, d);
+                return as_float(col);
             }
             else if constexpr (std::is_same_v<T, bool>)
             {
-                return as_bool(col, d);
+                return as_bool(col);
             }
             else if constexpr (std::is_same_v<T, std::string_view>)
             {
-                return as_string(col, d);
+                return as_string(col);
             }
             else if constexpr (std::is_same_v<T, std::string>)
             {
-                return std::string(as_string(col, d));
+                auto sv = as_string(col);
+                return sv ? std::optional<std::string>(std::string(*sv)) : std::nullopt;
             }
             else if constexpr (std::is_same_v<T, net::const_buffer>)
             {
@@ -142,7 +139,7 @@ namespace httplib::mysql
             }
             else if constexpr (std::is_same_v<T, std::chrono::system_clock::time_point>)
             {
-                return as_timestamp(col, d);
+                return as_timestamp(col);
             }
             else if constexpr (std::is_same_v<T, boost::json::value>)
             {
@@ -154,10 +151,10 @@ namespace httplib::mysql
             }
         }
         template <typename T>
-        T
-        get(std::string_view name, std::optional<T> d = {}) const
+        std::optional<T>
+        get(std::string_view name) const
         {
-            return get<T>(column(name), d);
+            return get<T>(column(name));
         }
 
         struct impl;

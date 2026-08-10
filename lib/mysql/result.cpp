@@ -113,24 +113,14 @@ namespace httplib::mysql
             return tp;
         }
 
-        static void
-        throw_null_error(row::impl const& imp, size_t col)
-        {
-            throw std::runtime_error("db: NULL in column '" + imp.parent->column_name(col) + "'");
-        }
-
         template <typename T, typename Conv>
-        static T
-        field_cast(row::impl const& imp, size_t col, std::optional<T> const& d, Conv&& conv)
+        static std::optional<T>
+        detail_value(row::impl const& imp, size_t col, Conv&& conv)
         {
-            auto f = ff(get_impl(*imp.parent), imp.idx, col);
+            auto f = detail::ff(get_impl(*imp.parent), imp.idx, col);
             if (f.is_null())
             {
-                if (d)
-                {
-                    return *d;
-                }
-                throw_null_error(imp, col);
+                return std::nullopt;
             }
             return conv(f);
         }
@@ -164,92 +154,89 @@ namespace httplib::mysql
         return is_null(column(name));
     }
 
-    std::string_view
-    row::as_string(size_t col, std::optional<std::string_view> d) const
+    std::optional<std::string_view>
+    row::as_string(size_t col) const
     {
-        auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
-        if (f.is_null())
-        {
-            if (d)
-            {
-                return *d;
-            }
-            detail::throw_null_error(*impl_, col);
-        }
-        if (!f.is_string())
-        {
-            throw std::runtime_error("db: cannot convert to string");
-        }
-        return f.as_string();
+        return detail::detail_value<std::string_view>(*impl_,
+                                                      col,
+                                                      [this](auto& f) -> std::string_view
+                                                      {
+                                                          if (!f.is_string())
+                                                          {
+                                                              throw std::runtime_error("db: cannot convert to string");
+                                                          }
+                                                          return f.as_string();
+                                                      });
     }
-    std::string_view
-    row::as_string(std::string_view name, std::optional<std::string_view> d) const
+    std::optional<std::string_view>
+    row::as_string(std::string_view name) const
     {
-        return as_string(column(name), d);
+        return as_string(column(name));
     }
 
-    int64_t
-    row::as_int64(size_t col, std::optional<int64_t> d) const
+    std::optional<int64_t>
+    row::as_int64(size_t col) const
     {
-        return detail::field_cast(*impl_, col, d, detail::fi);
+        return detail::detail_value<int64_t>(*impl_, col, detail::fi);
     }
-    int64_t
-    row::as_int64(std::string_view name, std::optional<int64_t> d) const
+    std::optional<int64_t>
+    row::as_int64(std::string_view name) const
     {
-        return as_int64(column(name), d);
-    }
-
-    uint64_t
-    row::as_uint64(size_t col, std::optional<uint64_t> d) const
-    {
-        return detail::field_cast(*impl_, col, d, detail::fu);
-    }
-    uint64_t
-    row::as_uint64(std::string_view name, std::optional<uint64_t> d) const
-    {
-        return as_uint64(column(name), d);
+        return as_int64(column(name));
     }
 
-    double
-    row::as_double(size_t col, std::optional<double> d) const
+    std::optional<uint64_t>
+    row::as_uint64(size_t col) const
     {
-        return detail::field_cast(*impl_, col, d, detail::fd);
+        return detail::detail_value<uint64_t>(*impl_, col, detail::fu);
     }
-    double
-    row::as_double(std::string_view name, std::optional<double> d) const
+    std::optional<uint64_t>
+    row::as_uint64(std::string_view name) const
     {
-        return as_double(column(name), d);
-    }
-
-    float
-    row::as_float(size_t col, std::optional<float> d) const
-    {
-        return detail::field_cast<float>(*impl_, col, d, [](auto& f) { return (float)detail::fd(f); });
-    }
-    float
-    row::as_float(std::string_view name, std::optional<float> d) const
-    {
-        return as_float(column(name), d);
+        return as_uint64(column(name));
     }
 
-    bool
-    row::as_bool(size_t col, std::optional<bool> d) const
+    std::optional<double>
+    row::as_double(size_t col) const
     {
-        return detail::field_cast(*impl_, col, d, detail::fi) != 0;
+        return detail::detail_value<double>(*impl_, col, detail::fd);
     }
-    bool
-    row::as_bool(std::string_view name, std::optional<bool> d) const
+    std::optional<double>
+    row::as_double(std::string_view name) const
     {
-        return as_bool(column(name), d);
+        return as_double(column(name));
     }
 
-    net::const_buffer
+    std::optional<float>
+    row::as_float(size_t col) const
+    {
+        return detail::detail_value<float>(*impl_, col, [](auto& f) { return (float)detail::fd(f); });
+    }
+    std::optional<float>
+    row::as_float(std::string_view name) const
+    {
+        return as_float(column(name));
+    }
+
+    std::optional<bool>
+    row::as_bool(size_t col) const
+    {
+        auto v = detail::detail_value<int64_t>(*impl_, col, detail::fi);
+        return v.has_value() ? std::optional<bool>(*v != 0) : std::nullopt;
+    }
+    std::optional<bool>
+    row::as_bool(std::string_view name) const
+    {
+        return as_bool(column(name));
+    }
+
+    std::optional<net::const_buffer>
     row::as_blob(size_t col) const
     {
         auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
         {
-            detail::throw_null_error(*impl_, col);
+            return std::nullopt;
         }
         if (!f.is_blob())
         {
@@ -258,61 +245,61 @@ namespace httplib::mysql
         auto b = f.as_blob();
         return net::const_buffer(b.data(), b.size());
     }
-    net::const_buffer
+    std::optional<net::const_buffer>
     row::as_blob(std::string_view name) const
     {
         return as_blob(column(name));
     }
 
-    date
+    std::optional<date>
     row::as_date(size_t col) const
     {
         auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
         {
-            detail::throw_null_error(*impl_, col);
+            return std::nullopt;
         }
         if (!f.is_date())
         {
             throw std::runtime_error("db: cannot convert to date");
         }
         auto d = f.as_date();
-        return { d.year(), d.month(), d.day() };
+        return date { d.year(), d.month(), d.day() };
     }
-    date
+    std::optional<date>
     row::as_date(std::string_view name) const
     {
         return as_date(column(name));
     }
 
-    datetime
+    std::optional<datetime>
     row::as_datetime(size_t col) const
     {
         auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
         {
-            detail::throw_null_error(*impl_, col);
+            return std::nullopt;
         }
         if (!f.is_datetime())
         {
             throw std::runtime_error("db: cannot convert to datetime");
         }
         auto d = f.as_datetime();
-        return { d.year(), d.month(), d.day(), d.hour(), d.minute(), d.second(), d.microsecond() };
+        return datetime { d.year(), d.month(), d.day(), d.hour(), d.minute(), d.second(), d.microsecond() };
     }
-    datetime
+    std::optional<datetime>
     row::as_datetime(std::string_view name) const
     {
         return as_datetime(column(name));
     }
 
-    time
+    std::optional<time>
     row::as_time(size_t col) const
     {
         auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
         {
-            detail::throw_null_error(*impl_, col);
+            return std::nullopt;
         }
         if (!f.is_time())
         {
@@ -321,24 +308,24 @@ namespace httplib::mysql
         auto t = f.as_time();
         auto dur = std::chrono::duration_cast<std::chrono::microseconds>(t);
         auto s = std::chrono::duration_cast<std::chrono::seconds>(dur).count();
-        return { (unsigned)(s / 3600),
-                 (unsigned)((s % 3600) / 60),
-                 (unsigned)(s % 60),
-                 (unsigned long)(dur.count() % 1000000) };
+        return time { (unsigned)(s / 3600),
+                      (unsigned)((s % 3600) / 60),
+                      (unsigned)(s % 60),
+                      (unsigned long)(dur.count() % 1000000) };
     }
-    time
+    std::optional<time>
     row::as_time(std::string_view name) const
     {
         return as_time(column(name));
     }
 
-    boost::json::value
+    std::optional<boost::json::value>
     row::as_json(size_t col) const
     {
         auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
         {
-            detail::throw_null_error(*impl_, col);
+            return std::nullopt;
         }
         if (!f.is_string())
         {
@@ -352,23 +339,19 @@ namespace httplib::mysql
         }
         return jv;
     }
-    boost::json::value
+    std::optional<boost::json::value>
     row::as_json(std::string_view name) const
     {
         return as_json(column(name));
     }
 
-    std::chrono::system_clock::time_point
-    row::as_timestamp(size_t col, std::optional<std::chrono::system_clock::time_point> d) const
+    std::optional<std::chrono::system_clock::time_point>
+    row::as_timestamp(size_t col) const
     {
         auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
         {
-            if (d)
-            {
-                return *d;
-            }
-            detail::throw_null_error(*impl_, col);
+            return std::nullopt;
         }
         if (!f.is_datetime())
         {
@@ -382,10 +365,10 @@ namespace httplib::mysql
                              f.as_datetime().second(),
                              f.as_datetime().microsecond() });
     }
-    std::chrono::system_clock::time_point
-    row::as_timestamp(std::string_view name, std::optional<std::chrono::system_clock::time_point> d) const
+    std::optional<std::chrono::system_clock::time_point>
+    row::as_timestamp(std::string_view name) const
     {
-        return as_timestamp(column(name), d);
+        return as_timestamp(column(name));
     }
 
     size_t

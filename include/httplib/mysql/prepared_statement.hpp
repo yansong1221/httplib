@@ -63,31 +63,31 @@ namespace httplib::mysql
 
         net::awaitable<result> execute();
 
-        prepared_statement& into(int64_t& v, size_t col);
-        prepared_statement& into(uint64_t& v, size_t col);
-        prepared_statement& into(double& v, size_t col);
-        prepared_statement& into(float& v, size_t col);
-        prepared_statement& into(bool& v, size_t col);
-        prepared_statement& into(std::string& v, size_t col);
-        prepared_statement& into(date& v, size_t col);
-        prepared_statement& into(datetime& v, size_t col);
-        prepared_statement& into(time& v, size_t col);
-        prepared_statement& into(std::chrono::system_clock::time_point& v, size_t col);
-        prepared_statement& into(net::const_buffer& v, size_t col);
-        prepared_statement& into(boost::json::value& v, size_t col);
+        prepared_statement& into(std::optional<int64_t>& v, size_t col);
+        prepared_statement& into(std::optional<uint64_t>& v, size_t col);
+        prepared_statement& into(std::optional<double>& v, size_t col);
+        prepared_statement& into(std::optional<float>& v, size_t col);
+        prepared_statement& into(std::optional<bool>& v, size_t col);
+        prepared_statement& into(std::optional<std::string>& v, size_t col);
+        prepared_statement& into(std::optional<date>& v, size_t col);
+        prepared_statement& into(std::optional<datetime>& v, size_t col);
+        prepared_statement& into(std::optional<time>& v, size_t col);
+        prepared_statement& into(std::optional<std::chrono::system_clock::time_point>& v, size_t col);
+        prepared_statement& into(std::optional<net::const_buffer>& v, size_t col);
+        prepared_statement& into(std::optional<boost::json::value>& v, size_t col);
 
-        prepared_statement& into(int64_t& v, std::string_view name);
-        prepared_statement& into(uint64_t& v, std::string_view name);
-        prepared_statement& into(double& v, std::string_view name);
-        prepared_statement& into(float& v, std::string_view name);
-        prepared_statement& into(bool& v, std::string_view name);
-        prepared_statement& into(std::string& v, std::string_view name);
-        prepared_statement& into(date& v, std::string_view name);
-        prepared_statement& into(datetime& v, std::string_view name);
-        prepared_statement& into(time& v, std::string_view name);
-        prepared_statement& into(std::chrono::system_clock::time_point& v, std::string_view name);
-        prepared_statement& into(net::const_buffer& v, std::string_view name);
-        prepared_statement& into(boost::json::value& v, std::string_view name);
+        prepared_statement& into(std::optional<int64_t>& v, std::string_view name);
+        prepared_statement& into(std::optional<uint64_t>& v, std::string_view name);
+        prepared_statement& into(std::optional<double>& v, std::string_view name);
+        prepared_statement& into(std::optional<float>& v, std::string_view name);
+        prepared_statement& into(std::optional<bool>& v, std::string_view name);
+        prepared_statement& into(std::optional<std::string>& v, std::string_view name);
+        prepared_statement& into(std::optional<date>& v, std::string_view name);
+        prepared_statement& into(std::optional<datetime>& v, std::string_view name);
+        prepared_statement& into(std::optional<time>& v, std::string_view name);
+        prepared_statement& into(std::optional<std::chrono::system_clock::time_point>& v, std::string_view name);
+        prepared_statement& into(std::optional<net::const_buffer>& v, std::string_view name);
+        prepared_statement& into(std::optional<boost::json::value>& v, std::string_view name);
 
         struct impl;
         explicit prepared_statement(session& sess, std::string sql);

@@ -1,4 +1,4 @@
-#ifdef HTTPLIB_ENABLED_DATABASE
+﻿#ifdef HTTPLIB_ENABLED_DATABASE
 #include "httplib/mysql/prepared_statement.hpp"
 #include "httplib/mysql/session.hpp"
 #include "mysql/result_impl.h"
@@ -456,180 +456,164 @@ namespace httplib::mysql
         co_return res;
     }
 
-    prepared_statement&
-    prepared_statement::into(int64_t& v, size_t col)
+    template <typename T, typename F>
+    static auto
+    into_extractor(std::optional<T>& v, size_t col, F get)
     {
-        impl_->extractors.push_back([&v, col](result const& r) { v = r[0].as_int64(col); });
+        return [&v, col, get = std::move(get)](result const& r) { v = get(r[0], col); };
+    }
+
+    template <typename T, typename F>
+    static auto
+    into_extractor(std::optional<T>& v, std::string_view name, F get)
+    {
+        return [&v, n = std::string(name), get = std::move(get)](result const& r) { v = get(r[0], n); };
+    }
+
+    prepared_statement&
+    prepared_statement::into(std::optional<int64_t>& v, size_t col)
+    {
+        impl_->extractors.push_back(into_extractor(v, col, [](auto r, auto c) { return r.as_int64(c); }));
         return *this;
     }
     prepared_statement&
-    prepared_statement::into(uint64_t& v, size_t col)
+    prepared_statement::into(std::optional<uint64_t>& v, size_t col)
     {
-        impl_->extractors.push_back([&v, col](result const& r) { v = r[0].as_uint64(col); });
+        impl_->extractors.push_back(into_extractor(v, col, [](auto r, auto c) { return r.as_uint64(c); }));
         return *this;
     }
     prepared_statement&
-    prepared_statement::into(double& v, size_t col)
+    prepared_statement::into(std::optional<double>& v, size_t col)
     {
-        impl_->extractors.push_back([&v, col](result const& r) { v = r[0].as_double(col); });
+        impl_->extractors.push_back(into_extractor(v, col, [](auto r, auto c) { return r.as_double(c); }));
         return *this;
     }
     prepared_statement&
-    prepared_statement::into(float& v, size_t col)
+    prepared_statement::into(std::optional<float>& v, size_t col)
     {
-        impl_->extractors.push_back([&v, col](result const& r) { v = r[0].as_float(col); });
+        impl_->extractors.push_back(into_extractor(v, col, [](auto r, auto c) { return r.as_float(c); }));
         return *this;
     }
     prepared_statement&
-    prepared_statement::into(bool& v, size_t col)
+    prepared_statement::into(std::optional<bool>& v, size_t col)
     {
-        impl_->extractors.push_back([&v, col](result const& r) { v = r[0].as_bool(col); });
+        impl_->extractors.push_back(into_extractor(v, col, [](auto r, auto c) { return r.as_bool(c); }));
         return *this;
     }
     prepared_statement&
-    prepared_statement::into(std::string& v, size_t col)
+    prepared_statement::into(std::optional<std::string>& v, size_t col)
     {
-        impl_->extractors.push_back([&v, col](result const& r) { v = r[0].as_string(col); });
+        impl_->extractors.push_back(into_extractor(v, col, [](auto r, auto c) { return r.as_string(c); }));
         return *this;
     }
     prepared_statement&
-    prepared_statement::into(date& v, size_t col)
+    prepared_statement::into(std::optional<date>& v, size_t col)
     {
-        impl_->extractors.push_back([&v, col](result const& r) { v = r[0].as_date(col); });
+        impl_->extractors.push_back(into_extractor(v, col, [](auto r, auto c) { return r.as_date(c); }));
         return *this;
     }
     prepared_statement&
-    prepared_statement::into(datetime& v, size_t col)
+    prepared_statement::into(std::optional<datetime>& v, size_t col)
     {
-        impl_->extractors.push_back([&v, col](result const& r) { v = r[0].as_datetime(col); });
+        impl_->extractors.push_back(into_extractor(v, col, [](auto r, auto c) { return r.as_datetime(c); }));
         return *this;
     }
     prepared_statement&
-    prepared_statement::into(time& v, size_t col)
+    prepared_statement::into(std::optional<time>& v, size_t col)
     {
-        impl_->extractors.push_back([&v, col](result const& r) { v = r[0].as_time(col); });
+        impl_->extractors.push_back(into_extractor(v, col, [](auto r, auto c) { return r.as_time(c); }));
         return *this;
     }
     prepared_statement&
-    prepared_statement::into(std::chrono::system_clock::time_point& v, size_t col)
+    prepared_statement::into(std::optional<std::chrono::system_clock::time_point>& v, size_t col)
     {
-        impl_->extractors.push_back([&v, col](result const& r) { v = r[0].as_timestamp(col); });
+        impl_->extractors.push_back(into_extractor(v, col, [](auto r, auto c) { return r.as_timestamp(c); }));
         return *this;
     }
     prepared_statement&
-    prepared_statement::into(net::const_buffer& v, size_t col)
+    prepared_statement::into(std::optional<net::const_buffer>& v, size_t col)
     {
-        impl_->extractors.push_back([&v, col](result const& r) { v = r[0].as_blob(col); });
+        impl_->extractors.push_back(into_extractor(v, col, [](auto r, auto c) { return r.as_blob(c); }));
         return *this;
     }
     prepared_statement&
-    prepared_statement::into(boost::json::value& v, size_t col)
+    prepared_statement::into(std::optional<boost::json::value>& v, size_t col)
     {
-        impl_->extractors.push_back([&v, col](result const& r) { v = r[0].as_json(col); });
+        impl_->extractors.push_back(into_extractor(v, col, [](auto r, auto c) { return r.as_json(c); }));
         return *this;
     }
 
     prepared_statement&
-    prepared_statement::into(date& v, std::string_view name)
+    prepared_statement::into(std::optional<date>& v, std::string_view name)
     {
-        impl_->extractors.push_back([&v, n = std::string(name)](result const& r) { v = r[0].as_date(n); });
+        impl_->extractors.push_back(into_extractor(v, name, [](auto r, auto n) { return r.as_date(n); }));
         return *this;
     }
     prepared_statement&
-    prepared_statement::into(int64_t& v, std::string_view name)
+    prepared_statement::into(std::optional<int64_t>& v, std::string_view name)
     {
-        impl_->extractors.push_back(
-            [&v, n = std::string(name)](result const& r)
-            {
-                auto row = r[0];
-                v = row.get<int64_t>(n);
-            });
+        impl_->extractors.push_back(into_extractor(v, name, [](auto r, auto n) { return r.as_int64(n); }));
         return *this;
     }
     prepared_statement&
-    prepared_statement::into(uint64_t& v, std::string_view name)
+    prepared_statement::into(std::optional<uint64_t>& v, std::string_view name)
     {
-        impl_->extractors.push_back(
-            [&v, n = std::string(name)](result const& r)
-            {
-                auto row = r[0];
-                v = row.get<uint64_t>(n);
-            });
+        impl_->extractors.push_back(into_extractor(v, name, [](auto r, auto n) { return r.as_uint64(n); }));
         return *this;
     }
     prepared_statement&
-    prepared_statement::into(double& v, std::string_view name)
+    prepared_statement::into(std::optional<double>& v, std::string_view name)
     {
-        impl_->extractors.push_back(
-            [&v, n = std::string(name)](result const& r)
-            {
-                auto row = r[0];
-                v = row.get<double>(n);
-            });
+        impl_->extractors.push_back(into_extractor(v, name, [](auto r, auto n) { return r.as_double(n); }));
         return *this;
     }
     prepared_statement&
-    prepared_statement::into(float& v, std::string_view name)
+    prepared_statement::into(std::optional<float>& v, std::string_view name)
     {
-        impl_->extractors.push_back(
-            [&v, n = std::string(name)](result const& r)
-            {
-                auto row = r[0];
-                v = row.get<float>(n);
-            });
+        impl_->extractors.push_back(into_extractor(v, name, [](auto r, auto n) { return r.as_float(n); }));
         return *this;
     }
     prepared_statement&
-    prepared_statement::into(bool& v, std::string_view name)
+    prepared_statement::into(std::optional<bool>& v, std::string_view name)
     {
-        impl_->extractors.push_back(
-            [&v, n = std::string(name)](result const& r)
-            {
-                auto row = r[0];
-                v = row.get<bool>(n);
-            });
+        impl_->extractors.push_back(into_extractor(v, name, [](auto r, auto n) { return r.as_bool(n); }));
         return *this;
     }
     prepared_statement&
-    prepared_statement::into(std::string& v, std::string_view name)
+    prepared_statement::into(std::optional<std::string>& v, std::string_view name)
     {
-        impl_->extractors.push_back(
-            [&v, n = std::string(name)](result const& r)
-            {
-                auto row = r[0];
-                v = row.get<std::string>(n);
-            });
+        impl_->extractors.push_back(into_extractor(v, name, [](auto r, auto n) { return r.as_string(n); }));
         return *this;
     }
 
     prepared_statement&
-    prepared_statement::into(datetime& v, std::string_view name)
+    prepared_statement::into(std::optional<datetime>& v, std::string_view name)
     {
-        impl_->extractors.push_back([&v, n = std::string(name)](result const& r) { v = r[0].as_datetime(n); });
+        impl_->extractors.push_back(into_extractor(v, name, [](auto r, auto n) { return r.as_datetime(n); }));
         return *this;
     }
     prepared_statement&
-    prepared_statement::into(time& v, std::string_view name)
+    prepared_statement::into(std::optional<time>& v, std::string_view name)
     {
-        impl_->extractors.push_back([&v, n = std::string(name)](result const& r) { v = r[0].as_time(n); });
+        impl_->extractors.push_back(into_extractor(v, name, [](auto r, auto n) { return r.as_time(n); }));
         return *this;
     }
     prepared_statement&
-    prepared_statement::into(std::chrono::system_clock::time_point& v, std::string_view name)
+    prepared_statement::into(std::optional<std::chrono::system_clock::time_point>& v, std::string_view name)
     {
-        impl_->extractors.push_back([&v, n = std::string(name)](result const& r) { v = r[0].as_timestamp(n); });
+        impl_->extractors.push_back(into_extractor(v, name, [](auto r, auto n) { return r.as_timestamp(n); }));
         return *this;
     }
     prepared_statement&
-    prepared_statement::into(net::const_buffer& v, std::string_view name)
+    prepared_statement::into(std::optional<net::const_buffer>& v, std::string_view name)
     {
-        impl_->extractors.push_back([&v, n = std::string(name)](result const& r) { v = r[0].as_blob(n); });
+        impl_->extractors.push_back(into_extractor(v, name, [](auto r, auto n) { return r.as_blob(n); }));
         return *this;
     }
     prepared_statement&
-    prepared_statement::into(boost::json::value& v, std::string_view name)
+    prepared_statement::into(std::optional<boost::json::value>& v, std::string_view name)
     {
-        impl_->extractors.push_back([&v, n = std::string(name)](result const& r) { v = r[0].as_json(n); });
+        impl_->extractors.push_back(into_extractor(v, name, [](auto r, auto n) { return r.as_json(n); }));
         return *this;
     }
 
