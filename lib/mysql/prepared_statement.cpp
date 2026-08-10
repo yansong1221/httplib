@@ -446,9 +446,12 @@ namespace httplib::mysql
         }
 
         auto res = result(std::make_unique<result::impl>(std::move(data)));
-        for (auto& ex : impl_->extractors)
+        if (res.row_count() > 0)
         {
-            ex(res);
+            for (auto& ex : impl_->extractors)
+            {
+                ex(res);
+            }
         }
         co_return res;
     }
