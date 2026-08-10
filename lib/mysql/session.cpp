@@ -53,7 +53,7 @@ namespace httplib::mysql
     net::awaitable<result>
     session::query(std::string_view sql)
     {
-        co_return co_await get_impl(*this).query_raw(sql, {});
+        co_return co_await stmt(sql).execute();
     }
 
     prepared_statement
@@ -103,48 +103,6 @@ namespace httplib::mysql
     session::set_query_logger(query_logger cb)
     {
         get_impl(*this).query_logger = std::move(cb);
-    }
-
-    net::awaitable<result>
-    session::impl::query_raw(std::string_view sql, std::span<boost::mysql::field_view const> params)
-    {
-        auto start = std::chrono::steady_clock::now();
-
-        boost::mysql::results data;
-        get_conn().set_meta_mode(boost::mysql::metadata_mode::full);
-
-        if (params.empty())
-        {
-            co_await get_conn().async_execute(std::string(sql), data, boost::asio::use_awaitable);
-        }
-        else
-        {
-            auto stmt = co_await get_conn().async_prepare_statement(std::string(sql), boost::asio::use_awaitable);
-
-            co_await get_conn().async_execute(stmt.bind(params.begin(), params.end()),
-                                              data,
-                                              boost::asio::use_awaitable);
-
-            boost::system::error_code ec;
-            co_await get_conn().async_close_statement(stmt,
-                                                      boost::asio::redirect_error(boost::asio::use_awaitable, ec));
-        }
-
-        auto res = result(std::make_unique<result::impl>(std::move(data)));
-
-        if (query_logger)
-        {
-            query_log_entry entry;
-            entry.sql = std::string(sql);
-            entry.duration
-                = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start);
-            entry.row_count = res.row_count();
-            entry.affected_rows = res.affected_rows();
-            entry.is_parameterized = !params.empty();
-            query_logger(entry);
-        }
-
-        co_return res;
     }
 
     net::awaitable<void>

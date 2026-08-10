@@ -36,8 +36,6 @@ namespace httplib::mysql
         net::awaitable<void> begin_transaction();
         net::awaitable<void> commit();
         net::awaitable<void> rollback();
-
-        net::awaitable<result> query_raw(std::string_view sql, std::span<boost::mysql::field_view const> params);
     };
 
     struct prepared_statement::impl

@@ -416,27 +416,28 @@ namespace httplib::mysql
 
         auto params = std::exchange(impl_->params, {});
         auto& imp = get_impl(*impl_->session);
+        auto start = std::chrono::steady_clock::now();
 
         if (!impl_->stmt_prepared)
         {
-            impl_->stmt = co_await imp.pooled.get().async_prepare_statement(impl_->sql, boost::asio::use_awaitable);
+            impl_->stmt = co_await imp.get_conn().async_prepare_statement(impl_->sql, boost::asio::use_awaitable);
             impl_->stmt_prepared = true;
         }
 
         boost::mysql::results data;
-        imp.pooled.get().set_meta_mode(boost::mysql::metadata_mode::full);
+        imp.get_conn().set_meta_mode(boost::mysql::metadata_mode::full);
 
         try
         {
             if (params.empty())
             {
-                co_await imp.pooled.get().async_execute(impl_->stmt.bind(), data, boost::asio::use_awaitable);
+                co_await imp.get_conn().async_execute(impl_->stmt.bind(), data, boost::asio::use_awaitable);
             }
             else
             {
-                co_await imp.pooled.get().async_execute(impl_->stmt.bind(params.begin(), params.end()),
-                                                        data,
-                                                        boost::asio::use_awaitable);
+                co_await imp.get_conn().async_execute(impl_->stmt.bind(params.begin(), params.end()),
+                                                      data,
+                                                      boost::asio::use_awaitable);
             }
         }
         catch (...)
@@ -446,6 +447,19 @@ namespace httplib::mysql
         }
 
         auto res = result(std::make_unique<result::impl>(std::move(data)));
+
+        if (imp.query_logger)
+        {
+            query_log_entry entry;
+            entry.sql = impl_->sql;
+            entry.duration
+                = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start);
+            entry.row_count = res.row_count();
+            entry.affected_rows = res.affected_rows();
+            entry.is_parameterized = !params.empty();
+            imp.query_logger(entry);
+        }
+
         if (res.row_count() > 0)
         {
             for (auto& ex : impl_->extractors)
