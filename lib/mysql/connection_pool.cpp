@@ -14,7 +14,7 @@ namespace httplib::mysql
     struct connection_pool::impl
     {
         pool_params c;
-        std::shared_ptr<boost::mysql::connection_pool> pool;
+        std::unique_ptr<boost::mysql::connection_pool> pool;
         std::atomic<bool> stopped { true };
     };
 
@@ -38,10 +38,10 @@ namespace httplib::mysql
     connection_pool::connection_pool(net::any_io_executor ex, pool_params c) : impl_(std::make_unique<impl>())
     {
         impl_->c = std::move(c);
-        impl_->pool = std::make_shared<boost::mysql::connection_pool>(ex, make_pool_params(impl_->c));
+        impl_->pool = std::make_unique<boost::mysql::connection_pool>(ex, make_pool_params(impl_->c));
     }
 
-    connection_pool::~connection_pool() = default;
+    connection_pool::~connection_pool() { stop(); }
 
     connection_pool::connection_pool(connection_pool&&) noexcept = default;
     connection_pool& connection_pool::operator=(connection_pool&&) noexcept = default;

@@ -1,11 +1,13 @@
 ﻿#ifdef HTTPLIB_ENABLED_DATABASE
 #include "httplib/mysql/prepared_statement.hpp"
+#include "httplib/mysql/mysql_exception.hpp"
 #include "httplib/mysql/session.hpp"
 #include "mysql/result_impl.h"
 #include "mysql/session_impl.h"
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/mysql.hpp>
+#include <format>
 
 namespace httplib::mysql
 {
@@ -418,27 +420,39 @@ namespace httplib::mysql
         auto& imp = get_impl(*impl_->session);
         auto start = std::chrono::steady_clock::now();
 
-        if (!impl_->stmt_prepared)
-        {
-            impl_->stmt = co_await imp.get_conn().async_prepare_statement(impl_->sql, boost::asio::use_awaitable);
-            impl_->stmt_prepared = true;
-        }
-
+        boost::mysql::diagnostics diag;
         boost::mysql::results data;
         imp.get_conn().set_meta_mode(boost::mysql::metadata_mode::full);
 
         try
         {
+            if (!impl_->stmt_prepared)
+            {
+                boost::system::error_code ec;
+                impl_->stmt = co_await imp.get_conn().async_prepare_statement(
+                    impl_->sql,
+                    diag,
+                    boost::asio::redirect_error(boost::asio::use_awaitable, ec));
+                raise_mysql_error(ec, diag);
+                impl_->stmt_prepared = true;
+            }
+
+            boost::system::error_code ec;
             if (params.empty())
             {
-                co_await imp.get_conn().async_execute(impl_->stmt.bind(), data, boost::asio::use_awaitable);
+                co_await imp.get_conn().async_execute(impl_->stmt.bind(),
+                                                      data,
+                                                      diag,
+                                                      boost::asio::redirect_error(boost::asio::use_awaitable, ec));
             }
             else
             {
                 co_await imp.get_conn().async_execute(impl_->stmt.bind(params.begin(), params.end()),
                                                       data,
-                                                      boost::asio::use_awaitable);
+                                                      diag,
+                                                      boost::asio::redirect_error(boost::asio::use_awaitable, ec));
             }
+            raise_mysql_error(ec, diag);
         }
         catch (...)
         {

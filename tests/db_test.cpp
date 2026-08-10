@@ -3,6 +3,7 @@
 #include "httplib/config.hpp"
 #include "httplib/mysql/config.hpp"
 #include "httplib/mysql/connection_pool.hpp"
+#include "httplib/mysql/mysql_exception.hpp"
 #include "httplib/mysql/result.hpp"
 #include "httplib/mysql/session.hpp"
 #include "httplib/server/middleware/data.hpp"
@@ -33,6 +34,14 @@ namespace
     }
 
 } // namespace
+
+TEST_CASE("mysql_exception: stores error_code and what", "[db]")
+{
+    auto ec = boost::system::errc::make_error_code(boost::system::errc::permission_denied);
+    mysql::mysql_exception ex(ec, "bad sql");
+    REQUIRE(ex.code().value() == ec.value());
+    REQUIRE(std::string(ex.what()) == "bad sql");
+}
 
 TEST_CASE("result: basics", "[db]")
 {

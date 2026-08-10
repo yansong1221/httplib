@@ -1,10 +1,12 @@
 #pragma once
 #ifdef HTTPLIB_ENABLED_DATABASE
 
+#include "httplib/mysql/mysql_exception.hpp"
 #include "httplib/mysql/prepared_statement.hpp"
 #include "httplib/mysql/session.hpp"
 #include "httplib/mysql/transaction.hpp"
 #include <boost/mysql/connection_pool.hpp>
+#include <boost/mysql/diagnostics.hpp>
 #include <boost/mysql/field_view.hpp>
 #include <boost/mysql/statement.hpp>
 #include <functional>
@@ -14,6 +16,22 @@
 
 namespace httplib::mysql
 {
+
+    inline void
+    raise_mysql_error(boost::system::error_code ec, boost::mysql::diagnostics const& diag)
+    {
+        if (!ec)
+        {
+            return;
+        }
+        auto msg = diag.server_message();
+        auto what = std::string("[") + std::to_string(ec.value()) + "] " + ec.message();
+        if (!msg.empty())
+        {
+            what += ": " + std::string(msg.data(), msg.size());
+        }
+        throw mysql_exception(ec, what);
+    }
 
     struct session::impl
     {

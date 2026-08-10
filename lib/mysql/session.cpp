@@ -109,7 +109,13 @@ namespace httplib::mysql
     session::impl::begin_transaction()
     {
         boost::mysql::results r;
-        co_await get_conn().async_execute("START TRANSACTION", r, boost::asio::use_awaitable);
+        boost::mysql::diagnostics diag;
+        boost::system::error_code ec;
+        co_await get_conn().async_execute("START TRANSACTION",
+                                          r,
+                                          diag,
+                                          boost::asio::redirect_error(boost::asio::use_awaitable, ec));
+        raise_mysql_error(ec, diag);
         in_transaction = true;
     }
 
@@ -117,7 +123,13 @@ namespace httplib::mysql
     session::impl::commit()
     {
         boost::mysql::results r;
-        co_await get_conn().async_execute("COMMIT", r, boost::asio::use_awaitable);
+        boost::mysql::diagnostics diag;
+        boost::system::error_code ec;
+        co_await get_conn().async_execute("COMMIT",
+                                          r,
+                                          diag,
+                                          boost::asio::redirect_error(boost::asio::use_awaitable, ec));
+        raise_mysql_error(ec, diag);
         in_transaction = false;
     }
 
@@ -125,7 +137,13 @@ namespace httplib::mysql
     session::impl::rollback()
     {
         boost::mysql::results r;
-        co_await get_conn().async_execute("ROLLBACK", r, boost::asio::use_awaitable);
+        boost::mysql::diagnostics diag;
+        boost::system::error_code ec;
+        co_await get_conn().async_execute("ROLLBACK",
+                                          r,
+                                          diag,
+                                          boost::asio::redirect_error(boost::asio::use_awaitable, ec));
+        raise_mysql_error(ec, diag);
         in_transaction = false;
     }
 
