@@ -71,10 +71,7 @@ namespace httplib::client
         }
 
         net::awaitable<client_handle>
-        async_acquire(std::string_view host,
-                      uint16_t port,
-                      bool ssl,
-                      std::chrono::steady_clock::duration wait_timeout = std::chrono::steady_clock::duration::zero())
+        async_acquire(std::string_view host, uint16_t port, bool ssl, std::chrono::steady_clock::duration wait_timeout)
         {
             if (stopped_)
             {
@@ -83,7 +80,9 @@ namespace httplib::client
 
             auto self = shared_from_this();
             auto url = util::make_url_value(host, port, ssl);
-            auto deadline = std::chrono::steady_clock::now() + wait_timeout;
+            auto deadline = wait_timeout == std::chrono::steady_clock::duration::zero()
+                                ? std::chrono::steady_clock::time_point::max()
+                                : std::chrono::steady_clock::now() + wait_timeout;
 
             do
             {

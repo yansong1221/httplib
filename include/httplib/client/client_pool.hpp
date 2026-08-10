@@ -68,25 +68,23 @@ namespace httplib::client
         http_client_pool(http_client_pool const&) = delete;
         http_client_pool& operator=(http_client_pool const&) = delete;
 
+        static constexpr auto default_timeout = std::chrono::seconds(3);
+
         std::future<client_handle> acquire(std::string_view host,
                                            uint16_t port,
                                            bool ssl,
-                                           std::chrono::steady_clock::duration wait_timeout
-                                           = std::chrono::steady_clock::duration::zero());
+                                           std::chrono::steady_clock::duration wait_timeout = default_timeout);
 
         std::future<client_handle> acquire(std::string_view url,
-                                           std::chrono::steady_clock::duration wait_timeout
-                                           = std::chrono::steady_clock::duration::zero());
+                                           std::chrono::steady_clock::duration wait_timeout = default_timeout);
 
         net::awaitable<client_handle> async_acquire(std::string_view host,
                                                     uint16_t port,
                                                     bool ssl,
-                                                    std::chrono::steady_clock::duration wait_timeout
-                                                    = std::chrono::steady_clock::duration::zero());
+                                                    std::chrono::steady_clock::duration wait_timeout = default_timeout);
 
         net::awaitable<client_handle> async_acquire(std::string_view url,
-                                                    std::chrono::steady_clock::duration wait_timeout
-                                                    = std::chrono::steady_clock::duration::zero());
+                                                    std::chrono::steady_clock::duration wait_timeout = default_timeout);
 
         net::any_io_executor get_executor() noexcept;
 
