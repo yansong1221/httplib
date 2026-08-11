@@ -1,9 +1,8 @@
 #include "httplib/util/misc.hpp"
 #include <boost/algorithm/string/trim.hpp>
-#include <boost/url/encode.hpp>
-#include <boost/url/encoding_opts.hpp>
-#include <boost/url/rfc/unreserved_chars.hpp>
 #include <fmt/format.h>
+#include <iomanip>
+#include <sstream>
 
 namespace httplib::util
 {
@@ -63,13 +62,28 @@ namespace httplib::util
     std::string
     url_encode(std::string_view value)
     {
-        boost::urls::encoding_opts opts;
-        opts.space_as_plus = true;
-        opts.lower_case = true;
-        auto size = boost::urls::encoded_size(value, boost::urls::unreserved_chars, opts);
-        std::string result(size, '\0');
-        boost::urls::encode(result.data(), size, value, boost::urls::unreserved_chars, opts);
-        return result;
+        std::ostringstream escaped;
+        escaped.fill('0');
+        escaped << std::hex;
+
+        for (char c : value)
+        {
+            if (std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || c == '.'
+                || c == '~')
+            {
+                escaped << c;
+            }
+            else if (c == ' ')
+            {
+                escaped << '+';
+            }
+            else
+            {
+                escaped << '%' << std::setw(2) << int(static_cast<unsigned char>(c));
+            }
+        }
+
+        return escaped.str();
     }
 
     std::vector<std::string_view>
