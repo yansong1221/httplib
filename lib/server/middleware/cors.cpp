@@ -135,13 +135,13 @@ namespace httplib::server::middleware
     bool
     cors_middleware::before(request& req, response& resp)
     {
+        impl_->apply(resp);
         if (req.method() == http::verb::options)
         {
-            impl_->apply(resp);
             resp.set_empty_content(http::status::no_content);
             return false;
         }
-        impl_->apply(resp);
+
         return true;
     }
 
