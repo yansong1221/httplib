@@ -2,6 +2,7 @@
 #include <variant>
 #ifdef HTTPLIB_ENABLED_SSL
 #include "ssl_stream.hpp"
+#include <boost/asio/ssl/host_name_verification.hpp>
 #endif
 #include "boost/asio/use_awaitable.hpp"
 #include "httplib/util/use_awaitable.hpp"
@@ -163,10 +164,10 @@ namespace httplib
 
         static boost::system::result<stream_t>
         create_stream(net::any_io_executor const& executor,
-                      std::string const& host,
-                      bool use_ssl,
-                      bool verify_ssl = false,
-                      std::string_view ca_cert = {})
+                       std::string const& host,
+                       bool use_ssl,
+                       bool verify_ssl = true,
+                       std::string_view ca_cert = {})
         {
             if (use_ssl)
             {
@@ -194,6 +195,15 @@ namespace httplib
                 {
                     beast::error_code ec { static_cast<int>(::ERR_get_error()), net::error::get_ssl_category() };
                     return ec;
+                }
+                if (verify_ssl)
+                {
+                    beast::error_code host_ec;
+                    stream.set_verify_callback(ssl::host_name_verification(host), host_ec);
+                    if (host_ec)
+                    {
+                        return host_ec;
+                    }
                 }
                 return stream_t(std::move(stream));
 #else

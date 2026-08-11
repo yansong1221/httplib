@@ -81,6 +81,18 @@ namespace httplib::client
     }
 
     void
+    ws_client::set_verify_ssl(bool verify)
+    {
+        impl_->set_verify_ssl(verify);
+    }
+
+    void
+    ws_client::set_ca_cert(std::string_view cert)
+    {
+        impl_->set_ca_cert(cert);
+    }
+
+    void
     ws_client::send(std::string&& data, bool binary /*= false*/)
     {
         return impl_->send(std::move(data), binary);

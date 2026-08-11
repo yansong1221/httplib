@@ -36,6 +36,12 @@ namespace httplib::jwt
                         return "id mismatch";
                     case error::invalid_token:
                         return "invalid token";
+                    case error::expired:
+                        return "token expired";
+                    case error::not_yet_valid:
+                        return "token not yet valid";
+                    case error::algorithm_mismatch:
+                        return "algorithm mismatch";
                 }
                 return "unknown error";
             }
@@ -466,14 +472,54 @@ namespace httplib::jwt
         return *this;
     }
 
+    verifier&
+    verifier::with_clock_skew(std::chrono::seconds skew)
+    {
+        clock_skew_ = skew;
+        return *this;
+    }
+
     void
     verifier::verify(decoded_jwt const& jwt, boost::system::error_code& ec) const
     {
         ec.clear();
-        if (alg_ && !jwt.verify(*alg_, ec))
+
+        if (alg_)
         {
-            return;
+            auto jwt_alg = jwt.get_algorithm();
+            if (jwt_alg != alg_->name())
+            {
+                ec = make_error_code(error::algorithm_mismatch);
+                return;
+            }
+            if (!jwt.verify(*alg_, ec))
+            {
+                return;
+            }
         }
+
+        auto now = std::chrono::system_clock::now();
+
+        if (jwt.has_expires_at())
+        {
+            auto exp = jwt.get_expires_at();
+            if (now > exp + clock_skew_)
+            {
+                ec = make_error_code(error::expired);
+                return;
+            }
+        }
+
+        if (jwt.has_not_before())
+        {
+            auto nbf = jwt.get_not_before();
+            if (now < nbf - clock_skew_)
+            {
+                ec = make_error_code(error::not_yet_valid);
+                return;
+            }
+        }
+
         if (!issuer_.empty() && jwt.get_issuer() != issuer_)
         {
             ec = make_error_code(error::issuer_mismatch);

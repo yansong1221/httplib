@@ -39,6 +39,9 @@ namespace httplib::client
         std::shared_ptr<spdlog::logger> logger() const;
         void set_logger(std::shared_ptr<spdlog::logger> logger);
 
+        void set_verify_ssl(bool verify) { verify_ssl_ = verify; }
+        void set_ca_cert(std::string_view cert) { ca_cert_ = cert; }
+
         void run(std::string_view target,
                  coro_open_handler_type&& open_handler,
                  coro_message_handler_type&& message_handler,
@@ -61,6 +64,8 @@ namespace httplib::client
         std::string host_;
         uint16_t port_ = 0;
         bool use_ssl_ = false;
+        bool verify_ssl_ = true;
+        std::string ca_cert_;
 
         std::shared_ptr<websocket_stream> stream_;
 

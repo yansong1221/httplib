@@ -309,8 +309,85 @@ TEST_CASE("JWT: middleware rejects missing Bearer", "[jwt]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_get("/protected"));
-            REQUIRE(resp.result() == http::status::unauthorized);
-            co_return;
-        });
+    auto resp = UNWRAP(co_await client.async_get("/protected"));
+    REQUIRE(resp.result() == http::status::unauthorized);
+    co_return;
+});
+}
+
+TEST_CASE("JWT: verifier rejects expired token", "[jwt]")
+{
+    auto now = std::chrono::system_clock::now();
+    auto token = httplib::jwt::create()
+                     .set_expires_at(now - 1h)
+                     .set_subject("alice")
+                     .sign(httplib::jwt::hs256("secret"));
+
+    auto decoded = httplib::jwt::decode(token).value();
+    boost::system::error_code ec;
+    httplib::jwt::verify(httplib::jwt::hs256("secret")).verify(decoded, ec);
+    REQUIRE(ec == make_error_code(httplib::jwt::error::expired));
+}
+
+TEST_CASE("JWT: verifier rejects not-yet-valid token", "[jwt]")
+{
+    auto now = std::chrono::system_clock::now();
+    auto token = httplib::jwt::create()
+                     .set_not_before(now + 1h)
+                     .set_subject("alice")
+                     .sign(httplib::jwt::hs256("secret"));
+
+    auto decoded = httplib::jwt::decode(token).value();
+    boost::system::error_code ec;
+    httplib::jwt::verify(httplib::jwt::hs256("secret")).verify(decoded, ec);
+    REQUIRE(ec == make_error_code(httplib::jwt::error::not_yet_valid));
+}
+
+TEST_CASE("JWT: verifier respects clock skew for expiration", "[jwt]")
+{
+    auto now = std::chrono::system_clock::now();
+    auto token = httplib::jwt::create()
+                     .set_expires_at(now - std::chrono::seconds(10))
+                     .set_subject("alice")
+                     .sign(httplib::jwt::hs256("secret"));
+
+    auto decoded = httplib::jwt::decode(token).value();
+    boost::system::error_code ec;
+
+    httplib::jwt::verify(httplib::jwt::hs256("secret")).verify(decoded, ec);
+    REQUIRE(ec == make_error_code(httplib::jwt::error::expired));
+
+    httplib::jwt::verify(httplib::jwt::hs256("secret"))
+        .with_clock_skew(std::chrono::seconds(60))
+        .verify(decoded, ec);
+    REQUIRE_FALSE(ec);
+}
+
+TEST_CASE("JWT: verifier rejects mismatched algorithm", "[jwt]")
+{
+    auto token = httplib::jwt::create().set_subject("alice").sign(httplib::jwt::hs256("secret"));
+
+    auto decoded = httplib::jwt::decode(token).value();
+    REQUIRE(decoded.get_algorithm() == "HS256");
+
+    boost::system::error_code ec;
+    httplib::jwt::verify(httplib::jwt::hs384("secret")).verify(decoded, ec);
+    REQUIRE(ec == make_error_code(httplib::jwt::error::algorithm_mismatch));
+}
+
+TEST_CASE("JWT: valid token passes all time checks", "[jwt]")
+{
+    auto now = std::chrono::system_clock::now();
+    auto token = httplib::jwt::create()
+                     .set_not_before(now - 1h)
+                     .set_expires_at(now + 1h)
+                     .set_subject("alice")
+                     .sign(httplib::jwt::hs256("secret"));
+
+    auto decoded = httplib::jwt::decode(token).value();
+    boost::system::error_code ec;
+    httplib::jwt::verify(httplib::jwt::hs256("secret"))
+        .with_subject("alice")
+        .verify(decoded, ec);
+    REQUIRE_FALSE(ec);
 }

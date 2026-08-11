@@ -1,31 +1,38 @@
 #include "httplib/util/misc.hpp"
 #include <boost/algorithm/string/trim.hpp>
+#include <boost/url/encode.hpp>
+#include <boost/url/encoding_opts.hpp>
+#include <boost/url/rfc/unreserved_chars.hpp>
 #include <fmt/format.h>
-#include <sstream>
 
 namespace httplib::util
 {
 
-    std::uint8_t
-    hex_to_dec(std::uint8_t c)
+    namespace detail
     {
-        if (c >= '0' && c <= '9')
+        static bool
+        is_hex_digit(uint8_t c)
         {
-            c -= '0';
+            return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
         }
-
-        else if (c >= 'a' && c <= 'f')
+        static std::uint8_t
+        hex_to_dec(std::uint8_t c)
         {
-            c -= 'a' - 10;
+            if (c >= '0' && c <= '9')
+            {
+                c -= '0';
+            }
+            else if (c >= 'a' && c <= 'f')
+            {
+                c -= 'a' - 10;
+            }
+            else if (c >= 'A' && c <= 'F')
+            {
+                c -= 'A' - 10;
+            }
+            return c;
         }
-
-        else if (c >= 'A' && c <= 'F')
-        {
-            c -= 'A' - 10;
-        }
-
-        return c;
-    }
+    } // namespace detail
 
     void
     url_decode(std::string& str)
@@ -34,10 +41,11 @@ namespace httplib::util
         for (size_t r = 0; r < str.size(); ++r)
         {
             uint8_t v = str[r];
-            if (str[r] == '%')
+            if (str[r] == '%' && r + 2 < str.size() && detail::is_hex_digit(str[r + 1])
+                && detail::is_hex_digit(str[r + 2]))
             {
-                v = hex_to_dec(str[++r]) << 4;
-                v |= hex_to_dec(str[++r]);
+                v = detail::hex_to_dec(str[++r]) << 4;
+                v |= detail::hex_to_dec(str[++r]);
             }
             str[w++] = v;
         }
@@ -55,27 +63,13 @@ namespace httplib::util
     std::string
     url_encode(std::string_view value)
     {
-        std::ostringstream escaped;
-        escaped.fill('0');
-        escaped << std::hex;
-
-        for (char c : value)
-        {
-            if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~')
-            {
-                escaped << c;
-            }
-            else if (c == ' ')
-            {
-                escaped << '+';
-            }
-            else
-            {
-                escaped << '%' << std::setw(2) << int(static_cast<unsigned char>(c));
-            }
-        }
-
-        return escaped.str();
+        boost::urls::encoding_opts opts;
+        opts.space_as_plus = true;
+        opts.lower_case = true;
+        auto size = boost::urls::encoded_size(value, boost::urls::unreserved_chars, opts);
+        std::string result(size, '\0');
+        boost::urls::encode(result.data(), size, value, boost::urls::unreserved_chars, opts);
+        return result;
     }
 
     std::vector<std::string_view>

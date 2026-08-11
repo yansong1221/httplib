@@ -37,6 +37,9 @@ namespace httplib::jwt
         audience_mismatch,
         id_mismatch,
         invalid_token,
+        expired,
+        not_yet_valid,
+        algorithm_mismatch,
     };
 
     HTTPLIB_API boost::system::error_code make_error_code(error e);
@@ -234,6 +237,7 @@ namespace httplib::jwt
         verifier& with_audience(std::string_view aud);
         verifier& with_id(std::string_view id);
         verifier& with_claim(std::string_view key, std::function<bool(boost::json::value const&)> fn);
+        verifier& with_clock_skew(std::chrono::seconds skew);
         void
         verify(decoded_jwt const& jwt) const
         {
@@ -252,6 +256,7 @@ namespace httplib::jwt
         std::string subject_;
         std::string audience_;
         std::string id_;
+        std::chrono::seconds clock_skew_ { 0 };
         std::vector<std::pair<std::string, std::function<bool(boost::json::value const&)>>> custom_checks_;
     };
 

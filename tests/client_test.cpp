@@ -155,9 +155,9 @@ namespace
                 server.run();
 
                 httplib::client::http_client client(pool.get_executor(),
-                                                     ep.address().to_string(),
-                                                     ep.port(),
-                                                     true);
+                                                      "localhost",
+                                                      ep.port(),
+                                                      true);
                 client.set_timeout(std::chrono::seconds(5));
 
                 co_await test(client);
@@ -996,7 +996,7 @@ TEST_CASE("client: async_send_file upload", "[client]")
 
 #ifdef HTTPLIB_ENABLED_SSL
 
-TEST_CASE("client: SSL default verify off", "[client]")
+TEST_CASE("client: SSL verify off with set_verify_ssl", "[client]")
 {
     run_ssl(
         [](auto& server)
@@ -1008,6 +1008,7 @@ TEST_CASE("client: SSL default verify off", "[client]")
         },
         [](auto& client) -> net::awaitable<void>
         {
+            client.set_verify_ssl(false);
             auto resp = co_await client.async_get("/ssl-test");
             REQUIRE(resp.has_value());
             REQUIRE(resp->result() == http::status::ok);
@@ -1047,6 +1048,25 @@ TEST_CASE("client: verify with custom CA cert", "[client]")
             client.set_verify_ssl(true);
             client.set_ca_cert(kTestCert);
             auto resp = co_await client.async_get("/ssl-ca");
+            REQUIRE(resp.has_value());
+            REQUIRE(resp->result() == http::status::ok);
+        });
+}
+
+TEST_CASE("client: SSL verify enabled by default", "[client]")
+{
+    run_ssl(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/ssl-default",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ssl-ok"sv, "text/plain"); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            client.set_ca_cert(kTestCert);
+            auto resp = co_await client.async_get("/ssl-default");
             REQUIRE(resp.has_value());
             REQUIRE(resp->result() == http::status::ok);
         });

@@ -718,17 +718,41 @@ TEST_CASE("db: column access on empty resultset", "[db][integration]")
 
 TEST_CASE("mysql_middleware: throws when not registered", "[db][middleware]")
 {
-    test_common::test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/db/nomw",
-        [](httplib::server::request& req, httplib::server::response& resp)
+    net::io_context ioc;
+    std::exception_ptr err;
+
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
         {
-            REQUIRE_THROWS_AS(mw::fetch<mw::mysql_middleware>(req), std::exception);
-            resp.set_string_content("ok"sv, "text/plain"sv);
-        });
-    ts.start();
-    auto resp = UNWRAP(ts.run_async([&]{ return ts.client->async_get("/db/nomw"); }));
-    REQUIRE(resp.result() == http::status::ok);
+            httplib::server::http_server server(ioc.get_executor());
+            server.router().template set_http_handler<http::verb::get>(
+                "/db/nomw",
+                [](httplib::server::request& req, httplib::server::response& resp)
+                {
+                    REQUIRE_THROWS_AS(mw::fetch<mw::mysql_middleware>(req), std::exception);
+                    resp.set_string_content("ok"sv, "text/plain"sv);
+                });
+            server.listen("127.0.0.1", 0);
+            auto ep = server.local_endpoint();
+            server.run();
+
+            httplib::client::http_client client(ioc.get_executor(),
+                                                ep.address().to_string(),
+                                                ep.port());
+            client.set_timeout(std::chrono::seconds(5));
+
+            auto resp = UNWRAP(co_await client.async_get("/db/nomw"));
+            REQUIRE(resp.result() == http::status::ok);
+
+            client.close();
+            server.stop();
+        },
+        [&](std::exception_ptr e) { err = e; });
+
+    ioc.run();
+    if (err)
+        std::rethrow_exception(err);
 }
 
 #else

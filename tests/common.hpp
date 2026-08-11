@@ -209,7 +209,7 @@ namespace test_common
             ssl_ = true;
 
             client = std::make_unique<httplib::client::http_client>(workers_.get_executor(),
-                                                                    endpoint.address().to_string(),
+                                                                    "localhost",
                                                                     endpoint.port(),
                                                                     true);
             client->set_timeout(std::chrono::seconds(5));
@@ -228,7 +228,7 @@ namespace test_common
         {
             auto c = std::make_unique<httplib::client::http_client>(
                 workers_.get_executor(),
-                std::format("{}://{}:{}", ssl_ ? "https" : "http", endpoint.address().to_string(), endpoint.port()));
+                std::format("{}://{}:{}", ssl_ ? "https" : "http", ssl_ ? "localhost" : endpoint.address().to_string(), endpoint.port()));
             c->set_timeout(std::chrono::seconds(5));
             return c;
         }
@@ -237,14 +237,6 @@ namespace test_common
         router()
         {
             return server.router();
-        }
-
-        template <typename Factory>
-        auto
-        run_async(Factory&& factory)
-        {
-            auto future = net::co_spawn(executor(), std::forward<Factory>(factory), net::use_future);
-            return future.get();
         }
 
       private:

@@ -148,6 +148,18 @@ namespace httplib::server
     }
 
     void
+    http_server::set_header_limit(std::uint32_t limit)
+    {
+        impl_->set_header_limit(limit);
+    }
+
+    void
+    http_server::set_body_limit(std::uint64_t limit)
+    {
+        impl_->set_body_limit(limit);
+    }
+
+    void
     http_server::set_reverse_proxy(std::string_view location, std::string_view url, proxy_interceptor_factory factory)
     {
         impl_->set_reverse_proxy(location, url, std::move(factory));

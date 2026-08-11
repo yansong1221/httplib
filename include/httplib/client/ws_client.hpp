@@ -34,6 +34,9 @@ namespace httplib::client
         std::shared_ptr<spdlog::logger> logger() const;
         void set_logger(std::shared_ptr<spdlog::logger> logger);
 
+        void set_verify_ssl(bool verify);
+        void set_ca_cert(std::string_view cert);
+
         template <typename OpenFunc, typename MessageFunc, typename CloseFunc>
         void
         run(std::string_view target,

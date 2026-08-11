@@ -177,6 +177,37 @@ TEST_CASE("util::url_decode", "[body-utils]")
     REQUIRE(httplib::util::url_decode("%41%42%43") == "ABC");
 }
 
+TEST_CASE("util::url_decode rejects malformed percent encoding", "[body-utils]")
+{
+    REQUIRE(httplib::util::url_decode("trailing%") == "trailing%");
+    REQUIRE(httplib::util::url_decode("incomplete%2") == "incomplete%2");
+    REQUIRE(httplib::util::url_decode("%ZZ") == "%ZZ");
+    REQUIRE(httplib::util::url_decode("%%") == "%%");
+    REQUIRE(httplib::util::url_decode("%GG") == "%GG");
+    REQUIRE(httplib::util::url_decode("a%20b%c") == "a b%c");
+    REQUIRE(httplib::util::url_decode("%") == "%");
+    REQUIRE(httplib::util::url_decode("") == "");
+}
+
+TEST_CASE("util::url_decode does not read out of bounds", "[body-utils]")
+{
+    std::string s("%");
+    httplib::util::url_decode(s);
+    REQUIRE(s == "%");
+
+    std::string s2("%A");
+    httplib::util::url_decode(s2);
+    REQUIRE(s2 == "%A");
+
+    std::string s3("%20%");
+    httplib::util::url_decode(s3);
+    REQUIRE(s3 == " %");
+
+    std::string s4("%20%A");
+    httplib::util::url_decode(s4);
+    REQUIRE(s4 == " %A");
+}
+
 TEST_CASE("util::url_encode", "[body-utils]")
 {
     REQUIRE(httplib::util::url_encode("hello world") == "hello+world");

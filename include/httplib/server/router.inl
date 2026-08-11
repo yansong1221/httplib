@@ -225,6 +225,14 @@ namespace httplib::server
         set_post_routing_handler_impl(std::move(coro_handler));
     }
 
+    template <typename Func>
+    void
+    router::set_connect_handler(std::string_view key, Func&& handler)
+    {
+        auto coro_handler = util::make_coro_handler(std::forward<Func>(handler));
+        set_connect_handler_impl(key, std::move(coro_handler));
+    }
+
     template <typename Func, typename... Aspects>
     void
     router::set_chunked_http_handler(http::verb method, std::string_view key, Func&& handler, Aspects... asps)

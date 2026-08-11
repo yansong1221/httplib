@@ -57,7 +57,9 @@ namespace httplib::body
     {
         if (content_length)
         {
-            impl_->parser.reset(json::make_shared_resource<json::monotonic_resource>(*content_length));
+            static constexpr std::uint64_t max_json_size = 10 * 1024 * 1024;
+            auto alloc_sz = std::min(*content_length, max_json_size);
+            impl_->parser.reset(json::make_shared_resource<json::monotonic_resource>(alloc_sz));
         }
         ec = {};
     }

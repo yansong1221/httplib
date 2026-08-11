@@ -40,7 +40,7 @@ namespace httplib::client
 
         if (!is_open())
         {
-            auto stream_result = http_stream::create_stream(executor_, host_, use_ssl_);
+            auto stream_result = http_stream::create_stream(executor_, host_, use_ssl_, verify_ssl_, ca_cert_);
             if (!stream_result)
             {
                 logger()->error("ws connect failed {}:{}: {}", host_, port_, stream_result.error().message());

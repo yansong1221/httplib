@@ -368,6 +368,36 @@ namespace httplib::server
     }
 
     void
+    router_impl::set_connect_handler_impl(std::string_view path, coro_http_handler_type&& handler)
+    {
+        std::unique_lock lock(mutex_);
+        auto segments = detail::split_segments(path);
+        auto node = insert(root_.get(), segments, 0);
+        node->connect_handler = wrap_global(std::move(handler));
+    }
+
+    std::optional<router::coro_http_handler_type>
+    router_impl::query_connect_handler(request& req) const
+    {
+        std::shared_lock lock(mutex_);
+        auto segments = detail::split_segments(req.path());
+
+        std::unordered_map<std::string, std::string> params;
+        auto node = match_nodes(root_.get(),
+                                segments,
+                                0,
+                                params,
+                                [&](Node const* node) { return node->connect_handler.has_value(); });
+
+        if (!node)
+        {
+            return std::nullopt;
+        }
+
+        return node->connect_handler;
+    }
+
+    void
     router_impl::set_chunked_http_handler_impl(http::verb method,
                                                std::string_view key,
                                                coro_http_handler_type&& handler)
@@ -388,6 +418,14 @@ namespace httplib::server
         for (auto const& v : node->chunked_handlers)
         {
             allows.insert(to_string(v.first));
+        }
+        if (node->connect_handler)
+        {
+            allows.insert(to_string(http::verb::connect));
+        }
+        if (node->ws_handler)
+        {
+            allows.insert(to_string(http::verb::get));
         }
     }
 

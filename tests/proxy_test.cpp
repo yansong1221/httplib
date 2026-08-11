@@ -1,8 +1,10 @@
 #include "common.hpp"
+#include "httplib/client/proxy_client.hpp"
 #include "httplib/client/ws_client.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/ip/tcp.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <string>
 #include <thread>
@@ -1049,8 +1051,8 @@ TEST_CASE("ws-forward stress: concurrent connections + shutdown", "[proxy][ws-fo
             [&]() -> net::awaitable<void>
             {
                 co_return;
-            });
-    }
+        });
+}
 
     std::this_thread::sleep_for(std::chrono::seconds(3));
     stop_flag.store(true);
@@ -1167,4 +1169,202 @@ TEST_CASE("ws-interceptor: messages intercepted", "[proxy][ws-forward]")
     REQUIRE(req_called.load() == 1);
     REQUIRE(client_msg_called.load() == 3);
     REQUIRE(upstream_msg_called.load() == 3);
+}
+
+TEST_CASE("CONNECT: rejected by default", "[proxy]")
+{
+    using test_common::run;
+    using test_common::setup_logger;
+
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/",
+                [](server::request&, server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_send_request(http::verb::connect, "example.com:80"));
+            REQUIRE(resp.result() == http::status::method_not_allowed);
+            co_return;
+        });
+}
+
+TEST_CASE("CONNECT: route handler can approve", "[proxy]")
+{
+    using test_common::run;
+    using test_common::setup_logger;
+
+    bool handler_called = false;
+
+    run(
+        [&](auto& server)
+        {
+            server.router().set_connect_handler(
+                "example.com:80",
+                [&](server::request& req, server::response& resp) -> net::awaitable<void>
+                {
+                    REQUIRE(req.target() == "example.com:80");
+                    handler_called = true;
+                    co_return;
+                });
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            co_await client.async_send_request(http::verb::connect, "example.com:80");
+            REQUIRE(handler_called);
+            co_return;
+        });
+}
+
+TEST_CASE("CONNECT: route handler can reject", "[proxy]")
+{
+    using test_common::run;
+    using test_common::setup_logger;
+
+    run(
+        [](auto& server)
+        {
+            server.router().set_connect_handler(
+                "example.com:80",
+                [](server::request& req, server::response& resp) -> net::awaitable<void>
+                {
+                    resp.set_error_content(http::status::forbidden);
+                    co_return;
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_send_request(http::verb::connect, "example.com:80"));
+            REQUIRE(resp.result() == http::status::forbidden);
+            co_return;
+        });
+}
+
+TEST_CASE("CONNECT: wildcard handler matches any target", "[proxy]")
+{
+    using test_common::run;
+    using test_common::setup_logger;
+
+    bool handler_called = false;
+
+    run(
+        [&](auto& server)
+        {
+            server.router().set_connect_handler(
+                "*",
+                [&](server::request& req, server::response& resp) -> net::awaitable<void>
+                {
+                    handler_called = true;
+                    co_return;
+                });
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            co_await client.async_send_request(http::verb::connect, "any.host:443");
+            REQUIRE(handler_called);
+            co_return;
+        });
+}
+
+TEST_CASE("CONNECT: path-specific handlers don't interfere", "[proxy]")
+{
+    using test_common::run;
+    using test_common::setup_logger;
+
+    run(
+        [](auto& server)
+        {
+            server.router().set_connect_handler(
+                "allowed.host:80",
+                [](server::request&, server::response&) -> net::awaitable<void>
+                { co_return; });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_send_request(http::verb::connect, "other.host:80"));
+            REQUIRE(resp.result() == http::status::method_not_allowed);
+            co_return;
+        });
+}
+
+TEST_CASE("CONNECT: tunnel forwards data bidirectionally", "[proxy]")
+{
+    net::io_context ioc;
+
+    tcp::acceptor echo_acceptor(ioc);
+    echo_acceptor.open(tcp::v4());
+    echo_acceptor.bind(tcp::endpoint(net::ip::make_address("127.0.0.1"), 0));
+    echo_acceptor.listen();
+    auto echo_port = echo_acceptor.local_endpoint().port();
+
+    std::atomic<int> echo_recv_bytes { -1 };
+    std::string echo_data;
+
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            auto sock = co_await echo_acceptor.async_accept(net::use_awaitable);
+            std::vector<char> buf(64);
+            boost::system::error_code ec;
+            auto n = co_await sock.async_read_some(net::buffer(buf), net::use_awaitable);
+            echo_recv_bytes = static_cast<int>(n);
+            echo_data = std::string(buf.data(), n);
+            if (n > 0)
+            {
+                co_await net::async_write(sock, net::buffer(buf, n), net::use_awaitable);
+            }
+            sock.shutdown(tcp::socket::shutdown_send, ec);
+            sock.close(ec);
+        },
+        net::detached);
+
+    httplib::server::http_server proxy(ioc.get_executor());
+    proxy.router().set_connect_handler(
+        "*",
+        [](httplib::server::request&, httplib::server::response&) -> net::awaitable<void> { co_return; });
+    proxy.listen("127.0.0.1", 0);
+    auto proxy_ep = proxy.local_endpoint();
+    proxy.run();
+
+    bool tunnel_ok = false;
+
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            httplib::client::proxy_client pc(
+                ioc.get_executor(), proxy_ep.address().to_string(), proxy_ep.port());
+
+            auto ec = co_await pc.async_connect(std::format("127.0.0.1:{}", echo_port));
+            if (ec)
+            {
+                proxy.stop();
+                co_return;
+            }
+
+            co_await pc.async_write(net::buffer(std::string("ping")));
+
+            std::vector<char> recv(64);
+            auto result = co_await pc.async_read_some(net::buffer(recv));
+            if (result.has_value()
+                && result.value() == 4
+                && std::string_view(recv.data(), 4) == "ping")
+            {
+                tunnel_ok = true;
+            }
+
+            pc.close();
+            proxy.stop();
+        },
+        net::detached);
+
+    ioc.run();
+
+    REQUIRE(tunnel_ok);
+    REQUIRE(echo_recv_bytes.load() == 4);
+    REQUIRE(echo_data == "ping");
 }

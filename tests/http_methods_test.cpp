@@ -825,6 +825,150 @@ TEST_CASE("Multipart randomized round-trip", "[http-methods]")
     std::filesystem::remove_all(upload_dir);
 }
 
+TEST_CASE("Multipart upload rejects path traversal via parent dir", "[http-methods]")
+{
+    auto upload_dir = std::filesystem::temp_directory_path() / "httplib_uploads_pt";
+    std::filesystem::create_directories(upload_dir);
+
+    run(
+        [&](auto& server)
+        {
+            server.set_upload_dir(upload_dir);
+            server.router().template set_http_handler<http::verb::post>(
+                "/upload-pt",
+                [&upload_dir](httplib::server::request& req, httplib::server::response& resp)
+                {
+                    auto const& fd = req.body().template as<body::form_data_body>();
+                    REQUIRE(fd.fields.size() == 1);
+                    REQUIRE(fd.fields[0].filename == "../../../etc/passwd");
+                    REQUIRE(fd.fields[0].file_path.has_value());
+                    auto const& fp = fd.fields[0].file_path.value();
+                    auto canonical_fp = std::filesystem::weakly_canonical(fp);
+                    auto canonical_dir = std::filesystem::weakly_canonical(upload_dir);
+                    REQUIRE(canonical_fp.string().find(canonical_dir.string()) == 0);
+                    REQUIRE(fp.filename() == "passwd");
+                    resp.set_string_content("ok"sv, "text/plain"sv);
+                });
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            std::string boundary = "----PathTraversal";
+            std::string body = std::format("--{}\r\n"
+                                           "Content-Disposition: form-data; name=\"file\"; "
+                                           "filename=\"../../../etc/passwd\"\r\n"
+                                           "\r\n"
+                                           "evil-content\r\n"
+                                           "--{}--\r\n",
+                                           boundary,
+                                           boundary);
+
+            auto hdrs = httplib::http::fields();
+            hdrs.set(http::field::content_type,
+                     std::format("multipart/form-data; boundary={}", boundary));
+            auto resp = UNWRAP(co_await client.async_send_request(
+                http::verb::post, "/upload-pt", body, hdrs));
+            REQUIRE(resp.result() == http::status::ok);
+            co_return;
+        });
+
+    std::filesystem::remove_all(upload_dir);
+}
+
+TEST_CASE("Multipart upload strips absolute path filename to basename", "[http-methods]")
+{
+    auto upload_dir = std::filesystem::temp_directory_path() / "httplib_uploads_abs";
+    std::filesystem::create_directories(upload_dir);
+
+    run(
+        [&](auto& server)
+        {
+            server.set_upload_dir(upload_dir);
+            server.router().template set_http_handler<http::verb::post>(
+                "/upload-abs",
+                [&upload_dir](httplib::server::request& req, httplib::server::response& resp)
+                {
+                    auto const& fd = req.body().template as<body::form_data_body>();
+                    REQUIRE(fd.fields.size() == 1);
+                    REQUIRE(fd.fields[0].file_path.has_value());
+                    auto const& fp = fd.fields[0].file_path.value();
+                    REQUIRE(fp.filename() == "evil.dll");
+                    auto canonical_fp = std::filesystem::weakly_canonical(fp);
+                    auto canonical_dir = std::filesystem::weakly_canonical(upload_dir);
+                    REQUIRE(canonical_fp.string().find(canonical_dir.string()) == 0);
+                    resp.set_string_content("ok"sv, "text/plain"sv);
+                });
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            std::string boundary = "----AbsPath";
+            std::string body = std::format("--{}\r\n"
+                                           "Content-Disposition: form-data; name=\"file\"; "
+                                           "filename=\"C:\\\\Windows\\\\System32\\\\evil.dll\"\r\n"
+                                           "\r\n"
+                                           "payload\r\n"
+                                           "--{}--\r\n",
+                                           boundary,
+                                           boundary);
+
+            auto hdrs = httplib::http::fields();
+            hdrs.set(http::field::content_type,
+                     std::format("multipart/form-data; boundary={}", boundary));
+            auto resp = UNWRAP(co_await client.async_send_request(
+                http::verb::post, "/upload-abs", body, hdrs));
+            REQUIRE(resp.result() == http::status::ok);
+            co_return;
+        });
+
+    std::filesystem::remove_all(upload_dir);
+}
+
+TEST_CASE("Multipart upload basename-only safe filename", "[http-methods]")
+{
+    auto upload_dir = std::filesystem::temp_directory_path() / "httplib_uploads_safe";
+    std::filesystem::create_directories(upload_dir);
+
+    run(
+        [&](auto& server)
+        {
+            server.set_upload_dir(upload_dir);
+            server.router().template set_http_handler<http::verb::post>(
+                "/upload-safe",
+                [&upload_dir](httplib::server::request& req, httplib::server::response& resp)
+                {
+                    auto const& fd = req.body().template as<body::form_data_body>();
+                    REQUIRE(fd.fields.size() == 1);
+                    REQUIRE(fd.fields[0].filename == "a/b/c/legit.txt");
+                    REQUIRE(fd.fields[0].file_path.has_value());
+                    auto const& fp = fd.fields[0].file_path.value();
+                    REQUIRE(fp.filename() == "legit.txt");
+                    REQUIRE(fp.parent_path() == upload_dir);
+                    resp.set_string_content("ok"sv, "text/plain"sv);
+                });
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            std::string boundary = "----SafeName";
+            std::string body = std::format("--{}\r\n"
+                                           "Content-Disposition: form-data; name=\"file\"; "
+                                           "filename=\"a/b/c/legit.txt\"\r\n"
+                                           "\r\n"
+                                           "safe-content\r\n"
+                                           "--{}--\r\n",
+                                           boundary,
+                                           boundary);
+
+            auto hdrs = httplib::http::fields();
+            hdrs.set(http::field::content_type,
+                     std::format("multipart/form-data; boundary={}", boundary));
+            auto resp = UNWRAP(co_await client.async_send_request(
+                http::verb::post, "/upload-safe", body, hdrs));
+            REQUIRE(resp.result() == http::status::ok);
+            co_return;
+        });
+
+    std::filesystem::remove_all(upload_dir);
+}
+
 TEST_CASE("Server: handler throws exception returns 500", "[http-methods]")
 {
     run(
@@ -1241,4 +1385,47 @@ TEST_CASE("Query params randomized round-trip", "[http-methods]")
                 co_return;
             });
     }
+}
+
+TEST_CASE("Server: header limit rejects oversized headers", "[http-methods]")
+{
+    run(
+        [](auto& server)
+        {
+            server.set_header_limit(128);
+            server.router().template set_http_handler<http::verb::get>(
+                "/hdr-limit",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto hdrs = httplib::http::fields();
+            std::string big_value(200, 'A');
+            hdrs.set("X-Big-Header", big_value);
+            auto resp = co_await client.async_send_request(http::verb::get, "/hdr-limit", hdrs);
+            REQUIRE_FALSE(resp.has_value());
+            co_return;
+        });
+}
+
+TEST_CASE("Server: body limit rejects oversized body", "[http-methods]")
+{
+    run(
+        [](auto& server)
+        {
+            server.set_body_limit(16);
+            server.router().template set_http_handler<http::verb::post>(
+                "/body-limit",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            std::string big_body(100, 'X');
+            auto resp = co_await client.async_send_request(
+                http::verb::post, "/body-limit", big_body);
+            REQUIRE_FALSE(resp.has_value());
+            co_return;
+        });
 }

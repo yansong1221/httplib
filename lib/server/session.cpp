@@ -213,8 +213,8 @@ namespace httplib::server
         for (;;)
         {
             http::request_parser<http::empty_body> header_parser;
-            header_parser.header_limit(std::numeric_limits<std::uint32_t>::max());
-            header_parser.body_limit(std::numeric_limits<unsigned long long>::max());
+            header_parser.header_limit(server_impl_->header_limit());
+            header_parser.body_limit(server_impl_->body_limit());
 
             stream_.expires_after(server_impl_->read_timeout());
             co_await http::async_read_header(stream_, buffer_, header_parser, util::net_awaitable[ec]);
@@ -231,9 +231,30 @@ namespace httplib::server
 
             if (header.method() == http::verb::connect)
             {
-                server_impl_->logger()->trace("proxy connect {}", req_target);
-                auto req = request::impl::make_request(local_endp, remote_endp, std::move(header_parser.release()));
-                co_return std::make_unique<http_proxy_task>(std::move(stream_), std::move(req), server_impl_);
+                auto req = request::impl::make_request(
+                    local_endp, remote_endp, std::move(header_parser.release()));
+                auto resp = response::impl::make_response(header.version(),
+                                                           header.keep_alive(),
+                                                           &stream_,
+                                                           server_impl_->write_timeout());
+                get_impl(resp).result(http::status::ok);
+
+                auto connect_handler = _router.query_connect_handler(req);
+                if (connect_handler)
+                {
+                    co_await (*connect_handler)(req, resp);
+                    if (resp.result_int() < 300)
+                    {
+                        co_return std::make_unique<http_proxy_task>(
+                            std::move(stream_), std::move(req), server_impl_);
+                    }
+                    co_await async_write(req, resp);
+                    co_return nullptr;
+                }
+                server_impl_->logger()->trace("CONNECT rejected, no handler for {}", req_target);
+                get_impl(resp).result(http::status::method_not_allowed);
+                co_await async_write(req, resp);
+                co_return nullptr;
             }
             if (websocket::is_upgrade(header.base()))
             {

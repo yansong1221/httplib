@@ -40,14 +40,6 @@ namespace httplib::util
         return val;
     }
     /**
-     * Convert a hex value to a decimal value.
-     *
-     * @param c The hexadecimal input.
-     * @return The decimal output.
-     */
-    HTTPLIB_API std::uint8_t hex_to_dec(std::uint8_t c);
-
-    /**
      * Decodes an URL.
      *
      * @details This function replaces %<hex> with the corresponding characters.

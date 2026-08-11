@@ -72,7 +72,7 @@ namespace httplib::body
                 {
                     pos++;
                 }
-                while (pos < header.size() && std::isspace(header[pos]))
+                while (pos < header.size() && std::isspace(static_cast<unsigned char>(header[pos])))
                 {
                     pos++;
                 }
@@ -470,8 +470,22 @@ namespace httplib::body
     {
         if (!file_stream_.is_open())
         {
-            auto name = field_data_.filename.empty() ? "upload" : field_data_.filename;
-            current_file_path_ = body_.save_dir / name;
+            auto safe_name = field_data_.filename.empty()
+                                 ? "upload"
+                                 : std::string(fs::path(field_data_.filename).filename().string());
+            if (safe_name.empty() || safe_name == "." || safe_name == "..")
+            {
+                safe_name = "upload";
+            }
+            auto candidate = body_.save_dir / safe_name;
+            auto canonical_dir = fs::weakly_canonical(body_.save_dir);
+            auto canonical_file = fs::weakly_canonical(candidate);
+            if (canonical_file.string().rfind(canonical_dir.string(), 0) != 0)
+            {
+                ec = http::error::body_limit;
+                return;
+            }
+            current_file_path_ = candidate;
             file_bytes_written_ = 0;
             file_stream_.open(current_file_path_, std::ios::out | std::ios::binary | std::ios::trunc);
         }

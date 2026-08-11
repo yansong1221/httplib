@@ -83,6 +83,28 @@ namespace httplib::server
             return upload_file_limit_;
         }
 
+        void
+        set_header_limit(std::uint32_t limit)
+        {
+            header_limit_ = limit;
+        }
+        std::uint32_t
+        header_limit() const
+        {
+            return header_limit_;
+        }
+
+        void
+        set_body_limit(std::uint64_t limit)
+        {
+            body_limit_ = limit;
+        }
+        std::uint64_t
+        body_limit() const
+        {
+            return body_limit_;
+        }
+
         void set_reverse_proxy(std::string_view location,
                                std::string_view upstream_url,
                                http_server::proxy_interceptor_factory factory);
@@ -132,6 +154,8 @@ namespace httplib::server
         fs::path upload_dir_;
         std::uint64_t upload_file_limit_ = 10 * 1024 * 1024;
 
+        std::uint32_t header_limit_ = 65536;
+        std::uint64_t body_limit_ = 100 * 1024 * 1024;
         std::atomic<bool> running_ = false;
 
 #ifdef HTTPLIB_ENABLED_SSL
