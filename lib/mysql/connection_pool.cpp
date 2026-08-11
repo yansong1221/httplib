@@ -24,6 +24,7 @@ namespace httplib::mysql
         params.ping_interval = cfg.ping_interval;
         params.ping_timeout = cfg.ping_timeout;
         params.multi_queries = true;
+        params.ssl = cfg.ssl ? boost::mysql::ssl_mode::enable : boost::mysql::ssl_mode::disable;
         return params;
     }
 

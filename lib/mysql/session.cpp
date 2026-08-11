@@ -27,6 +27,7 @@ namespace httplib::mysql
         {
             params.database = cfg.database;
         }
+        params.ssl = cfg.ssl ? boost::mysql::ssl_mode::enable : boost::mysql::ssl_mode::disable;
         co_await conn.async_connect(params, boost::asio::use_awaitable);
 
         auto imp = std::make_unique<impl>();

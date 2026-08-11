@@ -17,6 +17,7 @@ namespace httplib::mysql
         std::string database;
         std::string charset = "utf8mb4";
         std::chrono::seconds connect_timeout { 5 };
+        bool ssl = false;
     };
 
     struct pool_params : connect_params
