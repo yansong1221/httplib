@@ -11,18 +11,16 @@ namespace httplib::server
       public:
         explicit sse_writer_impl(server::chunk_writer* cw) : cw_(cw) {}
 
-        net::awaitable<boost::system::error_code>
+        net::awaitable<void>
         begin()
         {
             http::fields headers;
             headers.set(http::field::content_type, "text/event-stream");
             headers.set(http::field::cache_control, "no-cache");
-            auto ec = co_await cw_->write_header(http::status::ok, headers, false);
-            if (ec)
+            if (auto ec = co_await cw_->write_header(http::status::ok, headers, false); ec)
             {
-                co_return ec;
+                throw boost::system::system_error(ec);
             }
-            co_return boost::system::error_code {};
         }
 
         net::awaitable<void>
@@ -77,21 +75,30 @@ namespace httplib::server
                 }
             }
             msg += "\n";
-            co_await cw_->write_body(net::buffer(msg), more);
+            if (auto ec = co_await cw_->write_body(net::buffer(msg), more); ec)
+            {
+                throw boost::system::system_error(ec);
+            }
         }
 
         net::awaitable<void>
         send_retry(std::chrono::milliseconds ms, bool more) override
         {
             auto msg = "retry: " + std::to_string(ms.count()) + "\n\n";
-            co_await cw_->write_body(net::buffer(msg), more);
+            if (auto ec = co_await cw_->write_body(net::buffer(msg), more); ec)
+            {
+                throw boost::system::system_error(ec);
+            }
         }
 
         net::awaitable<void>
         send_comment(std::string_view comment, bool more) override
         {
             auto msg = std::string(": ") + std::string(comment) + "\n\n";
-            co_await cw_->write_body(net::buffer(msg), more);
+            if (auto ec = co_await cw_->write_body(net::buffer(msg), more); ec)
+            {
+                throw boost::system::system_error(ec);
+            }
         }
 
       private:

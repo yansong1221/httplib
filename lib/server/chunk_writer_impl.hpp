@@ -64,7 +64,8 @@ namespace httplib::server
         {
             if (!msg_ || !sr_)
             {
-                co_return boost::system::errc::make_error_code(boost::system::errc::invalid_argument);
+                throw boost::system::system_error(
+                    boost::system::errc::make_error_code(boost::system::errc::invalid_argument));
             }
 
             msg_->body().data = (void*)data.data();

@@ -12,17 +12,15 @@ namespace httplib::server
       public:
         explicit ndjson_writer_impl(server::chunk_writer* cw) : cw_(cw) {}
 
-        net::awaitable<boost::system::error_code>
+        net::awaitable<void>
         begin()
         {
             http::fields headers;
             headers.set(http::field::content_type, "application/x-ndjson");
-            auto ec = co_await cw_->write_header(http::status::ok, headers, false);
-            if (ec)
+            if (auto ec = co_await cw_->write_header(http::status::ok, headers, false); ec)
             {
-                co_return ec;
+                throw boost::system::system_error(ec);
             }
-            co_return boost::system::error_code {};
         }
 
         net::awaitable<void>
@@ -30,7 +28,10 @@ namespace httplib::server
         {
             auto line = boost::json::serialize(value);
             line += "\n";
-            co_await cw_->write_body(net::buffer(line), more);
+            if (auto ec = co_await cw_->write_body(net::buffer(line), more); ec)
+            {
+                throw boost::system::system_error(ec);
+            }
         }
 
       private:
