@@ -231,12 +231,11 @@ namespace httplib::server
 
             if (header.method() == http::verb::connect)
             {
-                auto req = request::impl::make_request(
-                    local_endp, remote_endp, std::move(header_parser.release()));
+                auto req = request::impl::make_request(local_endp, remote_endp, std::move(header_parser.release()));
                 auto resp = response::impl::make_response(header.version(),
-                                                           header.keep_alive(),
-                                                           &stream_,
-                                                           server_impl_->write_timeout());
+                                                          header.keep_alive(),
+                                                          &stream_,
+                                                          server_impl_->write_timeout());
                 get_impl(resp).result(http::status::ok);
 
                 auto connect_handler = _router.query_connect_handler(req);
@@ -245,8 +244,7 @@ namespace httplib::server
                     co_await (*connect_handler)(req, resp);
                     if (resp.result_int() < 300)
                     {
-                        co_return std::make_unique<http_proxy_task>(
-                            std::move(stream_), std::move(req), server_impl_);
+                        co_return std::make_unique<http_proxy_task>(std::move(stream_), std::move(req), server_impl_);
                     }
                     co_await async_write(req, resp);
                     co_return nullptr;
@@ -371,6 +369,7 @@ namespace httplib::server
                                               req_target,
                                               log_endp_format,
                                               e.what());
+                get_impl(resp).keep_alive(false);
                 resp.set_error_content(http::status::internal_server_error);
             }
             catch (...)
@@ -379,6 +378,7 @@ namespace httplib::server
                                               req.method_string(),
                                               req_target,
                                               log_endp_format);
+                get_impl(resp).keep_alive(false);
                 resp.set_error_content(http::status::internal_server_error);
             }
 

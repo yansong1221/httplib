@@ -148,7 +148,7 @@ namespace httplib::client
             {
                 return;
             }
-
+            conn->close();
             auto& pool = pools_[url];
             if (pool.size() < max_size_)
             {
