@@ -27,7 +27,7 @@ namespace httplib::mysql
 
       private:
         struct impl;
-        std::unique_ptr<impl> impl_;
+        std::shared_ptr<impl> impl_;
     };
 
 } // namespace httplib::mysql

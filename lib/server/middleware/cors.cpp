@@ -141,13 +141,13 @@ namespace httplib::server::middleware
             resp.set_empty_content(http::status::no_content);
             return false;
         }
+        impl_->apply(resp);
         return true;
     }
 
     bool
     cors_middleware::after(request&, response& resp)
     {
-        impl_->apply(resp);
         return true;
     }
 
