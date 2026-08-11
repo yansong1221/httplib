@@ -25,8 +25,11 @@ namespace httplib::mysql
         size_t min_connections = 2;
         size_t max_connections = 16;
 
-        std::chrono::seconds ping_interval { 30 };
-        std::chrono::seconds ping_timeout { 5 };
+        std::chrono::seconds acquire_timeout { 5 };
+        std::chrono::seconds idle_timeout { 300 };
+        std::chrono::seconds idle_check_interval { 60 };
+        std::chrono::seconds health_check_interval { 30 };
+        std::chrono::seconds ping_grace_period { 15 };
     };
 
 } // namespace httplib::mysql

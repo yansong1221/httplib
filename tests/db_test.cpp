@@ -43,10 +43,10 @@ namespace
             {
                 mysql::connection_pool pool(ioc.get_executor(), make_cfg());
                 pool.start();
-                auto sess = co_await pool.async_acquire();
-                co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
-                co_await sess.query("USE test");
-                co_await f(sess);
+                auto handle = co_await pool.async_acquire();
+                co_await handle->query("CREATE DATABASE IF NOT EXISTS test");
+                co_await handle->query("USE test");
+                co_await f(*handle);
             },
             [&](std::exception_ptr e)
             {
@@ -125,8 +125,8 @@ TEST_CASE("db: connection_pool basics", "[db][integration]")
     run_pool(
         [](mysql::connection_pool& pool) -> net::awaitable<void>
         {
-            auto sess = co_await pool.async_acquire();
-            auto ok = co_await sess.ping();
+            auto handle = co_await pool.async_acquire();
+            auto ok = co_await handle->ping();
             REQUIRE(ok);
         });
 }
@@ -146,8 +146,8 @@ TEST_CASE("db: connection_pool concurrent acquire", "[db][integration]")
             pool.start();
             auto s1 = co_await pool.async_acquire();
             auto s2 = co_await pool.async_acquire();
-            auto r1 = co_await s1.query("SELECT 'one' AS v");
-            auto r2 = co_await s2.query("SELECT 'two' AS v");
+            auto r1 = co_await s1->query("SELECT 'one' AS v");
+            auto r2 = co_await s2->query("SELECT 'two' AS v");
             REQUIRE(*r1[0].as_string("v") == "one");
             REQUIRE(*r2[0].as_string("v") == "two");
         },

@@ -75,6 +75,11 @@ namespace httplib::mysql
 
         void set_query_logger(query_logger cb);
 
+        void touch();
+        std::chrono::steady_clock::time_point last_active_time() const;
+        std::chrono::steady_clock::time_point last_ping_time() const;
+        bool in_transaction() const;
+
         struct impl;
         explicit session(std::unique_ptr<impl> p);
 

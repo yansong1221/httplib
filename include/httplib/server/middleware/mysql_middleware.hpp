@@ -20,7 +20,7 @@ namespace httplib::server::middleware
     class HTTPLIB_API mysql_middleware
     {
       public:
-        using value_type = std::shared_ptr<mysql::session>;
+        using value_type = std::shared_ptr<mysql::connection_pool::session_handle>;
         using pool_type = std::shared_ptr<mysql::connection_pool>;
 
         inline static std::shared_ptr<mysql::connection_pool>

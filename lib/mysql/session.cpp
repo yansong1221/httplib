@@ -3,8 +3,6 @@
 #include "httplib/mysql/connection_pool.hpp"
 #include "mysql/result_impl.h"
 #include "mysql/session_impl.h"
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/detached.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/mysql.hpp>
@@ -18,7 +16,7 @@ namespace httplib::mysql
     net::awaitable<session>
     session::connect(net::any_io_executor ex, connect_params cfg)
     {
-        boost::mysql::any_connection conn(ex);
+        auto conn = std::make_unique<boost::mysql::any_connection>(ex);
         boost::mysql::connect_params params;
         params.server_address.emplace_host_and_port(cfg.host, cfg.port);
         params.username = cfg.user;
@@ -28,11 +26,12 @@ namespace httplib::mysql
             params.database = cfg.database;
         }
         params.ssl = cfg.ssl ? boost::mysql::ssl_mode::enable : boost::mysql::ssl_mode::disable;
-        co_await conn.async_connect(params, boost::asio::use_awaitable);
+        params.multi_queries = true;
+        co_await conn->async_connect(params, boost::asio::use_awaitable);
 
         auto imp = std::make_unique<impl>();
         imp->params = std::move(cfg);
-        imp->standalone = std::make_unique<boost::mysql::any_connection>(std::move(conn));
+        imp->conn = std::move(conn);
         co_return session(std::move(imp));
     }
 
@@ -41,24 +40,25 @@ namespace httplib::mysql
 
     session::~session()
     {
-        if (impl_ && impl_->in_transaction)
+        if (!impl_)
+        {
+            return;
+        }
+
+        if (impl_->in_transaction)
         {
             impl_->in_transaction = false;
-            if (impl_->standalone)
-            {
-                return;
-            }
-            auto pooled = std::move(impl_->pooled);
-            auto ex = pooled.get().get_executor();
+            auto conn = std::move(impl_->conn);
+            auto ex = conn->get_executor();
             net::co_spawn(
                 ex,
-                [pooled = std::move(pooled)]() mutable -> net::awaitable<void>
+                [conn = std::move(conn)]() mutable -> net::awaitable<void>
                 {
                     try
                     {
                         boost::mysql::results r;
                         boost::mysql::diagnostics diag;
-                        co_await pooled.get().async_execute("ROLLBACK", r, diag, boost::asio::use_awaitable);
+                        co_await conn->async_execute("ROLLBACK", r, diag, boost::asio::use_awaitable);
                     }
                     catch (...)
                     {
@@ -128,13 +128,9 @@ namespace httplib::mysql
     session::reconnect()
     {
         auto& imp = get_impl(*this);
-        if (!imp.standalone)
-        {
-            throw std::runtime_error("reconnect only available on standalone sessions");
-        }
 
-        imp.standalone->close();
-        imp.standalone = std::make_unique<boost::mysql::any_connection>(imp.standalone->get_executor());
+        imp.conn->close();
+        imp.conn = std::make_unique<boost::mysql::any_connection>(imp.conn->get_executor());
 
         boost::mysql::connect_params params;
         params.server_address.emplace_host_and_port(imp.params.host, imp.params.port);
@@ -144,19 +140,24 @@ namespace httplib::mysql
         {
             params.database = imp.params.database;
         }
-        co_await imp.standalone->async_connect(params, boost::asio::use_awaitable);
+        params.multi_queries = true;
+        co_await imp.conn->async_connect(params, boost::asio::use_awaitable);
     }
 
     net::awaitable<bool>
     session::ping()
     {
+        auto& imp = get_impl(*this);
         try
         {
-            co_await get_impl(*this).get_conn().async_ping(boost::asio::use_awaitable);
+            co_await imp.get_conn().async_ping(boost::asio::use_awaitable);
+            imp.last_ping = std::chrono::steady_clock::now();
+            imp.last_active = imp.last_ping;
             co_return true;
         }
         catch (...)
         {
+            imp.live = false;
             co_return false;
         }
     }
@@ -165,6 +166,30 @@ namespace httplib::mysql
     session::set_query_logger(query_logger cb)
     {
         get_impl(*this).query_logger = std::move(cb);
+    }
+
+    void
+    session::touch()
+    {
+        get_impl(*this).last_active = std::chrono::steady_clock::now();
+    }
+
+    std::chrono::steady_clock::time_point
+    session::last_active_time() const
+    {
+        return get_impl(*this).last_active;
+    }
+
+    std::chrono::steady_clock::time_point
+    session::last_ping_time() const
+    {
+        return get_impl(*this).last_ping;
+    }
+
+    bool
+    session::in_transaction() const
+    {
+        return get_impl(*this).in_transaction;
     }
 
     net::awaitable<void>

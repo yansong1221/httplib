@@ -24,7 +24,6 @@ namespace httplib::client
             boost::system::error_code error_;
 
             client_handle(std::weak_ptr<impl> pool, std::unique_ptr<http_client> conn);
-            void release();
 
           public:
             client_handle();
@@ -51,6 +50,8 @@ namespace httplib::client
             http_client const& operator*() const;
 
             boost::system::error_code const& error() const noexcept;
+
+            void release();
         };
 
         struct pool_stats

@@ -48,15 +48,15 @@ namespace httplib::server::middleware
     net::awaitable<bool>
     mysql_middleware::before(request& req, response&)
     {
-        auto session
-            = std::make_shared<mysql::session>(co_await impl_->pool->async_acquire(impl_->opts.acquire_timeout));
+        auto handle
+            = std::make_shared<mysql::connection_pool::session_handle>(co_await impl_->pool->async_acquire(impl_->opts.acquire_timeout));
 
-        req.data().store(session);
+        req.data().store(handle);
         req.data().store(impl_->pool);
 
         if (impl_->opts.auto_transaction)
         {
-            co_await session->begin_transaction();
+            co_await handle->get()->begin_transaction();
         }
 
         co_return true;
@@ -72,7 +72,7 @@ namespace httplib::server::middleware
             {
                 try
                 {
-                    co_await sess->commit();
+                    co_await sess->get()->commit();
                 }
                 catch (...)
                 {

@@ -4,10 +4,11 @@
 #include "httplib/mysql/mysql_exception.hpp"
 #include "httplib/mysql/prepared_statement.hpp"
 #include "httplib/mysql/session.hpp"
-#include <boost/mysql/connection_pool.hpp>
+#include <boost/mysql.hpp>
 #include <boost/mysql/diagnostics.hpp>
 #include <boost/mysql/field_view.hpp>
 #include <boost/mysql/statement.hpp>
+#include <chrono>
 #include <functional>
 #include <string>
 #include <unordered_map>
@@ -39,20 +40,19 @@ namespace httplib::mysql
 
     struct session::impl
     {
-        boost::mysql::pooled_connection pooled;
-        std::unique_ptr<boost::mysql::any_connection> standalone;
+        std::unique_ptr<boost::mysql::any_connection> conn;
         connect_params params;
         bool in_transaction = false;
+        bool live = true;
         session::query_logger query_logger;
+
+        std::chrono::steady_clock::time_point last_active = std::chrono::steady_clock::now();
+        std::chrono::steady_clock::time_point last_ping;
 
         boost::mysql::any_connection&
         get_conn()
         {
-            if (standalone)
-            {
-                return *standalone;
-            }
-            return pooled.get();
+            return *conn;
         }
 
         net::awaitable<void> begin_transaction();

@@ -54,7 +54,7 @@ namespace httplib::server::middleware
         auto log = std::make_shared<query_log_options::value_type>();
         auto sess = fetch<mysql_middleware>(req);
 
-        sess->set_query_logger(
+        sess->get()->set_query_logger(
             [log, opts](mysql::query_log_entry const& entry) mutable
             {
                 if (opts.slow_query_threshold.count() > 0 && entry.duration >= opts.slow_query_threshold
@@ -87,7 +87,7 @@ namespace httplib::server::middleware
         if (has<mysql_middleware>(req))
         {
             auto& sess = fetch<mysql_middleware>(req);
-            sess->set_query_logger({});
+            sess->get()->set_query_logger({});
         }
         return true;
     }
