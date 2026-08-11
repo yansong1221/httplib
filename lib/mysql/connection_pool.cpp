@@ -40,7 +40,21 @@ namespace httplib::mysql
             {
                 return;
             }
-            pool.async_run(net::detached);
+            boost::asio::co_spawn(
+                pool.get_executor(),
+                [this, self = shared_from_this()]() -> net::awaitable<void>
+                {
+                    co_await pool.async_run(net::use_awaitable);
+                    stopped = true;
+                    co_return;
+                },
+                [](std::exception_ptr e)
+                {
+                    if (e)
+                    {
+                        std::rethrow_exception(e);
+                    }
+                });
         }
         void
         stop()
@@ -49,7 +63,20 @@ namespace httplib::mysql
             {
                 return;
             }
-            pool.cancel();
+            boost::asio::co_spawn(
+                pool.get_executor(),
+                [this, self = shared_from_this()]() -> net::awaitable<void>
+                {
+                    pool.cancel();
+                    co_return;
+                },
+                [](std::exception_ptr e)
+                {
+                    if (e)
+                    {
+                        std::rethrow_exception(e);
+                    }
+                });
         }
         net::awaitable<session>
         async_acquire(std::chrono::steady_clock::duration wait_timeout)
@@ -71,7 +98,7 @@ namespace httplib::mysql
 
     connection_pool::connection_pool(net::any_io_executor ex, pool_params c) : impl_(std::make_shared<impl>(ex, c)) {}
 
-    connection_pool::~connection_pool() {}
+    connection_pool::~connection_pool() { stop(); }
 
     connection_pool::connection_pool(connection_pool&&) noexcept = default;
     connection_pool& connection_pool::operator=(connection_pool&&) noexcept = default;
