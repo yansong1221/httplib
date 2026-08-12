@@ -83,7 +83,7 @@ namespace httplib::client
             boost::system::error_code ec;
             if (ec = co_await co_connect(); ec)
             {
-                logger()->warn("connect [{}:{}] error {}", host_, std::to_string(port_), ec.message());
+                
                 co_return ec;
             }
 

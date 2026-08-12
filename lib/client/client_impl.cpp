@@ -115,6 +115,11 @@ namespace httplib::client
             co_return ec;
         }
 
+        if (!read_impl_.expired())
+        {
+            co_return http_client::response {};
+        }
+
         http::response_parser<body::any_body> parser;
         parser.skip(req.method() == http::verb::head);
         parser.header_limit(std::numeric_limits<std::uint32_t>::max());
@@ -296,6 +301,7 @@ namespace httplib::client
             }
             if (ec)
             {
+                logger()->warn("connect [{}] error {}", util::make_url_value(host_, port_, use_ssl_), ec.message());
                 close();
                 co_return ec;
             }
