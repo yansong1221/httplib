@@ -12,7 +12,6 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -21,17 +20,25 @@ namespace httplib::client
 
     namespace
     {
+
         struct pooled_conn
         {
             std::unique_ptr<http_client> client;
             std::chrono::steady_clock::time_point idle_since;
         };
 
+        struct pool_state
+        {
+            std::vector<pooled_conn> idle;
+            int64_t active_count = 0;
+        };
+
         struct waiter_node
         {
             net::steady_timer timer;
+            std::string url;
 
-            explicit waiter_node(net::any_io_executor const& ex) : timer(ex) {}
+            waiter_node(net::any_io_executor const& ex, std::string u) : timer(ex), url(std::move(u)) {}
         };
 
     } // namespace
@@ -43,8 +50,6 @@ namespace httplib::client
             : ex_(ex)
             , max_size_(max_size)
             , idle_timeout_(idle_timeout)
-            , ping_interval_(std::chrono::seconds(30))
-            , health_check_path_("/")
             , cleanup_timer_(ex)
         {
         }
@@ -93,36 +98,25 @@ namespace httplib::client
                         boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
                 }
 
-                if (auto handle = self->try_pop(url); handle)
+                if (auto handle = self->acquire_or_create(url); handle)
                 {
                     co_return std::move(handle);
                 }
 
-                if (self->active_count_ < self->max_size_)
-                {
-                    self->active_count_++;
-                    co_return client_handle(self, std::make_unique<http_client>(self->ex_, url));
-                }
                 if (wait_timeout <= std::chrono::steady_clock::duration::zero())
                 {
                     co_return client_handle(boost::system::errc::make_error_code(boost::system::errc::timed_out));
                 }
 
-                auto node = std::make_shared<waiter_node>(self->ex_);
-
+                auto node = std::make_shared<waiter_node>(self->ex_, url);
                 node->timer.expires_at(deadline);
+
                 self->waiters_.push_back(node);
                 lock.unlock();
 
                 boost::system::error_code ec;
                 co_await node->timer.async_wait(util::net_awaitable[ec]);
 
-                lock.lock();
-
-                if (auto handle = self->try_pop(url); handle)
-                {
-                    co_return std::move(handle);
-                }
             } while (deadline > std::chrono::steady_clock::now());
 
             co_return client_handle(boost::system::errc::make_error_code(boost::system::errc::timed_out));
@@ -140,34 +134,35 @@ namespace httplib::client
                 return;
             }
 
-            if (active_count_ > 0)
-            {
-                active_count_--;
-            }
-            if (conn->has_active_session())
+            auto st_it = pools_.find(url);
+            if (st_it == pools_.end())
             {
                 return;
             }
-            conn->close();
-            auto& pool = pools_[url];
-            if (pool.size() < max_size_)
+            st_it->second.active_count--;
+
+            if (!conn->has_active_session())
             {
-                pool.push_back({ std::move(conn), std::chrono::steady_clock::now() });
+                // conn->close();
+                // FIXME: close disabled for testing
+
+                st_it->second.idle.push_back({ std::move(conn), std::chrono::steady_clock::now() });
             }
 
-            while (!waiters_.empty())
+            for (auto it = waiters_.begin(); it != waiters_.end();)
             {
-                auto w = waiters_.front();
-                waiters_.pop_front();
-                if (w.expired())
+                if (it->expired())
                 {
+                    it = waiters_.erase(it);
                     continue;
                 }
-                if (auto waiter = w.lock(); waiter)
+                if (auto waiter = it->lock(); waiter && waiter->url == url)
                 {
                     waiter->timer.cancel();
+                    waiters_.erase(it);
                     break;
                 }
+                ++it;
             }
         }
 
@@ -180,18 +175,17 @@ namespace httplib::client
                 return;
             }
             cleanup_timer_.cancel();
-            cleanup_timer_.expires_after(std::chrono::seconds(0));
 
             waiters_list waiters;
             waiters.swap(waiters_);
 
-            for (auto& [info, pool] : pools_)
+            for (auto& [info, st] : pools_)
             {
-                for (auto& pc : pool)
+                for (auto& pc : st.idle)
                 {
                     pc.client->close();
                 }
-                pool.clear();
+                st.idle.clear();
             }
             pools_.clear();
 
@@ -204,7 +198,6 @@ namespace httplib::client
                 if (auto waiter = w.lock(); waiter)
                 {
                     waiter->timer.cancel();
-                    waiter->timer.expires_after(std::chrono::seconds(0));
                 }
             }
         }
@@ -217,9 +210,9 @@ namespace httplib::client
             auto it = pools_.find(url);
             if (it != pools_.end())
             {
-                s.idle = it->second.size();
+                s.idle = it->second.idle.size();
+                s.active = it->second.active_count;
             }
-            s.active = active_count_;
             return s;
         }
 
@@ -228,13 +221,12 @@ namespace httplib::client
         {
             std::lock_guard<std::mutex> lock(mutex_);
             max_size_ = n;
-            // Trim excess connections
-            for (auto& [info, pool] : pools_)
+            for (auto& [info, st] : pools_)
             {
-                while (pool.size() > max_size_)
+                while (st.idle.size() > max_size_)
                 {
-                    pool.front().client->close();
-                    pool.erase(pool.begin());
+                    st.idle.front().client->close();
+                    st.idle.erase(st.idle.begin());
                 }
             }
         }
@@ -246,52 +238,39 @@ namespace httplib::client
             idle_timeout_ = timeout;
         }
 
-        void
-        set_min_connections(size_t n)
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            min_connections_ = n;
-        }
-
-        void
-        set_health_check_path(std::string path)
-        {
-            health_check_path_ = std::move(path);
-        }
-
-        void
-        set_ping_interval(std::chrono::steady_clock::duration interval)
-        {
-            ping_interval_ = interval;
-        }
-
       private:
         client_handle
-        try_pop(std::string const& url)
+        acquire_or_create(std::string const& url)
         {
-            auto it = pools_.find(url);
-            if (it != pools_.end() && !it->second.empty())
+            auto [it, inserted] = pools_.try_emplace(url);
+            auto& st = it->second;
+
+            if (!inserted && !st.idle.empty())
             {
-                auto& pool = it->second;
-                auto conn = std::move(pool.front().client);
-                pool.erase(pool.begin());
-                if (pool.empty())
-                {
-                    pools_.erase(it);
-                }
-                active_count_++;
+                auto conn = std::move(st.idle.front().client);
+                st.idle.erase(st.idle.begin());
+                st.active_count++;
                 return client_handle(shared_from_this(), std::move(conn));
             }
+
+            if (st.active_count + st.idle.size() < max_size_)
+            {
+                st.active_count++;
+                return client_handle(shared_from_this(), std::make_unique<http_client>(ex_, url));
+            }
+
             return {};
         }
 
         net::awaitable<void>
         co_maintain()
         {
+            auto interval = idle_timeout_ > std::chrono::seconds(0) ? idle_timeout_ : std::chrono::seconds(60);
+
             boost::system::error_code ec;
             while (!stopped_)
             {
-                cleanup_timer_.expires_after(ping_interval_);
+                cleanup_timer_.expires_after(interval);
                 co_await cleanup_timer_.async_wait(util::net_awaitable[ec]);
                 if (ec || stopped_)
                 {
@@ -299,119 +278,50 @@ namespace httplib::client
                 }
 
                 auto now = std::chrono::steady_clock::now();
-                std::vector<pooled_conn> to_health_check;
-                std::vector<std::unique_ptr<http_client>> to_replenish;
-
+                std::lock_guard<std::mutex> lock(mutex_);
+                for (auto it = pools_.begin(); it != pools_.end();)
                 {
-                    std::unique_lock<std::mutex> lock(mutex_);
-                    for (auto it = pools_.begin(); it != pools_.end();)
+                    auto& st = it->second;
+                    auto it2 = st.idle.begin();
+                    while (it2 != st.idle.end())
                     {
-                        auto& pool = it->second;
-                        auto it2 = pool.begin();
-                        while (it2 != pool.end())
+                        if (now - it2->idle_since > idle_timeout_)
                         {
-                            if (now - it2->idle_since > idle_timeout_)
-                            {
-                                it2->client->close();
-                                it2 = pool.erase(it2);
-                            }
-                            else if (now - it2->idle_since > ping_interval_)
-                            {
-                                to_health_check.push_back({ std::move(it2->client), it2->idle_since });
-                                it2 = pool.erase(it2);
-                            }
-                            else
-                            {
-                                ++it2;
-                            }
-                        }
-
-                        // 补充到 min_connections
-                        if (min_connections_ > 0)
-                        {
-                            auto url = it->first;
-                            auto alive = pool.size();
-                            while (alive < min_connections_)
-                            {
-                                to_replenish.push_back(std::make_unique<http_client>(ex_, url));
-                                alive++;
-                            }
-                        }
-
-                        if (pool.empty())
-                        {
-                            it = pools_.erase(it);
+                            it2->client->close();
+                            it2 = st.idle.erase(it2);
                         }
                         else
                         {
-                            ++it;
+                            ++it2;
                         }
                     }
-                }
-
-                // 健康检查：发 HEAD，失败就丢弃
-                for (auto& pc : to_health_check)
-                {
-                    bool ok = co_await health_check(*pc.client);
-                    if (ok)
+                    if (st.idle.empty() && st.active_count == 0)
                     {
-                        std::lock_guard<std::mutex> lock(mutex_);
-                        auto url = util::make_url_value(pc.client->host(), pc.client->port(), pc.client->is_use_ssl());
-                        pools_[url].push_back({ std::move(pc.client), std::chrono::steady_clock::now() });
+                        it = pools_.erase(it);
                     }
                     else
                     {
-                        pc.client->close();
+                        ++it;
                     }
                 }
-
-                // 补充连接放入空闲池
-                if (!to_replenish.empty())
-                {
-                    std::lock_guard<std::mutex> lock(mutex_);
-                    for (auto& conn : to_replenish)
-                    {
-                        auto url = util::make_url_value(conn->host(), conn->port(), conn->is_use_ssl());
-                        pools_[url].push_back({ std::move(conn), std::chrono::steady_clock::now() });
-                    }
-                }
-            }
-        }
-
-        net::awaitable<bool>
-        health_check(http_client& conn)
-        {
-            try
-            {
-                auto resp = co_await conn.async_head(health_check_path_);
-                co_return resp.has_value();
-            }
-            catch (...)
-            {
-                co_return false;
             }
         }
 
       private:
-        using pool_list = std::vector<pooled_conn>;
         using waiters_list = std::deque<std::weak_ptr<waiter_node>>;
 
         mutable std::mutex mutex_;
-        std::unordered_map<std::string, pool_list> pools_;
+        std::unordered_map<std::string, pool_state> pools_;
         size_t max_size_;
         std::chrono::steady_clock::duration idle_timeout_;
-        size_t active_count_ = 0;
 
         waiters_list waiters_;
 
       public:
-        net::any_io_executor ex_; // for get_executor()
+        net::any_io_executor ex_;
 
       private:
         std::atomic<bool> stopped_ { true };
-        std::chrono::steady_clock::duration ping_interval_;
-        std::string health_check_path_;
-        size_t min_connections_ = 0;
         net::steady_timer cleanup_timer_;
     };
 
@@ -451,6 +361,16 @@ namespace httplib::client
     }
 
     http_client_pool::client_handle::~client_handle() { release(); }
+
+    void
+    http_client_pool::client_handle::release()
+    {
+        auto pool = pool_.lock();
+        if (pool && conn_)
+        {
+            pool->release(std::move(conn_));
+        }
+    }
 
     http_client*
     http_client_pool::client_handle::get()
@@ -510,17 +430,7 @@ namespace httplib::client
         return error_;
     }
 
-    void
-    http_client_pool::client_handle::release()
-    {
-        auto pool = pool_.lock();
-        if (pool && conn_)
-        {
-            pool->release(std::move(conn_));
-        }
-    }
-
-    // ---- pool_list ----
+    // ---- connection_pool ----
 
     http_client_pool::http_client_pool(net::any_io_executor const& ex,
                                        size_t max_size,
@@ -535,24 +445,6 @@ namespace httplib::client
     http_client_pool::start()
     {
         impl_->start();
-    }
-
-    void
-    http_client_pool::set_min_connections(size_t n)
-    {
-        impl_->set_min_connections(n);
-    }
-
-    void
-    http_client_pool::set_health_check_path(std::string path)
-    {
-        impl_->set_health_check_path(std::move(path));
-    }
-
-    void
-    http_client_pool::set_ping_interval(std::chrono::steady_clock::duration interval)
-    {
-        impl_->set_ping_interval(interval);
     }
 
     std::future<http_client_pool::client_handle>

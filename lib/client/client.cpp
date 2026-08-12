@@ -8,7 +8,7 @@
 
 namespace httplib::client
 {
-    namespace
+    namespace detail
     {
 
         std::string
@@ -23,7 +23,7 @@ namespace httplib::client
             return target;
         }
 
-    } // namespace
+    } // namespace detail
 
     http_client::http_client(net::io_context& ex, std::string_view host, uint16_t port, bool ssl)
         : http_client(ex.get_executor(), host, port, ssl)
@@ -183,7 +183,7 @@ namespace httplib::client
                                     html::query_params const& params,
                                     http::fields const& headers)
     {
-        co_return co_await async_send_request(method, make_target(path, params), headers);
+        co_return co_await async_send_request(method, detail::make_target(path, params), headers);
     }
 
     net::awaitable<http_client::response_result>
@@ -193,7 +193,7 @@ namespace httplib::client
                                     std::string_view body,
                                     http::fields const& headers)
     {
-        co_return co_await async_send_request(method, make_target(path, params), body, headers);
+        co_return co_await async_send_request(method, detail::make_target(path, params), body, headers);
     }
 
     net::awaitable<http_client::response_result>
@@ -203,7 +203,7 @@ namespace httplib::client
                                     boost::json::value&& body,
                                     http::fields const& headers)
     {
-        co_return co_await async_send_request(method, make_target(path, params), std::move(body), headers);
+        co_return co_await async_send_request(method, detail::make_target(path, params), std::move(body), headers);
     }
 
     net::awaitable<http_client::response_result>
@@ -213,7 +213,7 @@ namespace httplib::client
                                     html::form_data&& body,
                                     http::fields const& headers)
     {
-        co_return co_await async_send_request(method, make_target(path, params), std::move(body), headers);
+        co_return co_await async_send_request(method, detail::make_target(path, params), std::move(body), headers);
     }
 
     net::awaitable<http_client::response_result>
@@ -223,7 +223,7 @@ namespace httplib::client
                                     html::query_params&& body,
                                     http::fields const& headers)
     {
-        co_return co_await async_send_request(method, make_target(path, params), std::move(body), headers);
+        co_return co_await async_send_request(method, detail::make_target(path, params), std::move(body), headers);
     }
 
     net::awaitable<http_client::response_result>
@@ -233,7 +233,7 @@ namespace httplib::client
                                  fs::path const& file_path,
                                  http::fields const& headers)
     {
-        co_return co_await async_send_file(method, make_target(path, params), file_path, headers);
+        co_return co_await async_send_file(method, detail::make_target(path, params), file_path, headers);
     }
 
     std::shared_ptr<write_session>
@@ -267,55 +267,55 @@ namespace httplib::client
     net::awaitable<http_client::response_result>
     http_client::async_get(std::string_view path, html::query_params const& params, http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::get, make_target(path, params), headers);
+        co_return co_await async_send_request(http::verb::get, detail::make_target(path, params), headers);
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_head(std::string_view path, html::query_params const& params, http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::head, make_target(path, params), headers);
+        co_return co_await async_send_request(http::verb::head, detail::make_target(path, params), headers);
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_post(std::string_view path, html::query_params const& params, http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::post, make_target(path, params), headers);
+        co_return co_await async_send_request(http::verb::post, detail::make_target(path, params), headers);
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_put(std::string_view path, html::query_params const& params, http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::put, make_target(path, params), headers);
+        co_return co_await async_send_request(http::verb::put, detail::make_target(path, params), headers);
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_patch(std::string_view path, html::query_params const& params, http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::patch, make_target(path, params), headers);
+        co_return co_await async_send_request(http::verb::patch, detail::make_target(path, params), headers);
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_del(std::string_view path, html::query_params const& params, http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::delete_, make_target(path, params), headers);
+        co_return co_await async_send_request(http::verb::delete_, detail::make_target(path, params), headers);
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_options(std::string_view path, html::query_params const& params, http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::options, make_target(path, params), headers);
+        co_return co_await async_send_request(http::verb::options, detail::make_target(path, params), headers);
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_connect(std::string_view path, html::query_params const& params, http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::connect, make_target(path, params), headers);
+        co_return co_await async_send_request(http::verb::connect, detail::make_target(path, params), headers);
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_trace(std::string_view path, html::query_params const& params, http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::trace, make_target(path, params), headers);
+        co_return co_await async_send_request(http::verb::trace, detail::make_target(path, params), headers);
     }
 
     // =============================================================================
@@ -328,7 +328,7 @@ namespace httplib::client
                             html::query_params const& params,
                             http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::post, make_target(path, params), body, headers);
+        co_return co_await async_send_request(http::verb::post, detail::make_target(path, params), body, headers);
     }
 
     net::awaitable<http_client::response_result>
@@ -337,7 +337,10 @@ namespace httplib::client
                             html::query_params const& params,
                             http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::post, make_target(path, params), std::move(body), headers);
+        co_return co_await async_send_request(http::verb::post,
+                                              detail::make_target(path, params),
+                                              std::move(body),
+                                              headers);
     }
 
     net::awaitable<http_client::response_result>
@@ -346,7 +349,7 @@ namespace httplib::client
                            html::query_params const& params,
                            http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::put, make_target(path, params), body, headers);
+        co_return co_await async_send_request(http::verb::put, detail::make_target(path, params), body, headers);
     }
 
     net::awaitable<http_client::response_result>
@@ -355,7 +358,10 @@ namespace httplib::client
                            html::query_params const& params,
                            http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::put, make_target(path, params), std::move(body), headers);
+        co_return co_await async_send_request(http::verb::put,
+                                              detail::make_target(path, params),
+                                              std::move(body),
+                                              headers);
     }
 
     net::awaitable<http_client::response_result>
@@ -364,7 +370,7 @@ namespace httplib::client
                              html::query_params const& params,
                              http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::patch, make_target(path, params), body, headers);
+        co_return co_await async_send_request(http::verb::patch, detail::make_target(path, params), body, headers);
     }
 
     net::awaitable<http_client::response_result>
@@ -373,7 +379,10 @@ namespace httplib::client
                              html::query_params const& params,
                              http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::patch, make_target(path, params), std::move(body), headers);
+        co_return co_await async_send_request(http::verb::patch,
+                                              detail::make_target(path, params),
+                                              std::move(body),
+                                              headers);
     }
 
     // =============================================================================

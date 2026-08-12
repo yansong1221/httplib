@@ -93,10 +93,6 @@ namespace httplib::client
         void set_idle_timeout(std::chrono::steady_clock::duration timeout);
 
         void start();
-        void set_min_connections(size_t n);
-        void set_health_check_path(std::string path);
-        void set_ping_interval(std::chrono::steady_clock::duration interval);
-
         void stop();
 
         pool_stats stats(std::string_view host, uint16_t port, bool ssl) const;
