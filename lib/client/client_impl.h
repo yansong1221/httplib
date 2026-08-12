@@ -64,8 +64,6 @@ namespace httplib::client
 
       private:
         net::awaitable<boost::system::error_code> co_connect();
-        net::awaitable<http_client::response_result> co_read_response(body_setup_fn const& body_setup = {},
-                                                                      bool is_head = false);
 
         void begin_io();
         void end_io();
@@ -132,6 +130,14 @@ namespace httplib::client
                     break;
                 }
                 end_io();
+                if (parser.is_done())
+                {
+                    finish_io();
+                    if (!parser.keep_alive())
+                    {
+                        close();
+                    }
+                }
             }
             co_return ec;
         }

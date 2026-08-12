@@ -115,8 +115,28 @@ namespace httplib::client
             co_return ec;
         }
 
-        buffer_.clear();
-        co_return co_await co_read_response(body_setup, req.method() == http::verb::head);
+        http::response_parser<body::any_body> parser;
+        parser.skip(req.method() == http::verb::head);
+        parser.header_limit(std::numeric_limits<std::uint32_t>::max());
+        parser.body_limit(std::numeric_limits<std::uint64_t>::max());
+
+        if (body_setup)
+        {
+            if (ec = co_await async_read(parser, true); ec)
+            {
+                co_return ec;
+            }
+            if (!parser.is_done())
+            {
+                body_setup(parser.get());
+            }
+        }
+
+        if (ec = co_await async_read(parser, false); ec)
+        {
+            co_return ec;
+        }
+        co_return parser.release();
     }
 
     net::awaitable<http_client::response_result>
@@ -282,61 +302,6 @@ namespace httplib::client
         }
         end_io();
         co_return boost::system::error_code {};
-    }
-
-    net::awaitable<http_client::response_result>
-    http_client::impl::co_read_response(body_setup_fn const& body_setup /*= {}*/, bool is_head /*= false*/)
-    {
-        if (!read_impl_.expired())
-        {
-            co_return http_client::response {};
-        }
-
-        boost::system::error_code ec;
-        http::response_parser<body::any_body> parser;
-        parser.skip(is_head);
-        parser.eager(false);
-        parser.header_limit(std::numeric_limits<std::uint32_t>::max());
-        parser.body_limit(std::numeric_limits<std::uint64_t>::max());
-
-        while (!parser.is_header_done())
-        {
-            begin_io();
-            co_await http::async_read_some(*stream_, buffer_, parser, util::net_awaitable[ec]);
-            if (ec)
-            {
-                close();
-                co_return ec;
-            }
-            end_io();
-        }
-
-        if (!parser.is_done())
-        {
-            if (body_setup)
-            {
-                body_setup(parser.get());
-            }
-
-            while (!parser.is_done())
-            {
-                begin_io();
-                co_await http::async_read_some(*stream_, buffer_, parser, util::net_awaitable[ec]);
-                if (ec)
-                {
-                    close();
-                    co_return ec;
-                }
-                end_io();
-            }
-        }
-
-        finish_io();
-        if (!parser.keep_alive())
-        {
-            close();
-        }
-        co_return parser.release();
     }
 
     net::awaitable<http_client::response_result>

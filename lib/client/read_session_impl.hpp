@@ -21,7 +21,6 @@ namespace httplib::client
             resp_parser_->body_limit((std::numeric_limits<std::uint64_t>::max)());
             resp_parser_->header_limit((std::numeric_limits<std::uint32_t>::max)());
 
-            parent_.buffer_.clear();
             co_return co_await parent_.async_read(*resp_parser_, true);
         }
 
@@ -81,11 +80,6 @@ namespace httplib::client
 
                 if (resp_parser_->is_done())
                 {
-                    parent_.finish_io();
-                    if (!resp_parser_->keep_alive())
-                    {
-                        parent_.close();
-                    }
                     co_return 0;
                 }
             }
