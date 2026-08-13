@@ -20,7 +20,13 @@ namespace httplib::mysql
 
     prepared_statement::prepared_statement(prepared_statement&&) noexcept = default;
     prepared_statement& prepared_statement::operator=(prepared_statement&&) noexcept = default;
-    prepared_statement::~prepared_statement() = default;
+    prepared_statement::~prepared_statement()
+    {
+        if (impl_ && impl_->stmt.valid() && impl_->session)
+        {
+            get_impl(*impl_->session).stmts_to_close.push_back(std::move(impl_->stmt));
+        }
+    }
 
     prepared_statement&
     prepared_statement::bind(std::string_view v)

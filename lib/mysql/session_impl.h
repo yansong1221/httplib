@@ -49,6 +49,8 @@ namespace httplib::mysql
         std::chrono::steady_clock::time_point last_active = std::chrono::steady_clock::now();
         std::chrono::steady_clock::time_point last_ping;
 
+        std::vector<boost::mysql::statement> stmts_to_close;
+
         boost::mysql::any_connection&
         get_conn()
         {

@@ -36,12 +36,7 @@ namespace httplib::mysql
 
     struct connection_pool::impl : public std::enable_shared_from_this<impl>
     {
-        impl(net::any_io_executor ex, pool_params cfg)
-            : ex_(ex)
-            , cfg_(std::move(cfg))
-            , maintain_timer_(ex)
-        {
-        }
+        impl(net::any_io_executor ex, pool_params cfg) : ex_(ex), cfg_(std::move(cfg)), maintain_timer_(ex) {}
 
         ~impl() { stop(); }
 
@@ -152,59 +147,73 @@ namespace httplib::mysql
 
             auto& imp = get_impl(*sess);
 
-            if (imp.in_transaction)
+            if (!imp.in_transaction && imp.stmts_to_close.empty())
             {
-                auto conn = std::move(imp.conn);
-                auto self = shared_from_this();
-                net::co_spawn(
-                    ex_,
-                    [self, conn = std::move(conn)]() mutable -> net::awaitable<void>
+                // 快速路径：无事务、无待关闭 stmt，同步入池
+                imp.last_active = std::chrono::steady_clock::now();
+
+                auto released_impl = std::make_unique<session::impl>();
+                released_impl->conn = std::move(imp.conn);
+                released_impl->live = imp.live;
+                released_impl->last_active = imp.last_active;
+                released_impl->last_ping = imp.last_ping;
+
+                idle_entry entry;
+                entry.sess_impl = std::move(released_impl);
+                entry.idle_since = entry.sess_impl->last_active;
+
+                push_idle(std::move(entry));
+                return;
+            }
+
+            auto conn = std::move(imp.conn);
+            bool in_transaction = imp.in_transaction;
+            auto stmts = std::move(imp.stmts_to_close);
+
+            auto self = shared_from_this();
+            net::co_spawn(
+                ex_,
+                [self, conn = std::move(conn), in_transaction, stmts = std::move(stmts)]() mutable
+                    -> net::awaitable<void>
+                {
+                    try
                     {
-                        try
+                        for (auto& st : stmts)
+                        {
+                            if (st.valid())
+                            {
+                                boost::mysql::diagnostics diag;
+                                co_await conn->async_close_statement(st, diag, boost::asio::use_awaitable);
+                            }
+                        }
+
+                        if (in_transaction)
                         {
                             boost::mysql::results r;
                             boost::mysql::diagnostics diag;
                             co_await conn->async_execute("ROLLBACK", r, diag, boost::asio::use_awaitable);
                         }
-                        catch (...)
-                        {
-                            std::lock_guard<std::mutex> lk(self->mutex_);
-                            if (self->active_count_ > 0)
-                            {
-                                --self->active_count_;
-                            }
-                            co_return;
-                        }
-
-                        idle_entry entry;
-                        entry.sess_impl = std::make_unique<session::impl>();
-                        entry.sess_impl->conn = std::move(conn);
-                        entry.sess_impl->live = true;
-                        entry.sess_impl->last_active = std::chrono::steady_clock::now();
-                        entry.idle_since = entry.sess_impl->last_active;
-
-                        self->push_idle(std::move(entry));
-                    },
-                    [](std::exception_ptr)
+                    }
+                    catch (...)
                     {
-                    });
-                return;
-            }
+                        std::lock_guard<std::mutex> lk(self->mutex_);
+                        if (self->active_count_ > 0)
+                        {
+                            --self->active_count_;
+                        }
+                        co_return;
+                    }
 
-            imp.last_active = std::chrono::steady_clock::now();
+                    idle_entry entry;
+                    entry.sess_impl = std::make_unique<session::impl>();
+                    entry.sess_impl->conn = std::move(conn);
+                    entry.sess_impl->live = true;
+                    entry.sess_impl->last_active = std::chrono::steady_clock::now();
+                    entry.idle_since = entry.sess_impl->last_active;
 
-            auto released_impl = std::make_unique<session::impl>();
-            released_impl->conn = std::move(imp.conn);
-            released_impl->in_transaction = imp.in_transaction;
-            released_impl->live = imp.live;
-            released_impl->last_active = imp.last_active;
-            released_impl->last_ping = imp.last_ping;
-
-            idle_entry entry;
-            entry.sess_impl = std::move(released_impl);
-            entry.idle_since = entry.sess_impl->last_active;
-
-            push_idle(std::move(entry));
+                    self->push_idle(std::move(entry));
+                },
+                [](std::exception_ptr) {});
         }
 
         void
@@ -380,8 +389,8 @@ namespace httplib::mysql
         net::awaitable<void>
         co_maintain()
         {
-            auto check_interval = cfg_.idle_check_interval.count() > 0 ? cfg_.idle_check_interval
-                                                                       : std::chrono::seconds(60);
+            auto check_interval
+                = cfg_.idle_check_interval.count() > 0 ? cfg_.idle_check_interval : std::chrono::seconds(60);
 
             boost::system::error_code ec;
             while (!stopped_)
@@ -405,8 +414,7 @@ namespace httplib::mysql
 
                     for (auto it = idle_.begin(); it != idle_.end();)
                     {
-                        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
-                            now - it->idle_since);
+                        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - it->idle_since);
 
                         if (cfg_.idle_timeout.count() > 0 && elapsed >= cfg_.idle_timeout)
                         {
@@ -418,8 +426,7 @@ namespace httplib::mysql
                             }
                         }
 
-                        if (cfg_.health_check_interval.count() > 0
-                            && elapsed >= cfg_.health_check_interval)
+                        if (cfg_.health_check_interval.count() > 0 && elapsed >= cfg_.health_check_interval)
                         {
                             to_ping.push_back(std::move(*it));
                             it = idle_.erase(it);
