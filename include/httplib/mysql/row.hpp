@@ -21,6 +21,7 @@ namespace httplib::mysql
         blob,
         date,
         datetime,
+        timestamp,
         time,
         null,
         unknown

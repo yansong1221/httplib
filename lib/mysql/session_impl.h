@@ -24,8 +24,112 @@
 namespace httplib::mysql
 {
 
+    inline std::string
+    format_param(boost::mysql::field_view const& f)
+    {
+        if (f.is_null())
+        {
+            return "NULL";
+        }
+        if (f.is_int64())
+        {
+            return std::to_string(f.as_int64());
+        }
+        if (f.is_uint64())
+        {
+            return std::to_string(f.as_uint64());
+        }
+        if (f.is_double())
+        {
+            return std::to_string(f.as_double());
+        }
+        if (f.is_string())
+        {
+            std::string out = "'";
+            for (char c : f.as_string())
+            {
+                if (c == '\'')
+                {
+                    out += "''";
+                }
+                else
+                {
+                    out += c;
+                }
+            }
+            out += "'";
+            return out;
+        }
+        if (f.is_blob())
+        {
+            return "(blob " + std::to_string(f.as_blob().size()) + " bytes)";
+        }
+        if (f.is_date())
+        {
+            auto d = f.as_date();
+            return std::to_string(static_cast<int>(d.year())) + "-" + std::to_string(static_cast<int>(d.month())) + "-"
+                   + std::to_string(static_cast<int>(d.day()));
+        }
+        if (f.is_datetime())
+        {
+            auto d = f.as_datetime();
+            return std::to_string(static_cast<int>(d.year())) + "-" + std::to_string(static_cast<int>(d.month())) + "-"
+                   + std::to_string(static_cast<int>(d.day())) + " " + std::to_string(static_cast<int>(d.hour())) + ":"
+                   + std::to_string(static_cast<int>(d.minute())) + ":" + std::to_string(static_cast<int>(d.second()));
+        }
+        return "?";
+    }
+
+    inline std::string
+    format_params(std::vector<boost::mysql::field_view> const& params)
+    {
+        if (params.empty())
+        {
+            return {};
+        }
+        std::string out = "[";
+        for (size_t i = 0; i < params.size(); ++i)
+        {
+            if (i != 0)
+            {
+                out += ", ";
+            }
+            out += format_param(params[i]);
+        }
+        out += "]";
+        return out;
+    }
+
+    inline std::string
+    format_named_params(std::vector<std::string> const& names, std::vector<boost::mysql::field_view> const& params)
+    {
+        if (params.empty())
+        {
+            return {};
+        }
+        std::string out = "[";
+        for (size_t i = 0; i < params.size(); ++i)
+        {
+            if (i != 0)
+            {
+                out += ", ";
+            }
+            if (i < names.size())
+            {
+                out += names[i];
+                out += "=";
+            }
+            out += format_param(params[i]);
+        }
+        out += "]";
+        return out;
+    }
+
     inline void
-    raise_mysql_error(boost::system::error_code ec, boost::mysql::diagnostics const& diag, std::string_view sql)
+    raise_mysql_error(boost::system::error_code ec,
+                      boost::mysql::diagnostics const& diag,
+                      std::string_view sql,
+                      std::string_view params = {})
     {
         if (!ec)
         {
@@ -33,6 +137,10 @@ namespace httplib::mysql
         }
         auto what
             = std::string("[") + std::to_string(ec.value()) + "] " + ec.message() + " (SQL: " + std::string(sql) + ")";
+        if (!params.empty())
+        {
+            what += " params: " + std::string(params);
+        }
         auto msg = diag.server_message();
         if (!msg.empty())
         {
@@ -47,7 +155,27 @@ namespace httplib::mysql
         raise_mysql_error(ec, diag, {});
     }
 
-    inline net::awaitable<void>
+    inline bool
+    is_connection_lost(boost::system::error_code ec, boost::mysql::diagnostics const& diag)
+    {
+        if (!ec)
+        {
+            return false;
+        }
+        // 服务端 SQL 错误（语法、约束等）连接仍可用
+        if (!diag.server_message().empty())
+        {
+            return false;
+        }
+        // 参数数量不匹配是客户端在发送前就判定的，连接仍可用
+        if (ec == boost::mysql::client_errc::wrong_num_params)
+        {
+            return false;
+        }
+        return true;
+    }
+
+    inline net::awaitable<std::chrono::seconds>
     connect_session(boost::mysql::any_connection& conn, connect_params const& cfg)
     {
         boost::mysql::connect_params params;
@@ -81,6 +209,42 @@ namespace httplib::mysql
                                         net::redirect_error(net::use_awaitable, ec));
             raise_mysql_error(ec, diag);
         }
+
+        if (!cfg.time_zone.empty())
+        {
+            boost::mysql::results r;
+            boost::mysql::diagnostics diag;
+            boost::system::error_code ec;
+            co_await conn.async_execute("SET time_zone = '" + cfg.time_zone + "'",
+                                        r,
+                                        diag,
+                                        net::redirect_error(net::use_awaitable, ec));
+            raise_mysql_error(ec, diag);
+        }
+
+        // 会话相对 UTC 的偏移（秒），用于 TIMESTAMP 类型换算回 UTC
+        std::chrono::seconds offset { 0 };
+        boost::mysql::results r;
+        boost::mysql::diagnostics diag;
+        boost::system::error_code ec;
+        co_await conn.async_execute("SELECT TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW())",
+                                    r,
+                                    diag,
+                                    net::redirect_error(net::use_awaitable, ec));
+        raise_mysql_error(ec, diag);
+        if (r.has_value() && !r.rows().empty())
+        {
+            auto f = r.rows()[0][0];
+            if (f.is_int64())
+            {
+                offset = std::chrono::seconds(f.as_int64());
+            }
+            else if (f.is_uint64())
+            {
+                offset = std::chrono::seconds(static_cast<int64_t>(f.as_uint64()));
+            }
+        }
+        co_return offset;
     }
 
     struct session::impl
@@ -93,6 +257,7 @@ namespace httplib::mysql
 
         std::chrono::steady_clock::time_point last_active = std::chrono::steady_clock::now();
         std::chrono::steady_clock::time_point last_ping;
+        std::chrono::seconds utc_offset { 0 };
 
         std::vector<boost::mysql::statement> stmts_to_close;
 
@@ -116,17 +281,20 @@ namespace httplib::mysql
         }
 
         void
-        raise_error(boost::system::error_code ec, boost::mysql::diagnostics const& diag, std::string_view sql = {})
+        raise_error(boost::system::error_code ec,
+                    boost::mysql::diagnostics const& diag,
+                    std::string_view sql = {},
+                    std::string_view params = {})
         {
             if (!ec)
             {
                 return;
             }
-            if (diag.server_message().empty())
+            if (is_connection_lost(ec, diag))
             {
                 live = false;
             }
-            raise_mysql_error(ec, diag, sql);
+            raise_mysql_error(ec, diag, sql, params);
         }
 
         boost::mysql::statement*
@@ -180,6 +348,7 @@ namespace httplib::mysql
     {
         session* session = nullptr;
         std::string sql;
+        std::string original_sql;
         std::vector<boost::mysql::field_view> params;
 
         std::vector<std::function<void(result const&)>> extractors;
@@ -187,8 +356,35 @@ namespace httplib::mysql
         std::vector<std::string> param_names;
         std::unordered_map<std::string, size_t> name_to_idx;
         std::unordered_map<std::string, boost::mysql::field_view> named_values;
+        std::unordered_map<std::string, std::string> named_storage;
         std::deque<std::string> data_strs;
         bool parsed = false;
+        bool need_params_reset = false;
+        bool need_extractors_reset = false;
+        bool used_positional_bind = false;
+
+        void
+        begin_bind()
+        {
+            used_positional_bind = true;
+            if (need_params_reset)
+            {
+                params.clear();
+                data_strs.clear();
+                need_params_reset = false;
+            }
+        }
+
+        void
+        add_extractor(std::function<void(result const&)> ex)
+        {
+            if (need_extractors_reset)
+            {
+                extractors.clear();
+                need_extractors_reset = false;
+            }
+            extractors.push_back(std::move(ex));
+        }
     };
 
 } // namespace httplib::mysql

@@ -30,7 +30,7 @@ namespace httplib::mysql
         }
     }
 
-    result::impl::impl(boost::mysql::results&& r) : data(std::move(r))
+    result::impl::impl(boost::mysql::results&& r, std::chrono::seconds offset) : data(std::move(r)), utc_offset(offset)
     {
         if (data.has_value())
         {
@@ -136,13 +136,13 @@ namespace httplib::mysql
     std::string const&
     result::column_name(size_t c) const
     {
-        return get_impl(*this).col_names[c];
+        return get_impl(*this).col_names.at(c);
     }
 
     column_type
     result::column_type(size_t c) const
     {
-        return get_impl(*this).col_types[c];
+        return get_impl(*this).col_types.at(c);
     }
 
     row

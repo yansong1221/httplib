@@ -108,6 +108,8 @@ namespace httplib::client
                     co_return client_handle(boost::system::errc::make_error_code(boost::system::errc::timed_out));
                 }
 
+                std::erase_if(self->waiters_, [](auto const& w) { return w.expired(); });
+
                 auto node = std::make_shared<waiter_node>(self->ex_, url);
                 node->timer.expires_at(deadline);
 

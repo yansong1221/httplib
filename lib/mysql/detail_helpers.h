@@ -7,6 +7,7 @@
 #include "mysql/row_impl.h"
 #include <boost/mysql.hpp>
 #include <chrono>
+#include <limits>
 
 namespace httplib::mysql::detail
 {
@@ -43,8 +44,9 @@ namespace httplib::mysql::detail
             case b::date:
                 return column_type::date;
             case b::datetime:
-            case b::timestamp:
                 return column_type::datetime;
+            case b::timestamp:
+                return column_type::timestamp;
             case b::time:
                 return column_type::time;
             default:
@@ -62,11 +64,28 @@ namespace httplib::mysql::detail
     fi(boost::mysql::field_view const& f)
     {
         if (f.is_int64())
+        {
             return f.as_int64();
+        }
         if (f.is_uint64())
-            return (int64_t)f.as_uint64();
+        {
+            auto v = f.as_uint64();
+            if (v > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+            {
+                throw std::runtime_error("db: value out of range for int64");
+            }
+            return static_cast<int64_t>(v);
+        }
         if (f.is_double())
-            return (int64_t)f.as_double();
+        {
+            auto v = f.as_double();
+            if (v < static_cast<double>(std::numeric_limits<int64_t>::min())
+                || v >= static_cast<double>(std::numeric_limits<int64_t>::max()))
+            {
+                throw std::runtime_error("db: value out of range for int64");
+            }
+            return static_cast<int64_t>(v);
+        }
         throw std::runtime_error("db: cannot convert to int64");
     }
 
@@ -74,11 +93,27 @@ namespace httplib::mysql::detail
     fu(boost::mysql::field_view const& f)
     {
         if (f.is_uint64())
+        {
             return f.as_uint64();
+        }
         if (f.is_int64())
-            return (uint64_t)f.as_int64();
+        {
+            auto v = f.as_int64();
+            if (v < 0)
+            {
+                throw std::runtime_error("db: value out of range for uint64");
+            }
+            return static_cast<uint64_t>(v);
+        }
         if (f.is_double())
-            return (uint64_t)f.as_double();
+        {
+            auto v = f.as_double();
+            if (v < 0.0 || v >= static_cast<double>(std::numeric_limits<uint64_t>::max()))
+            {
+                throw std::runtime_error("db: value out of range for uint64");
+            }
+            return static_cast<uint64_t>(v);
+        }
         throw std::runtime_error("db: cannot convert to uint64");
     }
 
@@ -86,17 +121,27 @@ namespace httplib::mysql::detail
     fd(boost::mysql::field_view const& f)
     {
         if (f.is_double())
+        {
             return f.as_double();
+        }
         if (f.is_int64())
+        {
             return (double)f.as_int64();
+        }
         if (f.is_uint64())
+        {
             return (double)f.as_uint64();
+        }
         throw std::runtime_error("db: cannot convert to double");
     }
 
     inline std::chrono::system_clock::time_point
     d2e(datetime const& dt)
     {
+        if (dt.month < 1 || dt.month > 12 || dt.day < 1 || dt.day > 31)
+        {
+            throw std::runtime_error("db: invalid datetime value");
+        }
         auto ymd = std::chrono::year(dt.year) / std::chrono::month(dt.month) / std::chrono::day(dt.day);
         auto tp = std::chrono::sys_days(ymd) + std::chrono::hours(dt.hour) + std::chrono::minutes(dt.minute)
                   + std::chrono::seconds(dt.second) + std::chrono::microseconds(dt.microsecond);
@@ -109,7 +154,9 @@ namespace httplib::mysql::detail
     {
         auto f = ff(get_impl(*imp.parent), imp.idx, col);
         if (f.is_null())
+        {
             return std::nullopt;
+        }
         return conv(f);
     }
 

@@ -17,6 +17,7 @@ namespace httplib::mysql
         std::string password;
         std::string database;
         std::string charset = "utf8mb4";
+        std::string time_zone = "+00:00";
         std::chrono::seconds connect_timeout { 5 };
         bool ssl = false;
         size_t max_cached_statements = 64;

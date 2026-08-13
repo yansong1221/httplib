@@ -103,6 +103,8 @@ namespace httplib::mysql
                     throw std::runtime_error("connection_pool: acquire timeout");
                 }
 
+                std::erase_if(self->waiters_, [](auto const& w) { return w.expired(); });
+
                 auto node = std::make_shared<net::steady_timer>(self->ex_);
                 node->expires_at(deadline);
                 self->waiters_.push_back(node);
@@ -133,6 +135,17 @@ namespace httplib::mysql
             auto& imp = get_impl(*sess);
             imp.query_logger = {};
 
+            if (!imp.live)
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                if (active_count_ > 0)
+                {
+                    --active_count_;
+                }
+                wake_one_waiter();
+                return;
+            }
+
             if (!imp.in_transaction && imp.stmts_to_close.empty())
             {
                 push_idle(std::move(sess));
@@ -150,7 +163,7 @@ namespace httplib::mysql
 
                     try
                     {
-                        for (auto& st : imp.stmts_to_close)
+                        for (auto& st : stmts)
                         {
                             if (st.valid())
                             {
@@ -171,6 +184,7 @@ namespace httplib::mysql
                         {
                             --self->active_count_;
                         }
+                        self->wake_one_waiter();
                         co_return;
                     }
 
@@ -257,6 +271,21 @@ namespace httplib::mysql
         }
 
         void
+        wake_one_waiter()
+        {
+            while (!waiters_.empty())
+            {
+                auto w = std::move(waiters_.front());
+                waiters_.pop_front();
+                if (auto waiter = w.lock())
+                {
+                    waiter->cancel();
+                    return;
+                }
+            }
+        }
+
+        void
         push_idle(std::unique_ptr<session> sess)
         {
             if (sess)
@@ -276,27 +305,19 @@ namespace httplib::mysql
             }
             idle_.push_back(std::move(sess));
 
-            while (!waiters_.empty())
-            {
-                auto w = std::move(waiters_.front());
-                waiters_.pop_front();
-                if (auto waiter = w.lock(); waiter)
-                {
-                    waiter->cancel();
-                    break;
-                }
-            }
+            wake_one_waiter();
         }
 
         net::awaitable<std::unique_ptr<session::impl>>
         create_connection_impl()
         {
             auto conn = std::make_unique<boost::mysql::any_connection>(ex_);
-            co_await connect_session(*conn, cfg_);
+            auto offset = co_await connect_session(*conn, cfg_);
 
             auto imp = std::make_unique<session::impl>();
             imp->params = cfg_;
             imp->conn = std::move(conn);
+            imp->utc_offset = offset;
             imp->stmt_cache.capacity = cfg_.max_cached_statements;
             co_return imp;
         }
@@ -376,8 +397,7 @@ namespace httplib::mysql
 
                         if (cfg_.idle_timeout.count() > 0 && elapsed >= cfg_.idle_timeout)
                         {
-                            size_t remaining = idle_.size() - 1;
-                            if (remaining > cfg_.min_connections || idle_.size() > cfg_.min_connections)
+                            if (idle_.size() > cfg_.min_connections)
                             {
                                 it = idle_.erase(it);
                                 continue;

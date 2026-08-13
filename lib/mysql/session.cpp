@@ -17,11 +17,12 @@ namespace httplib::mysql
     session::connect(net::any_io_executor ex, connect_params cfg)
     {
         auto conn = std::make_unique<boost::mysql::any_connection>(ex);
-        co_await connect_session(*conn, cfg);
+        auto offset = co_await connect_session(*conn, cfg);
 
         auto imp = std::make_unique<impl>();
         imp->params = std::move(cfg);
         imp->conn = std::move(conn);
+        imp->utc_offset = offset;
         imp->stmt_cache.capacity = imp->params.max_cached_statements;
         co_return session(std::move(imp));
     }
@@ -60,7 +61,7 @@ namespace httplib::mysql
                                               boost::asio::redirect_error(boost::asio::use_awaitable, ec));
         imp.raise_error(ec, diag, sql);
 
-        auto res = result(std::make_unique<result::impl>(std::move(data)));
+        auto res = result(std::make_unique<result::impl>(std::move(data), imp.utc_offset));
 
         if (imp.query_logger)
         {
@@ -97,7 +98,7 @@ namespace httplib::mysql
         imp.stmts_to_close.clear();
         imp.conn = std::make_unique<boost::mysql::any_connection>(imp.conn->get_executor());
 
-        co_await connect_session(*imp.conn, imp.params);
+        imp.utc_offset = co_await connect_session(*imp.conn, imp.params);
         imp.live = true;
     }
 

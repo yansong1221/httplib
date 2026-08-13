@@ -64,7 +64,14 @@ namespace httplib::mysql
             }
             if (e)
             {
-                co_await rollback();
+                try
+                {
+                    co_await rollback();
+                }
+                catch (...)
+                {
+                    // 回滚失败（通常是连接已死）时不掩盖原始异常
+                }
                 std::rethrow_exception(e);
             }
             co_await commit();

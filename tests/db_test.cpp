@@ -9,6 +9,8 @@
 #include "httplib/server/middleware/mysql_middleware.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
+#include "mysql/detail_helpers.h"
+#include "mysql/session_impl.h"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -48,13 +50,12 @@ namespace
                 co_await handle->query("USE test");
                 co_await f(*handle);
             },
-            [&](std::exception_ptr e)
-            {
-                err = e;
-            });
+            [&](std::exception_ptr e) { err = e; });
         ioc.run();
         if (err)
+        {
             std::rethrow_exception(err);
+        }
     }
 
     template <typename F>
@@ -71,13 +72,12 @@ namespace
                 pool.start();
                 co_await f(pool);
             },
-            [&](std::exception_ptr e)
-            {
-                err = e;
-            });
+            [&](std::exception_ptr e) { err = e; });
         ioc.run();
         if (err)
+        {
             std::rethrow_exception(err);
+        }
     }
 
 } // namespace
@@ -111,11 +111,58 @@ TEST_CASE("config: defaults", "[db]")
     REQUIRE(c.port == 3306);
     REQUIRE(c.connect_timeout == std::chrono::seconds(5));
     REQUIRE(c.max_cached_statements == 64);
+    REQUIRE(c.time_zone == "+00:00");
 
     mysql::pool_params p;
     REQUIRE(p.min_connections == 2);
     REQUIRE(p.max_connections == 16);
     REQUIRE(p.acquire_timeout == std::chrono::seconds(5));
+}
+
+TEST_CASE("d2e: rejects invalid date", "[db]")
+{
+    mysql::datetime dt;
+    dt.year = 2024;
+    dt.month = 0; // 零日期
+    dt.day = 15;
+    dt.hour = 12;
+    REQUIRE_THROWS_AS(mysql::detail::d2e(dt), std::runtime_error);
+
+    dt.month = 2;
+    dt.day = 0;
+    REQUIRE_THROWS_AS(mysql::detail::d2e(dt), std::runtime_error);
+}
+
+TEST_CASE("fi/fu: double range check", "[db]")
+{
+    REQUIRE_THROWS_AS(mysql::detail::fi(boost::mysql::field_view(1e20)), std::runtime_error);
+    REQUIRE_THROWS_AS(mysql::detail::fu(boost::mysql::field_view(-1.5)), std::runtime_error);
+
+    REQUIRE(mysql::detail::fi(boost::mysql::field_view(42.0)) == 42);
+    REQUIRE(mysql::detail::fu(boost::mysql::field_view(42.0)) == 42);
+}
+
+TEST_CASE("format_params", "[db]")
+{
+    std::vector<boost::mysql::field_view> p;
+    p.emplace_back(42);
+    p.emplace_back("hello");
+    p.emplace_back();
+    p.emplace_back(3.14);
+    auto s = mysql::format_params(p);
+    REQUIRE(s.find("42") != std::string::npos);
+    REQUIRE(s.find("'hello'") != std::string::npos);
+    REQUIRE(s.find("NULL") != std::string::npos);
+
+    REQUIRE(mysql::format_params({}).empty());
+
+    std::vector<std::string> names = { "id", "name" };
+    std::vector<boost::mysql::field_view> p2;
+    p2.emplace_back(42);
+    p2.emplace_back("hi");
+    auto s2 = mysql::format_named_params(names, p2);
+    REQUIRE(s2.find("id=42") != std::string::npos);
+    REQUIRE(s2.find("name='hi'") != std::string::npos);
 }
 
 // ===========================================================================
@@ -153,13 +200,12 @@ TEST_CASE("db: connection_pool concurrent acquire", "[db][integration]")
             REQUIRE(*r1[0].as_string("v") == "one");
             REQUIRE(*r2[0].as_string("v") == "two");
         },
-        [&](std::exception_ptr e)
-        {
-            err = e;
-        });
+        [&](std::exception_ptr e) { err = e; });
     ioc.run();
     if (err)
+    {
         std::rethrow_exception(err);
+    }
 }
 
 // ===========================================================================
@@ -185,8 +231,7 @@ TEST_CASE("db: empty result", "[db][integration]")
     run(
         [](mysql::session& sess) -> net::awaitable<void>
         {
-            co_await sess.query(
-                "CREATE TABLE IF NOT EXISTS __httplib_empty (id INT)");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_empty (id INT)");
             co_await sess.query("DELETE FROM __httplib_empty");
             auto r = co_await sess.query("SELECT * FROM __httplib_empty");
             REQUIRE(r.row_count() == 0);
@@ -200,14 +245,11 @@ TEST_CASE("db: affected_rows", "[db][integration]")
     run(
         [](mysql::session& sess) -> net::awaitable<void>
         {
-            co_await sess.query(
-                "CREATE TABLE IF NOT EXISTS __httplib_aff (id INT AUTO_INCREMENT PRIMARY KEY, v INT)");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_aff (id INT AUTO_INCREMENT PRIMARY KEY, v INT)");
             co_await sess.query("TRUNCATE __httplib_aff");
-            auto r1 = co_await sess.query(
-                "INSERT INTO __httplib_aff (v) VALUES (100)");
+            auto r1 = co_await sess.query("INSERT INTO __httplib_aff (v) VALUES (100)");
             REQUIRE(r1.affected_rows() == 1);
-            auto r2 = co_await sess.query(
-                "INSERT INTO __httplib_aff (v) VALUES (200),(300)");
+            auto r2 = co_await sess.query("INSERT INTO __httplib_aff (v) VALUES (200),(300)");
             REQUIRE(r2.affected_rows() == 2);
             co_await sess.query("DROP TABLE IF EXISTS __httplib_aff");
         });
@@ -218,16 +260,16 @@ TEST_CASE("db: result iterator", "[db][integration]")
     run(
         [](mysql::session& sess) -> net::awaitable<void>
         {
-            co_await sess.query(
-                "CREATE TABLE IF NOT EXISTS __httplib_iter (v INT)");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_iter (v INT)");
             co_await sess.query("DELETE FROM __httplib_iter");
             co_await sess.query("INSERT INTO __httplib_iter VALUES (1),(2),(3)");
-            auto r = co_await sess.query(
-                "SELECT v FROM __httplib_iter ORDER BY v");
+            auto r = co_await sess.query("SELECT v FROM __httplib_iter ORDER BY v");
             std::vector<int64_t> vals;
             for (auto row : r)
+            {
                 vals.push_back(*row.as_int64("v"));
-            REQUIRE(vals == std::vector<int64_t>{ 1, 2, 3 });
+            }
+            REQUIRE(vals == std::vector<int64_t> { 1, 2, 3 });
             co_await sess.query("DROP TABLE IF EXISTS __httplib_iter");
         });
 }
@@ -241,14 +283,12 @@ TEST_CASE("db: multi-statement query", "[db][integration]")
     run(
         [](mysql::session& sess) -> net::awaitable<void>
         {
-            co_await sess.query(
-                "CREATE TABLE IF NOT EXISTS __httplib_batch (id INT, val VARCHAR(50))");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_batch (id INT, val VARCHAR(50))");
             co_await sess.query("DELETE FROM __httplib_batch");
 
-            auto r = co_await sess.query(
-                "INSERT INTO __httplib_batch VALUES (1, 'a');"
-                "INSERT INTO __httplib_batch VALUES (2, 'b');"
-                "SELECT * FROM __httplib_batch ORDER BY id");
+            auto r = co_await sess.query("INSERT INTO __httplib_batch VALUES (1, 'a');"
+                                         "INSERT INTO __httplib_batch VALUES (2, 'b');"
+                                         "SELECT * FROM __httplib_batch ORDER BY id");
 
             REQUIRE(r.resultset_count() == 3);
             REQUIRE(r.affected_rows() == 1);
@@ -278,23 +318,19 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
         [](mysql::session& sess) -> net::awaitable<void>
         {
             co_await sess.query("DROP TABLE IF EXISTS __httplib_types");
-            co_await sess.query(
-                "CREATE TABLE __httplib_types ("
-                "  i64 BIGINT, u64 BIGINT UNSIGNED, f64 DOUBLE, str VARCHAR(100),"
-                "  bin BLOB, dt_date DATE, dt_dt DATETIME,"
-                "  dt_ts TIMESTAMP NULL, dt_t TIME)");
-            co_await sess.query(
-                "INSERT INTO __httplib_types VALUES "
-                "(42, 99, 3.14, 'hello', 'world', "
-                "'2024-01-15', '2024-06-20 18:30:45', "
-                "'2024-06-20 18:30:45', '12:34:56')");
-            co_await sess.query(
-                "INSERT INTO __httplib_types VALUES "
-                "(NULL, NULL, NULL, NULL, NULL, "
-                "NULL, NULL, NULL, NULL)");
+            co_await sess.query("CREATE TABLE __httplib_types ("
+                                "  i64 BIGINT, u64 BIGINT UNSIGNED, f64 DOUBLE, str VARCHAR(100),"
+                                "  bin BLOB, dt_date DATE, dt_dt DATETIME,"
+                                "  dt_ts TIMESTAMP NULL, dt_t TIME)");
+            co_await sess.query("INSERT INTO __httplib_types VALUES "
+                                "(42, 99, 3.14, 'hello', 'world', "
+                                "'2024-01-15', '2024-06-20 18:30:45', "
+                                "'2024-06-20 18:30:45', '12:34:56')");
+            co_await sess.query("INSERT INTO __httplib_types VALUES "
+                                "(NULL, NULL, NULL, NULL, NULL, "
+                                "NULL, NULL, NULL, NULL)");
 
-            auto r = co_await sess.query(
-                "SELECT * FROM __httplib_types ORDER BY i64 IS NULL, i64");
+            auto r = co_await sess.query("SELECT * FROM __httplib_types ORDER BY i64 IS NULL, i64");
             REQUIRE(r.row_count() == 2);
             REQUIRE(r.column_count() == 9);
 
@@ -352,9 +388,10 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
             // --- iterator ---
             std::vector<std::string> strs;
             for (auto row : r)
-                strs.push_back(row.is_null("str") ? "(null)"
-                                                  : std::string(*row.as_string("str")));
-            REQUIRE(strs == std::vector<std::string>{ "hello", "(null)" });
+            {
+                strs.push_back(row.is_null("str") ? "(null)" : std::string(*row.as_string("str")));
+            }
+            REQUIRE(strs == std::vector<std::string> { "hello", "(null)" });
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_types");
         });
@@ -369,15 +406,11 @@ TEST_CASE("db: prepared statement positional bind", "[db][integration]")
     run(
         [](mysql::session& sess) -> net::awaitable<void>
         {
-            co_await sess.query(
-                "CREATE TABLE IF NOT EXISTS __httplib_ps (id INT, name VARCHAR(100))");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_ps (id INT, name VARCHAR(100))");
             co_await sess.query("DELETE FROM __httplib_ps");
             co_await sess.query("INSERT INTO __httplib_ps VALUES (1, 'alice')");
 
-            auto r = co_await sess.stmt(
-                                       "SELECT id, name FROM __httplib_ps WHERE id = ?")
-                         .bind(1)
-                         .execute();
+            auto r = co_await sess.stmt("SELECT id, name FROM __httplib_ps WHERE id = ?").bind(1).execute();
             REQUIRE(r.row_count() == 1);
             REQUIRE(*r[0].as_int64("id") == 1);
             REQUIRE(*r[0].as_string("name") == "alice");
@@ -391,13 +424,11 @@ TEST_CASE("db: prepared statement named params", "[db][integration]")
     run(
         [](mysql::session& sess) -> net::awaitable<void>
         {
-            co_await sess.query(
-                "CREATE TABLE IF NOT EXISTS __httplib_named (id INT, name VARCHAR(100))");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_named (id INT, name VARCHAR(100))");
             co_await sess.query("DELETE FROM __httplib_named");
             co_await sess.query("INSERT INTO __httplib_named VALUES (77, 'target')");
 
-            auto r = co_await sess.stmt(
-                                       "SELECT id, name FROM __httplib_named WHERE name = :n")
+            auto r = co_await sess.stmt("SELECT id, name FROM __httplib_named WHERE name = :n")
                          .bind("n", "target")
                          .execute();
             REQUIRE(r.row_count() == 1);
@@ -412,17 +443,13 @@ TEST_CASE("db: prepared statement into() extraction", "[db][integration]")
     run(
         [](mysql::session& sess) -> net::awaitable<void>
         {
-            co_await sess.query(
-                "CREATE TABLE IF NOT EXISTS __httplib_into (id INT, name VARCHAR(100))");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_into (id INT, name VARCHAR(100))");
             co_await sess.query("DELETE FROM __httplib_into");
             co_await sess.query("INSERT INTO __httplib_into VALUES (42, 'alice')");
 
             std::optional<int64_t> id;
             std::optional<std::string> name;
-            co_await sess.stmt("SELECT id, name FROM __httplib_into")
-                .into(id, "id")
-                .into(name, "name")
-                .execute();
+            co_await sess.stmt("SELECT id, name FROM __httplib_into").into(id, "id").into(name, "name").execute();
             REQUIRE(id == 42);
             REQUIRE(name == "alice");
 
@@ -435,8 +462,7 @@ TEST_CASE("db: statement reuse (caching)", "[db][integration]")
     run(
         [](mysql::session& sess) -> net::awaitable<void>
         {
-            co_await sess.query(
-                "CREATE TABLE IF NOT EXISTS __httplib_cache (id INT)");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_cache (id INT)");
             co_await sess.query("DELETE FROM __httplib_cache");
             co_await sess.query("INSERT INTO __httplib_cache VALUES (1),(2)");
 
@@ -489,13 +515,12 @@ TEST_CASE("db: statement cache eviction", "[db][integration]")
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_sc");
         },
-        [&](std::exception_ptr e)
-        {
-            err = e;
-        });
+        [&](std::exception_ptr e) { err = e; });
     ioc.run();
     if (err)
+    {
         std::rethrow_exception(err);
+    }
 }
 
 // ===========================================================================
@@ -507,14 +532,12 @@ TEST_CASE("db: named params bound out of SQL order", "[db][integration]")
     run(
         [](mysql::session& sess) -> net::awaitable<void>
         {
-            co_await sess.query(
-                "CREATE TABLE IF NOT EXISTS __httplib_ord (a INT, b INT)");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_ord (a INT, b INT)");
             co_await sess.query("DELETE FROM __httplib_ord");
             co_await sess.query("INSERT INTO __httplib_ord VALUES (1, 2)");
 
             // bind in reverse order of appearance in the SQL
-            auto r = co_await sess.stmt(
-                                        "SELECT a, b FROM __httplib_ord WHERE a = :a AND b = :b")
+            auto r = co_await sess.stmt("SELECT a, b FROM __httplib_ord WHERE a = :a AND b = :b")
                          .bind("b", 2)
                          .bind("a", 1)
                          .execute();
@@ -531,8 +554,7 @@ TEST_CASE("db: named params reuse across cache", "[db][integration]")
     run(
         [](mysql::session& sess) -> net::awaitable<void>
         {
-            co_await sess.query(
-                "CREATE TABLE IF NOT EXISTS __httplib_nc (id INT, name VARCHAR(100))");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_nc (id INT, name VARCHAR(100))");
             co_await sess.query("DELETE FROM __httplib_nc");
             co_await sess.query("INSERT INTO __httplib_nc VALUES (1, 'a'),(2, 'b')");
 
@@ -600,13 +622,12 @@ TEST_CASE("db: charset applied on connect", "[db][integration]")
             auto r = co_await sess.query("SELECT @@character_set_client AS cs");
             REQUIRE(*r[0].as_string("cs") == "latin1");
         },
-        [&](std::exception_ptr e)
-        {
-            err = e;
-        });
+        [&](std::exception_ptr e) { err = e; });
     ioc.run();
     if (err)
+    {
         std::rethrow_exception(err);
+    }
 }
 
 TEST_CASE("db: async_acquire honors acquire_timeout", "[db][integration]")
@@ -632,13 +653,12 @@ TEST_CASE("db: async_acquire honors acquire_timeout", "[db][integration]")
             REQUIRE(elapsed >= std::chrono::milliseconds(800));
             REQUIRE(elapsed < std::chrono::seconds(3));
         },
-        [&](std::exception_ptr e)
-        {
-            err = e;
-        });
+        [&](std::exception_ptr e) { err = e; });
     ioc.run();
     if (err)
+    {
         std::rethrow_exception(err);
+    }
 }
 
 TEST_CASE("db: transport error marks connection dead", "[db][integration]")
@@ -675,13 +695,12 @@ TEST_CASE("db: transport error marks connection dead", "[db][integration]")
             auto ok = co_await h2->ping();
             REQUIRE(ok);
         },
-        [&](std::exception_ptr e)
-        {
-            err = e;
-        });
+        [&](std::exception_ptr e) { err = e; });
     ioc.run();
     if (err)
+    {
         std::rethrow_exception(err);
+    }
 }
 
 // Regression: binding two owned-storage values (json) used to share a single
@@ -691,16 +710,16 @@ TEST_CASE("db: prepared statement multiple json binds", "[db][integration]")
     run(
         [](mysql::session& sess) -> net::awaitable<void>
         {
-            co_await sess.query(
-                "CREATE TABLE IF NOT EXISTS __httplib_j2 (a JSON, b JSON)");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_j2 (a JSON, b JSON)");
             co_await sess.query("DELETE FROM __httplib_j2");
 
-            boost::json::value v1 = { { "x", 1 } };
-            boost::json::value v2 = { { "y", "hi" } };
-            co_await sess.stmt("INSERT INTO __httplib_j2 (a, b) VALUES (?, ?)")
-                .bind(v1)
-                .bind(v2)
-                .execute();
+            boost::json::value v1 = {
+                { "x", 1 }
+            };
+            boost::json::value v2 = {
+                { "y", "hi" }
+            };
+            co_await sess.stmt("INSERT INTO __httplib_j2 (a, b) VALUES (?, ?)").bind(v1).bind(v2).execute();
 
             auto r = co_await sess.query("SELECT a, b FROM __httplib_j2");
             REQUIRE(r.row_count() == 1);
@@ -709,6 +728,607 @@ TEST_CASE("db: prepared statement multiple json binds", "[db][integration]")
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_j2");
         });
+}
+
+TEST_CASE("db: numeric conversion range checks", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_rng (u BIGINT UNSIGNED, i BIGINT)");
+            co_await sess.query("DELETE FROM __httplib_rng");
+            co_await sess.query("INSERT INTO __httplib_rng VALUES (18446744073709551615, -1)");
+            auto r = co_await sess.query("SELECT u, i FROM __httplib_rng");
+
+            REQUIRE_THROWS_AS(r[0].as_int64("u"), std::runtime_error);
+            REQUIRE_THROWS_AS(r[0].as_uint64("i"), std::runtime_error);
+            REQUIRE(*r[0].as_uint64("u") == 18446744073709551615ull);
+            REQUIRE(*r[0].as_int64("i") == -1);
+            REQUIRE(*r[0].as_bool("u") == true);
+
+            REQUIRE_THROWS_AS(r.column_name(999), std::out_of_range);
+            REQUIRE_THROWS_AS(r.column_type(999), std::out_of_range);
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_rng");
+        });
+}
+
+TEST_CASE("db: negative TIME rejected", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_nt (t TIME)");
+            co_await sess.query("DELETE FROM __httplib_nt");
+            co_await sess.query("INSERT INTO __httplib_nt VALUES ('-12:34:56')");
+            auto r = co_await sess.query("SELECT t FROM __httplib_nt");
+            REQUIRE_THROWS_AS(r[0].as_time("t"), std::runtime_error);
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_nt");
+        });
+}
+
+TEST_CASE("db: timestamp timezone conversion", "[db][integration]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            mysql::connect_params cfg;
+            cfg.user = "root";
+            cfg.password = "123456";
+            cfg.time_zone = "+08:00";
+            auto sess = co_await mysql::session::connect(ioc.get_executor(), cfg);
+            co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
+            co_await sess.query("USE test");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_ts (t TIMESTAMP)");
+            co_await sess.query("DELETE FROM __httplib_ts");
+            co_await sess.query("INSERT INTO __httplib_ts VALUES ('2024-01-01 12:00:00')");
+            auto r = co_await sess.query("SELECT t FROM __httplib_ts");
+
+            REQUIRE(r.column_type(0) == mysql::column_type::timestamp);
+            auto ts = *r[0].as_timestamp("t");
+            std::chrono::system_clock::time_point expected
+                = std::chrono::sys_days(std::chrono::year(2024) / std::chrono::month(1) / std::chrono::day(1))
+                  + std::chrono::hours(4);
+            REQUIRE(ts == expected);
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_ts");
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
+TEST_CASE("db: timestamp default utc", "[db][integration]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            mysql::connect_params cfg;
+            cfg.user = "root";
+            cfg.password = "123456"; // 默认 time_zone = "+00:00"
+            auto sess = co_await mysql::session::connect(ioc.get_executor(), cfg);
+            co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
+            co_await sess.query("USE test");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_tsu (t TIMESTAMP)");
+            co_await sess.query("DELETE FROM __httplib_tsu");
+            co_await sess.query("INSERT INTO __httplib_tsu VALUES ('2024-01-01 12:00:00')");
+            auto r = co_await sess.query("SELECT t FROM __httplib_tsu");
+
+            auto ts = *r[0].as_timestamp("t");
+            std::chrono::system_clock::time_point expected
+                = std::chrono::sys_days(std::chrono::year(2024) / std::chrono::month(1) / std::chrono::day(1))
+                  + std::chrono::hours(12);
+            REQUIRE(ts == expected);
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_tsu");
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
+TEST_CASE("db: timestamp bind roundtrip utc", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_tsr (t TIMESTAMP)");
+            co_await sess.query("DELETE FROM __httplib_tsr");
+
+            std::chrono::system_clock::time_point tp
+                = std::chrono::sys_days(std::chrono::year(2024) / std::chrono::month(1) / std::chrono::day(1))
+                  + std::chrono::hours(12);
+            co_await sess.stmt("INSERT INTO __httplib_tsr (t) VALUES (?)").bind(tp).execute();
+            auto r = co_await sess.query("SELECT t FROM __httplib_tsr");
+            REQUIRE(*r[0].as_timestamp("t") == tp);
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_tsr");
+        });
+}
+
+TEST_CASE("db: timestamp bind roundtrip offset", "[db][integration]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            mysql::connect_params cfg;
+            cfg.user = "root";
+            cfg.password = "123456";
+            cfg.time_zone = "+08:00";
+            auto sess = co_await mysql::session::connect(ioc.get_executor(), cfg);
+            co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
+            co_await sess.query("USE test");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_tso (t TIMESTAMP)");
+            co_await sess.query("DELETE FROM __httplib_tso");
+
+            std::chrono::system_clock::time_point tp
+                = std::chrono::sys_days(std::chrono::year(2024) / std::chrono::month(1) / std::chrono::day(1))
+                  + std::chrono::hours(12);
+            co_await sess.stmt("INSERT INTO __httplib_tso (t) VALUES (?)").bind(tp).execute();
+            auto r = co_await sess.query("SELECT t FROM __httplib_tso");
+            REQUIRE(*r[0].as_timestamp("t") == tp);
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_tso");
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
+TEST_CASE("db: datetime date time unaffected by timezone", "[db][integration]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            mysql::connect_params cfg;
+            cfg.user = "root";
+            cfg.password = "123456";
+            cfg.time_zone = "+08:00";
+            auto sess = co_await mysql::session::connect(ioc.get_executor(), cfg);
+            co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
+            co_await sess.query("USE test");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_tzn (d DATETIME, dt DATE, t TIME)");
+            co_await sess.query("DELETE FROM __httplib_tzn");
+            co_await sess.query("INSERT INTO __httplib_tzn VALUES ('2024-01-15 12:34:56', '2024-01-15', '12:34:56')");
+            auto r = co_await sess.query("SELECT d, dt, t FROM __httplib_tzn");
+
+            REQUIRE(r.column_type(0) == mysql::column_type::datetime);
+            auto d = *r[0].as_datetime("d");
+            REQUIRE(d.hour == 12);
+            REQUIRE(d.minute == 34);
+
+            auto dt = *r[0].as_date("dt");
+            REQUIRE(dt.year == 2024);
+            REQUIRE(dt.day == 15);
+
+            auto t = *r[0].as_time("t");
+            REQUIRE(t.hour == 12);
+            REQUIRE(t.second == 56);
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_tzn");
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
+TEST_CASE("db: into replaced across executes", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_ext (id INT)");
+            co_await sess.query("DELETE FROM __httplib_ext");
+            co_await sess.query("INSERT INTO __httplib_ext VALUES (1),(2)");
+
+            auto stmt = sess.stmt("SELECT id FROM __httplib_ext WHERE id = ?");
+            std::optional<int64_t> v1;
+            co_await stmt.bind(1).into(v1, 0).execute();
+            REQUIRE(v1 == 1);
+
+            std::optional<int64_t> v2;
+            co_await stmt.bind(2).into(v2, 0).execute();
+            REQUIRE(v1 == 1); // 重新 into 替换旧 extractor，v1 不再被写
+            REQUIRE(v2 == 2);
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_ext");
+        });
+}
+
+TEST_CASE("db: into persists across executes", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_ip (v INT)");
+            co_await sess.query("DELETE FROM __httplib_ip");
+            co_await sess.query("INSERT INTO __httplib_ip VALUES (10),(20)");
+
+            // 输出只绑一次，循环里只重绑输入，输出每次自动更新
+            auto stmt = sess.stmt("SELECT v FROM __httplib_ip WHERE v = ?");
+            std::optional<int64_t> out;
+            stmt.into(out, "v");
+            co_await stmt.bind(10).execute();
+            REQUIRE(out == 10);
+            co_await stmt.bind(20).execute();
+            REQUIRE(out == 20);
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_ip");
+        });
+}
+
+TEST_CASE("db: bind arity mismatch throws", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_arity (a INT, b INT)");
+            co_await sess.query("DELETE FROM __httplib_arity");
+
+            REQUIRE_THROWS_AS(co_await sess.stmt("INSERT INTO __httplib_arity VALUES (?, ?)").bind(1).execute(),
+                              mysql::mysql_exception);
+            REQUIRE_THROWS_AS(co_await sess.stmt("INSERT INTO __httplib_arity VALUES (?)").bind(1).bind(2).execute(),
+                              mysql::mysql_exception);
+
+            // 连接仍可用（参数数量错误是客户端判定，不应废掉连接）
+            auto r = co_await sess.query("SELECT 1 AS v");
+            REQUIRE(*r[0].as_int64("v") == 1);
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_arity");
+        });
+}
+
+TEST_CASE("db: error message includes params", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_ep (id INT PRIMARY KEY)");
+            co_await sess.query("DELETE FROM __httplib_ep");
+            co_await sess.query("INSERT INTO __httplib_ep VALUES (1)");
+
+            try
+            {
+                co_await sess.stmt("INSERT INTO __httplib_ep VALUES (?)").bind(1).execute();
+                REQUIRE(false);
+            }
+            catch (mysql::mysql_exception const& ex)
+            {
+                REQUIRE(std::string(ex.what()).find("params: [1]") != std::string::npos);
+            }
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_ep");
+        });
+}
+
+TEST_CASE("db: error message includes named params", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_enp (id INT PRIMARY KEY)");
+            co_await sess.query("DELETE FROM __httplib_enp");
+            co_await sess.query("INSERT INTO __httplib_enp VALUES (1)");
+
+            try
+            {
+                co_await sess.stmt("INSERT INTO __httplib_enp VALUES (:id)").bind("id", 1).execute();
+                REQUIRE(false);
+            }
+            catch (mysql::mysql_exception const& ex)
+            {
+                REQUIRE(std::string(ex.what()).find("params: [id=1]") != std::string::npos);
+                REQUIRE(std::string(ex.what()).find(":id") != std::string::npos); // 原始 SQL 保留 :id
+            }
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_enp");
+        });
+}
+
+TEST_CASE("db: bind null and empty string", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_bnd (a INT, s VARCHAR(100))");
+            co_await sess.query("DELETE FROM __httplib_bnd");
+            co_await sess.stmt("INSERT INTO __httplib_bnd (a, s) VALUES (?, ?)")
+                .bind(nullptr)
+                .bind(std::string_view(""))
+                .execute();
+
+            auto r = co_await sess.query("SELECT a, s FROM __httplib_bnd");
+            REQUIRE(r[0].is_null("a"));
+            REQUIRE(*r[0].as_string("s") == "");
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_bnd");
+        });
+}
+
+TEST_CASE("db: bind prevents SQL injection", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_inj (name VARCHAR(100))");
+            co_await sess.query("DELETE FROM __httplib_inj");
+            co_await sess.query("INSERT INTO __httplib_inj VALUES ('alice'),('bob')");
+
+            auto r = co_await sess.stmt("SELECT name FROM __httplib_inj WHERE name = ?").bind("' OR '1'='1").execute();
+            REQUIRE(r.row_count() == 0);
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_inj");
+        });
+}
+
+TEST_CASE("db: bind blob binary data", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_blob (b BLOB)");
+            co_await sess.query("DELETE FROM __httplib_blob");
+
+            unsigned char raw[] = { 0x00, 0x01, 0x02, 0x00, 0xff, 0x00 };
+            co_await sess.stmt("INSERT INTO __httplib_blob (b) VALUES (?)")
+                .bind(net::const_buffer(raw, sizeof(raw)))
+                .execute();
+
+            auto r = co_await sess.query("SELECT b FROM __httplib_blob");
+            auto blob = r[0].as_blob("b");
+            REQUIRE(blob.has_value());
+            REQUIRE(blob->size() == sizeof(raw));
+            REQUIRE(std::string_view(static_cast<char const*>(blob->data()), blob->size())
+                    == std::string_view(reinterpret_cast<char const*>(raw), sizeof(raw)));
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_blob");
+        });
+}
+
+TEST_CASE("db: unbound named param is null", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            auto r = co_await sess.stmt("SELECT :n IS NULL AS r").execute();
+            REQUIRE(*r[0].as_int64("r") == 1);
+        });
+}
+
+TEST_CASE("db: bind unknown name throws", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            // SQL 里只有 :a，绑一个不存在的名字
+            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x").bind("b", 42).execute(), std::runtime_error);
+
+            // 纯位置式 SQL 上做命名绑定
+            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT ? AS x").bind("n", 1).execute(), std::runtime_error);
+
+            // 命名 SQL 上做位置绑定
+            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x").bind(1).execute(), std::runtime_error);
+
+            // 正常绑定不受影响
+            auto r = co_await sess.stmt("SELECT :a AS x").bind("a", 42).execute();
+            REQUIRE(*r[0].as_int64("x") == 42);
+        });
+}
+
+TEST_CASE("db: bind once execute multiple times", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_reuse (v INT)");
+            co_await sess.query("DELETE FROM __httplib_reuse");
+
+            // 命名参数：绑一次跑两次，参数复用（named_values 不消费）
+            auto named = sess.stmt("INSERT INTO __httplib_reuse VALUES (:v)");
+            named.bind("v", 1);
+            co_await named.execute();
+            co_await named.execute();
+
+            // 位置参数：绑一次跑两次，参数也应复用
+            auto positional = sess.stmt("INSERT INTO __httplib_reuse VALUES (?)");
+            positional.bind(2);
+            co_await positional.execute();
+            co_await positional.execute();
+
+            auto r1 = co_await sess.query("SELECT COUNT(*) AS c FROM __httplib_reuse WHERE v = 1");
+            REQUIRE(*r1[0].as_int64("c") == 2);
+            auto r2 = co_await sess.query("SELECT COUNT(*) AS c FROM __httplib_reuse WHERE v = 2");
+            REQUIRE(*r2[0].as_int64("c") == 2);
+
+            // 位置式重绑：第二次 bind 应覆盖而非追加
+            auto rebind = sess.stmt("INSERT INTO __httplib_reuse VALUES (?)");
+            rebind.bind(3);
+            co_await rebind.execute();
+            rebind.bind(4);
+            co_await rebind.execute();
+            auto r3 = co_await sess.query("SELECT COUNT(*) AS c FROM __httplib_reuse WHERE v = 4");
+            REQUIRE(*r3[0].as_int64("c") == 1);
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_reuse");
+        });
+}
+
+TEST_CASE("db: into edge cases", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_intoedge (id INT, name VARCHAR(100))");
+            co_await sess.query("DELETE FROM __httplib_intoedge");
+            co_await sess.query("INSERT INTO __httplib_intoedge VALUES (1, 'alice'), (NULL, NULL)");
+
+            // 越界列下标
+            {
+                std::optional<int64_t> v;
+                REQUIRE_THROWS_AS(co_await sess.stmt("SELECT id FROM __httplib_intoedge").into(v, 999).execute(),
+                                  std::out_of_range);
+            }
+            // 列名不存在
+            {
+                std::optional<int64_t> v;
+                REQUIRE_THROWS_AS(co_await sess.stmt("SELECT id FROM __httplib_intoedge").into(v, "nope").execute(),
+                                  std::runtime_error);
+            }
+            // 类型不匹配
+            {
+                std::optional<int64_t> v;
+                REQUIRE_THROWS_AS(
+                    co_await sess.stmt("SELECT name FROM __httplib_intoedge WHERE id = 1").into(v, "name").execute(),
+                    std::runtime_error);
+            }
+            // 空结果不写 optional
+            {
+                std::optional<int64_t> v = 7;
+                co_await sess.stmt("SELECT id FROM __httplib_intoedge WHERE id = 999").into(v, "id").execute();
+                REQUIRE(v == 7);
+            }
+            // NULL 值 -> nullopt
+            {
+                std::optional<int64_t> v = 7;
+                co_await sess.stmt("SELECT id FROM __httplib_intoedge WHERE name IS NULL").into(v, "id").execute();
+                REQUIRE(!v.has_value());
+            }
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_intoedge");
+        });
+}
+
+TEST_CASE("db: with_transaction keeps original error", "[db][integration]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            mysql::connection_pool pool(ioc.get_executor(), make_cfg());
+            pool.start();
+            auto handle = co_await pool.async_acquire();
+
+            mysql::connect_params kcfg;
+            kcfg.user = "root";
+            kcfg.password = "123456";
+            auto killer = co_await mysql::session::connect(ioc.get_executor(), kcfg);
+
+            std::string msg;
+            try
+            {
+                co_await handle->with_transaction(
+                    [&](mysql::session& s) -> net::awaitable<void>
+                    {
+                        auto r = co_await s.query("SELECT CONNECTION_ID() AS id");
+                        auto conn_id = *r[0].as_uint64("id");
+                        co_await killer.query("KILL " + std::to_string(conn_id));
+                        throw std::runtime_error("boom");
+                    });
+            }
+            catch (std::runtime_error const& ex)
+            {
+                msg = ex.what();
+            }
+            REQUIRE(msg == "boom");
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
+TEST_CASE("db: dead connection release wakes waiter", "[db][integration]")
+{
+    auto cfg = make_cfg();
+    cfg.min_connections = 0;
+    cfg.max_connections = 1;
+    cfg.acquire_timeout = std::chrono::seconds(10);
+
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            mysql::connection_pool pool(ioc.get_executor(), cfg);
+            pool.start();
+
+            auto h1 = co_await pool.async_acquire();
+            auto r = co_await h1->query("SELECT CONNECTION_ID() AS id");
+            auto conn_id = *r[0].as_uint64("id");
+
+            std::optional<mysql::connection_pool::session_handle> h2;
+            net::co_spawn(
+                ioc.get_executor(),
+                [&pool, &h2]() -> net::awaitable<void> { h2.emplace(co_await pool.async_acquire()); },
+                [](std::exception_ptr) {});
+
+            // let the waiting acquire register itself
+            net::steady_timer settle(ioc.get_executor());
+            settle.expires_after(std::chrono::milliseconds(200));
+            co_await settle.async_wait(boost::asio::use_awaitable);
+
+            {
+                mysql::connect_params kcfg;
+                kcfg.user = "root";
+                kcfg.password = "123456";
+                auto killer = co_await mysql::session::connect(ioc.get_executor(), kcfg);
+                co_await killer.query("KILL " + std::to_string(conn_id));
+            }
+            REQUIRE_THROWS_AS(co_await h1->query("SELECT 1"), mysql::mysql_exception);
+
+            auto t0 = std::chrono::steady_clock::now();
+            h1.release(); // dead -> dropped -> wakes the waiter
+
+            while (!h2)
+            {
+                net::steady_timer poll(ioc.get_executor());
+                poll.expires_after(std::chrono::milliseconds(50));
+                co_await poll.async_wait(boost::asio::use_awaitable);
+                if (std::chrono::steady_clock::now() - t0 > std::chrono::seconds(3))
+                {
+                    break;
+                }
+            }
+
+            REQUIRE(h2.has_value());
+            auto ok = co_await (*h2)->ping();
+            REQUIRE(ok);
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
 }
 
 // ===========================================================================
@@ -720,13 +1340,10 @@ TEST_CASE("db: json column", "[db][integration]")
     run(
         [](mysql::session& sess) -> net::awaitable<void>
         {
-            co_await sess.query(
-                "CREATE TABLE IF NOT EXISTS __httplib_json (id INT, data JSON)");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_json (id INT, data JSON)");
             co_await sess.query("DELETE FROM __httplib_json");
-            co_await sess.query(
-                "INSERT INTO __httplib_json VALUES (1, '{\"x\":1,\"y\":\"hi\"}')");
-            auto r = co_await sess.query(
-                "SELECT data FROM __httplib_json WHERE id = 1");
+            co_await sess.query("INSERT INTO __httplib_json VALUES (1, '{\"x\":1,\"y\":\"hi\"}')");
+            auto r = co_await sess.query("SELECT data FROM __httplib_json WHERE id = 1");
             auto val = *r[0].as_json("data");
             REQUIRE(val.as_object().at("x").as_int64() == 1);
             REQUIRE(val.as_object().at("y").as_string() == "hi");
@@ -743,8 +1360,7 @@ TEST_CASE("db: transaction commit", "[db][integration]")
     run(
         [](mysql::session& sess) -> net::awaitable<void>
         {
-            co_await sess.query(
-                "CREATE TABLE IF NOT EXISTS __httplib_txn (id INT)");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_txn (id INT)");
             co_await sess.query("DELETE FROM __httplib_txn");
 
             co_await sess.begin_transaction();
@@ -764,8 +1380,7 @@ TEST_CASE("db: transaction rollback", "[db][integration]")
     run(
         [](mysql::session& sess) -> net::awaitable<void>
         {
-            co_await sess.query(
-                "CREATE TABLE IF NOT EXISTS __httplib_txr (id INT)");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_txr (id INT)");
             co_await sess.query("DELETE FROM __httplib_txr");
 
             co_await sess.begin_transaction();
@@ -784,8 +1399,7 @@ TEST_CASE("db: with_transaction commit path", "[db][integration]")
     run(
         [](mysql::session& sess) -> net::awaitable<void>
         {
-            co_await sess.query(
-                "CREATE TABLE IF NOT EXISTS __httplib_wtxn (id INT)");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_wtxn (id INT)");
             co_await sess.query("DELETE FROM __httplib_wtxn");
 
             co_await sess.with_transaction(
@@ -795,8 +1409,7 @@ TEST_CASE("db: with_transaction commit path", "[db][integration]")
                     co_await s.query("INSERT INTO __httplib_wtxn VALUES (2)");
                 });
 
-            auto r = co_await sess.query(
-                "SELECT id FROM __httplib_wtxn ORDER BY id");
+            auto r = co_await sess.query("SELECT id FROM __httplib_wtxn ORDER BY id");
             REQUIRE(r.row_count() == 2);
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_wtxn");
@@ -808,8 +1421,7 @@ TEST_CASE("db: with_transaction rollback on exception", "[db][integration]")
     run(
         [](mysql::session& sess) -> net::awaitable<void>
         {
-            co_await sess.query(
-                "CREATE TABLE IF NOT EXISTS __httplib_wtxr (id INT)");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_wtxr (id INT)");
             co_await sess.query("DELETE FROM __httplib_wtxr");
 
             try
@@ -817,8 +1429,7 @@ TEST_CASE("db: with_transaction rollback on exception", "[db][integration]")
                 co_await sess.with_transaction(
                     [](mysql::session& s) -> net::awaitable<void>
                     {
-                        co_await s.query(
-                            "INSERT INTO __httplib_wtxr VALUES (999)");
+                        co_await s.query("INSERT INTO __httplib_wtxr VALUES (999)");
                         throw std::runtime_error("boom");
                     });
             }
@@ -877,18 +1488,16 @@ TEST_CASE("db: standalone connect and query", "[db][integration]")
             mysql::connect_params cfg;
             cfg.user = "root";
             cfg.password = "123456";
-            auto sess = co_await mysql::session::connect(
-                ioc.get_executor(), cfg);
+            auto sess = co_await mysql::session::connect(ioc.get_executor(), cfg);
             auto r = co_await sess.query("SELECT 'standalone' AS msg");
             REQUIRE(*r[0].as_string("msg") == "standalone");
         },
-        [&](std::exception_ptr e)
-        {
-            err = e;
-        });
+        [&](std::exception_ptr e) { err = e; });
     ioc.run();
     if (err)
+    {
         std::rethrow_exception(err);
+    }
 }
 
 TEST_CASE("db: standalone reconnect", "[db][integration]")
@@ -902,21 +1511,19 @@ TEST_CASE("db: standalone reconnect", "[db][integration]")
             mysql::connect_params cfg;
             cfg.user = "root";
             cfg.password = "123456";
-            auto sess = co_await mysql::session::connect(
-                ioc.get_executor(), cfg);
+            auto sess = co_await mysql::session::connect(ioc.get_executor(), cfg);
             auto r1 = co_await sess.query("SELECT 1 AS v");
             REQUIRE(*r1[0].as_int64("v") == 1);
             co_await sess.reconnect();
             auto r2 = co_await sess.query("SELECT 2 AS v");
             REQUIRE(*r2[0].as_int64("v") == 2);
         },
-        [&](std::exception_ptr e)
-        {
-            err = e;
-        });
+        [&](std::exception_ptr e) { err = e; });
     ioc.run();
     if (err)
+    {
         std::rethrow_exception(err);
+    }
 }
 
 // ===========================================================================
@@ -925,12 +1532,8 @@ TEST_CASE("db: standalone reconnect", "[db][integration]")
 
 TEST_CASE("db: invalid SQL throws", "[db][integration]")
 {
-    run(
-        [](mysql::session& sess) -> net::awaitable<void>
-        {
-            REQUIRE_THROWS_AS(co_await sess.query("BOGUS SYNTAX ERROR"),
-                              mysql::mysql_exception);
-        });
+    run([](mysql::session& sess) -> net::awaitable<void>
+        { REQUIRE_THROWS_AS(co_await sess.query("BOGUS SYNTAX ERROR"), mysql::mysql_exception); });
 }
 
 TEST_CASE("db: row out of bounds", "[db][integration]")
@@ -961,8 +1564,7 @@ TEST_CASE("db: column access on empty resultset", "[db][integration]")
     run(
         [](mysql::session& sess) -> net::awaitable<void>
         {
-            co_await sess.query(
-                "CREATE TABLE IF NOT EXISTS __httplib_nerr (id INT)");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_nerr (id INT)");
             co_await sess.query("DELETE FROM __httplib_nerr");
             auto r = co_await sess.query("SELECT * FROM __httplib_nerr");
             REQUIRE(r.row_count() == 0);
@@ -997,9 +1599,7 @@ TEST_CASE("mysql_middleware: throws when not registered", "[db][middleware]")
             auto ep = server.local_endpoint();
             server.run();
 
-            httplib::client::http_client client(ioc.get_executor(),
-                                                ep.address().to_string(),
-                                                ep.port());
+            httplib::client::http_client client(ioc.get_executor(), ep.address().to_string(), ep.port());
             client.set_timeout(std::chrono::seconds(5));
 
             auto resp = UNWRAP(co_await client.async_get("/db/nomw"));
@@ -1012,7 +1612,9 @@ TEST_CASE("mysql_middleware: throws when not registered", "[db][middleware]")
 
     ioc.run();
     if (err)
+    {
         std::rethrow_exception(err);
+    }
 }
 
 #else

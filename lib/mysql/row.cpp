@@ -40,13 +40,15 @@ namespace httplib::mysql
     row::as_string(size_t col) const
     {
         return detail::detail_value<std::string_view>(*impl_,
-                                                       col,
-                                                       [this](auto& f) -> std::string_view
-                                                       {
-                                                           if (!f.is_string())
-                                                               throw std::runtime_error("db: cannot convert to string");
-                                                           return f.as_string();
-                                                       });
+                                                      col,
+                                                      [this](auto& f) -> std::string_view
+                                                      {
+                                                          if (!f.is_string())
+                                                          {
+                                                              throw std::runtime_error("db: cannot convert to string");
+                                                          }
+                                                          return f.as_string();
+                                                      });
     }
     std::optional<std::string_view>
     row::as_string(std::string_view name) const
@@ -101,8 +103,24 @@ namespace httplib::mysql
     std::optional<bool>
     row::as_bool(size_t col) const
     {
-        auto v = detail::detail_value<int64_t>(*impl_, col, detail::fi);
-        return v.has_value() ? std::optional<bool>(*v != 0) : std::nullopt;
+        auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
+        if (f.is_null())
+        {
+            return std::nullopt;
+        }
+        if (f.is_int64())
+        {
+            return f.as_int64() != 0;
+        }
+        if (f.is_uint64())
+        {
+            return f.as_uint64() != 0;
+        }
+        if (f.is_double())
+        {
+            return f.as_double() != 0.0;
+        }
+        throw std::runtime_error("db: cannot convert to bool");
     }
     std::optional<bool>
     row::as_bool(std::string_view name) const
@@ -115,9 +133,13 @@ namespace httplib::mysql
     {
         auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
+        {
             return std::nullopt;
+        }
         if (!f.is_blob())
+        {
             throw std::runtime_error("db: cannot convert to blob");
+        }
         auto b = f.as_blob();
         return net::const_buffer(b.data(), b.size());
     }
@@ -132,9 +154,13 @@ namespace httplib::mysql
     {
         auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
+        {
             return std::nullopt;
+        }
         if (!f.is_date())
+        {
             throw std::runtime_error("db: cannot convert to date");
+        }
         auto d = f.as_date();
         return date { d.year(), d.month(), d.day() };
     }
@@ -149,9 +175,13 @@ namespace httplib::mysql
     {
         auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
+        {
             return std::nullopt;
+        }
         if (!f.is_datetime())
+        {
             throw std::runtime_error("db: cannot convert to datetime");
+        }
         auto d = f.as_datetime();
         return datetime { d.year(), d.month(), d.day(), d.hour(), d.minute(), d.second(), d.microsecond() };
     }
@@ -166,11 +196,19 @@ namespace httplib::mysql
     {
         auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
+        {
             return std::nullopt;
+        }
         if (!f.is_time())
+        {
             throw std::runtime_error("db: cannot convert to time");
+        }
         auto t = f.as_time();
         auto dur = std::chrono::duration_cast<std::chrono::microseconds>(t);
+        if (dur.count() < 0)
+        {
+            throw std::runtime_error("db: negative TIME not supported");
+        }
         auto s = std::chrono::duration_cast<std::chrono::seconds>(dur).count();
         return time { (unsigned)(s / 3600),
                       (unsigned)((s % 3600) / 60),
@@ -188,13 +226,19 @@ namespace httplib::mysql
     {
         auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
+        {
             return std::nullopt;
+        }
         if (!f.is_string())
+        {
             throw std::runtime_error("db: cannot convert to json");
+        }
         boost::system::error_code ec;
         boost::json::value jv = boost::json::parse(f.as_string(), ec);
         if (ec)
+        {
             throw std::runtime_error("db: json parse error: " + ec.message());
+        }
         return jv;
     }
     std::optional<boost::json::value>
@@ -208,16 +252,21 @@ namespace httplib::mysql
     {
         auto f = detail::ff(get_impl(*impl_->parent), impl_->idx, col);
         if (f.is_null())
+        {
             return std::nullopt;
+        }
         if (!f.is_datetime())
+        {
             throw std::runtime_error("db: cannot convert to timestamp");
-        return detail::d2e({ f.as_datetime().year(),
-                             f.as_datetime().month(),
-                             f.as_datetime().day(),
-                             f.as_datetime().hour(),
-                             f.as_datetime().minute(),
-                             f.as_datetime().second(),
-                             f.as_datetime().microsecond() });
+        }
+        auto d = f.as_datetime();
+        auto tp = detail::d2e({ d.year(), d.month(), d.day(), d.hour(), d.minute(), d.second(), d.microsecond() });
+        auto const& parent = get_impl(*impl_->parent);
+        if (col < parent.col_types.size() && parent.col_types[col] == column_type::timestamp)
+        {
+            tp -= parent.utc_offset;
+        }
+        return tp;
     }
     std::optional<std::chrono::system_clock::time_point>
     row::as_timestamp(std::string_view name) const
