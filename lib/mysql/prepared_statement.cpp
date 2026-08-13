@@ -20,13 +20,7 @@ namespace httplib::mysql
 
     prepared_statement::prepared_statement(prepared_statement&&) noexcept = default;
     prepared_statement& prepared_statement::operator=(prepared_statement&&) noexcept = default;
-    prepared_statement::~prepared_statement()
-    {
-        if (impl_ && impl_->stmt.valid() && impl_->session)
-        {
-            get_impl(*impl_->session).stmts_to_close.push_back(std::move(impl_->stmt));
-        }
-    }
+    prepared_statement::~prepared_statement() = default;
 
     prepared_statement&
     prepared_statement::bind(std::string_view v)
@@ -152,8 +146,8 @@ namespace httplib::mysql
     prepared_statement&
     prepared_statement::bind(boost::json::value const& v)
     {
-        impl_->data_str = boost::json::serialize(v);
-        impl_->params.emplace_back(impl_->data_str);
+        impl_->data_strs.push_back(boost::json::serialize(v));
+        impl_->params.emplace_back(impl_->data_strs.back());
         return *this;
     }
 
@@ -178,6 +172,9 @@ namespace httplib::mysql
     {
         std::string result;
         result.reserve(imp.sql.size());
+
+        imp.param_names.clear();
+        imp.name_to_idx.clear();
 
         for (size_t i = 0; i < imp.sql.size(); ++i)
         {
@@ -252,20 +249,7 @@ namespace httplib::mysql
     static void
     bind_named(prepared_statement::impl& imp, std::string_view name, boost::mysql::field_view fv)
     {
-        auto it = imp.name_to_idx.find(std::string(name));
-        if (it == imp.name_to_idx.end())
-        {
-            size_t idx = imp.param_names.size();
-            imp.param_names.emplace_back(name);
-            imp.name_to_idx[std::string(name)] = idx;
-            it = imp.name_to_idx.find(std::string(name));
-        }
-        auto idx = it->second;
-        if (idx >= imp.params.size())
-        {
-            imp.params.resize(idx + 1);
-        }
-        imp.params[idx] = fv;
+        imp.named_values[std::string(name)] = fv;
     }
 
     prepared_statement&
@@ -383,19 +367,20 @@ namespace httplib::mysql
     prepared_statement&
     prepared_statement::bind(std::string_view name, net::const_buffer v)
     {
-        impl_->data_str = std::string(static_cast<char const*>(v.data()), v.size());
-        bind_named(
-            *impl_,
-            name,
-            boost::mysql::field_view(boost::mysql::blob_view(static_cast<unsigned char const*>(v.data()), v.size())));
+        impl_->data_strs.emplace_back(static_cast<char const*>(v.data()), v.size());
+        bind_named(*impl_,
+                   name,
+                   boost::mysql::field_view(
+                       boost::mysql::blob_view(reinterpret_cast<unsigned char const*>(impl_->data_strs.back().data()),
+                                               impl_->data_strs.back().size())));
         return *this;
     }
 
     prepared_statement&
     prepared_statement::bind(std::string_view name, boost::json::value const& v)
     {
-        impl_->data_str = boost::json::serialize(v);
-        bind_named(*impl_, name, boost::mysql::field_view(impl_->data_str));
+        impl_->data_strs.push_back(boost::json::serialize(v));
+        bind_named(*impl_, name, boost::mysql::field_view(impl_->data_strs.back()));
         return *this;
     }
 
@@ -422,6 +407,17 @@ namespace httplib::mysql
             impl_->parsed = true;
         }
 
+        if (impl_->parsed)
+        {
+            impl_->params.clear();
+            impl_->params.reserve(impl_->param_names.size());
+            for (auto const& name : impl_->param_names)
+            {
+                auto it = impl_->named_values.find(name);
+                impl_->params.push_back(it != impl_->named_values.end() ? it->second : boost::mysql::field_view());
+            }
+        }
+
         auto params = std::exchange(impl_->params, {});
         auto& imp = get_impl(*impl_->session);
         auto start = std::chrono::steady_clock::now();
@@ -430,41 +426,38 @@ namespace httplib::mysql
         boost::mysql::results data;
         imp.get_conn().set_meta_mode(boost::mysql::metadata_mode::full);
 
-        try
+        boost::mysql::statement stmt;
+        if (auto* cached = imp.find_statement(impl_->sql))
         {
-            if (!impl_->stmt_prepared)
-            {
-                boost::system::error_code ec;
-                impl_->stmt = co_await imp.get_conn().async_prepare_statement(
-                    impl_->sql,
-                    diag,
-                    boost::asio::redirect_error(boost::asio::use_awaitable, ec));
-                raise_mysql_error(ec, diag, impl_->sql);
-                impl_->stmt_prepared = true;
-            }
-
+            stmt = *cached;
+        }
+        else
+        {
             boost::system::error_code ec;
-            if (params.empty())
-            {
-                co_await imp.get_conn().async_execute(impl_->stmt.bind(),
-                                                      data,
-                                                      diag,
-                                                      boost::asio::redirect_error(boost::asio::use_awaitable, ec));
-            }
-            else
-            {
-                co_await imp.get_conn().async_execute(impl_->stmt.bind(params.begin(), params.end()),
-                                                      data,
-                                                      diag,
-                                                      boost::asio::redirect_error(boost::asio::use_awaitable, ec));
-            }
-            raise_mysql_error(ec, diag, impl_->sql);
+            stmt = co_await imp.get_conn().async_prepare_statement(
+                impl_->sql,
+                diag,
+                boost::asio::redirect_error(boost::asio::use_awaitable, ec));
+            imp.raise_error(ec, diag, impl_->sql);
+            imp.store_statement(impl_->sql, stmt);
         }
-        catch (...)
+
+        boost::system::error_code ec;
+        if (params.empty())
         {
-            impl_->stmt_prepared = false;
-            throw;
+            co_await imp.get_conn().async_execute(stmt.bind(),
+                                                  data,
+                                                  diag,
+                                                  boost::asio::redirect_error(boost::asio::use_awaitable, ec));
         }
+        else
+        {
+            co_await imp.get_conn().async_execute(stmt.bind(params.begin(), params.end()),
+                                                  data,
+                                                  diag,
+                                                  boost::asio::redirect_error(boost::asio::use_awaitable, ec));
+        }
+        imp.raise_error(ec, diag, impl_->sql);
 
         auto res = result(std::make_unique<result::impl>(std::move(data)));
 

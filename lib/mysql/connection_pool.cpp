@@ -16,24 +16,6 @@
 namespace httplib::mysql
 {
 
-    namespace
-    {
-
-        struct idle_entry
-        {
-            std::unique_ptr<session::impl> sess_impl;
-            std::chrono::steady_clock::time_point idle_since;
-        };
-
-        struct waiter_node
-        {
-            net::steady_timer timer;
-
-            explicit waiter_node(net::any_io_executor const& ex) : timer(ex) {}
-        };
-
-    } // namespace
-
     struct connection_pool::impl : public std::enable_shared_from_this<impl>
     {
         impl(net::any_io_executor ex, pool_params cfg) : ex_(ex), cfg_(std::move(cfg)), maintain_timer_(ex) {}
@@ -67,6 +49,11 @@ namespace httplib::mysql
                 throw std::runtime_error("connection_pool: pool is shut down");
             }
 
+            if (wait_timeout <= std::chrono::steady_clock::duration::zero())
+            {
+                wait_timeout = cfg_.acquire_timeout;
+            }
+
             auto deadline = wait_timeout <= std::chrono::steady_clock::duration::zero()
                                 ? std::chrono::steady_clock::time_point::max()
                                 : std::chrono::steady_clock::now() + wait_timeout;
@@ -81,9 +68,8 @@ namespace httplib::mysql
                     throw std::runtime_error("connection_pool: pool is shut down");
                 }
 
-                if (auto imp = self->try_pop_idle())
+                if (auto sess = self->try_pop_idle())
                 {
-                    auto sess = std::make_unique<session>(std::move(imp));
                     co_return session_handle(self, std::move(sess));
                 }
 
@@ -117,19 +103,18 @@ namespace httplib::mysql
                     throw std::runtime_error("connection_pool: acquire timeout");
                 }
 
-                auto node = std::make_shared<waiter_node>(self->ex_);
-                node->timer.expires_at(deadline);
+                auto node = std::make_shared<net::steady_timer>(self->ex_);
+                node->expires_at(deadline);
                 self->waiters_.push_back(node);
                 lock.unlock();
 
                 boost::system::error_code ec;
-                co_await node->timer.async_wait(util::net_awaitable[ec]);
+                co_await node->async_wait(util::net_awaitable[ec]);
 
                 lock.lock();
 
-                if (auto imp = self->try_pop_idle())
+                if (auto sess = self->try_pop_idle())
                 {
-                    auto sess = std::make_unique<session>(std::move(imp));
                     co_return session_handle(self, std::move(sess));
                 }
             } while (deadline > std::chrono::steady_clock::now());
@@ -146,52 +131,37 @@ namespace httplib::mysql
             }
 
             auto& imp = get_impl(*sess);
+            imp.query_logger = {};
 
             if (!imp.in_transaction && imp.stmts_to_close.empty())
             {
-                // 快速路径：无事务、无待关闭 stmt，同步入池
-                imp.last_active = std::chrono::steady_clock::now();
-
-                auto released_impl = std::make_unique<session::impl>();
-                released_impl->conn = std::move(imp.conn);
-                released_impl->live = imp.live;
-                released_impl->last_active = imp.last_active;
-                released_impl->last_ping = imp.last_ping;
-
-                idle_entry entry;
-                entry.sess_impl = std::move(released_impl);
-                entry.idle_since = entry.sess_impl->last_active;
-
-                push_idle(std::move(entry));
+                push_idle(std::move(sess));
                 return;
             }
-
-            auto conn = std::move(imp.conn);
-            bool in_transaction = imp.in_transaction;
-            auto stmts = std::move(imp.stmts_to_close);
 
             auto self = shared_from_this();
             net::co_spawn(
                 ex_,
-                [self, conn = std::move(conn), in_transaction, stmts = std::move(stmts)]() mutable
-                    -> net::awaitable<void>
+                [self, sess = std::move(sess)]() mutable -> net::awaitable<void>
                 {
+                    auto& imp = get_impl(*sess);
+                    auto stmts = std::move(imp.stmts_to_close);
+                    bool in_transaction = imp.in_transaction;
+
                     try
                     {
-                        for (auto& st : stmts)
+                        for (auto& st : imp.stmts_to_close)
                         {
                             if (st.valid())
                             {
                                 boost::mysql::diagnostics diag;
-                                co_await conn->async_close_statement(st, diag, boost::asio::use_awaitable);
+                                co_await imp.get_conn().async_close_statement(st, diag, boost::asio::use_awaitable);
                             }
                         }
 
                         if (in_transaction)
                         {
-                            boost::mysql::results r;
-                            boost::mysql::diagnostics diag;
-                            co_await conn->async_execute("ROLLBACK", r, diag, boost::asio::use_awaitable);
+                            co_await sess->rollback();
                         }
                     }
                     catch (...)
@@ -204,14 +174,7 @@ namespace httplib::mysql
                         co_return;
                     }
 
-                    idle_entry entry;
-                    entry.sess_impl = std::make_unique<session::impl>();
-                    entry.sess_impl->conn = std::move(conn);
-                    entry.sess_impl->live = true;
-                    entry.sess_impl->last_active = std::chrono::steady_clock::now();
-                    entry.idle_since = entry.sess_impl->last_active;
-
-                    self->push_idle(std::move(entry));
+                    self->push_idle(std::move(sess));
                 },
                 [](std::exception_ptr) {});
         }
@@ -236,7 +199,7 @@ namespace httplib::mysql
             {
                 if (auto waiter = w.lock())
                 {
-                    waiter->timer.cancel();
+                    waiter->cancel();
                 }
             }
         }
@@ -269,75 +232,72 @@ namespace httplib::mysql
         }
 
       private:
-        std::unique_ptr<session::impl>
+        std::unique_ptr<session>
         try_pop_idle()
         {
             while (!idle_.empty())
             {
-                auto entry = std::move(idle_.back());
+                auto sess = std::move(idle_.back());
                 idle_.pop_back();
 
-                if (!entry.sess_impl || !entry.sess_impl->conn || !entry.sess_impl->live)
+                if (!sess)
+                {
+                    continue;
+                }
+                auto& imp = get_impl(*sess);
+                if (!imp.conn || !imp.live)
                 {
                     continue;
                 }
 
                 ++active_count_;
-                return std::move(entry.sess_impl);
+                return std::move(sess);
             }
             return nullptr;
         }
 
         void
-        push_idle(idle_entry entry)
+        push_idle(std::unique_ptr<session> sess)
         {
+            if (sess)
+            {
+                get_impl(*sess).last_active = std::chrono::steady_clock::now();
+            }
+
             std::lock_guard<std::mutex> lock(mutex_);
 
             if (active_count_ > 0)
             {
                 --active_count_;
             }
-
             if (stopped_)
             {
                 return;
             }
+            idle_.push_back(std::move(sess));
 
-            if (!waiters_.empty())
+            while (!waiters_.empty())
             {
-                idle_.push_back(std::move(entry));
                 auto w = std::move(waiters_.front());
                 waiters_.pop_front();
-                if (auto waiter = w.lock())
+                if (auto waiter = w.lock(); waiter)
                 {
-                    waiter->timer.cancel();
+                    waiter->cancel();
+                    break;
                 }
-                return;
             }
-
-            idle_.push_back(std::move(entry));
         }
 
         net::awaitable<std::unique_ptr<session::impl>>
         create_connection_impl()
         {
             auto conn = std::make_unique<boost::mysql::any_connection>(ex_);
-            boost::mysql::connect_params params;
-            params.server_address.emplace_host_and_port(cfg_.host, cfg_.port);
-            params.username = cfg_.user;
-            params.password = cfg_.password;
-            if (!cfg_.database.empty())
-            {
-                params.database = cfg_.database;
-            }
-            params.ssl = cfg_.ssl ? boost::mysql::ssl_mode::enable : boost::mysql::ssl_mode::disable;
-            params.multi_queries = true;
-
-            co_await conn->async_connect(params, boost::asio::use_awaitable);
+            co_await connect_session(*conn, cfg_);
 
             auto imp = std::make_unique<session::impl>();
             imp->params = cfg_;
             imp->conn = std::move(conn);
+            imp->stmt_cache.capacity = cfg_.max_cached_statements;
             co_return imp;
         }
 
@@ -351,18 +311,15 @@ namespace httplib::mysql
         net::awaitable<void>
         co_init_and_maintain()
         {
-            std::vector<idle_entry> pre_created;
+            std::vector<std::unique_ptr<session>> pre_created;
             for (size_t i = 0; i < cfg_.min_connections; ++i)
             {
                 try
                 {
-                    auto imp = co_await create_connection_impl();
-                    if (imp)
+                    auto sess = co_await create_session();
+                    if (sess)
                     {
-                        idle_entry entry;
-                        entry.sess_impl = std::move(imp);
-                        entry.idle_since = std::chrono::steady_clock::now();
-                        pre_created.push_back(std::move(entry));
+                        pre_created.push_back(std::move(sess));
                     }
                 }
                 catch (...)
@@ -376,9 +333,9 @@ namespace httplib::mysql
                 {
                     co_return;
                 }
-                for (auto& entry : pre_created)
+                for (auto& sess : pre_created)
                 {
-                    idle_.push_back(std::move(entry));
+                    idle_.push_back(std::move(sess));
                 }
             }
 
@@ -404,7 +361,7 @@ namespace httplib::mysql
 
                 auto now = std::chrono::steady_clock::now();
 
-                std::vector<idle_entry> to_ping;
+                std::vector<std::unique_ptr<session>> to_ping;
                 {
                     std::lock_guard<std::mutex> lock(mutex_);
                     if (stopped_)
@@ -414,7 +371,8 @@ namespace httplib::mysql
 
                     for (auto it = idle_.begin(); it != idle_.end();)
                     {
-                        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - it->idle_since);
+                        auto elapsed
+                            = std::chrono::duration_cast<std::chrono::seconds>(now - get_impl(**it).last_active);
 
                         if (cfg_.idle_timeout.count() > 0 && elapsed >= cfg_.idle_timeout)
                         {
@@ -438,7 +396,7 @@ namespace httplib::mysql
                     }
                 }
 
-                for (auto& entry : to_ping)
+                for (auto& sess : to_ping)
                 {
                     if (stopped_)
                     {
@@ -446,29 +404,32 @@ namespace httplib::mysql
                     }
 
                     bool alive = false;
-                    if (entry.sess_impl && entry.sess_impl->conn)
+                    if (sess)
                     {
-                        try
+                        auto& imp = get_impl(*sess);
+                        if (imp.conn)
                         {
-                            co_await entry.sess_impl->conn->async_ping(boost::asio::use_awaitable);
-                            entry.sess_impl->last_ping = std::chrono::steady_clock::now();
-                            entry.sess_impl->last_active = entry.sess_impl->last_ping;
-                            entry.sess_impl->live = true;
-                            alive = true;
-                        }
-                        catch (...)
-                        {
-                            entry.sess_impl->live = false;
+                            try
+                            {
+                                co_await imp.conn->async_ping(boost::asio::use_awaitable);
+                                imp.last_ping = std::chrono::steady_clock::now();
+                                imp.last_active = imp.last_ping;
+                                imp.live = true;
+                                alive = true;
+                            }
+                            catch (...)
+                            {
+                                imp.live = false;
+                            }
                         }
                     }
 
                     if (alive)
                     {
-                        entry.idle_since = std::chrono::steady_clock::now();
                         std::lock_guard<std::mutex> lock(mutex_);
                         if (!stopped_)
                         {
-                            idle_.push_back(std::move(entry));
+                            idle_.push_back(std::move(sess));
                         }
                     }
                 }
@@ -491,17 +452,13 @@ namespace httplib::mysql
                     }
                     try
                     {
-                        auto imp = co_await create_connection_impl();
-                        if (imp)
+                        auto sess = co_await create_session();
+                        if (sess)
                         {
-                            idle_entry entry;
-                            entry.sess_impl = std::move(imp);
-                            entry.idle_since = std::chrono::steady_clock::now();
-
                             std::lock_guard<std::mutex> lock(mutex_);
                             if (!stopped_)
                             {
-                                idle_.push_back(std::move(entry));
+                                idle_.push_back(std::move(sess));
                             }
                         }
                     }
@@ -512,10 +469,10 @@ namespace httplib::mysql
             }
         }
 
-        using waiters_list = std::deque<std::weak_ptr<waiter_node>>;
+        using waiters_list = std::deque<std::weak_ptr<net::steady_timer>>;
 
         mutable std::mutex mutex_;
-        std::vector<idle_entry> idle_;
+        std::vector<std::unique_ptr<session>> idle_;
         size_t active_count_ = 0;
         waiters_list waiters_;
 

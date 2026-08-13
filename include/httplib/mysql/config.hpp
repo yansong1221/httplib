@@ -2,6 +2,7 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -18,6 +19,7 @@ namespace httplib::mysql
         std::string charset = "utf8mb4";
         std::chrono::seconds connect_timeout { 5 };
         bool ssl = false;
+        size_t max_cached_statements = 64;
     };
 
     struct pool_params : connect_params
@@ -29,7 +31,6 @@ namespace httplib::mysql
         std::chrono::seconds idle_timeout { 300 };
         std::chrono::seconds idle_check_interval { 60 };
         std::chrono::seconds health_check_interval { 30 };
-        std::chrono::seconds ping_grace_period { 15 };
     };
 
 } // namespace httplib::mysql

@@ -17,56 +17,19 @@ namespace httplib::mysql
     session::connect(net::any_io_executor ex, connect_params cfg)
     {
         auto conn = std::make_unique<boost::mysql::any_connection>(ex);
-        boost::mysql::connect_params params;
-        params.server_address.emplace_host_and_port(cfg.host, cfg.port);
-        params.username = cfg.user;
-        params.password = cfg.password;
-        if (!cfg.database.empty())
-        {
-            params.database = cfg.database;
-        }
-        params.ssl = cfg.ssl ? boost::mysql::ssl_mode::enable : boost::mysql::ssl_mode::disable;
-        params.multi_queries = true;
-        co_await conn->async_connect(params, boost::asio::use_awaitable);
+        co_await connect_session(*conn, cfg);
 
         auto imp = std::make_unique<impl>();
         imp->params = std::move(cfg);
         imp->conn = std::move(conn);
+        imp->stmt_cache.capacity = imp->params.max_cached_statements;
         co_return session(std::move(imp));
     }
 
     session::session(session&&) noexcept = default;
     session& session::operator=(session&&) noexcept = default;
 
-    session::~session()
-    {
-        if (!impl_)
-        {
-            return;
-        }
-
-        if (impl_->in_transaction)
-        {
-            impl_->in_transaction = false;
-            auto conn = std::move(impl_->conn);
-            auto ex = conn->get_executor();
-            net::co_spawn(
-                ex,
-                [conn = std::move(conn)]() mutable -> net::awaitable<void>
-                {
-                    try
-                    {
-                        boost::mysql::results r;
-                        boost::mysql::diagnostics diag;
-                        co_await conn->async_execute("ROLLBACK", r, diag, boost::asio::use_awaitable);
-                    }
-                    catch (...)
-                    {
-                    }
-                },
-                net::detached);
-        }
-    }
+    session::~session() = default;
 
     session::impl&
     get_impl(session& self)
@@ -95,7 +58,7 @@ namespace httplib::mysql
                                               data,
                                               diag,
                                               boost::asio::redirect_error(boost::asio::use_awaitable, ec));
-        raise_mysql_error(ec, diag, sql);
+        imp.raise_error(ec, diag, sql);
 
         auto res = result(std::make_unique<result::impl>(std::move(data)));
 
@@ -130,18 +93,12 @@ namespace httplib::mysql
         auto& imp = get_impl(*this);
 
         imp.conn->close();
+        imp.clear_statement_cache();
+        imp.stmts_to_close.clear();
         imp.conn = std::make_unique<boost::mysql::any_connection>(imp.conn->get_executor());
 
-        boost::mysql::connect_params params;
-        params.server_address.emplace_host_and_port(imp.params.host, imp.params.port);
-        params.username = imp.params.user;
-        params.password = imp.params.password;
-        if (!imp.params.database.empty())
-        {
-            params.database = imp.params.database;
-        }
-        params.multi_queries = true;
-        co_await imp.conn->async_connect(params, boost::asio::use_awaitable);
+        co_await connect_session(*imp.conn, imp.params);
+        imp.live = true;
     }
 
     net::awaitable<bool>
@@ -214,7 +171,7 @@ namespace httplib::mysql
                                           r,
                                           diag,
                                           boost::asio::redirect_error(boost::asio::use_awaitable, ec));
-        raise_mysql_error(ec, diag);
+        raise_error(ec, diag);
         in_transaction = true;
     }
 
@@ -228,7 +185,7 @@ namespace httplib::mysql
                                           r,
                                           diag,
                                           boost::asio::redirect_error(boost::asio::use_awaitable, ec));
-        raise_mysql_error(ec, diag);
+        raise_error(ec, diag);
         in_transaction = false;
     }
 
@@ -242,7 +199,7 @@ namespace httplib::mysql
                                           r,
                                           diag,
                                           boost::asio::redirect_error(boost::asio::use_awaitable, ec));
-        raise_mysql_error(ec, diag);
+        raise_error(ec, diag);
         in_transaction = false;
     }
 

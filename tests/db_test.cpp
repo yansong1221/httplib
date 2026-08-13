@@ -110,10 +110,12 @@ TEST_CASE("config: defaults", "[db]")
     REQUIRE(c.host == "127.0.0.1");
     REQUIRE(c.port == 3306);
     REQUIRE(c.connect_timeout == std::chrono::seconds(5));
+    REQUIRE(c.max_cached_statements == 64);
 
     mysql::pool_params p;
     REQUIRE(p.min_connections == 2);
     REQUIRE(p.max_connections == 16);
+    REQUIRE(p.acquire_timeout == std::chrono::seconds(5));
 }
 
 // ===========================================================================
@@ -448,6 +450,264 @@ TEST_CASE("db: statement reuse (caching)", "[db][integration]")
             REQUIRE(v2 == 2);
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_cache");
+        });
+}
+
+// ===========================================================================
+// Statement cache eviction
+// ===========================================================================
+
+TEST_CASE("db: statement cache eviction", "[db][integration]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            mysql::connect_params cfg;
+            cfg.user = "root";
+            cfg.password = "123456";
+            cfg.max_cached_statements = 2;
+            auto sess = co_await mysql::session::connect(ioc.get_executor(), cfg);
+            co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
+            co_await sess.query("USE test");
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_sc (id INT)");
+            co_await sess.query("DELETE FROM __httplib_sc");
+            co_await sess.query("INSERT INTO __httplib_sc VALUES (1),(2),(3),(4),(5),(6)");
+
+            for (int round = 0; round < 3; ++round)
+            {
+                std::optional<int64_t> a, b, c;
+                co_await sess.stmt("SELECT id FROM __httplib_sc WHERE id = ?").bind(1).into(a, 0).execute();
+                co_await sess.stmt("SELECT id FROM __httplib_sc WHERE id > ?").bind(3).into(b, 0).execute();
+                co_await sess.stmt("SELECT id FROM __httplib_sc WHERE id >= ?").bind(5).into(c, 0).execute();
+                REQUIRE(a == 1);
+                REQUIRE(b == 4);
+                REQUIRE(c == 5);
+            }
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_sc");
+        },
+        [&](std::exception_ptr e)
+        {
+            err = e;
+        });
+    ioc.run();
+    if (err)
+        std::rethrow_exception(err);
+}
+
+// ===========================================================================
+// Risk-item regressions
+// ===========================================================================
+
+TEST_CASE("db: named params bound out of SQL order", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query(
+                "CREATE TABLE IF NOT EXISTS __httplib_ord (a INT, b INT)");
+            co_await sess.query("DELETE FROM __httplib_ord");
+            co_await sess.query("INSERT INTO __httplib_ord VALUES (1, 2)");
+
+            // bind in reverse order of appearance in the SQL
+            auto r = co_await sess.stmt(
+                                        "SELECT a, b FROM __httplib_ord WHERE a = :a AND b = :b")
+                         .bind("b", 2)
+                         .bind("a", 1)
+                         .execute();
+            REQUIRE(r.row_count() == 1);
+            REQUIRE(*r[0].as_int64("a") == 1);
+            REQUIRE(*r[0].as_int64("b") == 2);
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_ord");
+        });
+}
+
+TEST_CASE("db: named params reuse across cache", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query(
+                "CREATE TABLE IF NOT EXISTS __httplib_nc (id INT, name VARCHAR(100))");
+            co_await sess.query("DELETE FROM __httplib_nc");
+            co_await sess.query("INSERT INTO __httplib_nc VALUES (1, 'a'),(2, 'b')");
+
+            for (int round = 0; round < 2; ++round)
+            {
+                std::optional<int64_t> id;
+                std::optional<std::string> name;
+                co_await sess.stmt("SELECT id, name FROM __httplib_nc WHERE name = :n")
+                    .bind("n", "a")
+                    .into(id, "id")
+                    .into(name, "name")
+                    .execute();
+                REQUIRE(id == 1);
+                REQUIRE(name == "a");
+            }
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_nc");
+        });
+}
+
+// Regression: releasing a session with an open transaction used to crash
+// ~session() (use-after-move of conn). It must roll back and leave the pool usable.
+TEST_CASE("db: release with open transaction does not crash", "[db][integration]")
+{
+    run_pool(
+        [](mysql::connection_pool& pool) -> net::awaitable<void>
+        {
+            {
+                auto handle = co_await pool.async_acquire();
+                co_await handle->begin_transaction();
+                co_await handle->query("SELECT 1");
+            } // released with the transaction still open
+
+            auto h2 = co_await pool.async_acquire();
+            auto ok = co_await h2->ping();
+            REQUIRE(ok);
+        });
+}
+
+TEST_CASE("db: pooled session reconnect keeps params", "[db][integration]")
+{
+    run_pool(
+        [](mysql::connection_pool& pool) -> net::awaitable<void>
+        {
+            auto handle = co_await pool.async_acquire();
+            co_await handle->reconnect();
+            auto r = co_await handle->query("SELECT 1 AS v");
+            REQUIRE(*r[0].as_int64("v") == 1);
+        });
+}
+
+TEST_CASE("db: charset applied on connect", "[db][integration]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            mysql::connect_params cfg;
+            cfg.user = "root";
+            cfg.password = "123456";
+            cfg.charset = "latin1";
+            auto sess = co_await mysql::session::connect(ioc.get_executor(), cfg);
+            auto r = co_await sess.query("SELECT @@character_set_client AS cs");
+            REQUIRE(*r[0].as_string("cs") == "latin1");
+        },
+        [&](std::exception_ptr e)
+        {
+            err = e;
+        });
+    ioc.run();
+    if (err)
+        std::rethrow_exception(err);
+}
+
+TEST_CASE("db: async_acquire honors acquire_timeout", "[db][integration]")
+{
+    auto cfg = make_cfg();
+    cfg.min_connections = 0;
+    cfg.max_connections = 1;
+    cfg.acquire_timeout = std::chrono::seconds(1);
+
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            mysql::connection_pool pool(ioc.get_executor(), cfg);
+            pool.start();
+            auto h1 = co_await pool.async_acquire(); // holds the only connection
+
+            auto t0 = std::chrono::steady_clock::now();
+            REQUIRE_THROWS_AS(co_await pool.async_acquire(), std::runtime_error);
+            auto elapsed = std::chrono::steady_clock::now() - t0;
+            REQUIRE(elapsed >= std::chrono::milliseconds(800));
+            REQUIRE(elapsed < std::chrono::seconds(3));
+        },
+        [&](std::exception_ptr e)
+        {
+            err = e;
+        });
+    ioc.run();
+    if (err)
+        std::rethrow_exception(err);
+}
+
+TEST_CASE("db: transport error marks connection dead", "[db][integration]")
+{
+    auto cfg = make_cfg();
+    cfg.min_connections = 0;
+    cfg.max_connections = 1;
+
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            mysql::connection_pool pool(ioc.get_executor(), cfg);
+            pool.start();
+
+            {
+                auto h1 = co_await pool.async_acquire();
+                auto r = co_await h1->query("SELECT CONNECTION_ID() AS id");
+                auto conn_id = *r[0].as_uint64("id");
+
+                mysql::connect_params kcfg;
+                kcfg.user = "root";
+                kcfg.password = "123456";
+                auto killer = co_await mysql::session::connect(ioc.get_executor(), kcfg);
+                co_await killer.query("KILL " + std::to_string(conn_id));
+
+                REQUIRE_THROWS_AS(co_await h1->query("SELECT 1"), mysql::mysql_exception);
+            } // h1 released here with a dead connection (live=false)
+
+            // the pool must drop the dead connection and create a fresh one
+            auto h2 = co_await pool.async_acquire();
+            auto ok = co_await h2->ping();
+            REQUIRE(ok);
+        },
+        [&](std::exception_ptr e)
+        {
+            err = e;
+        });
+    ioc.run();
+    if (err)
+        std::rethrow_exception(err);
+}
+
+// Regression: binding two owned-storage values (json) used to share a single
+// data_str buffer, so the first field_view dangled / was overwritten.
+TEST_CASE("db: prepared statement multiple json binds", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query(
+                "CREATE TABLE IF NOT EXISTS __httplib_j2 (a JSON, b JSON)");
+            co_await sess.query("DELETE FROM __httplib_j2");
+
+            boost::json::value v1 = { { "x", 1 } };
+            boost::json::value v2 = { { "y", "hi" } };
+            co_await sess.stmt("INSERT INTO __httplib_j2 (a, b) VALUES (?, ?)")
+                .bind(v1)
+                .bind(v2)
+                .execute();
+
+            auto r = co_await sess.query("SELECT a, b FROM __httplib_j2");
+            REQUIRE(r.row_count() == 1);
+            REQUIRE(r[0].as_json("a")->as_object().at("x").as_int64() == 1);
+            REQUIRE(r[0].as_json("b")->as_object().at("y").as_string() == "hi");
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_j2");
         });
 }
 
