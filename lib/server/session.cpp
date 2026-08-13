@@ -147,6 +147,7 @@ namespace httplib::server
     session::detect_ssl_task::then()
     {
         beast::flat_buffer buffer;
+        buffer.reserve(io_buffer_size);
 #ifdef HTTPLIB_ENABLED_SSL
         if (auto ssl_ctx = (*server_impl_).ssl_context(); ssl_ctx)
         {

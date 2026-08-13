@@ -99,7 +99,7 @@ namespace httplib::body
                 eof
             };
             step step_ = step::header;
-            char buf_[BOOST_BEAST_FILE_BUFFER_SIZE];
+            char buf_[file_body_buffer_size]; 
             std::size_t file_size_;
         };
         //--------------------------------------------------------------------------

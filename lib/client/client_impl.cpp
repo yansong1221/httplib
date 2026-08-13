@@ -38,6 +38,8 @@ namespace httplib::client
         spdlog::sinks_init_list sink_list = { console_sink };
         default_logger_ = std::make_shared<spdlog::logger>("httplib.client", sink_list);
         default_logger_->set_level(spdlog::level::info);
+
+        buffer_.reserve(io_buffer_size);
     }
 
     http_client::request

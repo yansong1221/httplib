@@ -148,8 +148,8 @@ namespace httplib
 
             if (!ec)
             {
-                net::socket_base::reuse_address option(true);
-                socket().set_option(option);
+                socket().set_option(net::socket_base::reuse_address(true));
+                socket().set_option(net::ip::tcp::no_delay(true));
             }
             co_return ec;
         }
@@ -164,10 +164,10 @@ namespace httplib
 
         static boost::system::result<stream_t>
         create_stream(net::any_io_executor const& executor,
-                       std::string const& host,
-                       bool use_ssl,
-                       bool verify_ssl = true,
-                       std::string_view ca_cert = {})
+                      std::string const& host,
+                      bool use_ssl,
+                      bool verify_ssl = true,
+                      std::string_view ca_cert = {})
         {
             if (use_ssl)
             {

@@ -268,6 +268,10 @@ namespace httplib::server
     {
         auto remote_endp = sock.remote_endpoint();
         auto local_endp = sock.local_endpoint();
+        {
+            boost::system::error_code ec;
+            sock.set_option(net::ip::tcp::no_delay(true), ec);
+        }
         logger()->trace("accept new connection [{}:{}]", remote_endp.address().to_string(), remote_endp.port());
 
         auto conn = std::make_shared<session>(std::move(sock), shared_from_this());
