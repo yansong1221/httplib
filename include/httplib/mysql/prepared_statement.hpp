@@ -23,10 +23,12 @@ namespace httplib::mysql
          */
         template <typename T>
         inline constexpr bool is_vector_into_type_v
-            = std::is_same_v<T, int64_t> || std::is_same_v<T, uint64_t> || std::is_same_v<T, double>
-              || std::is_same_v<T, float> || std::is_same_v<T, bool> || std::is_same_v<T, std::string>
-              || std::is_same_v<T, date> || std::is_same_v<T, datetime> || std::is_same_v<T, time>
-              || std::is_same_v<T, std::chrono::system_clock::time_point> || std::is_same_v<T, boost::json::value>;
+            = std::is_same_v<T, int64_t> || std::is_same_v<T, uint64_t> || std::is_same_v<T, int>
+              || std::is_same_v<T, unsigned> || std::is_same_v<T, short> || std::is_same_v<T, unsigned short>
+              || std::is_same_v<T, double> || std::is_same_v<T, float> || std::is_same_v<T, bool>
+              || std::is_same_v<T, std::string> || std::is_same_v<T, date> || std::is_same_v<T, datetime>
+              || std::is_same_v<T, time> || std::is_same_v<T, std::chrono::system_clock::time_point>
+              || std::is_same_v<T, boost::json::value>;
 
         /**
          * \brief `into(std::optional<T>&)` 支持的元素类型（在 vector 基础上额外支持 const_buffer）。

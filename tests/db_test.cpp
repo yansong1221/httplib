@@ -410,6 +410,41 @@ TEST_CASE("db: prepared statement into() extraction", "[db][integration]")
         });
 }
 
+TEST_CASE("db: into() supports small integer types", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_ints (a INT, b INT, c INT, d INT)");
+            co_await sess.query("DELETE FROM __httplib_ints");
+            co_await sess.query("INSERT INTO __httplib_ints VALUES (1, 2, 3, 4)");
+
+            std::optional<int> si;
+            std::optional<short> ss;
+            std::optional<unsigned> ui;
+            std::optional<unsigned short> us;
+            co_await sess.stmt("SELECT a, b, c, d FROM __httplib_ints")
+                .into(si, 0)
+                .into(ss, 1)
+                .into(ui, 2)
+                .into(us, 3)
+                .execute();
+            REQUIRE(si == 1);
+            REQUIRE(ss == 2);
+            REQUIRE(ui == 3u);
+            REQUIRE(us == 4);
+
+            std::vector<int> vi;
+            std::vector<unsigned> vu;
+            co_await sess.query("INSERT INTO __httplib_ints VALUES (5, 6, 7, 8)");
+            co_await sess.stmt("SELECT a, c FROM __httplib_ints ORDER BY a").into(vi, 0).into(vu, 1).execute();
+            REQUIRE(vi == std::vector<int> { 1, 5 });
+            REQUIRE(vu == std::vector<unsigned> { 3u, 7u });
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_ints");
+        });
+}
+
 TEST_CASE("db: statement reuse (caching)", "[db][integration]")
 {
     run(
@@ -1190,13 +1225,21 @@ TEST_CASE("db: bind blob binary data", "[db][integration]")
         });
 }
 
-TEST_CASE("db: unbound named param is null", "[db][integration]")
+TEST_CASE("db: unbound named param throws", "[db][integration]")
 {
     run(
         [](mysql::session& sess) -> net::awaitable<void>
         {
-            auto r = co_await sess.stmt("SELECT :n IS NULL AS r").execute();
-            REQUIRE(*r[0].as_int64("r") == 1);
+            // 完全未绑定
+            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :n IS NULL AS r").execute(), std::runtime_error);
+
+            // 绑了一部分，剩一个没绑
+            REQUIRE_THROWS_AS(
+                co_await sess.stmt("SELECT :a + :b AS x").bind("a", 1).execute(), std::runtime_error);
+
+            // 全部绑定正常执行
+            auto r = co_await sess.stmt("SELECT :a + :b AS x").bind("a", 1).bind("b", 2).execute();
+            REQUIRE(*r[0].as_int64("x") == 3);
         });
 }
 

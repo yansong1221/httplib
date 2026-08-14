@@ -4,8 +4,10 @@
 #include "mysql_fwd.hpp"
 #include <chrono>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -55,6 +57,46 @@ namespace httplib::mysql
         , time
     {
     };
+
+    namespace detail
+    {
+        /**
+         * \brief 把 int64 窄化到更小的整数类型，越界抛异常。
+         */
+        template <typename T>
+        std::optional<T>
+        narrow_int(std::optional<int64_t> v)
+        {
+            if (!v)
+            {
+                return std::nullopt;
+            }
+            if (*v < static_cast<int64_t>(std::numeric_limits<T>::min())
+                || *v > static_cast<int64_t>(std::numeric_limits<T>::max()))
+            {
+                throw std::runtime_error("db: value out of range for integer type");
+            }
+            return static_cast<T>(*v);
+        }
+
+        /**
+         * \brief 把 uint64 窄化到更小的无符号整数类型，越界抛异常。
+         */
+        template <typename T>
+        std::optional<T>
+        narrow_uint(std::optional<uint64_t> v)
+        {
+            if (!v)
+            {
+                return std::nullopt;
+            }
+            if (*v > static_cast<uint64_t>(std::numeric_limits<T>::max()))
+            {
+                throw std::runtime_error("db: value out of range for integer type");
+            }
+            return static_cast<T>(*v);
+        }
+    } // namespace detail
 
     /**
      * \brief 结果集中的一行。
@@ -124,8 +166,9 @@ namespace httplib::mysql
         /**
          * \brief 按模板参数类型读取列值。
          * \details
-         * 支持 int64_t / uint64_t / double / float / bool / std::string / std::string_view /
-         * net::const_buffer / date / datetime / time / system_clock::time_point / boost::json::value。
+         * 支持 int64_t / uint64_t / int / unsigned / short / unsigned short / double / float / bool /
+         * std::string / std::string_view / net::const_buffer / date / datetime / time /
+         * system_clock::time_point / boost::json::value。
          * \param col 列下标。
          * \returns 列值；NULL 返回 nullopt。
          */
@@ -140,6 +183,22 @@ namespace httplib::mysql
             else if constexpr (std::is_same_v<T, uint64_t>)
             {
                 return as_uint64(col);
+            }
+            else if constexpr (std::is_same_v<T, int>)
+            {
+                return detail::narrow_int<int>(as_int64(col));
+            }
+            else if constexpr (std::is_same_v<T, unsigned>)
+            {
+                return detail::narrow_uint<unsigned>(as_uint64(col));
+            }
+            else if constexpr (std::is_same_v<T, short>)
+            {
+                return detail::narrow_int<short>(as_int64(col));
+            }
+            else if constexpr (std::is_same_v<T, unsigned short>)
+            {
+                return detail::narrow_uint<unsigned short>(as_uint64(col));
             }
             else if constexpr (std::is_same_v<T, double>)
             {

@@ -441,7 +441,11 @@ namespace httplib::mysql
             for (auto const& name : impl_->param_names)
             {
                 auto it = impl_->named_values.find(name);
-                impl_->params.push_back(it != impl_->named_values.end() ? it->second : boost::mysql::field_view());
+                if (it == impl_->named_values.end())
+                {
+                    throw std::runtime_error("db: unbound named parameter '" + name + "'");
+                }
+                impl_->params.push_back(it->second);
             }
         }
 
