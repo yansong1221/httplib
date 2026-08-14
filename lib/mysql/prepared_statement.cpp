@@ -35,7 +35,6 @@ namespace httplib::mysql
         result.reserve(imp.sql.size());
 
         imp.param_names.clear();
-        imp.name_to_idx.clear();
 
         for (size_t i = 0; i < imp.sql.size(); ++i)
         {
@@ -91,9 +90,7 @@ namespace httplib::mysql
                 if (start > i + 1)
                 {
                     std::string name = imp.sql.substr(i + 1, start - i - 1);
-                    // 每次出现都记录，支持同名复用；name_to_idx 仅作为"合法名字"集合
                     imp.param_names.push_back(name);
-                    imp.name_to_idx.insert(name);
                     result += '?';
                     i = start - 1;
                     continue;
@@ -108,7 +105,7 @@ namespace httplib::mysql
     bind_named(prepared_statement::impl& imp, std::string_view name, boost::mysql::field_view fv)
     {
         auto key = std::string(name);
-        if (imp.name_to_idx.find(key) == imp.name_to_idx.end())
+        if (std::ranges::find(imp.param_names, name) == imp.param_names.end())
         {
             throw std::runtime_error("db: no such named parameter '" + key + "'");
         }
