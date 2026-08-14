@@ -355,7 +355,6 @@ namespace httplib::mysql
         std::vector<std::function<void(result const&)>> extractors;
 
         std::vector<std::string> param_names;
-        std::unordered_set<std::string> name_to_idx;
         std::unordered_map<std::string, boost::mysql::field_view> named_values;
         std::unordered_map<std::string, std::string> named_storage;
         std::deque<std::string> data_strs;
