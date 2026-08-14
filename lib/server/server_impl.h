@@ -155,7 +155,7 @@ namespace httplib::server
         std::uint64_t upload_file_limit_ = 10 * 1024 * 1024;
 
         std::uint32_t header_limit_ = 65536;
-        std::uint64_t body_limit_ = 100 * 1024 * 1024;
+        std::uint64_t body_limit_ = std::numeric_limits<std::uint64_t>::max();
         std::atomic<bool> running_ = false;
 
 #ifdef HTTPLIB_ENABLED_SSL
