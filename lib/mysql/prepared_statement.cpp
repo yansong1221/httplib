@@ -12,11 +12,121 @@
 namespace httplib::mysql
 {
 
+    static boost::mysql::datetime
+    to_datetime(std::chrono::system_clock::time_point tp)
+    {
+        auto days = std::chrono::floor<std::chrono::days>(tp);
+        auto ymd = std::chrono::year_month_day(days);
+        auto hms = std::chrono::hh_mm_ss(tp - days);
+
+        return boost::mysql::datetime(static_cast<unsigned short>(static_cast<int>(ymd.year())),
+                                      static_cast<unsigned short>(static_cast<unsigned>(ymd.month())),
+                                      static_cast<unsigned short>(static_cast<unsigned>(ymd.day())),
+                                      static_cast<unsigned short>(hms.hours().count()),
+                                      static_cast<unsigned short>(hms.minutes().count()),
+                                      static_cast<unsigned short>(hms.seconds().count()),
+                                      static_cast<unsigned long>(hms.subseconds().count()));
+    }
+
+    static void
+    parse_named_params(prepared_statement::impl& imp)
+    {
+        std::string result;
+        result.reserve(imp.sql.size());
+
+        imp.param_names.clear();
+        imp.name_to_idx.clear();
+
+        for (size_t i = 0; i < imp.sql.size(); ++i)
+        {
+            char c = imp.sql[i];
+            if (c == '\'' || c == '"' || c == '`')
+            {
+                char quote = c;
+                result += c;
+                while (++i < imp.sql.size())
+                {
+                    result += imp.sql[i];
+                    if (imp.sql[i] == quote && (i + 1 >= imp.sql.size() || imp.sql[i + 1] != quote))
+                    {
+                        break;
+                    }
+                    if (imp.sql[i] == '\\' && i + 1 < imp.sql.size())
+                    {
+                        result += imp.sql[++i];
+                    }
+                }
+                continue;
+            }
+            if (c == '-' && i + 1 < imp.sql.size() && imp.sql[i + 1] == '-')
+            {
+                while (i < imp.sql.size() && imp.sql[i] != '\n')
+                {
+                    ++i;
+                }
+                if (i < imp.sql.size())
+                {
+                    result += imp.sql[i];
+                }
+                continue;
+            }
+            if (c == '/' && i + 1 < imp.sql.size() && imp.sql[i + 1] == '*')
+            {
+                i += 2;
+                while (i + 1 < imp.sql.size() && !(imp.sql[i] == '*' && imp.sql[i + 1] == '/'))
+                {
+                    ++i;
+                }
+                i += 1;
+                continue;
+            }
+            if (c == ':')
+            {
+                size_t start = i + 1;
+                while (start < imp.sql.size()
+                       && (std::isalnum(static_cast<unsigned char>(imp.sql[start])) || imp.sql[start] == '_'))
+                {
+                    ++start;
+                }
+                if (start > i + 1)
+                {
+                    std::string name = imp.sql.substr(i + 1, start - i - 1);
+                    if (imp.name_to_idx.find(name) == imp.name_to_idx.end())
+                    {
+                        size_t idx = imp.param_names.size();
+                        imp.param_names.push_back(name);
+                        imp.name_to_idx[name] = idx;
+                    }
+                    result += '?';
+                    i = start - 1;
+                    continue;
+                }
+            }
+            result += c;
+        }
+        imp.sql = std::move(result);
+    }
+
+    static void
+    bind_named(prepared_statement::impl& imp, std::string_view name, boost::mysql::field_view fv)
+    {
+        auto key = std::string(name);
+        if (imp.name_to_idx.find(key) == imp.name_to_idx.end())
+        {
+            throw std::runtime_error("db: no such named parameter '" + key + "'");
+        }
+        imp.named_values[std::move(key)] = fv;
+    }
+
     prepared_statement::prepared_statement(session& sess, std::string sql) : impl_(std::make_unique<impl>())
     {
         impl_->session = &sess;
         impl_->original_sql = sql;
         impl_->sql = std::move(sql);
+        if (impl_->sql.find(':') != std::string::npos)
+        {
+            parse_named_params(*impl_);
+        }
     }
 
     prepared_statement::prepared_statement(prepared_statement&&) noexcept = default;
@@ -168,107 +278,6 @@ namespace httplib::mysql
         impl_->data_strs.push_back(boost::json::serialize(v));
         impl_->params.emplace_back(impl_->data_strs.back());
         return *this;
-    }
-
-    static boost::mysql::datetime
-    to_datetime(std::chrono::system_clock::time_point tp)
-    {
-        auto days = std::chrono::floor<std::chrono::days>(tp);
-        auto ymd = std::chrono::year_month_day(days);
-        auto hms = std::chrono::hh_mm_ss(tp - days);
-
-        return boost::mysql::datetime(static_cast<unsigned short>(static_cast<int>(ymd.year())),
-                                      static_cast<unsigned short>(static_cast<unsigned>(ymd.month())),
-                                      static_cast<unsigned short>(static_cast<unsigned>(ymd.day())),
-                                      static_cast<unsigned short>(hms.hours().count()),
-                                      static_cast<unsigned short>(hms.minutes().count()),
-                                      static_cast<unsigned short>(hms.seconds().count()),
-                                      static_cast<unsigned long>(hms.subseconds().count()));
-    }
-
-    static void
-    parse_named_params(prepared_statement::impl& imp)
-    {
-        std::string result;
-        result.reserve(imp.sql.size());
-
-        imp.param_names.clear();
-        imp.name_to_idx.clear();
-
-        for (size_t i = 0; i < imp.sql.size(); ++i)
-        {
-            char c = imp.sql[i];
-            if (c == '\'' || c == '"' || c == '`')
-            {
-                char quote = c;
-                result += c;
-                while (++i < imp.sql.size())
-                {
-                    result += imp.sql[i];
-                    if (imp.sql[i] == quote && (i + 1 >= imp.sql.size() || imp.sql[i + 1] != quote))
-                    {
-                        break;
-                    }
-                    if (imp.sql[i] == '\\' && i + 1 < imp.sql.size())
-                    {
-                        result += imp.sql[++i];
-                    }
-                }
-                continue;
-            }
-            if (c == '-' && i + 1 < imp.sql.size() && imp.sql[i + 1] == '-')
-            {
-                while (i < imp.sql.size() && imp.sql[i] != '\n')
-                {
-                    ++i;
-                }
-                if (i < imp.sql.size())
-                {
-                    result += imp.sql[i];
-                }
-                continue;
-            }
-            if (c == '/' && i + 1 < imp.sql.size() && imp.sql[i + 1] == '*')
-            {
-                i += 2;
-                while (i + 1 < imp.sql.size() && !(imp.sql[i] == '*' && imp.sql[i + 1] == '/'))
-                {
-                    ++i;
-                }
-                i += 1;
-                continue;
-            }
-            if (c == ':')
-            {
-                size_t start = i + 1;
-                while (start < imp.sql.size()
-                       && (std::isalnum(static_cast<unsigned char>(imp.sql[start])) || imp.sql[start] == '_'))
-                {
-                    ++start;
-                }
-                if (start > i + 1)
-                {
-                    std::string name = imp.sql.substr(i + 1, start - i - 1);
-                    if (imp.name_to_idx.find(name) == imp.name_to_idx.end())
-                    {
-                        size_t idx = imp.param_names.size();
-                        imp.param_names.push_back(name);
-                        imp.name_to_idx[name] = idx;
-                    }
-                    result += '?';
-                    i = start - 1;
-                    continue;
-                }
-            }
-            result += c;
-        }
-        imp.sql = std::move(result);
-    }
-
-    static void
-    bind_named(prepared_statement::impl& imp, std::string_view name, boost::mysql::field_view fv)
-    {
-        imp.named_values[std::string(name)] = fv;
     }
 
     prepared_statement&
@@ -425,26 +434,7 @@ namespace httplib::mysql
     net::awaitable<result>
     prepared_statement::execute()
     {
-        if (!impl_->parsed && impl_->sql.find(':') != std::string::npos)
-        {
-            parse_named_params(*impl_);
-            impl_->parsed = true;
-        }
-
-        for (auto const& kv : impl_->named_values)
-        {
-            if (impl_->name_to_idx.find(kv.first) == impl_->name_to_idx.end())
-            {
-                throw std::runtime_error("db: no such named parameter '" + kv.first + "'");
-            }
-        }
-
-        if (!impl_->param_names.empty() && impl_->used_positional_bind)
-        {
-            throw std::runtime_error("db: cannot mix positional and named parameters");
-        }
-
-        if (impl_->parsed)
+        if (!impl_->param_names.empty())
         {
             impl_->params.clear();
             impl_->params.reserve(impl_->param_names.size());
@@ -523,165 +513,10 @@ namespace httplib::mysql
         co_return res;
     }
 
-    template <typename T, typename F>
-    static auto
-    into_extractor(std::optional<T>& v, size_t col, F get)
+    void
+    prepared_statement::add_extractor(std::function<void(result const&)> ex)
     {
-        return [&v, col, get = std::move(get)](result const& r) { v = get(r[0], col); };
-    }
-
-    template <typename T, typename F>
-    static auto
-    into_extractor(std::optional<T>& v, std::string_view name, F get)
-    {
-        return [&v, n = std::string(name), get = std::move(get)](result const& r) { v = get(r[0], n); };
-    }
-
-    prepared_statement&
-    prepared_statement::into(std::optional<int64_t>& v, size_t col)
-    {
-        impl_->add_extractor(into_extractor(v, col, [](auto r, auto c) { return r.as_int64(c); }));
-        return *this;
-    }
-    prepared_statement&
-    prepared_statement::into(std::optional<uint64_t>& v, size_t col)
-    {
-        impl_->add_extractor(into_extractor(v, col, [](auto r, auto c) { return r.as_uint64(c); }));
-        return *this;
-    }
-    prepared_statement&
-    prepared_statement::into(std::optional<double>& v, size_t col)
-    {
-        impl_->add_extractor(into_extractor(v, col, [](auto r, auto c) { return r.as_double(c); }));
-        return *this;
-    }
-    prepared_statement&
-    prepared_statement::into(std::optional<float>& v, size_t col)
-    {
-        impl_->add_extractor(into_extractor(v, col, [](auto r, auto c) { return r.as_float(c); }));
-        return *this;
-    }
-    prepared_statement&
-    prepared_statement::into(std::optional<bool>& v, size_t col)
-    {
-        impl_->add_extractor(into_extractor(v, col, [](auto r, auto c) { return r.as_bool(c); }));
-        return *this;
-    }
-    prepared_statement&
-    prepared_statement::into(std::optional<std::string>& v, size_t col)
-    {
-        impl_->add_extractor(into_extractor(v, col, [](auto r, auto c) { return r.as_string(c); }));
-        return *this;
-    }
-    prepared_statement&
-    prepared_statement::into(std::optional<date>& v, size_t col)
-    {
-        impl_->add_extractor(into_extractor(v, col, [](auto r, auto c) { return r.as_date(c); }));
-        return *this;
-    }
-    prepared_statement&
-    prepared_statement::into(std::optional<datetime>& v, size_t col)
-    {
-        impl_->add_extractor(into_extractor(v, col, [](auto r, auto c) { return r.as_datetime(c); }));
-        return *this;
-    }
-    prepared_statement&
-    prepared_statement::into(std::optional<time>& v, size_t col)
-    {
-        impl_->add_extractor(into_extractor(v, col, [](auto r, auto c) { return r.as_time(c); }));
-        return *this;
-    }
-    prepared_statement&
-    prepared_statement::into(std::optional<std::chrono::system_clock::time_point>& v, size_t col)
-    {
-        impl_->add_extractor(into_extractor(v, col, [](auto r, auto c) { return r.as_timestamp(c); }));
-        return *this;
-    }
-    prepared_statement&
-    prepared_statement::into(std::optional<net::const_buffer>& v, size_t col)
-    {
-        impl_->add_extractor(into_extractor(v, col, [](auto r, auto c) { return r.as_blob(c); }));
-        return *this;
-    }
-    prepared_statement&
-    prepared_statement::into(std::optional<boost::json::value>& v, size_t col)
-    {
-        impl_->add_extractor(into_extractor(v, col, [](auto r, auto c) { return r.as_json(c); }));
-        return *this;
-    }
-
-    prepared_statement&
-    prepared_statement::into(std::optional<date>& v, std::string_view name)
-    {
-        impl_->add_extractor(into_extractor(v, name, [](auto r, auto n) { return r.as_date(n); }));
-        return *this;
-    }
-    prepared_statement&
-    prepared_statement::into(std::optional<int64_t>& v, std::string_view name)
-    {
-        impl_->add_extractor(into_extractor(v, name, [](auto r, auto n) { return r.as_int64(n); }));
-        return *this;
-    }
-    prepared_statement&
-    prepared_statement::into(std::optional<uint64_t>& v, std::string_view name)
-    {
-        impl_->add_extractor(into_extractor(v, name, [](auto r, auto n) { return r.as_uint64(n); }));
-        return *this;
-    }
-    prepared_statement&
-    prepared_statement::into(std::optional<double>& v, std::string_view name)
-    {
-        impl_->add_extractor(into_extractor(v, name, [](auto r, auto n) { return r.as_double(n); }));
-        return *this;
-    }
-    prepared_statement&
-    prepared_statement::into(std::optional<float>& v, std::string_view name)
-    {
-        impl_->add_extractor(into_extractor(v, name, [](auto r, auto n) { return r.as_float(n); }));
-        return *this;
-    }
-    prepared_statement&
-    prepared_statement::into(std::optional<bool>& v, std::string_view name)
-    {
-        impl_->add_extractor(into_extractor(v, name, [](auto r, auto n) { return r.as_bool(n); }));
-        return *this;
-    }
-    prepared_statement&
-    prepared_statement::into(std::optional<std::string>& v, std::string_view name)
-    {
-        impl_->add_extractor(into_extractor(v, name, [](auto r, auto n) { return r.as_string(n); }));
-        return *this;
-    }
-
-    prepared_statement&
-    prepared_statement::into(std::optional<datetime>& v, std::string_view name)
-    {
-        impl_->add_extractor(into_extractor(v, name, [](auto r, auto n) { return r.as_datetime(n); }));
-        return *this;
-    }
-    prepared_statement&
-    prepared_statement::into(std::optional<time>& v, std::string_view name)
-    {
-        impl_->add_extractor(into_extractor(v, name, [](auto r, auto n) { return r.as_time(n); }));
-        return *this;
-    }
-    prepared_statement&
-    prepared_statement::into(std::optional<std::chrono::system_clock::time_point>& v, std::string_view name)
-    {
-        impl_->add_extractor(into_extractor(v, name, [](auto r, auto n) { return r.as_timestamp(n); }));
-        return *this;
-    }
-    prepared_statement&
-    prepared_statement::into(std::optional<net::const_buffer>& v, std::string_view name)
-    {
-        impl_->add_extractor(into_extractor(v, name, [](auto r, auto n) { return r.as_blob(n); }));
-        return *this;
-    }
-    prepared_statement&
-    prepared_statement::into(std::optional<boost::json::value>& v, std::string_view name)
-    {
-        impl_->add_extractor(into_extractor(v, name, [](auto r, auto n) { return r.as_json(n); }));
-        return *this;
+        impl_->add_extractor(std::move(ex));
     }
 
 } // namespace httplib::mysql

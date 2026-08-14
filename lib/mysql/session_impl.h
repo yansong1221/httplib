@@ -358,15 +358,16 @@ namespace httplib::mysql
         std::unordered_map<std::string, boost::mysql::field_view> named_values;
         std::unordered_map<std::string, std::string> named_storage;
         std::deque<std::string> data_strs;
-        bool parsed = false;
         bool need_params_reset = false;
         bool need_extractors_reset = false;
-        bool used_positional_bind = false;
 
         void
         begin_bind()
         {
-            used_positional_bind = true;
+            if (!param_names.empty())
+            {
+                throw std::runtime_error("db: cannot mix positional and named parameters");
+            }
             if (need_params_reset)
             {
                 params.clear();

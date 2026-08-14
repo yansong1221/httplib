@@ -3,8 +3,11 @@
 
 namespace httplib::mysql
 {
+    /// 日期（年/月/日）。
     struct date;
+    /// 日期时间（date + time）。
     struct datetime;
+    /// 时间（时/分/秒/微秒）。
     struct time;
 
     class result;

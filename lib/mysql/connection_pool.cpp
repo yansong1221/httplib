@@ -62,15 +62,15 @@ namespace httplib::mysql
 
             do
             {
+                if (auto sess = co_await self->try_pop_validated())
+                {
+                    co_return session_handle(self, std::move(sess));
+                }
+
                 std::unique_lock<std::mutex> lock(self->mutex_);
                 if (self->stopped_)
                 {
                     throw std::runtime_error("connection_pool: pool is shut down");
-                }
-
-                if (auto sess = self->try_pop_idle())
-                {
-                    co_return session_handle(self, std::move(sess));
                 }
 
                 if (active_count_ + idle_.size() < cfg_.max_connections)
@@ -112,13 +112,6 @@ namespace httplib::mysql
 
                 boost::system::error_code ec;
                 co_await node->async_wait(util::net_awaitable[ec]);
-
-                lock.lock();
-
-                if (auto sess = self->try_pop_idle())
-                {
-                    co_return session_handle(self, std::move(sess));
-                }
             } while (deadline > std::chrono::steady_clock::now());
 
             throw std::runtime_error("connection_pool: acquire timeout");
@@ -268,6 +261,33 @@ namespace httplib::mysql
                 return std::move(sess);
             }
             return nullptr;
+        }
+
+        net::awaitable<std::unique_ptr<session>>
+        try_pop_validated()
+        {
+            std::unique_ptr<session> sess;
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+                sess = try_pop_idle();
+            }
+            if (!sess)
+            {
+                co_return nullptr;
+            }
+
+            if (!cfg_.validate_on_borrow || co_await sess->ping())
+            {
+                co_return sess;
+            }
+
+            // 连接已失效：丢弃，由外层重新创建新连接
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (active_count_ > 0)
+            {
+                --active_count_;
+            }
+            co_return nullptr;
         }
 
         void

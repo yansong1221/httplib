@@ -11,12 +11,23 @@
 namespace httplib::mysql
 {
 
+    /**
+     * \brief MySQL 连接池。
+     * \details
+     * 维护一批可复用的连接，通过 \ref async_acquire 借出、句柄析构时归还。
+     * \n
+     * 后台协程负责空闲连接的回收与健康检查（见 \ref pool_params）。
+     */
     class HTTPLIB_API connection_pool
     {
       private:
         struct impl;
 
       public:
+        /**
+         * \brief 借出的连接句柄。
+         * \details 析构时把连接归还给池；同一时刻只能有一个持有者。
+         */
         class HTTPLIB_API session_handle
         {
             friend class connection_pool;
@@ -45,6 +56,9 @@ namespace httplib::mysql
             session& operator*();
             session const& operator*() const;
 
+            /**
+             * \brief 提前归还连接。
+             */
             void release();
         };
 
@@ -57,9 +71,23 @@ namespace httplib::mysql
         connection_pool(connection_pool&&) noexcept;
         connection_pool& operator=(connection_pool&&) noexcept;
 
+        /**
+         * \brief 启动池（预建 min_connections 条连接，并启动维护协程）。
+         */
         void start();
+
+        /**
+         * \brief 借出一条连接。
+         * \param wait_timeout 池满时的等待超时；0 使用 pool_params::acquire_timeout。
+         * \returns 连接句柄。
+         * \throws std::runtime_error 池已关闭或等待超时。
+         */
         net::awaitable<session_handle> async_acquire(std::chrono::steady_clock::duration wait_timeout
                                                      = std::chrono::steady_clock::duration::zero());
+
+        /**
+         * \brief 关闭池，唤醒所有等待者。
+         */
         void stop();
 
         size_t active_count() const;

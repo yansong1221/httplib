@@ -12,6 +12,15 @@
 namespace httplib::mysql
 {
 
+    /**
+     * \brief 查询结果集。
+     * \details
+     * 由 \ref session::query 或 \ref prepared_statement::execute 返回。
+     * \n
+     * 多语句查询会包含多个结果集，可通过 \ref resultset_count / \ref next_resultset 遍历。
+     * \n
+     * 支持范围 for 遍历行（通过 \ref begin / \ref end）。
+     */
     class HTTPLIB_API result
     {
       public:
@@ -23,29 +32,69 @@ namespace httplib::mysql
         result(result const&) = delete;
         result& operator=(result const&) = delete;
 
+        /**
+         * \brief 当前结果集是否没有行。
+         */
         bool empty() const;
 
+        /**
+         * \brief 结果集数量（多语句查询时 > 1）。
+         */
         size_t resultset_count() const;
+
+        /**
+         * \brief 前进到下一个结果集，返回是否成功。
+         */
         bool next_resultset();
 
+        /**
+         * \brief 当前结果集的行数。
+         */
         size_t row_count() const;
 
+        /**
+         * \brief 影响的行数（INSERT/UPDATE/DELETE 等）。
+         */
         uint64_t affected_rows() const;
 
+        /**
+         * \brief 最后插入的自增 ID。
+         */
         uint64_t last_insert_id() const;
 
+        /**
+         * \brief 警告数量。
+         */
         uint64_t warning_count() const;
 
+        /**
+         * \brief 列数。
+         */
         size_t column_count() const;
 
+        /**
+         * \brief 按列名查找列下标，找不到抛异常。
+         */
         size_t column_index(std::string_view name) const;
 
+        /**
+         * \brief 按列下标取列名。
+         */
         std::string const& column_name(size_t col) const;
 
+        /**
+         * \brief 按列下标取列类型。
+         */
         mysql::column_type column_type(size_t col) const;
 
+        /**
+         * \brief 按行下标取行（不进行越界检查）。
+         */
         row operator[](size_t index) const;
 
+        /**
+         * \brief 行迭代器（input iterator）。
+         */
         class iterator
         {
           public:
@@ -91,8 +140,14 @@ namespace httplib::mysql
             friend class result;
         };
 
+        /**
+         * \brief 返回指向第一行的迭代器。
+         */
         iterator begin() const;
 
+        /**
+         * \brief 返回指向末尾的迭代器。
+         */
         iterator end() const;
 
         struct impl;

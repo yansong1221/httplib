@@ -9,8 +9,6 @@
 #include "httplib/server/middleware/mysql_middleware.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
-#include "mysql/detail_helpers.h"
-#include "mysql/session_impl.h"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -117,52 +115,7 @@ TEST_CASE("config: defaults", "[db]")
     REQUIRE(p.min_connections == 2);
     REQUIRE(p.max_connections == 16);
     REQUIRE(p.acquire_timeout == std::chrono::seconds(5));
-}
-
-TEST_CASE("d2e: rejects invalid date", "[db]")
-{
-    mysql::datetime dt;
-    dt.year = 2024;
-    dt.month = 0; // 零日期
-    dt.day = 15;
-    dt.hour = 12;
-    REQUIRE_THROWS_AS(mysql::detail::d2e(dt), std::runtime_error);
-
-    dt.month = 2;
-    dt.day = 0;
-    REQUIRE_THROWS_AS(mysql::detail::d2e(dt), std::runtime_error);
-}
-
-TEST_CASE("fi/fu: double range check", "[db]")
-{
-    REQUIRE_THROWS_AS(mysql::detail::fi(boost::mysql::field_view(1e20)), std::runtime_error);
-    REQUIRE_THROWS_AS(mysql::detail::fu(boost::mysql::field_view(-1.5)), std::runtime_error);
-
-    REQUIRE(mysql::detail::fi(boost::mysql::field_view(42.0)) == 42);
-    REQUIRE(mysql::detail::fu(boost::mysql::field_view(42.0)) == 42);
-}
-
-TEST_CASE("format_params", "[db]")
-{
-    std::vector<boost::mysql::field_view> p;
-    p.emplace_back(42);
-    p.emplace_back("hello");
-    p.emplace_back();
-    p.emplace_back(3.14);
-    auto s = mysql::format_params(p);
-    REQUIRE(s.find("42") != std::string::npos);
-    REQUIRE(s.find("'hello'") != std::string::npos);
-    REQUIRE(s.find("NULL") != std::string::npos);
-
-    REQUIRE(mysql::format_params({}).empty());
-
-    std::vector<std::string> names = { "id", "name" };
-    std::vector<boost::mysql::field_view> p2;
-    p2.emplace_back(42);
-    p2.emplace_back("hi");
-    auto s2 = mysql::format_named_params(names, p2);
-    REQUIRE(s2.find("id=42") != std::string::npos);
-    REQUIRE(s2.find("name='hi'") != std::string::npos);
+    REQUIRE_FALSE(p.validate_on_borrow);
 }
 
 // ===========================================================================
@@ -703,6 +656,48 @@ TEST_CASE("db: transport error marks connection dead", "[db][integration]")
     }
 }
 
+TEST_CASE("db: borrow ping drops stale connection", "[db][integration]")
+{
+    auto cfg = make_cfg();
+    cfg.min_connections = 0;
+    cfg.max_connections = 1;
+    cfg.validate_on_borrow = true;
+
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            mysql::connection_pool pool(ioc.get_executor(), cfg);
+            pool.start();
+
+            {
+                auto h1 = co_await pool.async_acquire();
+                auto r = co_await h1->query("SELECT CONNECTION_ID() AS id");
+                auto conn_id = *r[0].as_uint64("id");
+
+                // kill h1 的连接，但不再执行查询（live 仍为 true）
+                mysql::connect_params kcfg;
+                kcfg.user = "root";
+                kcfg.password = "123456";
+                auto killer = co_await mysql::session::connect(ioc.get_executor(), kcfg);
+                co_await killer.query("KILL " + std::to_string(conn_id));
+            } // h1 释放回池，live 仍为 true，但底层连接已死
+
+            // 借出时 ping 应检测到失效连接并丢弃、重建
+            auto h2 = co_await pool.async_acquire();
+            auto ok = co_await h2->ping();
+            REQUIRE(ok);
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
 // Regression: binding two owned-storage values (json) used to share a single
 // data_str buffer, so the first field_view dangled / was overwritten.
 TEST_CASE("db: prepared statement multiple json binds", "[db][integration]")
@@ -750,6 +745,23 @@ TEST_CASE("db: numeric conversion range checks", "[db][integration]")
             REQUIRE_THROWS_AS(r.column_type(999), std::out_of_range);
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_rng");
+        });
+}
+
+TEST_CASE("db: double to int range check", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            auto r1 = co_await sess.query("SELECT 1e20 AS v");
+            REQUIRE_THROWS_AS(r1[0].as_int64("v"), std::runtime_error);
+            REQUIRE_THROWS_AS(r1[0].as_uint64("v"), std::runtime_error);
+
+            auto r2 = co_await sess.query("SELECT -1.5e0 AS v");
+            REQUIRE_THROWS_AS(r2[0].as_uint64("v"), std::runtime_error);
+
+            auto r3 = co_await sess.query("SELECT 4.2e1 AS v");
+            REQUIRE(*r3[0].as_int64("v") == 42);
         });
 }
 
@@ -978,6 +990,35 @@ TEST_CASE("db: into persists across executes", "[db][integration]")
             REQUIRE(out == 20);
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_ip");
+        });
+}
+
+TEST_CASE("db: into vector", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_vec (id INT, name VARCHAR(100))");
+            co_await sess.query("DELETE FROM __httplib_vec");
+            co_await sess.query("INSERT INTO __httplib_vec VALUES (1, 'a'),(2, 'b'),(3, 'c')");
+
+            // 按列下标
+            std::vector<int64_t> ids;
+            co_await sess.stmt("SELECT id FROM __httplib_vec ORDER BY id").into(ids, 0).execute();
+            REQUIRE(ids == std::vector<int64_t> { 1, 2, 3 });
+
+            // 按列名
+            std::vector<std::string> names;
+            co_await sess.stmt("SELECT name FROM __httplib_vec ORDER BY id").into(names, "name").execute();
+            REQUIRE(names == std::vector<std::string> { "a", "b", "c" });
+
+            // 含 NULL 行时抛异常
+            co_await sess.query("INSERT INTO __httplib_vec VALUES (NULL, NULL)");
+            std::vector<int64_t> all;
+            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT id FROM __httplib_vec").into(all, "id").execute(),
+                              std::runtime_error);
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_vec");
         });
 }
 

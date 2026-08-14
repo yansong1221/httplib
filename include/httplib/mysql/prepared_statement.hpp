@@ -5,13 +5,47 @@
 #include "httplib/mysql/mysql_fwd.hpp"
 #include "httplib/mysql/result.hpp"
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <vector>
 
 namespace httplib::mysql
 {
 
+    namespace detail
+    {
+        /**
+         * \brief `into(std::vector<T>&)` 支持的元素类型。
+         * \details 仅包含可拥有/可复制的值类型；view 类型（string_view / const_buffer）被排除。
+         */
+        template <typename T>
+        inline constexpr bool is_vector_into_type_v
+            = std::is_same_v<T, int64_t> || std::is_same_v<T, uint64_t> || std::is_same_v<T, double>
+              || std::is_same_v<T, float> || std::is_same_v<T, bool> || std::is_same_v<T, std::string>
+              || std::is_same_v<T, date> || std::is_same_v<T, datetime> || std::is_same_v<T, time>
+              || std::is_same_v<T, std::chrono::system_clock::time_point> || std::is_same_v<T, boost::json::value>;
+
+        /**
+         * \brief `into(std::optional<T>&)` 支持的元素类型（在 vector 基础上额外支持 const_buffer）。
+         */
+        template <typename T>
+        inline constexpr bool is_optional_into_type_v
+            = is_vector_into_type_v<T> || std::is_same_v<T, net::const_buffer>;
+    } // namespace detail
+
+    /**
+     * \brief 预编译语句。
+     * \details
+     * 由 \ref session::stmt 创建，支持位置占位符 `?` 与命名占位符 `:name`。
+     * \n
+     * 用法：`bind(...)` 绑定参数后 `execute()` 执行；可选地用 `into(...)` 把结果提取到变量。
+     * \n
+     * 绑定参数在语句生命周期内持久：重复 `execute()` 复用上次参数，重新 `bind` 则替换；
+     * 提取目标同理，重新 `into` 会替换上一次的。
+     */
     class HTTPLIB_API prepared_statement
     {
       public:
@@ -22,6 +56,7 @@ namespace httplib::mysql
         prepared_statement(prepared_statement const&) = delete;
         prepared_statement& operator=(prepared_statement const&) = delete;
 
+        /** 位置式绑定（对应 `?` 占位符，按调用顺序）。 */
         prepared_statement& bind(std::string_view v);
         prepared_statement& bind(std::string const& v);
         prepared_statement& bind(char const* v);
@@ -42,6 +77,7 @@ namespace httplib::mysql
         prepared_statement& bind(boost::json::value const& v);
         prepared_statement& bind(std::chrono::system_clock::time_point tp);
 
+        /** 命名式绑定（对应 `:name` 占位符，绑定不存在的名字会抛异常）。 */
         prepared_statement& bind(std::string_view name, std::string_view v);
         prepared_statement& bind(std::string_view name, char const* v);
         prepared_statement& bind(std::string_view name, int64_t v);
@@ -61,38 +97,105 @@ namespace httplib::mysql
         prepared_statement& bind(std::string_view name, boost::json::value const& v);
         prepared_statement& bind(std::string_view name, std::chrono::system_clock::time_point tp);
 
+        /**
+         * \brief 执行语句。
+         * \returns 结果集。
+         * \throws mysql_exception 执行失败。
+         */
         net::awaitable<result> execute();
 
-        prepared_statement& into(std::optional<int64_t>& v, size_t col);
-        prepared_statement& into(std::optional<uint64_t>& v, size_t col);
-        prepared_statement& into(std::optional<double>& v, size_t col);
-        prepared_statement& into(std::optional<float>& v, size_t col);
-        prepared_statement& into(std::optional<bool>& v, size_t col);
-        prepared_statement& into(std::optional<std::string>& v, size_t col);
-        prepared_statement& into(std::optional<date>& v, size_t col);
-        prepared_statement& into(std::optional<datetime>& v, size_t col);
-        prepared_statement& into(std::optional<time>& v, size_t col);
-        prepared_statement& into(std::optional<std::chrono::system_clock::time_point>& v, size_t col);
-        prepared_statement& into(std::optional<net::const_buffer>& v, size_t col);
-        prepared_statement& into(std::optional<boost::json::value>& v, size_t col);
+        /**
+         * \brief 把第一行指定列提取到 optional（NULL → nullopt）。
+         * \param v 输出目标。
+         * \param col 列下标。
+         */
+        template <typename T>
+        prepared_statement&
+        into(std::optional<T>& v, size_t col)
+        {
+            static_assert(detail::is_optional_into_type_v<T>, "db: unsupported type for into(std::optional)");
+            add_extractor([&v, col](result const& r) { v = r[0].get<T>(col); });
+            return *this;
+        }
 
-        prepared_statement& into(std::optional<int64_t>& v, std::string_view name);
-        prepared_statement& into(std::optional<uint64_t>& v, std::string_view name);
-        prepared_statement& into(std::optional<double>& v, std::string_view name);
-        prepared_statement& into(std::optional<float>& v, std::string_view name);
-        prepared_statement& into(std::optional<bool>& v, std::string_view name);
-        prepared_statement& into(std::optional<std::string>& v, std::string_view name);
-        prepared_statement& into(std::optional<date>& v, std::string_view name);
-        prepared_statement& into(std::optional<datetime>& v, std::string_view name);
-        prepared_statement& into(std::optional<time>& v, std::string_view name);
-        prepared_statement& into(std::optional<std::chrono::system_clock::time_point>& v, std::string_view name);
-        prepared_statement& into(std::optional<net::const_buffer>& v, std::string_view name);
-        prepared_statement& into(std::optional<boost::json::value>& v, std::string_view name);
+        /**
+         * \brief 把第一行指定列提取到 optional（NULL → nullopt）。
+         * \param v 输出目标。
+         * \param name 列名。
+         */
+        template <typename T>
+        prepared_statement&
+        into(std::optional<T>& v, std::string_view name)
+        {
+            static_assert(detail::is_optional_into_type_v<T>, "db: unsupported type for into(std::optional)");
+            add_extractor([&v, n = std::string(name)](result const& r) { v = r[0].get<T>(n); });
+            return *this;
+        }
+
+        /**
+         * \brief 把所有行指定列提取到 vector。
+         * \param v 输出目标（先 clear）。
+         * \param col 列下标。
+         * \throws std::runtime_error 结果中含 NULL。
+         */
+        template <typename T>
+        prepared_statement&
+        into(std::vector<T>& v, size_t col)
+        {
+            static_assert(detail::is_vector_into_type_v<T>, "db: unsupported type for into(std::vector)");
+            add_extractor(
+                [&v, col](result const& r)
+                {
+                    v.clear();
+                    v.reserve(r.row_count());
+                    for (size_t i = 0; i < r.row_count(); ++i)
+                    {
+                        auto val = r[i].get<T>(col);
+                        if (!val)
+                        {
+                            throw std::runtime_error("db: NULL value when extracting into vector");
+                        }
+                        v.push_back(std::move(*val));
+                    }
+                });
+            return *this;
+        }
+
+        /**
+         * \brief 把所有行指定列提取到 vector。
+         * \param v 输出目标（先 clear）。
+         * \param name 列名。
+         * \throws std::runtime_error 结果中含 NULL。
+         */
+        template <typename T>
+        prepared_statement&
+        into(std::vector<T>& v, std::string_view name)
+        {
+            static_assert(detail::is_vector_into_type_v<T>, "db: unsupported type for into(std::vector)");
+            add_extractor(
+                [&v, n = std::string(name)](result const& r)
+                {
+                    v.clear();
+                    v.reserve(r.row_count());
+                    for (size_t i = 0; i < r.row_count(); ++i)
+                    {
+                        auto val = r[i].get<T>(n);
+                        if (!val)
+                        {
+                            throw std::runtime_error("db: NULL value when extracting into vector");
+                        }
+                        v.push_back(std::move(*val));
+                    }
+                });
+            return *this;
+        }
 
         struct impl;
         explicit prepared_statement(session& sess, std::string sql);
 
       private:
+        void add_extractor(std::function<void(result const&)> ex);
+
         std::unique_ptr<impl> impl_;
     };
 } // namespace httplib::mysql

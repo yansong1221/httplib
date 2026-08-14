@@ -12,35 +12,58 @@
 namespace httplib::mysql
 {
 
+    /**
+     * \brief 结果集列的类型。
+     */
     enum class column_type
     {
-        string,
-        int64,
-        uint64,
-        double_,
-        blob,
-        date,
-        datetime,
-        timestamp,
-        time,
-        null,
-        unknown
+        string,    ///< 字符串（CHAR/VARCHAR/TEXT/JSON 等）。
+        int64,     ///< 有符号整数。
+        uint64,    ///< 无符号整数。
+        double_,   ///< 浮点数。
+        blob,      ///< 二进制数据。
+        date,      ///< DATE。
+        datetime,  ///< DATETIME。
+        timestamp, ///< TIMESTAMP（时区敏感）。
+        time,      ///< TIME。
+        null,      ///< NULL。
+        unknown    ///< 未知类型。
     };
+
+    /**
+     * \brief 日期（年/月/日）。
+     */
     struct date
     {
         unsigned year = 0, month = 0, day = 0;
     };
+
+    /**
+     * \brief 时间（时/分/秒/微秒）。
+     */
     struct time
     {
         unsigned hour = 0, minute = 0, second = 0;
         unsigned long microsecond = 0;
     };
+
+    /**
+     * \brief 日期时间（date 与 time 的组合）。
+     */
     struct datetime
         : date
         , time
     {
     };
 
+    /**
+     * \brief 结果集中的一行。
+     * \details
+     * 通过 \ref result::operator[] 或 \ref result::iterator 获取。
+     * \n
+     * 除 `get<std::string>` 外的 `as_*` 系列方法返回的视图（string_view / const_buffer）指向结果集内部缓冲区，
+     * 在 result 被销毁后会失效；`get<std::string>` 会拷贝一份。
+     */
     class HTTPLIB_API row
     {
       public:
@@ -48,8 +71,17 @@ namespace httplib::mysql
         row& operator=(row&&) noexcept;
         ~row();
 
+        /**
+         * \brief 该行的列数。
+         */
         size_t size() const;
+        /**
+         * \brief 按列名查找列下标，找不到抛异常。
+         */
         size_t column(std::string_view name) const;
+        /**
+         * \brief 判断指定列是否为 NULL。
+         */
         bool is_null(size_t col) const;
         bool is_null(std::string_view name) const;
 
@@ -89,6 +121,14 @@ namespace httplib::mysql
         std::optional<std::chrono::system_clock::time_point> as_timestamp(size_t col) const;
         std::optional<std::chrono::system_clock::time_point> as_timestamp(std::string_view name) const;
 
+        /**
+         * \brief 按模板参数类型读取列值。
+         * \details
+         * 支持 int64_t / uint64_t / double / float / bool / std::string / std::string_view /
+         * net::const_buffer / date / datetime / time / system_clock::time_point / boost::json::value。
+         * \param col 列下标。
+         * \returns 列值；NULL 返回 nullopt。
+         */
         template <typename T>
         std::optional<T>
         get(size_t col) const
@@ -151,6 +191,11 @@ namespace httplib::mysql
                 static_assert(sizeof(T) == 0, "unsupported get<T> type");
             }
         }
+
+        /**
+         * \brief 按模板参数类型、列名读取列值。
+         * \param name 列名。
+         */
         template <typename T>
         std::optional<T>
         get(std::string_view name) const
@@ -166,4 +211,4 @@ namespace httplib::mysql
     };
 
 } // namespace httplib::mysql
-#endif
+#endif // HTTPLIB_ENABLED_DATABASE
