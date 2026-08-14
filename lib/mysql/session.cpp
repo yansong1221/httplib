@@ -54,8 +54,7 @@ namespace httplib::mysql
         boost::mysql::diagnostics diag;
         boost::system::error_code ec;
         boost::mysql::results data;
-        imp.get_conn().set_meta_mode(boost::mysql::metadata_mode::full);
-        co_await imp.get_conn().async_execute(std::string(sql),
+        co_await imp.get_conn().async_execute(sql,
                                               data,
                                               diag,
                                               boost::asio::redirect_error(boost::asio::use_awaitable, ec));

@@ -261,6 +261,7 @@ namespace httplib::mysql
         return *this;
     }
 
+    // blob 以零拷贝视图存储（非拥有，与字符串不同）：调用方需保证缓冲区在 execute() 前保持有效
     prepared_statement&
     prepared_statement::bind(std::span<std::byte const> v)
     {
@@ -386,6 +387,7 @@ namespace httplib::mysql
         return *this;
     }
 
+    // blob 以零拷贝视图存储（非拥有，与字符串不同）：调用方需保证缓冲区在 execute() 前保持有效
     prepared_statement&
     prepared_statement::bind(std::string_view name, std::span<std::byte const> v)
     {
@@ -467,7 +469,6 @@ namespace httplib::mysql
 
         boost::mysql::diagnostics diag;
         boost::mysql::results data;
-        imp.get_conn().set_meta_mode(boost::mysql::metadata_mode::full);
 
         boost::mysql::statement stmt;
         if (auto* cached = imp.find_statement(impl_->sql))

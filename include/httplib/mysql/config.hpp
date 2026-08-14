@@ -52,8 +52,6 @@ namespace httplib::mysql
         /// 池允许的最大连接数（空闲 + 活跃）。
         size_t max_connections = 16;
 
-        /// 取连接时的默认等待超时（池满时）。
-        std::chrono::seconds acquire_timeout { 5 };
         /// 空闲连接超过该时长即被回收。
         std::chrono::seconds idle_timeout { 300 };
         /// 空闲检查 / 回收的周期。

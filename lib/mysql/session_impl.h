@@ -208,6 +208,8 @@ namespace httplib::mysql
             co_await conn.async_connect(params, net::use_awaitable);
         }
 
+        conn.set_meta_mode(boost::mysql::metadata_mode::full);
+
         if (!cfg.charset.empty())
         {
             boost::mysql::results r;

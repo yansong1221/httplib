@@ -51,11 +51,7 @@ namespace httplib::mysql
                 throw std::runtime_error("connection_pool: pool is shut down");
             }
 
-            if (wait_timeout <= std::chrono::steady_clock::duration::zero())
-            {
-                wait_timeout = cfg_.acquire_timeout;
-            }
-
+            // 0（默认）表示不设超时，一直等到有连接可用
             auto deadline = wait_timeout <= std::chrono::steady_clock::duration::zero()
                                 ? std::chrono::steady_clock::time_point::max()
                                 : std::chrono::steady_clock::now() + wait_timeout;
@@ -96,10 +92,6 @@ namespace httplib::mysql
                     }
                 }
 
-                if (deadline == std::chrono::steady_clock::time_point::max())
-                {
-                    throw std::runtime_error("connection_pool: pool is full and no timeout specified");
-                }
                 if (deadline <= std::chrono::steady_clock::now())
                 {
                     throw std::runtime_error("connection_pool: acquire timeout");
@@ -108,7 +100,15 @@ namespace httplib::mysql
                 std::erase_if(self->waiters_, [](auto const& w) { return w.expired(); });
 
                 auto node = std::make_shared<net::steady_timer>(self->ex_);
-                node->expires_at(deadline);
+                if (deadline == std::chrono::steady_clock::time_point::max())
+                {
+                    // 无超时：设一个很长的唤醒间隔兜底，正常靠 release 时 cancel 打断
+                    node->expires_after(std::chrono::hours(24));
+                }
+                else
+                {
+                    node->expires_at(deadline);
+                }
                 self->waiters_.push_back(node);
                 lock.unlock();
 

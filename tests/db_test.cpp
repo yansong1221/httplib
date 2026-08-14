@@ -116,7 +116,6 @@ TEST_CASE("config: defaults", "[db]")
     mysql::pool_params p;
     REQUIRE(p.min_connections == 2);
     REQUIRE(p.max_connections == 16);
-    REQUIRE(p.acquire_timeout == std::chrono::seconds(5));
     REQUIRE_FALSE(p.validate_on_borrow);
 }
 
@@ -642,12 +641,11 @@ TEST_CASE("db: charset applied on connect", "[db][integration]")
     }
 }
 
-TEST_CASE("db: async_acquire honors acquire_timeout", "[db][integration]")
+TEST_CASE("db: async_acquire honors wait_timeout", "[db][integration]")
 {
     auto cfg = make_cfg();
     cfg.min_connections = 0;
     cfg.max_connections = 1;
-    cfg.acquire_timeout = std::chrono::seconds(1);
 
     net::io_context ioc;
     std::exception_ptr err;
@@ -660,7 +658,7 @@ TEST_CASE("db: async_acquire honors acquire_timeout", "[db][integration]")
             auto h1 = co_await pool.async_acquire(); // holds the only connection
 
             auto t0 = std::chrono::steady_clock::now();
-            REQUIRE_THROWS_AS(co_await pool.async_acquire(), std::runtime_error);
+            REQUIRE_THROWS_AS(co_await pool.async_acquire(std::chrono::seconds(1)), std::runtime_error);
             auto elapsed = std::chrono::steady_clock::now() - t0;
             REQUIRE(elapsed >= std::chrono::milliseconds(800));
             REQUIRE(elapsed < std::chrono::seconds(3));
@@ -1286,8 +1284,7 @@ TEST_CASE("db: unbound named param throws", "[db][integration]")
             REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :n IS NULL AS r").execute(), std::runtime_error);
 
             // 绑了一部分，剩一个没绑
-            REQUIRE_THROWS_AS(
-                co_await sess.stmt("SELECT :a + :b AS x").bind("a", 1).execute(), std::runtime_error);
+            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a + :b AS x").bind("a", 1).execute(), std::runtime_error);
 
             // 全部绑定正常执行
             auto r = co_await sess.stmt("SELECT :a + :b AS x").bind("a", 1).bind("b", 2).execute();
@@ -1535,7 +1532,6 @@ TEST_CASE("db: dead connection release wakes waiter", "[db][integration]")
     auto cfg = make_cfg();
     cfg.min_connections = 0;
     cfg.max_connections = 1;
-    cfg.acquire_timeout = std::chrono::seconds(10);
 
     net::io_context ioc;
     std::exception_ptr err;
@@ -2047,7 +2043,8 @@ TEST_CASE("db: temporal & narrow error handling", "[db][unit]")
     REQUIRE_THROWS_AS(mysql::detail::narrow_int<int>(std::optional<int64_t> { INT64_MAX }), std::runtime_error);
     REQUIRE_THROWS_AS(mysql::detail::narrow_int<int>(std::optional<int64_t> { INT64_MIN }), std::runtime_error);
     REQUIRE_THROWS_AS(mysql::detail::narrow_int<short>(std::optional<int64_t> { 70000 }), std::runtime_error);
-    REQUIRE_THROWS_AS(mysql::detail::narrow_uint<unsigned short>(std::optional<uint64_t> { 70000 }), std::runtime_error);
+    REQUIRE_THROWS_AS(mysql::detail::narrow_uint<unsigned short>(std::optional<uint64_t> { 70000 }),
+                      std::runtime_error);
     REQUIRE_THROWS_AS(mysql::detail::narrow_uint<unsigned>(std::optional<uint64_t> { UINT64_MAX }), std::runtime_error);
     REQUIRE(mysql::detail::narrow_uint<unsigned>(std::optional<uint64_t> { 4000000000ull }) == 4000000000u);
 }

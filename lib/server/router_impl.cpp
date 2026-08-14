@@ -2,6 +2,7 @@
 #include "request_impl.hpp"
 #include "response_impl.hpp"
 #include <boost/algorithm/string/join.hpp>
+#include <exception>
 #include <iostream>
 #include <set>
 
@@ -51,18 +52,35 @@ namespace httplib::server
                     break;
                 }
             }
+
+            std::exception_ptr eptr;
             if (ok)
             {
-                co_await handler(req, resp);
+                try
+                {
+                    co_await handler(req, resp);
+                }
+                catch (...)
+                {
+                    eptr = std::current_exception();
+                }
             }
 
-            ok = true;
-            for (auto& after : global_after_)
+            // handler 正常返回（或 before 短路）才执行 after；抛异常时跳过，交给外层设 500
+            if (!eptr)
             {
-                if (!co_await after(req, resp))
+                for (auto& after : global_after_)
                 {
-                    break;
+                    if (!co_await after(req, resp))
+                    {
+                        break;
+                    }
                 }
+            }
+
+            if (eptr)
+            {
+                std::rethrow_exception(eptr);
             }
         };
     }

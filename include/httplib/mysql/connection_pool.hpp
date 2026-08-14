@@ -78,7 +78,7 @@ namespace httplib::mysql
 
         /**
          * \brief 借出一条连接。
-         * \param wait_timeout 池满时的等待超时；0 使用 pool_params::acquire_timeout。
+         * \param wait_timeout 池满时的等待超时；0（默认）表示不设超时，一直等到有连接可用。
          * \returns 连接句柄。
          * \throws std::runtime_error 池已关闭或等待超时。
          */

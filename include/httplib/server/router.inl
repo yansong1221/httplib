@@ -1,6 +1,7 @@
 #pragma once
 #include "httplib/server/server_fwd.hpp"
 #include "httplib/util/misc.hpp"
+#include <exception>
 
 namespace httplib::server
 {
@@ -131,15 +132,32 @@ namespace httplib::server
                                     { ((co_await helper::do_before(aspect, req, resp, ok)), ...); },
                                     aspects);
 
+                std::exception_ptr eptr;
                 if (ok)
                 {
-                    co_await coro_handler(req, resp);
+                    try
+                    {
+                        co_await coro_handler(req, resp);
+                    }
+                    catch (...)
+                    {
+                        eptr = std::current_exception();
+                    }
                 }
-                ok = true;
 
-                co_await std::apply([&](auto&... aspect) -> net::awaitable<void>
-                                    { ((co_await helper::do_after(aspect, req, resp, ok)), ...); },
-                                    aspects);
+                // handler 正常返回（或 before 短路）才执行 after；抛异常时跳过，交给外层设 500
+                if (!eptr)
+                {
+                    ok = true;
+                    co_await std::apply([&](auto&... aspect) -> net::awaitable<void>
+                                        { ((co_await helper::do_after(aspect, req, resp, ok)), ...); },
+                                        aspects);
+                }
+
+                if (eptr)
+                {
+                    std::rethrow_exception(eptr);
+                }
             };
         }
         else
