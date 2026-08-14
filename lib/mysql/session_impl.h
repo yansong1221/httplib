@@ -19,6 +19,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace httplib::mysql
@@ -354,20 +355,24 @@ namespace httplib::mysql
         std::vector<std::function<void(result const&)>> extractors;
 
         std::vector<std::string> param_names;
-        std::unordered_map<std::string, size_t> name_to_idx;
+        std::unordered_set<std::string> name_to_idx;
         std::unordered_map<std::string, boost::mysql::field_view> named_values;
         std::unordered_map<std::string, std::string> named_storage;
         std::deque<std::string> data_strs;
         bool need_params_reset = false;
         bool need_extractors_reset = false;
+        bool has_named_bind = false;
+        bool has_positional_bind = false;
+        size_t next_into_col = 0;
 
         void
         begin_bind()
         {
-            if (!param_names.empty())
+            if (has_named_bind)
             {
                 throw std::runtime_error("db: cannot mix positional and named parameters");
             }
+            has_positional_bind = true;
             if (need_params_reset)
             {
                 params.clear();
@@ -377,14 +382,28 @@ namespace httplib::mysql
         }
 
         void
-        add_extractor(std::function<void(result const&)> ex)
+        begin_into()
         {
             if (need_extractors_reset)
             {
                 extractors.clear();
+                next_into_col = 0;
                 need_extractors_reset = false;
             }
+        }
+
+        void
+        add_extractor(std::function<void(result const&)> ex)
+        {
+            begin_into();
             extractors.push_back(std::move(ex));
+        }
+
+        size_t
+        alloc_into_col()
+        {
+            begin_into();
+            return next_into_col++;
         }
     };
 

@@ -363,7 +363,7 @@ TEST_CASE("db: prepared statement positional bind", "[db][integration]")
             co_await sess.query("DELETE FROM __httplib_ps");
             co_await sess.query("INSERT INTO __httplib_ps VALUES (1, 'alice')");
 
-            auto r = co_await sess.stmt("SELECT id, name FROM __httplib_ps WHERE id = ?").bind(1).execute();
+            auto r = co_await sess.stmt("SELECT id, name FROM __httplib_ps WHERE id = :id").bind(1).execute();
             REQUIRE(r.row_count() == 1);
             REQUIRE(*r[0].as_int64("id") == 1);
             REQUIRE(*r[0].as_string("name") == "alice");
@@ -419,7 +419,7 @@ TEST_CASE("db: statement reuse (caching)", "[db][integration]")
             co_await sess.query("DELETE FROM __httplib_cache");
             co_await sess.query("INSERT INTO __httplib_cache VALUES (1),(2)");
 
-            auto stmt = sess.stmt("SELECT id FROM __httplib_cache WHERE id = ?");
+            auto stmt = sess.stmt("SELECT id FROM __httplib_cache WHERE id = :id");
             std::optional<int64_t> v1;
             co_await stmt.bind(1).into(v1, 0).execute();
             REQUIRE(v1 == 1);
@@ -458,9 +458,9 @@ TEST_CASE("db: statement cache eviction", "[db][integration]")
             for (int round = 0; round < 3; ++round)
             {
                 std::optional<int64_t> a, b, c;
-                co_await sess.stmt("SELECT id FROM __httplib_sc WHERE id = ?").bind(1).into(a, 0).execute();
-                co_await sess.stmt("SELECT id FROM __httplib_sc WHERE id > ?").bind(3).into(b, 0).execute();
-                co_await sess.stmt("SELECT id FROM __httplib_sc WHERE id >= ?").bind(5).into(c, 0).execute();
+                co_await sess.stmt("SELECT id FROM __httplib_sc WHERE id = :id").bind(1).into(a, 0).execute();
+                co_await sess.stmt("SELECT id FROM __httplib_sc WHERE id > :id").bind(3).into(b, 0).execute();
+                co_await sess.stmt("SELECT id FROM __httplib_sc WHERE id >= :id").bind(5).into(c, 0).execute();
                 REQUIRE(a == 1);
                 REQUIRE(b == 4);
                 REQUIRE(c == 5);
@@ -714,7 +714,7 @@ TEST_CASE("db: prepared statement multiple json binds", "[db][integration]")
             boost::json::value v2 = {
                 { "y", "hi" }
             };
-            co_await sess.stmt("INSERT INTO __httplib_j2 (a, b) VALUES (?, ?)").bind(v1).bind(v2).execute();
+            co_await sess.stmt("INSERT INTO __httplib_j2 (a, b) VALUES (:a, :b)").bind(v1).bind(v2).execute();
 
             auto r = co_await sess.query("SELECT a, b FROM __httplib_j2");
             REQUIRE(r.row_count() == 1);
@@ -862,7 +862,7 @@ TEST_CASE("db: timestamp bind roundtrip utc", "[db][integration]")
             std::chrono::system_clock::time_point tp
                 = std::chrono::sys_days(std::chrono::year(2024) / std::chrono::month(1) / std::chrono::day(1))
                   + std::chrono::hours(12);
-            co_await sess.stmt("INSERT INTO __httplib_tsr (t) VALUES (?)").bind(tp).execute();
+            co_await sess.stmt("INSERT INTO __httplib_tsr (t) VALUES (:t)").bind(tp).execute();
             auto r = co_await sess.query("SELECT t FROM __httplib_tsr");
             REQUIRE(*r[0].as_timestamp("t") == tp);
 
@@ -891,7 +891,7 @@ TEST_CASE("db: timestamp bind roundtrip offset", "[db][integration]")
             std::chrono::system_clock::time_point tp
                 = std::chrono::sys_days(std::chrono::year(2024) / std::chrono::month(1) / std::chrono::day(1))
                   + std::chrono::hours(12);
-            co_await sess.stmt("INSERT INTO __httplib_tso (t) VALUES (?)").bind(tp).execute();
+            co_await sess.stmt("INSERT INTO __httplib_tso (t) VALUES (:t)").bind(tp).execute();
             auto r = co_await sess.query("SELECT t FROM __httplib_tso");
             REQUIRE(*r[0].as_timestamp("t") == tp);
 
@@ -957,7 +957,7 @@ TEST_CASE("db: into replaced across executes", "[db][integration]")
             co_await sess.query("DELETE FROM __httplib_ext");
             co_await sess.query("INSERT INTO __httplib_ext VALUES (1),(2)");
 
-            auto stmt = sess.stmt("SELECT id FROM __httplib_ext WHERE id = ?");
+            auto stmt = sess.stmt("SELECT id FROM __httplib_ext WHERE id = :id");
             std::optional<int64_t> v1;
             co_await stmt.bind(1).into(v1, 0).execute();
             REQUIRE(v1 == 1);
@@ -981,7 +981,7 @@ TEST_CASE("db: into persists across executes", "[db][integration]")
             co_await sess.query("INSERT INTO __httplib_ip VALUES (10),(20)");
 
             // 输出只绑一次，循环里只重绑输入，输出每次自动更新
-            auto stmt = sess.stmt("SELECT v FROM __httplib_ip WHERE v = ?");
+            auto stmt = sess.stmt("SELECT v FROM __httplib_ip WHERE v = :v");
             std::optional<int64_t> out;
             stmt.into(out, "v");
             co_await stmt.bind(10).execute();
@@ -1022,6 +1022,45 @@ TEST_CASE("db: into vector", "[db][integration]")
         });
 }
 
+TEST_CASE("db: into positional column", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_ipc (id INT, name VARCHAR(100))");
+            co_await sess.query("DELETE FROM __httplib_ipc");
+            co_await sess.query("INSERT INTO __httplib_ipc VALUES (1, 'a'),(2, 'b')");
+
+            // optional：第 N 次 into 对应第 N 列（SOCI 风格，不写列名/列号）
+            std::optional<int64_t> id;
+            std::optional<std::string> name;
+            co_await sess.stmt("SELECT id, name FROM __httplib_ipc WHERE id = :id")
+                .bind("id", 1)
+                .into(id)
+                .into(name)
+                .execute();
+            REQUIRE(id == 1);
+            REQUIRE(name == "a");
+
+            // vector：第 N 次 into 对应第 N 列
+            std::vector<int64_t> ids;
+            std::vector<std::string> names;
+            co_await sess.stmt("SELECT id, name FROM __httplib_ipc ORDER BY id").into(ids).into(names).execute();
+            REQUIRE(ids == std::vector<int64_t> { 1, 2 });
+            REQUIRE(names == std::vector<std::string> { "a", "b" });
+
+            // 重新 into 时计数器从 0 重新计
+            std::optional<int64_t> v;
+            auto stmt = sess.stmt("SELECT id FROM __httplib_ipc WHERE id = :id");
+            co_await stmt.bind("id", 1).into(v).execute();
+            REQUIRE(v == 1);
+            co_await stmt.bind("id", 2).into(v).execute();
+            REQUIRE(v == 2);
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_ipc");
+        });
+}
+
 TEST_CASE("db: bind arity mismatch throws", "[db][integration]")
 {
     run(
@@ -1030,9 +1069,9 @@ TEST_CASE("db: bind arity mismatch throws", "[db][integration]")
             co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_arity (a INT, b INT)");
             co_await sess.query("DELETE FROM __httplib_arity");
 
-            REQUIRE_THROWS_AS(co_await sess.stmt("INSERT INTO __httplib_arity VALUES (?, ?)").bind(1).execute(),
+            REQUIRE_THROWS_AS(co_await sess.stmt("INSERT INTO __httplib_arity VALUES (:a, :b)").bind(1).execute(),
                               mysql::mysql_exception);
-            REQUIRE_THROWS_AS(co_await sess.stmt("INSERT INTO __httplib_arity VALUES (?)").bind(1).bind(2).execute(),
+            REQUIRE_THROWS_AS(co_await sess.stmt("INSERT INTO __httplib_arity VALUES (:a)").bind(1).bind(2).execute(),
                               mysql::mysql_exception);
 
             // 连接仍可用（参数数量错误是客户端判定，不应废掉连接）
@@ -1054,7 +1093,7 @@ TEST_CASE("db: error message includes params", "[db][integration]")
 
             try
             {
-                co_await sess.stmt("INSERT INTO __httplib_ep VALUES (?)").bind(1).execute();
+                co_await sess.stmt("INSERT INTO __httplib_ep VALUES (:id)").bind(1).execute();
                 REQUIRE(false);
             }
             catch (mysql::mysql_exception const& ex)
@@ -1097,7 +1136,7 @@ TEST_CASE("db: bind null and empty string", "[db][integration]")
         {
             co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_bnd (a INT, s VARCHAR(100))");
             co_await sess.query("DELETE FROM __httplib_bnd");
-            co_await sess.stmt("INSERT INTO __httplib_bnd (a, s) VALUES (?, ?)")
+            co_await sess.stmt("INSERT INTO __httplib_bnd (a, s) VALUES (:a, :s)")
                 .bind(nullptr)
                 .bind(std::string_view(""))
                 .execute();
@@ -1119,7 +1158,8 @@ TEST_CASE("db: bind prevents SQL injection", "[db][integration]")
             co_await sess.query("DELETE FROM __httplib_inj");
             co_await sess.query("INSERT INTO __httplib_inj VALUES ('alice'),('bob')");
 
-            auto r = co_await sess.stmt("SELECT name FROM __httplib_inj WHERE name = ?").bind("' OR '1'='1").execute();
+            auto r
+                = co_await sess.stmt("SELECT name FROM __httplib_inj WHERE name = :name").bind("' OR '1'='1").execute();
             REQUIRE(r.row_count() == 0);
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_inj");
@@ -1135,7 +1175,7 @@ TEST_CASE("db: bind blob binary data", "[db][integration]")
             co_await sess.query("DELETE FROM __httplib_blob");
 
             unsigned char raw[] = { 0x00, 0x01, 0x02, 0x00, 0xff, 0x00 };
-            co_await sess.stmt("INSERT INTO __httplib_blob (b) VALUES (?)")
+            co_await sess.stmt("INSERT INTO __httplib_blob (b) VALUES (:b)")
                 .bind(net::const_buffer(raw, sizeof(raw)))
                 .execute();
 
@@ -1160,6 +1200,86 @@ TEST_CASE("db: unbound named param is null", "[db][integration]")
         });
 }
 
+TEST_CASE("db: named param reused multiple times", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_nr (a INT, b INT)");
+            co_await sess.query("DELETE FROM __httplib_nr");
+            co_await sess.query("INSERT INTO __httplib_nr VALUES (1, 1),(2, 3)");
+
+            // 同一个 :x 出现两次，绑一次即可两处生效
+            auto r = co_await sess.stmt("SELECT a, b FROM __httplib_nr WHERE a = :x AND b = :x").bind("x", 1).execute();
+            REQUIRE(r.row_count() == 1);
+            REQUIRE(*r[0].as_int64("a") == 1);
+            REQUIRE(*r[0].as_int64("b") == 1);
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_nr");
+        });
+}
+
+TEST_CASE("db: named param cross reuse", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_cross (a INT, b INT, c INT)");
+            co_await sess.query("DELETE FROM __httplib_cross");
+            co_await sess.query("INSERT INTO __httplib_cross VALUES (1,1,1),(1,2,1),(2,3,2)");
+
+            // 同一个名字出现 3 次，绑一次全部生效
+            {
+                auto r = co_await sess.stmt("SELECT a, b, c FROM __httplib_cross WHERE a = :x AND b = :x AND c = :x")
+                             .bind("x", 1)
+                             .execute();
+                REQUIRE(r.row_count() == 1);
+                REQUIRE(*r[0].as_int64("a") == 1);
+                REQUIRE(*r[0].as_int64("b") == 1);
+                REQUIRE(*r[0].as_int64("c") == 1);
+            }
+
+            // 两个名字交叉 + 重复
+            {
+                auto r = co_await sess.stmt("SELECT a, b, c FROM __httplib_cross WHERE a = :x AND b = :y AND c = :x")
+                             .bind("x", 1)
+                             .bind("y", 2)
+                             .execute();
+                REQUIRE(r.row_count() == 1);
+                REQUIRE(*r[0].as_int64("a") == 1);
+                REQUIRE(*r[0].as_int64("b") == 2);
+                REQUIRE(*r[0].as_int64("c") == 1);
+            }
+
+            // 命名绑定与出现顺序无关（先绑 y 再绑 x）
+            {
+                auto r = co_await sess.stmt("SELECT a, b, c FROM __httplib_cross WHERE a = :x AND b = :y AND c = :x")
+                             .bind("y", 2)
+                             .bind("x", 1)
+                             .execute();
+                REQUIRE(r.row_count() == 1);
+                REQUIRE(*r[0].as_int64("a") == 1);
+                REQUIRE(*r[0].as_int64("b") == 2);
+                REQUIRE(*r[0].as_int64("c") == 1);
+            }
+
+            // 位置绑定下每个出现都是一个位置（重复名也要逐个绑）
+            {
+                auto r = co_await sess.stmt("SELECT a, b, c FROM __httplib_cross WHERE a = :x AND b = :y AND c = :x")
+                             .bind(1)
+                             .bind(2)
+                             .bind(1)
+                             .execute();
+                REQUIRE(r.row_count() == 1);
+                REQUIRE(*r[0].as_int64("a") == 1);
+                REQUIRE(*r[0].as_int64("b") == 2);
+                REQUIRE(*r[0].as_int64("c") == 1);
+            }
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_cross");
+        });
+}
+
 TEST_CASE("db: bind unknown name throws", "[db][integration]")
 {
     run(
@@ -1168,15 +1288,24 @@ TEST_CASE("db: bind unknown name throws", "[db][integration]")
             // SQL 里只有 :a，绑一个不存在的名字
             REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x").bind("b", 42).execute(), std::runtime_error);
 
-            // 纯位置式 SQL 上做命名绑定
-            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT ? AS x").bind("n", 1).execute(), std::runtime_error);
-
-            // 命名 SQL 上做位置绑定
-            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x").bind(1).execute(), std::runtime_error);
+            // 命名 + 位置混用（两种顺序都抛）
+            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x").bind(1).bind("a", 2).execute(), std::runtime_error);
+            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x").bind("a", 2).bind(1).execute(), std::runtime_error);
 
             // 正常绑定不受影响
             auto r = co_await sess.stmt("SELECT :a AS x").bind("a", 42).execute();
             REQUIRE(*r[0].as_int64("x") == 42);
+        });
+}
+
+TEST_CASE("db: named placeholder bound positionally", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            // :name 占位符按出现顺序做位置绑定（SOCI 风格）
+            auto r = co_await sess.stmt("SELECT :a + :b AS x").bind(1).bind(2).execute();
+            REQUIRE(*r[0].as_int64("x") == 3);
         });
 }
 
@@ -1195,7 +1324,7 @@ TEST_CASE("db: bind once execute multiple times", "[db][integration]")
             co_await named.execute();
 
             // 位置参数：绑一次跑两次，参数也应复用
-            auto positional = sess.stmt("INSERT INTO __httplib_reuse VALUES (?)");
+            auto positional = sess.stmt("INSERT INTO __httplib_reuse VALUES (:v)");
             positional.bind(2);
             co_await positional.execute();
             co_await positional.execute();
@@ -1206,7 +1335,7 @@ TEST_CASE("db: bind once execute multiple times", "[db][integration]")
             REQUIRE(*r2[0].as_int64("c") == 2);
 
             // 位置式重绑：第二次 bind 应覆盖而非追加
-            auto rebind = sess.stmt("INSERT INTO __httplib_reuse VALUES (?)");
+            auto rebind = sess.stmt("INSERT INTO __httplib_reuse VALUES (:v)");
             rebind.bind(3);
             co_await rebind.execute();
             rebind.bind(4);

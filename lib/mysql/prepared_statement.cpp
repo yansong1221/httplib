@@ -91,12 +91,9 @@ namespace httplib::mysql
                 if (start > i + 1)
                 {
                     std::string name = imp.sql.substr(i + 1, start - i - 1);
-                    if (imp.name_to_idx.find(name) == imp.name_to_idx.end())
-                    {
-                        size_t idx = imp.param_names.size();
-                        imp.param_names.push_back(name);
-                        imp.name_to_idx[name] = idx;
-                    }
+                    // 每次出现都记录，支持同名复用；name_to_idx 仅作为"合法名字"集合
+                    imp.param_names.push_back(name);
+                    imp.name_to_idx.insert(name);
                     result += '?';
                     i = start - 1;
                     continue;
@@ -115,6 +112,11 @@ namespace httplib::mysql
         {
             throw std::runtime_error("db: no such named parameter '" + key + "'");
         }
+        if (imp.has_positional_bind)
+        {
+            throw std::runtime_error("db: cannot mix positional and named parameters");
+        }
+        imp.has_named_bind = true;
         imp.named_values[std::move(key)] = fv;
     }
 
@@ -434,7 +436,8 @@ namespace httplib::mysql
     net::awaitable<result>
     prepared_statement::execute()
     {
-        if (!impl_->param_names.empty())
+        // 命名绑定（或未绑定的 :name 语句）→ 从 named_values 重建参数；纯位置绑定 → 直接用 params
+        if (impl_->has_named_bind || (!impl_->has_positional_bind && !impl_->param_names.empty()))
         {
             impl_->params.clear();
             impl_->params.reserve(impl_->param_names.size());
@@ -447,7 +450,7 @@ namespace httplib::mysql
 
         auto& params = impl_->params;
         auto params_str
-            = impl_->param_names.empty() ? format_params(params) : format_named_params(impl_->param_names, params);
+            = impl_->has_named_bind ? format_named_params(impl_->param_names, params) : format_params(params);
         auto& imp = get_impl(*impl_->session);
         auto start = std::chrono::steady_clock::now();
 
@@ -517,6 +520,12 @@ namespace httplib::mysql
     prepared_statement::add_extractor(std::function<void(result const&)> ex)
     {
         impl_->add_extractor(std::move(ex));
+    }
+
+    size_t
+    prepared_statement::alloc_into_col()
+    {
+        return impl_->alloc_into_col();
     }
 
 } // namespace httplib::mysql

@@ -39,9 +39,12 @@ namespace httplib::mysql
     /**
      * \brief 预编译语句。
      * \details
-     * 由 \ref session::stmt 创建，支持位置占位符 `?` 与命名占位符 `:name`。
+     * 由 \ref session::stmt 创建，使用命名占位符 `:name`（内部重写为 MySQL 原生的 `?`）。
      * \n
      * 用法：`bind(...)` 绑定参数后 `execute()` 执行；可选地用 `into(...)` 把结果提取到变量。
+     * \n
+     * `:name` 占位符既可按名字绑定（`bind("name", v)`），也可按出现顺序做位置绑定（`bind(v)`，
+     * SOCI 风格）；同一语句内不能混用两种方式。
      * \n
      * 绑定参数在语句生命周期内持久：重复 `execute()` 复用上次参数，重新 `bind` 则替换；
      * 提取目标同理，重新 `into` 会替换上一次的。
@@ -56,7 +59,7 @@ namespace httplib::mysql
         prepared_statement(prepared_statement const&) = delete;
         prepared_statement& operator=(prepared_statement const&) = delete;
 
-        /** 位置式绑定（对应 `?` 占位符，按调用顺序）。 */
+        /** 位置式绑定，按调用顺序对应 `:name` 占位符。 */
         prepared_statement& bind(std::string_view v);
         prepared_statement& bind(std::string const& v);
         prepared_statement& bind(char const* v);
@@ -133,6 +136,20 @@ namespace httplib::mysql
         }
 
         /**
+         * \brief 把第一行按位置提取到 optional（第 N 次调用对应第 N 列，NULL → nullopt）。
+         * \param v 输出目标。
+         */
+        template <typename T>
+        prepared_statement&
+        into(std::optional<T>& v)
+        {
+            static_assert(detail::is_optional_into_type_v<T>, "db: unsupported type for into(std::optional)");
+            auto col = alloc_into_col();
+            add_extractor([&v, col](result const& r) { v = r[0].get<T>(col); });
+            return *this;
+        }
+
+        /**
          * \brief 把所有行指定列提取到 vector。
          * \param v 输出目标（先 clear）。
          * \param col 列下标。
@@ -190,11 +207,42 @@ namespace httplib::mysql
             return *this;
         }
 
+        /**
+         * \brief 把所有行按位置提取到 vector（第 N 次调用对应第 N 列）。
+         * \param v 输出目标（先 clear）。
+         * \throws std::runtime_error 结果中含 NULL。
+         */
+        template <typename T>
+        prepared_statement&
+        into(std::vector<T>& v)
+        {
+            static_assert(detail::is_vector_into_type_v<T>, "db: unsupported type for into(std::vector)");
+            auto col = alloc_into_col();
+            add_extractor(
+                [&v, col](result const& r)
+                {
+                    v.clear();
+                    v.reserve(r.row_count());
+                    for (size_t i = 0; i < r.row_count(); ++i)
+                    {
+                        auto val = r[i].get<T>(col);
+                        if (!val)
+                        {
+                            throw std::runtime_error("db: NULL value when extracting into vector");
+                        }
+                        v.push_back(std::move(*val));
+                    }
+                });
+            return *this;
+        }
+
         struct impl;
         explicit prepared_statement(session& sess, std::string sql);
 
       private:
         void add_extractor(std::function<void(result const&)> ex);
+
+        size_t alloc_into_col();
 
         std::unique_ptr<impl> impl_;
     };
