@@ -2,6 +2,7 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 
 #include "httplib/mysql/result.hpp"
+#include "httplib/util/string_hash.hpp"
 #include <boost/mysql.hpp>
 #include <chrono>
 #include <string>
@@ -18,7 +19,7 @@ namespace httplib::mysql
 
         std::vector<std::string> col_names;
         std::vector<mysql::column_type> col_types;
-        std::unordered_map<std::string, size_t> col_index;
+        util::string_map<size_t> col_index;
         uint64_t affected = 0;
         uint64_t insert_id = 0;
         uint64_t warnings = 0;

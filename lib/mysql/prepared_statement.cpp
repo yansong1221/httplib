@@ -136,7 +136,7 @@ namespace httplib::mysql
     prepared_statement::bind(std::string_view v)
     {
         impl_->begin_bind();
-        impl_->params.emplace_back(boost::mysql::field_view(v));
+        impl_->params.emplace_back(std::string(v));
         return *this;
     }
 
@@ -144,7 +144,7 @@ namespace httplib::mysql
     prepared_statement::bind(std::string const& v)
     {
         impl_->begin_bind();
-        impl_->params.emplace_back(boost::mysql::field_view(v));
+        impl_->params.emplace_back(v);
         return *this;
     }
 
@@ -152,7 +152,7 @@ namespace httplib::mysql
     prepared_statement::bind(char const* v)
     {
         impl_->begin_bind();
-        impl_->params.emplace_back(boost::mysql::field_view(v));
+        impl_->params.emplace_back(std::string(v));
         return *this;
     }
 
@@ -262,7 +262,7 @@ namespace httplib::mysql
     }
 
     prepared_statement&
-    prepared_statement::bind(std::span<const std::byte> v)
+    prepared_statement::bind(std::span<std::byte const> v)
     {
         impl_->begin_bind();
         impl_->params.emplace_back(boost::mysql::field_view(
@@ -281,14 +281,14 @@ namespace httplib::mysql
     prepared_statement&
     prepared_statement::bind(std::string_view name, std::string_view v)
     {
-        bind_named(*impl_, name, boost::mysql::field_view(v));
+        bind_named(*impl_, name, std::string(v));
         return *this;
     }
 
     prepared_statement&
     prepared_statement::bind(std::string_view name, char const* v)
     {
-        bind_named(*impl_, name, boost::mysql::field_view(v));
+        bind_named(*impl_, name, std::string(v));
         return *this;
     }
 
@@ -387,13 +387,12 @@ namespace httplib::mysql
     }
 
     prepared_statement&
-    prepared_statement::bind(std::string_view name, std::span<const std::byte> v)
+    prepared_statement::bind(std::string_view name, std::span<std::byte const> v)
     {
-        bind_named(
-            *impl_,
-            name,
-            boost::mysql::field_view(
-                boost::mysql::blob_view(reinterpret_cast<unsigned char const*>(v.data()), v.size())));
+        bind_named(*impl_,
+                   name,
+                   boost::mysql::field_view(
+                       boost::mysql::blob_view(reinterpret_cast<unsigned char const*>(v.data()), v.size())));
         return *this;
     }
 
@@ -462,10 +461,7 @@ namespace httplib::mysql
         }
 
         auto make_params_str = [&]() -> std::string
-        {
-            return impl_->has_named_bind ? format_named_params(impl_->param_names, views)
-                                         : format_params(views);
-        };
+        { return impl_->has_named_bind ? format_named_params(impl_->param_names, views) : format_params(views); };
         auto& imp = get_impl(*impl_->session);
         auto start = std::chrono::steady_clock::now();
 

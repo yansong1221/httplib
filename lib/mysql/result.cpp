@@ -125,7 +125,7 @@ namespace httplib::mysql
     result::column_index(std::string_view n) const
     {
         auto& i = get_impl(*this);
-        auto it = i.col_index.find(std::string(n));
+        auto it = i.col_index.find(n);
         if (it == i.col_index.end())
         {
             throw std::runtime_error("db: column not found: " + std::string(n));

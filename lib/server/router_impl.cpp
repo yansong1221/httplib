@@ -272,7 +272,7 @@ namespace httplib::server
 
         // 1) static
         {
-            auto iter = parent->static_children.find(std::string(seg));
+            auto iter = parent->static_children.find(seg);
             if (iter != parent->static_children.end())
             {
                 if (auto node = match_nodes(iter->second.get(), segments, index + 1, params, handler); node)

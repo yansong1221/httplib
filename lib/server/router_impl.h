@@ -1,5 +1,6 @@
 #pragma once
 #include "httplib/server/router.hpp"
+#include "httplib/util/string_hash.hpp"
 #include <boost/beast/http/verb.hpp>
 #include <functional>
 #include <memory>
@@ -75,7 +76,7 @@ namespace httplib::server
             std::optional<ws_handler_entry> ws_handler;
             std::optional<coro_http_handler_type> connect_handler;
 
-            std::unordered_map<std::string, std::unique_ptr<Node>> static_children;
+            util::string_map<std::unique_ptr<Node>> static_children;
             std::vector<std::unique_ptr<Node>> param_children;
             std::vector<std::unique_ptr<Node>> regex_children;
             std::unique_ptr<Node> wildcard_children;

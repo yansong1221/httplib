@@ -195,7 +195,7 @@ namespace httplib::compress
     bool
     compressor_factory::is_supported_encoding(std::string_view encoding) const
     {
-        auto iter = creators_.find(std::string(encoding));
+        auto iter = creators_.find(encoding);
         return iter != creators_.end();
     }
 

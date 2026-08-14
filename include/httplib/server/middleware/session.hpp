@@ -1,6 +1,7 @@
 #pragma once
 #include "httplib/config.hpp"
 #include "httplib/server/server_fwd.hpp"
+#include "httplib/util/string_hash.hpp"
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -34,7 +35,7 @@ namespace httplib::server::middleware
         bool has(std::string_view key) const;
         void remove(std::string_view key);
         bool empty() const;
-        std::unordered_map<std::string, std::string> const& data() const;
+        util::string_map<std::string> const& data() const;
 
       private:
         struct impl;

@@ -2,6 +2,7 @@
 #include "httplib/server/middleware/session.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
+#include "httplib/util/string_hash.hpp"
 #include "memory_store.hpp"
 #include <atomic>
 #include <mutex>
@@ -33,7 +34,7 @@ namespace httplib::server::middleware
         std::string id;
         session::time_point created;
         session::time_point last_access;
-        std::unordered_map<std::string, std::string> data;
+        util::string_map<std::string> data;
     };
 
     session::session(std::string id, time_point created)
@@ -78,7 +79,7 @@ namespace httplib::server::middleware
     std::optional<std::string>
     session::get(std::string_view key) const
     {
-        auto it = impl_->data.find(std::string(key));
+        auto it = impl_->data.find(key);
         if (it != impl_->data.end())
         {
             return it->second;
@@ -95,7 +96,7 @@ namespace httplib::server::middleware
     bool
     session::has(std::string_view key) const
     {
-        return impl_->data.count(std::string(key)) > 0;
+        return impl_->data.count(key) > 0;
     }
 
     void
@@ -110,7 +111,7 @@ namespace httplib::server::middleware
         return impl_->data.empty();
     }
 
-    std::unordered_map<std::string, std::string> const&
+    util::string_map<std::string> const&
     session::data() const
     {
         return impl_->data;
@@ -126,7 +127,7 @@ namespace httplib::server::middleware
 
         std::chrono::seconds ttl_;
         std::mutex mutex_;
-        std::unordered_map<std::string, std::shared_ptr<session>> sessions_;
+        util::string_map<std::shared_ptr<session>> sessions_;
 
         bool
         is_expired(session const& s) const
@@ -148,7 +149,7 @@ namespace httplib::server::middleware
     memory_session_store::load(std::string_view id)
     {
         std::lock_guard lock(impl_->mutex_);
-        auto it = impl_->sessions_.find(std::string(id));
+        auto it = impl_->sessions_.find(id);
         if (it != impl_->sessions_.end())
         {
             auto s = it->second;

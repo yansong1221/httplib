@@ -1,5 +1,6 @@
 #pragma once
 #include "httplib/config.hpp"
+#include "httplib/util/string_hash.hpp"
 #include <boost/asio/buffer.hpp>
 #include <functional>
 #include <unordered_map>
@@ -43,6 +44,6 @@ namespace httplib::compress
       private:
         compressor_factory();
         void register_compressor(std::string const& encoding, create_function&& func);
-        std::unordered_map<std::string, create_function> creators_;
+        util::string_map<create_function> creators_;
     };
 } // namespace httplib::compress

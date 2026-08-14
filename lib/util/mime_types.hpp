@@ -498,7 +498,7 @@ namespace httplib::mime
     inline std::string_view
     get_mime_type(std::string_view extension)
     {
-        auto it = mime_map.find(std::string(extension.data(), extension.size()));
+        auto it = mime_map.find(extension);
         if (it == mime_map.end())
         {
             return "application/octet-stream";

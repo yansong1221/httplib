@@ -4,6 +4,7 @@
 #include "httplib/mysql/mysql_exception.hpp"
 #include "httplib/mysql/prepared_statement.hpp"
 #include "httplib/mysql/session.hpp"
+#include "httplib/util/string_hash.hpp"
 #include <boost/asio/cancel_after.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/use_awaitable.hpp>
@@ -26,6 +27,27 @@ namespace httplib::mysql
 {
 
     inline std::string
+    quote_mysql_string(std::string_view sv)
+    {
+        std::string out;
+        out.reserve(sv.size() + 2);
+        out += '\'';
+        for (char c : sv)
+        {
+            if (c == '\'')
+            {
+                out += "''";
+            }
+            else
+            {
+                out += c;
+            }
+        }
+        out += '\'';
+        return out;
+    }
+
+    inline std::string
     format_param(boost::mysql::field_view const& f)
     {
         if (f.is_null())
@@ -46,20 +68,7 @@ namespace httplib::mysql
         }
         if (f.is_string())
         {
-            std::string out = "'";
-            for (char c : f.as_string())
-            {
-                if (c == '\'')
-                {
-                    out += "''";
-                }
-                else
-                {
-                    out += c;
-                }
-            }
-            out += "'";
-            return out;
+            return quote_mysql_string(f.as_string());
         }
         if (f.is_blob())
         {
@@ -204,7 +213,7 @@ namespace httplib::mysql
             boost::mysql::results r;
             boost::mysql::diagnostics diag;
             boost::system::error_code ec;
-            co_await conn.async_execute("SET NAMES '" + cfg.charset + "'",
+            co_await conn.async_execute("SET NAMES " + quote_mysql_string(cfg.charset),
                                         r,
                                         diag,
                                         net::redirect_error(net::use_awaitable, ec));
@@ -216,7 +225,7 @@ namespace httplib::mysql
             boost::mysql::results r;
             boost::mysql::diagnostics diag;
             boost::system::error_code ec;
-            co_await conn.async_execute("SET time_zone = '" + cfg.time_zone + "'",
+            co_await conn.async_execute("SET time_zone = " + quote_mysql_string(cfg.time_zone),
                                         r,
                                         diag,
                                         net::redirect_error(net::use_awaitable, ec));
@@ -270,7 +279,7 @@ namespace httplib::mysql
                 std::list<std::string>::iterator lru_it;
             };
 
-            std::unordered_map<std::string, entry> map;
+            util::string_map<entry> map;
             std::list<std::string> lru;
             size_t capacity = 64;
         } stmt_cache;
@@ -301,7 +310,7 @@ namespace httplib::mysql
         boost::mysql::statement*
         find_statement(std::string_view sql)
         {
-            auto it = stmt_cache.map.find(std::string(sql));
+            auto it = stmt_cache.map.find(sql);
             if (it == stmt_cache.map.end())
             {
                 return nullptr;
@@ -347,7 +356,8 @@ namespace httplib::mysql
 
     struct prepared_statement::impl
     {
-        /// 参数值：field_view 为标量/非拥有视图；std::string 为拥有型 JSON 序列化结果
+        /// 参数值：field_view 为标量/非拥有视图（int/double/date/blob 等）；std::string 为拥有型字符串（普通字符串与
+        /// JSON 序列化结果）
         using param = std::variant<boost::mysql::field_view, std::string>;
 
         session* session = nullptr;

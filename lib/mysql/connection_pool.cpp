@@ -29,9 +29,11 @@ namespace httplib::mysql
             {
                 return;
             }
+            auto epoch = epoch_.load();
             net::co_spawn(
                 ex_,
-                [this, self = shared_from_this()]() -> net::awaitable<void> { co_await co_init_and_maintain(); },
+                [this, self = shared_from_this(), epoch]() -> net::awaitable<void>
+                { co_await co_init_and_maintain(epoch); },
                 [](std::exception_ptr e)
                 {
                     if (e)
@@ -194,6 +196,7 @@ namespace httplib::mysql
             {
                 return;
             }
+            epoch_.fetch_add(1);
             maintain_timer_.cancel();
 
             waiters_list waiters;
@@ -350,7 +353,7 @@ namespace httplib::mysql
         }
 
         net::awaitable<void>
-        co_init_and_maintain()
+        co_init_and_maintain(uint64_t epoch)
         {
             std::vector<std::unique_ptr<session>> pre_created;
             for (size_t i = 0; i < cfg_.min_connections; ++i)
@@ -370,7 +373,7 @@ namespace httplib::mysql
 
             {
                 std::lock_guard<std::mutex> lock(mutex_);
-                if (stopped_)
+                if (stopped_ || epoch_ != epoch)
                 {
                     co_return;
                 }
@@ -380,22 +383,22 @@ namespace httplib::mysql
                 }
             }
 
-            co_await co_maintain();
+            co_await co_maintain(epoch);
             co_return;
         }
 
         net::awaitable<void>
-        co_maintain()
+        co_maintain(uint64_t epoch)
         {
             auto check_interval
                 = cfg_.idle_check_interval.count() > 0 ? cfg_.idle_check_interval : std::chrono::seconds(60);
 
             boost::system::error_code ec;
-            while (!stopped_)
+            while (!stopped_ && epoch_ == epoch)
             {
                 maintain_timer_.expires_after(check_interval);
                 co_await maintain_timer_.async_wait(util::net_awaitable[ec]);
-                if (ec || stopped_)
+                if (ec || stopped_ || epoch_ != epoch)
                 {
                     co_return;
                 }
@@ -438,7 +441,7 @@ namespace httplib::mysql
 
                 for (auto& sess : to_ping)
                 {
-                    if (stopped_)
+                    if (stopped_ || epoch_ != epoch)
                     {
                         co_return;
                     }
@@ -486,7 +489,7 @@ namespace httplib::mysql
 
                 for (size_t i = 0; i < deficit; ++i)
                 {
-                    if (stopped_)
+                    if (stopped_ || epoch_ != epoch)
                     {
                         co_return;
                     }
@@ -520,6 +523,7 @@ namespace httplib::mysql
         pool_params cfg_;
 
         std::atomic<bool> stopped_ { true };
+        std::atomic<uint64_t> epoch_ { 0 };
         net::steady_timer maintain_timer_;
     };
 

@@ -1,5 +1,6 @@
 #pragma once
 #include "httplib/config.hpp"
+#include "httplib/util/string_hash.hpp"
 #include <memory>
 #include <optional>
 #include <string>
@@ -119,7 +120,7 @@ namespace httplib::html
         std::optional<std::string>
         get(std::string_view name) const
         {
-            auto it = impl_->values_.find(std::string(name));
+            auto it = impl_->values_.find(name);
             if (it != impl_->values_.end())
             {
                 return it->second;
@@ -130,7 +131,7 @@ namespace httplib::html
         bool
         has(std::string_view name) const
         {
-            return impl_->values_.count(std::string(name)) > 0;
+            return impl_->values_.count(name) > 0;
         }
 
         size_t
@@ -139,7 +140,7 @@ namespace httplib::html
             return impl_->values_.size();
         }
 
-        std::unordered_map<std::string, std::string> const&
+        util::string_map<std::string> const&
         values() const
         {
             return impl_->values_;
@@ -154,7 +155,7 @@ namespace httplib::html
       private:
         struct impl
         {
-            std::unordered_map<std::string, std::string> values_;
+            util::string_map<std::string> values_;
             std::vector<cookie> cookies_;
 
             static std::string_view
