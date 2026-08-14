@@ -2,7 +2,6 @@
 #include "httplib/mysql/result.hpp"
 #include "mysql/detail_helpers.h"
 #include "mysql/result_impl.h"
-#include "mysql/row_impl.h"
 
 namespace httplib::mysql
 {
@@ -16,16 +15,19 @@ namespace httplib::mysql
         warnings = rs.warning_count();
         col_names.clear();
         col_types.clear();
+        col_index.clear();
         if (rs.has_value())
         {
             auto m = rs.meta();
             col_names.reserve(m.size());
             col_types.reserve(m.size());
+            col_index.reserve(m.size());
             for (auto& c : m)
             {
                 auto s = c.column_name();
                 col_names.emplace_back(s.data(), s.size());
                 col_types.push_back(detail::map_column_type(c.type(), c.is_unsigned()));
+                col_index.emplace(col_names.back(), col_names.size() - 1);
             }
         }
     }
@@ -123,14 +125,12 @@ namespace httplib::mysql
     result::column_index(std::string_view n) const
     {
         auto& i = get_impl(*this);
-        for (size_t j = 0; j < i.col_names.size(); ++j)
+        auto it = i.col_index.find(std::string(n));
+        if (it == i.col_index.end())
         {
-            if (i.col_names[j] == n)
-            {
-                return j;
-            }
+            throw std::runtime_error("db: column not found: " + std::string(n));
         }
-        throw std::runtime_error("db: column not found: " + std::string(n));
+        return it->second;
     }
 
     std::string const&
@@ -148,10 +148,7 @@ namespace httplib::mysql
     row
     result::operator[](size_t i) const
     {
-        auto imp = std::make_unique<row::impl>();
-        imp->parent = this;
-        imp->idx = i;
-        return row(std::move(imp));
+        return row(this, i);
     }
 
     result::iterator

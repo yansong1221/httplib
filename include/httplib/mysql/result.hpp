@@ -13,6 +13,24 @@ namespace httplib::mysql
 {
 
     /**
+     * \brief 结果集列的类型。
+     */
+    enum class column_type
+    {
+        string,    ///< 字符串（CHAR/VARCHAR/TEXT/JSON 等）。
+        int64,     ///< 有符号整数。
+        uint64,    ///< 无符号整数。
+        double_,   ///< 浮点数。
+        blob,      ///< 二进制数据。
+        date,      ///< DATE。
+        datetime,  ///< DATETIME。
+        timestamp, ///< TIMESTAMP（时区敏感）。
+        time,      ///< TIME。
+        null,      ///< NULL。
+        unknown    ///< 未知类型。
+    };
+
+    /**
      * \brief 查询结果集。
      * \details
      * 由 \ref session::query 或 \ref prepared_statement::execute 返回。

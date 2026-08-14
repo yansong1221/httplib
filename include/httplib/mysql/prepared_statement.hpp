@@ -4,9 +4,11 @@
 #include "httplib/config.hpp"
 #include "httplib/mysql/mysql_fwd.hpp"
 #include "httplib/mysql/result.hpp"
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -19,7 +21,7 @@ namespace httplib::mysql
     {
         /**
          * \brief `into(std::vector<T>&)` 支持的元素类型。
-         * \details 仅包含可拥有/可复制的值类型；view 类型（string_view / const_buffer）被排除。
+         * \details 仅包含可拥有/可复制的值类型；view 类型（string_view / std::span<const std::byte>）被排除。
          */
         template <typename T>
         inline constexpr bool is_vector_into_type_v
@@ -31,11 +33,11 @@ namespace httplib::mysql
               || std::is_same_v<T, boost::json::value>;
 
         /**
-         * \brief `into(std::optional<T>&)` 支持的元素类型（在 vector 基础上额外支持 const_buffer）。
+         * \brief `into(std::optional<T>&)` 支持的元素类型（在 vector 基础上额外支持 std::span<const std::byte>）。
          */
         template <typename T>
         inline constexpr bool is_optional_into_type_v
-            = is_vector_into_type_v<T> || std::is_same_v<T, net::const_buffer>;
+            = is_vector_into_type_v<T> || std::is_same_v<T, std::span<const std::byte>>;
     } // namespace detail
 
     /**
@@ -78,7 +80,7 @@ namespace httplib::mysql
         prepared_statement& bind(date v);
         prepared_statement& bind(datetime v);
         prepared_statement& bind(time v);
-        prepared_statement& bind(net::const_buffer v);
+        prepared_statement& bind(std::span<const std::byte> v);
         prepared_statement& bind(boost::json::value const& v);
         prepared_statement& bind(std::chrono::system_clock::time_point tp);
 
@@ -98,7 +100,7 @@ namespace httplib::mysql
         prepared_statement& bind(std::string_view name, date v);
         prepared_statement& bind(std::string_view name, datetime v);
         prepared_statement& bind(std::string_view name, time v);
-        prepared_statement& bind(std::string_view name, net::const_buffer v);
+        prepared_statement& bind(std::string_view name, std::span<const std::byte> v);
         prepared_statement& bind(std::string_view name, boost::json::value const& v);
         prepared_statement& bind(std::string_view name, std::chrono::system_clock::time_point tp);
 
@@ -195,10 +197,15 @@ namespace httplib::mysql
                 [&v, n = std::string(name)](result const& r)
                 {
                     v.clear();
+                    if (r.row_count() == 0)
+                    {
+                        return;
+                    }
+                    size_t col = r.column_index(n);
                     v.reserve(r.row_count());
                     for (size_t i = 0; i < r.row_count(); ++i)
                     {
-                        auto val = r[i].get<T>(n);
+                        auto val = r[i].get<T>(col);
                         if (!val)
                         {
                             throw std::runtime_error("db: NULL value when extracting into vector");

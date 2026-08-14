@@ -4,7 +4,6 @@
 #include "httplib/config.hpp"
 #include "httplib/mysql/result.hpp"
 #include "mysql/result_impl.h"
-#include "mysql/row_impl.h"
 #include <boost/mysql.hpp>
 #include <chrono>
 #include <limits>
@@ -138,21 +137,14 @@ namespace httplib::mysql::detail
     inline std::chrono::system_clock::time_point
     d2e(datetime const& dt)
     {
-        if (dt.month < 1 || dt.month > 12 || dt.day < 1 || dt.day > 31)
-        {
-            throw std::runtime_error("db: invalid datetime value");
-        }
-        auto ymd = std::chrono::year(dt.year) / std::chrono::month(dt.month) / std::chrono::day(dt.day);
-        auto tp = std::chrono::sys_days(ymd) + std::chrono::hours(dt.hour) + std::chrono::minutes(dt.minute)
-                  + std::chrono::seconds(dt.second) + std::chrono::microseconds(dt.microsecond);
-        return tp;
+        return dt.to_time_point();
     }
 
     template <typename T, typename Conv>
     inline std::optional<T>
-    detail_value(row::impl const& imp, size_t col, Conv&& conv)
+    detail_value(result::impl const& i, size_t idx, size_t col, Conv&& conv)
     {
-        auto f = ff(get_impl(*imp.parent), imp.idx, col);
+        auto f = ff(i, idx, col);
         if (f.is_null())
         {
             return std::nullopt;

@@ -100,6 +100,7 @@ namespace httplib::mysql
 
         imp.utc_offset = co_await connect_session(*imp.conn, imp.params);
         imp.live = true;
+        imp.in_transaction = false;
     }
 
     net::awaitable<bool>

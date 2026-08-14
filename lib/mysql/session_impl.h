@@ -13,13 +13,13 @@
 #include <boost/mysql/statement.hpp>
 #include <chrono>
 #include <cstddef>
-#include <deque>
 #include <functional>
 #include <list>
 #include <string>
 #include <string_view>
 #include <unordered_map>
 #include <unordered_set>
+#include <variant>
 #include <vector>
 
 namespace httplib::mysql
@@ -347,17 +347,18 @@ namespace httplib::mysql
 
     struct prepared_statement::impl
     {
+        /// 参数值：field_view 为标量/非拥有视图；std::string 为拥有型 JSON 序列化结果
+        using param = std::variant<boost::mysql::field_view, std::string>;
+
         session* session = nullptr;
         std::string sql;
         std::string original_sql;
-        std::vector<boost::mysql::field_view> params;
+        std::vector<param> params;
 
         std::vector<std::function<void(result const&)>> extractors;
 
         std::vector<std::string> param_names;
-        std::unordered_map<std::string, boost::mysql::field_view> named_values;
-        std::unordered_map<std::string, std::string> named_storage;
-        std::deque<std::string> data_strs;
+        std::unordered_map<std::string, param> named_values;
         bool need_params_reset = false;
         bool need_extractors_reset = false;
         bool has_named_bind = false;
@@ -375,7 +376,6 @@ namespace httplib::mysql
             if (need_params_reset)
             {
                 params.clear();
-                data_strs.clear();
                 need_params_reset = false;
             }
         }

@@ -5,6 +5,7 @@
 #include <boost/mysql.hpp>
 #include <chrono>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace httplib::mysql
@@ -17,6 +18,7 @@ namespace httplib::mysql
 
         std::vector<std::string> col_names;
         std::vector<mysql::column_type> col_types;
+        std::unordered_map<std::string, size_t> col_index;
         uint64_t affected = 0;
         uint64_t insert_id = 0;
         uint64_t warnings = 0;

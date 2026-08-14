@@ -102,7 +102,7 @@ namespace httplib::mysql
     }
 
     static void
-    bind_named(prepared_statement::impl& imp, std::string_view name, boost::mysql::field_view fv)
+    bind_named(prepared_statement::impl& imp, std::string_view name, prepared_statement::impl::param value)
     {
         auto key = std::string(name);
         if (std::ranges::find(imp.param_names, name) == imp.param_names.end())
@@ -114,7 +114,7 @@ namespace httplib::mysql
             throw std::runtime_error("db: cannot mix positional and named parameters");
         }
         imp.has_named_bind = true;
-        imp.named_values[std::move(key)] = fv;
+        imp.named_values[std::move(key)] = std::move(value);
     }
 
     prepared_statement::prepared_statement(session& sess, std::string sql) : impl_(std::make_unique<impl>())
@@ -136,7 +136,7 @@ namespace httplib::mysql
     prepared_statement::bind(std::string_view v)
     {
         impl_->begin_bind();
-        impl_->params.emplace_back(v);
+        impl_->params.emplace_back(boost::mysql::field_view(v));
         return *this;
     }
 
@@ -144,7 +144,7 @@ namespace httplib::mysql
     prepared_statement::bind(std::string const& v)
     {
         impl_->begin_bind();
-        impl_->params.emplace_back(v);
+        impl_->params.emplace_back(boost::mysql::field_view(v));
         return *this;
     }
 
@@ -152,7 +152,7 @@ namespace httplib::mysql
     prepared_statement::bind(char const* v)
     {
         impl_->begin_bind();
-        impl_->params.emplace_back(v);
+        impl_->params.emplace_back(boost::mysql::field_view(v));
         return *this;
     }
 
@@ -160,7 +160,7 @@ namespace httplib::mysql
     prepared_statement::bind(int64_t v)
     {
         impl_->begin_bind();
-        impl_->params.emplace_back(v);
+        impl_->params.emplace_back(boost::mysql::field_view(v));
         return *this;
     }
 
@@ -168,7 +168,7 @@ namespace httplib::mysql
     prepared_statement::bind(uint64_t v)
     {
         impl_->begin_bind();
-        impl_->params.emplace_back(v);
+        impl_->params.emplace_back(boost::mysql::field_view(v));
         return *this;
     }
 
@@ -176,7 +176,7 @@ namespace httplib::mysql
     prepared_statement::bind(int v)
     {
         impl_->begin_bind();
-        impl_->params.emplace_back(static_cast<int64_t>(v));
+        impl_->params.emplace_back(boost::mysql::field_view(static_cast<int64_t>(v)));
         return *this;
     }
 
@@ -184,7 +184,7 @@ namespace httplib::mysql
     prepared_statement::bind(unsigned v)
     {
         impl_->begin_bind();
-        impl_->params.emplace_back(static_cast<uint64_t>(v));
+        impl_->params.emplace_back(boost::mysql::field_view(static_cast<uint64_t>(v)));
         return *this;
     }
 
@@ -192,7 +192,7 @@ namespace httplib::mysql
     prepared_statement::bind(short v)
     {
         impl_->begin_bind();
-        impl_->params.emplace_back(static_cast<int64_t>(v));
+        impl_->params.emplace_back(boost::mysql::field_view(static_cast<int64_t>(v)));
         return *this;
     }
 
@@ -200,7 +200,7 @@ namespace httplib::mysql
     prepared_statement::bind(unsigned short v)
     {
         impl_->begin_bind();
-        impl_->params.emplace_back(static_cast<uint64_t>(v));
+        impl_->params.emplace_back(boost::mysql::field_view(static_cast<uint64_t>(v)));
         return *this;
     }
 
@@ -208,7 +208,7 @@ namespace httplib::mysql
     prepared_statement::bind(double v)
     {
         impl_->begin_bind();
-        impl_->params.emplace_back(v);
+        impl_->params.emplace_back(boost::mysql::field_view(v));
         return *this;
     }
 
@@ -216,7 +216,7 @@ namespace httplib::mysql
     prepared_statement::bind(float v)
     {
         impl_->begin_bind();
-        impl_->params.emplace_back(static_cast<double>(v));
+        impl_->params.emplace_back(boost::mysql::field_view(static_cast<double>(v)));
         return *this;
     }
 
@@ -224,7 +224,7 @@ namespace httplib::mysql
     prepared_statement::bind(bool v)
     {
         impl_->begin_bind();
-        impl_->params.emplace_back(static_cast<int64_t>(v ? 1 : 0));
+        impl_->params.emplace_back(boost::mysql::field_view(static_cast<int64_t>(v ? 1 : 0)));
         return *this;
     }
 
@@ -232,7 +232,7 @@ namespace httplib::mysql
     prepared_statement::bind(std::nullptr_t)
     {
         impl_->begin_bind();
-        impl_->params.emplace_back();
+        impl_->params.emplace_back(boost::mysql::field_view());
         return *this;
     }
 
@@ -240,7 +240,7 @@ namespace httplib::mysql
     prepared_statement::bind(date v)
     {
         impl_->begin_bind();
-        impl_->params.emplace_back(boost::mysql::date(v.year, v.month, v.day));
+        impl_->params.emplace_back(boost::mysql::field_view(boost::mysql::date(v.year, v.month, v.day)));
         return *this;
     }
 
@@ -248,8 +248,8 @@ namespace httplib::mysql
     prepared_statement::bind(datetime v)
     {
         impl_->begin_bind();
-        impl_->params.emplace_back(
-            boost::mysql::datetime(v.year, v.month, v.day, v.hour, v.minute, v.second, v.microsecond));
+        impl_->params.emplace_back(boost::mysql::field_view(
+            boost::mysql::datetime(v.year, v.month, v.day, v.hour, v.minute, v.second, v.microsecond)));
         return *this;
     }
 
@@ -257,16 +257,16 @@ namespace httplib::mysql
     prepared_statement::bind(time v)
     {
         impl_->begin_bind();
-        impl_->params.emplace_back(std::chrono::hours(v.hour) + std::chrono::minutes(v.minute)
-                                   + std::chrono::seconds(v.second) + std::chrono::microseconds(v.microsecond));
+        impl_->params.emplace_back(boost::mysql::field_view(v.to_duration()));
         return *this;
     }
 
     prepared_statement&
-    prepared_statement::bind(net::const_buffer v)
+    prepared_statement::bind(std::span<const std::byte> v)
     {
         impl_->begin_bind();
-        impl_->params.emplace_back(boost::mysql::blob_view(static_cast<unsigned char const*>(v.data()), v.size()));
+        impl_->params.emplace_back(boost::mysql::field_view(
+            boost::mysql::blob_view(reinterpret_cast<unsigned char const*>(v.data()), v.size())));
         return *this;
     }
 
@@ -274,8 +274,7 @@ namespace httplib::mysql
     prepared_statement::bind(boost::json::value const& v)
     {
         impl_->begin_bind();
-        impl_->data_strs.push_back(boost::json::serialize(v));
-        impl_->params.emplace_back(impl_->data_strs.back());
+        impl_->params.emplace_back(boost::json::serialize(v));
         return *this;
     }
 
@@ -383,33 +382,25 @@ namespace httplib::mysql
     prepared_statement&
     prepared_statement::bind(std::string_view name, time v)
     {
-        bind_named(*impl_,
-                   name,
-                   boost::mysql::field_view(std::chrono::hours(v.hour) + std::chrono::minutes(v.minute)
-                                            + std::chrono::seconds(v.second)
-                                            + std::chrono::microseconds(v.microsecond)));
+        bind_named(*impl_, name, boost::mysql::field_view(v.to_duration()));
         return *this;
     }
 
     prepared_statement&
-    prepared_statement::bind(std::string_view name, net::const_buffer v)
+    prepared_statement::bind(std::string_view name, std::span<const std::byte> v)
     {
-        auto& storage = impl_->named_storage[std::string(name)];
-        storage.assign(static_cast<char const*>(v.data()), v.size());
         bind_named(
             *impl_,
             name,
             boost::mysql::field_view(
-                boost::mysql::blob_view(reinterpret_cast<unsigned char const*>(storage.data()), storage.size())));
+                boost::mysql::blob_view(reinterpret_cast<unsigned char const*>(v.data()), v.size())));
         return *this;
     }
 
     prepared_statement&
     prepared_statement::bind(std::string_view name, boost::json::value const& v)
     {
-        auto& storage = impl_->named_storage[std::string(name)];
-        storage = boost::json::serialize(v);
-        bind_named(*impl_, name, boost::mysql::field_view(storage));
+        bind_named(*impl_, name, boost::json::serialize(v));
         return *this;
     }
 
@@ -418,7 +409,7 @@ namespace httplib::mysql
     {
         impl_->begin_bind();
         auto& imp = get_impl(*impl_->session);
-        impl_->params.emplace_back(to_datetime(tp + imp.utc_offset));
+        impl_->params.emplace_back(boost::mysql::field_view(to_datetime(tp + imp.utc_offset)));
         return *this;
     }
 
@@ -449,9 +440,32 @@ namespace httplib::mysql
             }
         }
 
-        auto& params = impl_->params;
-        auto params_str
-            = impl_->has_named_bind ? format_named_params(impl_->param_names, params) : format_params(params);
+        // 统一投影成 field_view：标量/视图直接拷贝，JSON（std::string 分支）引用其持有缓冲区
+        std::vector<boost::mysql::field_view> views;
+        views.reserve(impl_->params.size());
+        for (auto const& p : impl_->params)
+        {
+            std::visit(
+                [&](auto const& v)
+                {
+                    using T = std::decay_t<decltype(v)>;
+                    if constexpr (std::is_same_v<T, std::string>)
+                    {
+                        views.emplace_back(v);
+                    }
+                    else
+                    {
+                        views.push_back(v);
+                    }
+                },
+                p);
+        }
+
+        auto make_params_str = [&]() -> std::string
+        {
+            return impl_->has_named_bind ? format_named_params(impl_->param_names, views)
+                                         : format_params(views);
+        };
         auto& imp = get_impl(*impl_->session);
         auto start = std::chrono::steady_clock::now();
 
@@ -471,12 +485,15 @@ namespace httplib::mysql
                 impl_->sql,
                 diag,
                 boost::asio::redirect_error(boost::asio::use_awaitable, ec));
-            imp.raise_error(ec, diag, impl_->original_sql, params_str);
+            if (ec)
+            {
+                imp.raise_error(ec, diag, impl_->original_sql, make_params_str());
+            }
             imp.store_statement(impl_->sql, stmt);
         }
 
         boost::system::error_code ec;
-        if (params.empty())
+        if (views.empty())
         {
             co_await imp.get_conn().async_execute(stmt.bind(),
                                                   data,
@@ -485,12 +502,15 @@ namespace httplib::mysql
         }
         else
         {
-            co_await imp.get_conn().async_execute(stmt.bind(params.begin(), params.end()),
+            co_await imp.get_conn().async_execute(stmt.bind(views.begin(), views.end()),
                                                   data,
                                                   diag,
                                                   boost::asio::redirect_error(boost::asio::use_awaitable, ec));
         }
-        imp.raise_error(ec, diag, impl_->original_sql, params_str);
+        if (ec)
+        {
+            imp.raise_error(ec, diag, impl_->original_sql, make_params_str());
+        }
 
         auto res = result(std::make_unique<result::impl>(std::move(data), imp.utc_offset));
 
@@ -501,7 +521,7 @@ namespace httplib::mysql
             entry.duration = std::chrono::steady_clock::now() - start;
             entry.row_count = res.row_count();
             entry.affected_rows = res.affected_rows();
-            entry.is_parameterized = !params.empty();
+            entry.is_parameterized = !views.empty();
             imp.query_logger(entry);
         }
 

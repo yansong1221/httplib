@@ -2,117 +2,28 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 
 #include "mysql_fwd.hpp"
+#include "temporal.hpp"
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
-#include <limits>
-#include <memory>
 #include <optional>
-#include <stdexcept>
-#include <string>
+#include <span>
 #include <string_view>
 
 namespace httplib::mysql
 {
 
     /**
-     * \brief 结果集列的类型。
-     */
-    enum class column_type
-    {
-        string,    ///< 字符串（CHAR/VARCHAR/TEXT/JSON 等）。
-        int64,     ///< 有符号整数。
-        uint64,    ///< 无符号整数。
-        double_,   ///< 浮点数。
-        blob,      ///< 二进制数据。
-        date,      ///< DATE。
-        datetime,  ///< DATETIME。
-        timestamp, ///< TIMESTAMP（时区敏感）。
-        time,      ///< TIME。
-        null,      ///< NULL。
-        unknown    ///< 未知类型。
-    };
-
-    /**
-     * \brief 日期（年/月/日）。
-     */
-    struct date
-    {
-        unsigned year = 0, month = 0, day = 0;
-    };
-
-    /**
-     * \brief 时间（时/分/秒/微秒）。
-     */
-    struct time
-    {
-        unsigned hour = 0, minute = 0, second = 0;
-        unsigned long microsecond = 0;
-    };
-
-    /**
-     * \brief 日期时间（date 与 time 的组合）。
-     */
-    struct datetime
-        : date
-        , time
-    {
-    };
-
-    namespace detail
-    {
-        /**
-         * \brief 把 int64 窄化到更小的整数类型，越界抛异常。
-         */
-        template <typename T>
-        std::optional<T>
-        narrow_int(std::optional<int64_t> v)
-        {
-            if (!v)
-            {
-                return std::nullopt;
-            }
-            if (*v < static_cast<int64_t>(std::numeric_limits<T>::min())
-                || *v > static_cast<int64_t>(std::numeric_limits<T>::max()))
-            {
-                throw std::runtime_error("db: value out of range for integer type");
-            }
-            return static_cast<T>(*v);
-        }
-
-        /**
-         * \brief 把 uint64 窄化到更小的无符号整数类型，越界抛异常。
-         */
-        template <typename T>
-        std::optional<T>
-        narrow_uint(std::optional<uint64_t> v)
-        {
-            if (!v)
-            {
-                return std::nullopt;
-            }
-            if (*v > static_cast<uint64_t>(std::numeric_limits<T>::max()))
-            {
-                throw std::runtime_error("db: value out of range for integer type");
-            }
-            return static_cast<T>(*v);
-        }
-    } // namespace detail
-
-    /**
      * \brief 结果集中的一行。
      * \details
      * 通过 \ref result::operator[] 或 \ref result::iterator 获取。
      * \n
-     * 除 `get<std::string>` 外的 `as_*` 系列方法返回的视图（string_view / const_buffer）指向结果集内部缓冲区，
+     * 除 `get<std::string>` 外的 `as_*` 系列方法返回的视图（string_view / std::span<const std::byte>）指向结果集内部缓冲区，
      * 在 result 被销毁后会失效；`get<std::string>` 会拷贝一份。
      */
     class HTTPLIB_API row
     {
       public:
-        row(row&&) noexcept;
-        row& operator=(row&&) noexcept;
-        ~row();
-
         /**
          * \brief 该行的列数。
          */
@@ -145,8 +56,8 @@ namespace httplib::mysql
         std::optional<bool> as_bool(size_t col) const;
         std::optional<bool> as_bool(std::string_view name) const;
 
-        std::optional<net::const_buffer> as_blob(size_t col) const;
-        std::optional<net::const_buffer> as_blob(std::string_view name) const;
+        std::optional<std::span<const std::byte>> as_blob(size_t col) const;
+        std::optional<std::span<const std::byte>> as_blob(std::string_view name) const;
 
         std::optional<boost::json::value> as_json(size_t col) const;
         std::optional<boost::json::value> as_json(std::string_view name) const;
@@ -167,107 +78,30 @@ namespace httplib::mysql
          * \brief 按模板参数类型读取列值。
          * \details
          * 支持 int64_t / uint64_t / int / unsigned / short / unsigned short / double / float / bool /
-         * std::string / std::string_view / net::const_buffer / date / datetime / time /
+         * std::string / std::string_view / std::span<const std::byte> / date / datetime / time /
          * system_clock::time_point / boost::json::value。
          * \param col 列下标。
          * \returns 列值；NULL 返回 nullopt。
          */
         template <typename T>
-        std::optional<T>
-        get(size_t col) const
-        {
-            if constexpr (std::is_same_v<T, int64_t>)
-            {
-                return as_int64(col);
-            }
-            else if constexpr (std::is_same_v<T, uint64_t>)
-            {
-                return as_uint64(col);
-            }
-            else if constexpr (std::is_same_v<T, int>)
-            {
-                return detail::narrow_int<int>(as_int64(col));
-            }
-            else if constexpr (std::is_same_v<T, unsigned>)
-            {
-                return detail::narrow_uint<unsigned>(as_uint64(col));
-            }
-            else if constexpr (std::is_same_v<T, short>)
-            {
-                return detail::narrow_int<short>(as_int64(col));
-            }
-            else if constexpr (std::is_same_v<T, unsigned short>)
-            {
-                return detail::narrow_uint<unsigned short>(as_uint64(col));
-            }
-            else if constexpr (std::is_same_v<T, double>)
-            {
-                return as_double(col);
-            }
-            else if constexpr (std::is_same_v<T, float>)
-            {
-                return as_float(col);
-            }
-            else if constexpr (std::is_same_v<T, bool>)
-            {
-                return as_bool(col);
-            }
-            else if constexpr (std::is_same_v<T, std::string_view>)
-            {
-                return as_string(col);
-            }
-            else if constexpr (std::is_same_v<T, std::string>)
-            {
-                auto sv = as_string(col);
-                return sv ? std::optional<std::string>(std::string(*sv)) : std::nullopt;
-            }
-            else if constexpr (std::is_same_v<T, net::const_buffer>)
-            {
-                return as_blob(col);
-            }
-            else if constexpr (std::is_same_v<T, date>)
-            {
-                return as_date(col);
-            }
-            else if constexpr (std::is_same_v<T, datetime>)
-            {
-                return as_datetime(col);
-            }
-            else if constexpr (std::is_same_v<T, time>)
-            {
-                return as_time(col);
-            }
-            else if constexpr (std::is_same_v<T, std::chrono::system_clock::time_point>)
-            {
-                return as_timestamp(col);
-            }
-            else if constexpr (std::is_same_v<T, boost::json::value>)
-            {
-                return as_json(col);
-            }
-            else
-            {
-                static_assert(sizeof(T) == 0, "unsupported get<T> type");
-            }
-        }
+        std::optional<T> get(size_t col) const;
 
         /**
          * \brief 按模板参数类型、列名读取列值。
          * \param name 列名。
          */
         template <typename T>
-        std::optional<T>
-        get(std::string_view name) const
-        {
-            return get<T>(column(name));
-        }
-
-        struct impl;
-        explicit row(std::unique_ptr<impl> p);
+        std::optional<T> get(std::string_view name) const;
 
       private:
-        std::unique_ptr<impl> impl_;
+        row(result const* parent, size_t idx) noexcept;
+        result const* parent_ = nullptr;
+        size_t idx_ = 0;
+
+        friend class result;
     };
 
 } // namespace httplib::mysql
+
+#include "httplib/mysql/row.inl"
 #endif // HTTPLIB_ENABLED_DATABASE

@@ -12,6 +12,8 @@
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <cstddef>
+#include <span>
 
 namespace mysql = httplib::mysql;
 namespace mw = httplib::server::middleware;
@@ -205,6 +207,28 @@ TEST_CASE("db: affected_rows", "[db][integration]")
             auto r2 = co_await sess.query("INSERT INTO __httplib_aff (v) VALUES (200),(300)");
             REQUIRE(r2.affected_rows() == 2);
             co_await sess.query("DROP TABLE IF EXISTS __httplib_aff");
+        });
+}
+
+TEST_CASE("db: DML metadata (affected_rows / last_insert_id)", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_dml (id INT AUTO_INCREMENT PRIMARY KEY, v INT)");
+            co_await sess.query("TRUNCATE __httplib_dml");
+
+            auto ins = co_await sess.query("INSERT INTO __httplib_dml (v) VALUES (1),(2),(3)");
+            REQUIRE(ins.affected_rows() == 3);
+            REQUIRE(ins.last_insert_id() != 0);
+
+            auto upd = co_await sess.query("UPDATE __httplib_dml SET v = v + 10 WHERE v <= 2");
+            REQUIRE(upd.affected_rows() == 2);
+
+            auto del = co_await sess.query("DELETE FROM __httplib_dml WHERE v = 11");
+            REQUIRE(del.affected_rows() == 1);
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_dml");
         });
 }
 
@@ -800,7 +824,7 @@ TEST_CASE("db: double to int range check", "[db][integration]")
         });
 }
 
-TEST_CASE("db: negative TIME rejected", "[db][integration]")
+TEST_CASE("db: negative TIME parsed", "[db][integration]")
 {
     run(
         [](mysql::session& sess) -> net::awaitable<void>
@@ -809,7 +833,11 @@ TEST_CASE("db: negative TIME rejected", "[db][integration]")
             co_await sess.query("DELETE FROM __httplib_nt");
             co_await sess.query("INSERT INTO __httplib_nt VALUES ('-12:34:56')");
             auto r = co_await sess.query("SELECT t FROM __httplib_nt");
-            REQUIRE_THROWS_AS(r[0].as_time("t"), std::runtime_error);
+            auto t = *r[0].as_time("t");
+            REQUIRE(t.negative);
+            REQUIRE(t.hour == 12);
+            REQUIRE(t.minute == 34);
+            REQUIRE(t.second == 56);
             co_await sess.query("DROP TABLE IF EXISTS __httplib_nt");
         });
 }
@@ -1211,17 +1239,41 @@ TEST_CASE("db: bind blob binary data", "[db][integration]")
 
             unsigned char raw[] = { 0x00, 0x01, 0x02, 0x00, 0xff, 0x00 };
             co_await sess.stmt("INSERT INTO __httplib_blob (b) VALUES (:b)")
-                .bind(net::const_buffer(raw, sizeof(raw)))
+                .bind(std::as_bytes(std::span(raw)))
                 .execute();
 
             auto r = co_await sess.query("SELECT b FROM __httplib_blob");
             auto blob = r[0].as_blob("b");
             REQUIRE(blob.has_value());
             REQUIRE(blob->size() == sizeof(raw));
-            REQUIRE(std::string_view(static_cast<char const*>(blob->data()), blob->size())
+            REQUIRE(std::string_view(reinterpret_cast<char const*>(blob->data()), blob->size())
                     == std::string_view(reinterpret_cast<char const*>(raw), sizeof(raw)));
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_blob");
+        });
+}
+
+TEST_CASE("db: bind named blob binary data", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_nblob (b BLOB)");
+            co_await sess.query("DELETE FROM __httplib_nblob");
+
+            unsigned char raw[] = { 0xde, 0xad, 0xbe, 0xef };
+            co_await sess.stmt("INSERT INTO __httplib_nblob (b) VALUES (:b)")
+                .bind("b", std::as_bytes(std::span(raw)))
+                .execute();
+
+            auto r = co_await sess.query("SELECT b FROM __httplib_nblob");
+            auto blob = r[0].as_blob("b");
+            REQUIRE(blob.has_value());
+            REQUIRE(blob->size() == sizeof(raw));
+            REQUIRE(std::string_view(reinterpret_cast<char const*>(blob->data()), blob->size())
+                    == std::string_view(reinterpret_cast<char const*>(raw), sizeof(raw)));
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_nblob");
         });
 }
 
@@ -1739,6 +1791,18 @@ TEST_CASE("db: standalone reconnect", "[db][integration]")
     }
 }
 
+TEST_CASE("db: reconnect resets transaction state", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.begin_transaction();
+            REQUIRE(sess.in_transaction());
+            co_await sess.reconnect();
+            REQUIRE_FALSE(sess.in_transaction());
+        });
+}
+
 // ===========================================================================
 // Error / exception paths
 // ===========================================================================
@@ -1828,6 +1892,164 @@ TEST_CASE("mysql_middleware: throws when not registered", "[db][middleware]")
     {
         std::rethrow_exception(err);
     }
+}
+
+TEST_CASE("db: date/time/datetime utilities", "[db][unit]")
+{
+    using namespace std::chrono;
+
+    static_assert(mysql::date { 2024, 2, 29 }.is_valid());
+    static_assert(!mysql::date { 2023, 2, 29 }.is_valid());
+    static_assert(mysql::date { 2024, 2, 29 }.is_leap_year());
+    static_assert(mysql::date { 2024, 2, 29 }.days_in_month() == 29);
+    static_assert(mysql::date::from_sys_days(mysql::date { 2024, 1, 2 }.to_sys_days()) == mysql::date { 2024, 1, 2 });
+    static_assert(mysql::time { 1, 2, 3, 456789 }.to_duration() == microseconds { 3723456789LL });
+    static_assert(mysql::time { 1, 2, 3, 456789 }.total_microseconds() == 3723456789LL);
+    static_assert(mysql::time::from_duration(microseconds { -1 }) == mysql::time { 0, 0, 0, 1, true });
+    static_assert(mysql::datetime { 2024, 1, 15, 12, 34, 56 }.is_valid());
+
+    mysql::date d { 2024, 2, 29 };
+    REQUIRE(d.is_valid());
+    REQUIRE(d.is_leap_year());
+    REQUIRE(d.days_in_month() == 29);
+    REQUIRE_FALSE(mysql::date { 2023, 2, 29 }.is_valid());
+    REQUIRE(mysql::date { 2023, 2, 28 }.is_valid());
+    REQUIRE_FALSE(mysql::date { 2024, 4, 31 }.is_valid());
+    REQUIRE_FALSE(mysql::date { 0, 0, 0 }.is_valid());
+
+    REQUIRE(d.to_string() == "2024-02-29");
+    auto d2 = mysql::date::from_string("2024-02-29");
+    REQUIRE(d2.has_value());
+    REQUIRE(*d2 == d);
+    REQUIRE_FALSE(mysql::date::from_string("2024-02-30").has_value());
+    REQUIRE_FALSE(mysql::date::from_string("2024/02/29").has_value());
+
+    auto sd = d.to_sys_days();
+    REQUIRE(mysql::date::from_sys_days(sd) == d);
+    REQUIRE((d + days { 1 }) == mysql::date { 2024, 3, 1 });
+    REQUIRE((mysql::date { 2024, 3, 1 } - days { 1 }) == d);
+    REQUIRE((mysql::date { 2024, 3, 1 } - d) == days { 1 });
+    REQUIRE(mysql::date { 2024, 3, 1 } > d);
+
+    mysql::time t { 1, 2, 3, 456789 };
+    REQUIRE(t.is_valid());
+    REQUIRE_FALSE(mysql::time { 0, 60, 0, 0 }.is_valid());
+    REQUIRE(t.to_duration() == hours { 1 } + minutes { 2 } + seconds { 3 } + microseconds { 456789 });
+    REQUIRE(t.total_microseconds() == 3723456789LL);
+    REQUIRE(mysql::time::from_duration(t.to_duration()) == t);
+    REQUIRE(t.to_string() == "01:02:03.456789");
+    REQUIRE(mysql::time { 1, 2, 3, 0 }.to_string() == "01:02:03");
+    auto t2 = mysql::time::from_string("01:02:03.456789");
+    REQUIRE(t2.has_value());
+    REQUIRE(*t2 == t);
+    auto t3 = mysql::time::from_string("01:02:03.5");
+    REQUIRE(t3.has_value());
+    REQUIRE(t3->microsecond == 500000);
+    REQUIRE_FALSE(mysql::time::from_string("01:61:00").has_value());
+
+    auto tn = mysql::time::from_duration(microseconds { -3723456789 });
+    REQUIRE(tn.negative);
+    REQUIRE(tn.hour == 1);
+    REQUIRE(tn.minute == 2);
+    REQUIRE(tn.second == 3);
+    REQUIRE(tn.microsecond == 456789);
+    REQUIRE(tn.to_duration() == microseconds { -3723456789 });
+    REQUIRE(tn.total_microseconds() == -3723456789LL);
+    REQUIRE(tn.to_string() == "-01:02:03.456789");
+    auto tn2 = mysql::time::from_string("-01:02:03.456789");
+    REQUIRE(tn2.has_value());
+    REQUIRE(*tn2 == tn);
+    REQUIRE(tn < t);
+    REQUIRE_FALSE(mysql::time::from_string("-01:61:00").has_value());
+
+    mysql::datetime dt { 2024, 1, 15, 12, 34, 56, 123456 };
+    REQUIRE(dt.is_valid());
+    auto tp = dt.to_time_point();
+    REQUIRE(mysql::datetime::from_time_point(tp) == dt);
+    REQUIRE(dt.to_string() == "2024-01-15 12:34:56.123456");
+    auto dt2 = mysql::datetime::from_string("2024-01-15 12:34:56.123456");
+    REQUIRE(dt2.has_value());
+    REQUIRE(*dt2 == dt);
+    auto dt3 = mysql::datetime::from_string("2024-01-15 12:34:56");
+    REQUIRE(dt3.has_value());
+    REQUIRE(dt3->microsecond == 0);
+    REQUIRE_FALSE(mysql::datetime::from_string("2024-01-15T12:34:56").has_value());
+    REQUIRE((mysql::datetime { 2024, 1, 15, 12, 34, 57 } - dt) == microseconds { 876544 });
+    REQUIRE(mysql::datetime { 2024, 1, 15, 12, 34, 57 } > dt);
+
+    std::hash<mysql::date> hd;
+    REQUIRE(hd(d) == hd(mysql::date { 2024, 2, 29 }));
+    REQUIRE(hd(d) != hd(mysql::date { 2024, 3, 1 }));
+    std::hash<mysql::datetime> hdt;
+    REQUIRE(hdt(dt) == hdt(mysql::datetime { 2024, 1, 15, 12, 34, 56, 123456 }));
+
+    std::hash<mysql::time> ht;
+    mysql::time z0 { 0, 0, 0, 0, false };
+    mysql::time z1 { 0, 0, 0, 0, true };
+    REQUIRE(z0 == z1);
+    REQUIRE(ht(z0) == ht(z1));
+}
+
+TEST_CASE("db: temporal & narrow error handling", "[db][unit]")
+{
+    using namespace std::chrono;
+
+    // date 非法 → to_sys_days / 算术抛异常
+    REQUIRE_THROWS_AS((mysql::date { 2024, 2, 30 }).to_sys_days(), std::runtime_error);
+    REQUIRE_THROWS_AS((mysql::date { 2024, 13, 1 }).to_sys_days(), std::runtime_error);
+    REQUIRE_THROWS_AS((mysql::date { 0, 0, 0 }).to_sys_days(), std::runtime_error);
+    REQUIRE_THROWS_AS((mysql::date { 2024, 2, 30 }) + days { 1 }, std::runtime_error);
+    REQUIRE_THROWS_AS((mysql::date { 2024, 2, 30 }) - (mysql::date { 2024, 2, 28 }), std::runtime_error);
+
+    // date::from_string 各种非法
+    REQUIRE_FALSE(mysql::date::from_string("").has_value());
+    REQUIRE_FALSE(mysql::date::from_string("2024-02").has_value());
+    REQUIRE_FALSE(mysql::date::from_string("2024-02-30").has_value());
+    REQUIRE_FALSE(mysql::date::from_string("2024-13-01").has_value());
+    REQUIRE_FALSE(mysql::date::from_string("2024-00-10").has_value());
+    REQUIRE_FALSE(mysql::date::from_string("2024-01-00").has_value());
+    REQUIRE_FALSE(mysql::date::from_string("abcd-ef-gh").has_value());
+    REQUIRE_FALSE(mysql::date::from_string("20240229").has_value());
+    REQUIRE_FALSE(mysql::date::from_string("2024/02/29").has_value());
+    REQUIRE_FALSE(mysql::date::from_string("2024--02-29").has_value());
+
+    // time::from_string 各种非法
+    REQUIRE_FALSE(mysql::time::from_string("").has_value());
+    REQUIRE_FALSE(mysql::time::from_string("12:34").has_value());
+    REQUIRE_FALSE(mysql::time::from_string("12:60:00").has_value());
+    REQUIRE_FALSE(mysql::time::from_string("12:34:60").has_value());
+    REQUIRE_FALSE(mysql::time::from_string("12:34:56.1234567").has_value());
+    REQUIRE_FALSE(mysql::time::from_string("1a:00:00").has_value());
+    REQUIRE_FALSE(mysql::time::from_string("-").has_value());
+    REQUIRE_FALSE(mysql::time::from_string("--01:02:03").has_value());
+
+    // datetime 非法 → is_valid / to_time_point
+    REQUIRE_FALSE(mysql::datetime { 2024, 2, 30, 12, 0, 0 }.is_valid());
+    REQUIRE_FALSE(mysql::datetime { 2024, 1, 1, 24, 0, 0 }.is_valid());
+    REQUIRE_FALSE(mysql::datetime { 2024, 1, 1, 12, 60, 0 }.is_valid());
+    REQUIRE_FALSE(mysql::datetime { 2024, 1, 1, 12, 0, 0, 1000000 }.is_valid());
+    REQUIRE_THROWS_AS((mysql::datetime { 2024, 2, 30, 12, 0, 0 }).to_time_point(), std::runtime_error);
+    REQUIRE_THROWS_AS((mysql::datetime { 2024, 1, 1, 12, 60, 0 }).to_time_point(), std::runtime_error);
+    REQUIRE_THROWS_AS((mysql::datetime { 2024, 1, 1, 12, 0, 60 }).to_time_point(), std::runtime_error);
+
+    // datetime::from_string 各种非法
+    REQUIRE_FALSE(mysql::datetime::from_string("").has_value());
+    REQUIRE_FALSE(mysql::datetime::from_string("2024-01-15").has_value());
+    REQUIRE_FALSE(mysql::datetime::from_string("2024-01-15T12:34:56").has_value());
+    REQUIRE_FALSE(mysql::datetime::from_string("2024-02-30 12:00:00").has_value());
+    REQUIRE_FALSE(mysql::datetime::from_string("2024-01-15 12:60:00").has_value());
+    REQUIRE_FALSE(mysql::datetime::from_string("2024-01-15 25:00:00").has_value());
+    REQUIRE_FALSE(mysql::datetime::from_string("2024-01-15 -12:00:00").has_value());
+
+    // narrow_int / narrow_uint 越界
+    REQUIRE(mysql::detail::narrow_int<int>(std::optional<int64_t> { 12345 }) == 12345);
+    REQUIRE_FALSE(mysql::detail::narrow_int<int>(std::nullopt).has_value());
+    REQUIRE_THROWS_AS(mysql::detail::narrow_int<int>(std::optional<int64_t> { INT64_MAX }), std::runtime_error);
+    REQUIRE_THROWS_AS(mysql::detail::narrow_int<int>(std::optional<int64_t> { INT64_MIN }), std::runtime_error);
+    REQUIRE_THROWS_AS(mysql::detail::narrow_int<short>(std::optional<int64_t> { 70000 }), std::runtime_error);
+    REQUIRE_THROWS_AS(mysql::detail::narrow_uint<unsigned short>(std::optional<uint64_t> { 70000 }), std::runtime_error);
+    REQUIRE_THROWS_AS(mysql::detail::narrow_uint<unsigned>(std::optional<uint64_t> { UINT64_MAX }), std::runtime_error);
+    REQUIRE(mysql::detail::narrow_uint<unsigned>(std::optional<uint64_t> { 4000000000ull }) == 4000000000u);
 }
 
 #else
