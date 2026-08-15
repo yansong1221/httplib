@@ -637,6 +637,70 @@ TEST_CASE("db: query into() extraction", "[db][integration]")
         });
 }
 
+TEST_CASE("db: query bind positional", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_qb (id INT, name VARCHAR(100))");
+            co_await sess.query("DELETE FROM __httplib_qb");
+            co_await sess.query("INSERT INTO __httplib_qb VALUES (1, 'a'),(2, 'b')");
+
+            std::optional<std::string> name;
+            co_await sess.query("SELECT name FROM __httplib_qb WHERE id = :id",
+                                mysql::bind(2),
+                                mysql::into(name, "name"));
+            REQUIRE(name == "b");
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_qb");
+        });
+}
+
+TEST_CASE("db: query bind named + escaping", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_qe (id INT, name VARCHAR(100))");
+            co_await sess.query("DELETE FROM __httplib_qe");
+
+            std::string evil = "a'b\\c";
+            co_await sess.query("INSERT INTO __httplib_qe VALUES (:id, :n)",
+                                mysql::bind("id", 1),
+                                mysql::bind("n", evil));
+            auto r = co_await sess.query("SELECT name FROM __httplib_qe WHERE id = 1");
+            REQUIRE(*r[0].as_string("name") == evil);
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_qe");
+        });
+}
+
+TEST_CASE("db: query bind null and blob", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_qn (id INT, b BLOB)");
+            co_await sess.query("DELETE FROM __httplib_qn");
+
+            co_await sess.query("INSERT INTO __httplib_qn VALUES (:id, :b)",
+                                mysql::bind("id", 1),
+                                mysql::bind("b", nullptr));
+            auto r1 = co_await sess.query("SELECT b FROM __httplib_qn WHERE id = 1");
+            REQUIRE(r1[0].is_null("b"));
+
+            std::byte buf[] = { std::byte { 0x00 }, std::byte { 0x01 }, std::byte { 0xFF } };
+            co_await sess.query("INSERT INTO __httplib_qn VALUES (:id, :b)",
+                                mysql::bind("id", 2),
+                                mysql::bind("b", std::span<const std::byte>(buf, 3)));
+            auto r2 = co_await sess.query("SELECT b FROM __httplib_qn WHERE id = 2");
+            auto blob = r2[0].as_blob("b");
+            REQUIRE(blob->size() == 3);
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_qn");
+        });
+}
+
 TEST_CASE("db: into() supports small integer types", "[db][integration]")
 {
     run(

@@ -86,6 +86,18 @@ namespace httplib::mysql
         co_return res;
     }
 
+    net::awaitable<result>
+    session::execute_query(std::string_view sql, std::vector<detail::binder> binders)
+    {
+        if (binders.empty())
+        {
+            co_return co_await query(sql);
+        }
+        auto& imp = get_impl(*this);
+        auto rendered = detail::render_query(sql, binders, imp.utc_offset);
+        co_return co_await query(rendered);
+    }
+
     prepared_statement
     session::stmt(std::string_view sql)
     {

@@ -56,6 +56,17 @@ namespace httplib::mysql
         /// 提取器签名 `(result const&, size_t& next_col)`；位置式 into 使用并递增 next_col。
         using extractor = std::function<void(result const&, size_t& next_col)>;
 
+        template <typename E>
+        void
+        apply_one(result const& res, size_t& next_col, E&& e)
+        {
+            if constexpr (std::is_same_v<std::decay_t<E>, extractor>)
+            {
+                e(res, next_col);
+            }
+            // 其他类型（如 binder）跳过
+        }
+
         template <typename... Ex>
         void
         apply_extractors(result const& res, Ex&&... ex)
@@ -65,7 +76,7 @@ namespace httplib::mysql
                 return;
             }
             size_t next_col = 0;
-            (std::forward<Ex>(ex)(res, next_col), ...);
+            (apply_one(res, next_col, std::forward<Ex>(ex)), ...);
         }
     } // namespace detail
 

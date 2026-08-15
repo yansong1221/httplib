@@ -2,6 +2,7 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 
 #include "httplib/config.hpp"
+#include "httplib/mysql/binder.hpp"
 #include "httplib/mysql/config.hpp"
 #include "httplib/mysql/extractor.hpp"
 #include "httplib/mysql/prepared_statement.hpp"
@@ -17,6 +18,7 @@
 #include <string_view>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace httplib::mysql
 {
@@ -73,9 +75,9 @@ namespace httplib::mysql
         net::awaitable<result> query(std::string_view sql);
 
         /**
-         * \brief 执行一条 SQL 语句并把结果提取到变量。
+         * \brief 执行一条 SQL 语句，可带参数绑定（`bind`）并把结果提取到变量（`into`）。
          * \param sql SQL 文本。
-         * \param ex 一个或多个 \ref into 提取声明。
+         * \param ex 一个或多个 \ref bind 参数声明 / \ref into 提取声明。
          * \returns 结果集。
          * \throws mysql_exception 执行失败。
          */
@@ -83,7 +85,9 @@ namespace httplib::mysql
         net::awaitable<result>
         query(std::string_view sql, Ex&&... ex)
         {
-            auto res = co_await query(sql);
+            std::vector<detail::binder> binders;
+            (detail::collect_binder(binders, std::forward<Ex>(ex)), ...);
+            auto res = co_await execute_query(sql, std::move(binders));
             detail::apply_extractors(res, std::forward<Ex>(ex)...);
             co_return res;
         }
@@ -167,6 +171,9 @@ namespace httplib::mysql
         explicit session(std::unique_ptr<impl> p);
 
       private:
+        /// 执行查询（可选参数绑定）；渲染逻辑在 .cpp 侧完成。
+        net::awaitable<result> execute_query(std::string_view sql, std::vector<detail::binder> binders);
+
         std::unique_ptr<impl> impl_;
 
         friend impl& get_impl(session& self);

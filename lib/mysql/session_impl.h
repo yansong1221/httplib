@@ -1,6 +1,7 @@
 #pragma once
 #ifdef HTTPLIB_ENABLED_DATABASE
 
+#include "httplib/mysql/binder.hpp"
 #include "httplib/mysql/mysql_exception.hpp"
 #include "httplib/mysql/prepared_statement.hpp"
 #include "httplib/mysql/session.hpp"
@@ -12,11 +13,13 @@
 #include <boost/mysql/diagnostics.hpp>
 #include <boost/mysql/field_view.hpp>
 #include <boost/mysql/statement.hpp>
+#include <cctype>
 #include <chrono>
 #include <cstddef>
 #include <functional>
 #include <list>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -76,7 +79,18 @@ namespace httplib::mysql
         }
         if (f.is_blob())
         {
-            return "(blob " + std::to_string(f.as_blob().size()) + " bytes)";
+            static const char* digits = "0123456789ABCDEF";
+            auto b = f.as_blob();
+            std::string out;
+            out.reserve(b.size() * 2 + 3);
+            out += "X'";
+            for (unsigned char byte : b)
+            {
+                out += digits[(byte >> 4) & 0xF];
+                out += digits[byte & 0xF];
+            }
+            out += '\'';
+            return out;
         }
         if (f.is_date())
         {
@@ -141,6 +155,161 @@ namespace httplib::mysql
         out += "]";
         return out;
     }
+
+    namespace detail
+    {
+        inline std::string
+        param_to_sql(param const& p, std::chrono::seconds utc_offset)
+        {
+            return std::visit(
+                [&](auto const& v) -> std::string
+                {
+                    using T = std::decay_t<decltype(v)>;
+                    if constexpr (std::is_same_v<T, std::string>)
+                    {
+                        return quote_mysql_string(v);
+                    }
+                    else if constexpr (std::is_same_v<T, std::chrono::system_clock::time_point>)
+                    {
+                        return quote_mysql_string(datetime::from_time_point(v + utc_offset).to_string());
+                    }
+                    else
+                    {
+                        return format_param(v);
+                    }
+                },
+                p);
+        }
+
+        inline std::string
+        render_query(std::string_view sql, std::vector<binder> const& binders, std::chrono::seconds utc_offset)
+        {
+            bool has_named = false;
+            bool has_pos = false;
+            std::unordered_map<std::string, param const*> named;
+            std::vector<param const*> pos;
+            for (auto const& b : binders)
+            {
+                if (b.name.empty())
+                {
+                    has_pos = true;
+                    pos.push_back(&b.value);
+                }
+                else
+                {
+                    has_named = true;
+                    named.emplace(b.name, &b.value);
+                }
+            }
+            if (has_named && has_pos)
+            {
+                throw std::runtime_error("db: cannot mix positional and named parameters");
+            }
+
+            std::string out;
+            out.reserve(sql.size());
+            size_t pos_idx = 0;
+
+            for (size_t i = 0; i < sql.size(); ++i)
+            {
+                char c = sql[i];
+                if (c == '\'' || c == '"' || c == '`')
+                {
+                    char quote = c;
+                    out += c;
+                    while (++i < sql.size())
+                    {
+                        out += sql[i];
+                        if (sql[i] == quote && (i + 1 >= sql.size() || sql[i + 1] != quote))
+                        {
+                            break;
+                        }
+                        if (sql[i] == '\\' && i + 1 < sql.size())
+                        {
+                            out += sql[++i];
+                        }
+                    }
+                    continue;
+                }
+                if (c == '#')
+                {
+                    while (i < sql.size() && sql[i] != '\n')
+                    {
+                        ++i;
+                    }
+                    if (i < sql.size())
+                    {
+                        out += sql[i];
+                    }
+                    continue;
+                }
+                if (c == '-' && i + 1 < sql.size() && sql[i + 1] == '-'
+                    && (i + 2 >= sql.size() || std::isspace(static_cast<unsigned char>(sql[i + 2]))))
+                {
+                    while (i < sql.size() && sql[i] != '\n')
+                    {
+                        ++i;
+                    }
+                    if (i < sql.size())
+                    {
+                        out += sql[i];
+                    }
+                    continue;
+                }
+                if (c == '/' && i + 1 < sql.size() && sql[i + 1] == '*')
+                {
+                    i += 2;
+                    while (i + 1 < sql.size() && !(sql[i] == '*' && sql[i + 1] == '/'))
+                    {
+                        ++i;
+                    }
+                    i += 1;
+                    continue;
+                }
+                if (c == ':')
+                {
+                    size_t start = i + 1;
+                    while (start < sql.size()
+                           && (std::isalnum(static_cast<unsigned char>(sql[start])) || sql[start] == '_'))
+                    {
+                        ++start;
+                    }
+                    if (start > i + 1)
+                    {
+                        std::string name(sql.substr(i + 1, start - i - 1));
+                        param const* pv = nullptr;
+                        if (has_named)
+                        {
+                            auto it = named.find(name);
+                            if (it == named.end())
+                            {
+                                throw std::runtime_error("db: unbound named parameter ':" + name + "'");
+                            }
+                            pv = it->second;
+                        }
+                        else
+                        {
+                            if (pos_idx >= pos.size())
+                            {
+                                throw std::runtime_error("db: too few parameters for placeholders");
+                            }
+                            pv = pos[pos_idx++];
+                        }
+                        out += param_to_sql(*pv, utc_offset);
+                        i = start - 1;
+                        continue;
+                    }
+                }
+                out += c;
+            }
+
+            if (!has_named && pos_idx != pos.size())
+            {
+                throw std::runtime_error("db: too many parameters");
+            }
+            return out;
+        }
+    } // namespace detail
 
     inline void
     raise_mysql_error(boost::system::error_code ec,
