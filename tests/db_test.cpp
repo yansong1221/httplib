@@ -684,6 +684,94 @@ TEST_CASE("db: query bind null and blob", "[db][integration]")
         });
 }
 
+TEST_CASE("db: query bind scalar types round-trip", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_qs ("
+                                "u64 BIGINT UNSIGNED, s SMALLINT, us SMALLINT UNSIGNED, u INT UNSIGNED, "
+                                "d DOUBLE, f FLOAT, b TINYINT(1), dt DATE, j JSON, ts TIMESTAMP)");
+            co_await sess.query("DELETE FROM __httplib_qs");
+
+            auto tp = std::chrono::sys_days(std::chrono::year(2024) / std::chrono::month(6) / std::chrono::day(1))
+                      + std::chrono::hours(12);
+            boost::json::value jv { { "k", "v" } };
+            co_await sess.query("INSERT INTO __httplib_qs VALUES (:u64, :s, :us, :u, :d, :f, :b, :dt, :j, :ts)",
+                                mysql::bind("u64", uint64_t { 42 }),
+                                mysql::bind("s", short { -7 }),
+                                mysql::bind("us", static_cast<unsigned short>(7)),
+                                mysql::bind("u", 123u),
+                                mysql::bind("d", 2.25),
+                                mysql::bind("f", 1.5f),
+                                mysql::bind("b", true),
+                                mysql::bind("dt", mysql::date { 2024, 6, 1 }),
+                                mysql::bind("j", jv),
+                                mysql::bind("ts", tp));
+
+            auto r = co_await sess.query("SELECT u64, s, us, u, d, f, b, dt, j, ts FROM __httplib_qs");
+            REQUIRE(r.row_count() == 1);
+            REQUIRE(*r[0].as_uint64("u64") == 42);
+            REQUIRE(*r[0].as_int64("s") == -7);
+            REQUIRE(*r[0].as_uint64("us") == 7);
+            REQUIRE(*r[0].as_uint64("u") == 123);
+            REQUIRE(*r[0].as_double("d") == 2.25);
+            REQUIRE(*r[0].as_float("f") == 1.5f);
+            REQUIRE(*r[0].as_bool("b") == true);
+            REQUIRE(*r[0].as_date("dt") == mysql::date { 2024, 6, 1 });
+            REQUIRE(*r[0].as_json("j") == jv);
+            REQUIRE(*r[0].as_timestamp("ts") == tp);
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_qs");
+        });
+}
+
+TEST_CASE("db: stmt bind scalar types round-trip", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_ss ("
+                                "u64 BIGINT UNSIGNED, s SMALLINT, us SMALLINT UNSIGNED, u INT UNSIGNED, "
+                                "d DOUBLE, f FLOAT, b TINYINT(1), dt DATE, dtm DATETIME(6), tm TIME(6), j JSON)");
+            co_await sess.query("DELETE FROM __httplib_ss");
+
+            mysql::datetime dtm { 2024, 6, 1, 12, 34, 56, 123456 };
+            auto tm = mysql::time::from_duration(std::chrono::microseconds { 3723456789 });
+            boost::json::value jv { { "k", "v" } };
+            co_await sess.stmt("INSERT INTO __httplib_ss VALUES "
+                               "(:u64, :s, :us, :u, :d, :f, :b, :dt, :dtm, :tm, :j)")
+                .bind("u64", uint64_t { 42 })
+                .bind("s", short { -7 })
+                .bind("us", static_cast<unsigned short>(7))
+                .bind("u", 123u)
+                .bind("d", 2.25)
+                .bind("f", 1.5f)
+                .bind("b", true)
+                .bind("dt", mysql::date { 2024, 6, 1 })
+                .bind("dtm", dtm)
+                .bind("tm", tm)
+                .bind("j", jv)
+                .execute();
+
+            auto r = co_await sess.query("SELECT u64, s, us, u, d, f, b, dt, dtm, tm, j FROM __httplib_ss");
+            REQUIRE(r.row_count() == 1);
+            REQUIRE(*r[0].as_uint64("u64") == 42);
+            REQUIRE(*r[0].as_int64("s") == -7);
+            REQUIRE(*r[0].as_uint64("us") == 7);
+            REQUIRE(*r[0].as_uint64("u") == 123);
+            REQUIRE(*r[0].as_double("d") == 2.25);
+            REQUIRE(*r[0].as_float("f") == 1.5f);
+            REQUIRE(*r[0].as_bool("b") == true);
+            REQUIRE(*r[0].as_date("dt") == mysql::date { 2024, 6, 1 });
+            REQUIRE(*r[0].as_datetime("dtm") == dtm);
+            REQUIRE(*r[0].as_time("tm") == tm);
+            REQUIRE(*r[0].as_json("j") == jv);
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_ss");
+        });
+}
+
 TEST_CASE("db: into() supports small integer types", "[db][integration]")
 {
     run(

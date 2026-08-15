@@ -79,6 +79,10 @@ namespace httplib::mysql
             {
                 return f.as_double();
             }
+            if (f.is_float())
+            {
+                return static_cast<double>(f.as_float());
+            }
             if (f.is_int64())
             {
                 return (double)f.as_int64();

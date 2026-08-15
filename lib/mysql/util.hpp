@@ -71,18 +71,20 @@ namespace httplib::mysql::util
         if (f.is_date())
         {
             auto d = f.as_date();
-            return std::to_string(static_cast<int>(d.year())) + "-" + std::to_string(static_cast<int>(d.month())) + "-"
-                   + std::to_string(static_cast<int>(d.day()));
+            return quote_mysql_string(
+                std::to_string(static_cast<int>(d.year())) + "-" + std::to_string(static_cast<int>(d.month())) + "-"
+                + std::to_string(static_cast<int>(d.day())));
         }
         if (f.is_datetime())
         {
             auto d = f.as_datetime();
-            return datetime { d.year(), d.month(), d.day(), d.hour(), d.minute(), d.second(), d.microsecond() }
-                .to_string();
+            return quote_mysql_string(
+                datetime { d.year(), d.month(), d.day(), d.hour(), d.minute(), d.second(), d.microsecond() }
+                    .to_string());
         }
         if (f.is_time())
         {
-            return time::from_duration(f.as_time()).to_string();
+            return quote_mysql_string(time::from_duration(f.as_time()).to_string());
         }
         return "?";
     }
