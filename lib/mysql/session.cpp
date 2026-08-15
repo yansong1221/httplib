@@ -105,7 +105,6 @@ namespace httplib::mysql
 
         imp.conn->close();
         imp.clear_statement_cache();
-        imp.stmts_to_close.clear();
         imp.conn = std::make_unique<boost::mysql::any_connection>(imp.conn->get_executor());
 
         imp.utc_offset = co_await connect_session(*imp.conn, imp.params);

@@ -484,6 +484,7 @@ namespace httplib::mysql
         boost::mysql::results data;
 
         boost::mysql::statement stmt;
+        std::optional<boost::mysql::statement> to_close;
         if (auto* cached = imp.find_statement(impl_->sql))
         {
             stmt = *cached;
@@ -499,7 +500,7 @@ namespace httplib::mysql
             {
                 imp.raise_error(ec, diag, impl_->original_sql, make_params_str());
             }
-            imp.store_statement(impl_->sql, stmt);
+            to_close = imp.store_statement(impl_->sql, stmt);
         }
 
         boost::system::error_code ec;
@@ -522,6 +523,22 @@ namespace httplib::mysql
             imp.raise_error(ec, diag, impl_->original_sql, make_params_str());
         }
         imp.touch();
+
+        // 关闭本次不再保留的语句（capacity==0 的当前语句，或缓存驱逐的旧语句）。
+        // 关闭失败只标记连接失效，不影响已经成功返回的结果。
+        if (to_close && to_close->valid())
+        {
+            boost::system::error_code close_ec;
+            boost::mysql::diagnostics close_diag;
+            co_await imp.get_conn().async_close_statement(
+                *to_close,
+                close_diag,
+                boost::asio::redirect_error(boost::asio::use_awaitable, close_ec));
+            if (close_ec)
+            {
+                imp.live = false;
+            }
+        }
 
         auto res = result(std::make_unique<result::impl>(std::move(data), imp.utc_offset));
 

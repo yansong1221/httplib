@@ -73,6 +73,8 @@ namespace httplib::mysql
         /**
          * \brief 创建一个 prepared statement（支持 `?` 与 `:name` 占位符）。
          * \param sql SQL 文本。
+         * \warning 返回的语句是本次会话的临时视图：不要保存到 session 之外，session 销毁或归还连接池后
+         *          语句即失效，再调用 execute 属于未定义行为。
          */
         prepared_statement stmt(std::string_view sql);
 

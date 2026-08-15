@@ -157,6 +157,20 @@ TEST_CASE("db: format_param datetime keeps microseconds", "[db][unit]")
     REQUIRE(s.find("123456") != std::string::npos);
 }
 
+TEST_CASE("db: quote_mysql_string escapes backslash", "[db][unit]")
+{
+    // 单引号用 '' 转义（现有正确行为）
+    REQUIRE(mysql::quote_mysql_string("a'b") == "'a''b'");
+
+    // 反斜杠必须转义成 \\：MySQL 默认 NO_BACKSLASH_ESCAPES 关闭时，\ 是转义符。
+    // 不转义的话：
+    //   1) 值末尾的反斜杠会吞掉闭合引号 → SQL 语法错误
+    //   2) 值中的 \n / \b / \t 等会被解释成控制字符，破坏原值
+    REQUIRE(mysql::quote_mysql_string("abc\\") == "'abc\\\\'");
+    REQUIRE(mysql::quote_mysql_string("a\\nb") == "'a\\\\nb'");
+    REQUIRE(mysql::quote_mysql_string("a\\'b") == "'a\\\\''b'");
+}
+
 // ===========================================================================
 // Connection pool
 // ===========================================================================

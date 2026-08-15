@@ -16,6 +16,7 @@
 #include <cstddef>
 #include <functional>
 #include <list>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -34,9 +35,12 @@ namespace httplib::mysql
         out += '\'';
         for (char c : sv)
         {
-            if (c == '\'')
+            // 反斜杠与单引号都要翻倍：MySQL 默认 NO_BACKSLASH_ESCAPES 关闭时 \ 是转义符，
+            // 不转义反斜杠会吞掉闭合引号或把 \n/\b 等解释成控制字符。
+            if (c == '\'' || c == '\\')
             {
-                out += "''";
+                out += c;
+                out += c;
             }
             else
             {
@@ -277,8 +281,6 @@ namespace httplib::mysql
         std::chrono::steady_clock::time_point last_ping;
         std::chrono::seconds utc_offset { 0 };
 
-        std::vector<boost::mysql::statement> stmts_to_close;
-
         struct statement_cache
         {
             struct entry
@@ -347,14 +349,16 @@ namespace httplib::mysql
             return &it->second.stmt;
         }
 
-        void
+        // 返回需要关闭的语句：capacity==0 时是本次 prepare 的语句（用完即关），
+        // 缓存满驱逐时是被逐出的旧语句；正常缓存则返回 nullopt。
+        std::optional<boost::mysql::statement>
         store_statement(std::string sql, boost::mysql::statement stmt)
         {
             if (stmt_cache.capacity == 0)
             {
-                stmts_to_close.push_back(std::move(stmt));
-                return;
+                return std::move(stmt);
             }
+            std::optional<boost::mysql::statement> evicted;
             if (stmt_cache.map.size() >= stmt_cache.capacity)
             {
                 auto evict_key = std::move(stmt_cache.lru.back());
@@ -362,12 +366,13 @@ namespace httplib::mysql
                 auto evict_it = stmt_cache.map.find(evict_key);
                 if (evict_it != stmt_cache.map.end())
                 {
-                    stmts_to_close.push_back(std::move(evict_it->second.stmt));
+                    evicted = std::move(evict_it->second.stmt);
                     stmt_cache.map.erase(evict_it);
                 }
             }
             stmt_cache.lru.push_front(sql);
             stmt_cache.map.emplace(std::move(sql), statement_cache::entry { std::move(stmt), stmt_cache.lru.begin() });
+            return evicted;
         }
 
         void

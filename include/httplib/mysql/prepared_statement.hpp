@@ -54,6 +54,9 @@ namespace httplib::mysql
      * \n
      * 绑定参数在语句生命周期内持久：重复 `execute()` 复用上次参数，重新 `bind` 则替换；
      * 提取目标同理，重新 `into` 会替换上一次的。
+     * \n
+     * \warning 语句是 \ref session::stmt 创建的临时视图：请勿保存到 session 之外，session 销毁或归还
+     *          连接池后语句即失效，再执行属于未定义行为。
      */
     class HTTPLIB_API prepared_statement
     {

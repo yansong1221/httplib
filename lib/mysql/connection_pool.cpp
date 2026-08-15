@@ -177,7 +177,7 @@ namespace httplib::mysql
                 return;
             }
 
-            if (!imp.in_transaction && imp.stmts_to_close.empty())
+            if (!imp.in_transaction)
             {
                 push_idle(std::move(sess));
                 return;
@@ -188,25 +188,9 @@ namespace httplib::mysql
                 ex_,
                 [self, sess = std::move(sess)]() mutable -> net::awaitable<void>
                 {
-                    auto& imp = get_impl(*sess);
-                    auto stmts = std::move(imp.stmts_to_close);
-                    bool in_transaction = imp.in_transaction;
-
                     try
                     {
-                        for (auto& st : stmts)
-                        {
-                            if (st.valid())
-                            {
-                                boost::mysql::diagnostics diag;
-                                co_await imp.get_conn().async_close_statement(st, diag, boost::asio::use_awaitable);
-                            }
-                        }
-
-                        if (in_transaction)
-                        {
-                            co_await sess->rollback();
-                        }
+                        co_await sess->rollback();
                     }
                     catch (...)
                     {
