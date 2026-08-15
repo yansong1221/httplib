@@ -607,11 +607,33 @@ TEST_CASE("db: prepared statement into() extraction", "[db][integration]")
 
             std::optional<int64_t> id;
             std::optional<std::string> name;
-            co_await sess.stmt("SELECT id, name FROM __httplib_into").into(id, "id").into(name, "name").execute();
+            co_await sess.stmt("SELECT id, name FROM __httplib_into")
+                .execute(mysql::into(id, "id"), mysql::into(name, "name"));
             REQUIRE(id == 42);
             REQUIRE(name == "alice");
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_into");
+        });
+}
+
+TEST_CASE("db: query into() extraction", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_qinto (id INT, name VARCHAR(100))");
+            co_await sess.query("DELETE FROM __httplib_qinto");
+            co_await sess.query("INSERT INTO __httplib_qinto VALUES (1, 'a'),(2, 'b')");
+
+            std::optional<std::string> name;
+            co_await sess.query("SELECT name FROM __httplib_qinto WHERE id = 1", mysql::into(name, "name"));
+            REQUIRE(name == "a");
+
+            std::vector<int64_t> ids;
+            co_await sess.query("SELECT id FROM __httplib_qinto ORDER BY id", mysql::into(ids));
+            REQUIRE(ids == std::vector<int64_t> { 1, 2 });
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_qinto");
         });
 }
 
@@ -629,11 +651,7 @@ TEST_CASE("db: into() supports small integer types", "[db][integration]")
             std::optional<unsigned> ui;
             std::optional<unsigned short> us;
             co_await sess.stmt("SELECT a, b, c, d FROM __httplib_ints")
-                .into(si, 0)
-                .into(ss, 1)
-                .into(ui, 2)
-                .into(us, 3)
-                .execute();
+                .execute(mysql::into(si, 0), mysql::into(ss, 1), mysql::into(ui, 2), mysql::into(us, 3));
             REQUIRE(si == 1);
             REQUIRE(ss == 2);
             REQUIRE(ui == 3u);
@@ -642,7 +660,8 @@ TEST_CASE("db: into() supports small integer types", "[db][integration]")
             std::vector<int> vi;
             std::vector<unsigned> vu;
             co_await sess.query("INSERT INTO __httplib_ints VALUES (5, 6, 7, 8)");
-            co_await sess.stmt("SELECT a, c FROM __httplib_ints ORDER BY a").into(vi, 0).into(vu, 1).execute();
+            co_await sess.stmt("SELECT a, c FROM __httplib_ints ORDER BY a")
+                .execute(mysql::into(vi, 0), mysql::into(vu, 1));
             REQUIRE(vi == std::vector<int> { 1, 5 });
             REQUIRE(vu == std::vector<unsigned> { 3u, 7u });
 
@@ -661,11 +680,11 @@ TEST_CASE("db: statement reuse (caching)", "[db][integration]")
 
             auto stmt = sess.stmt("SELECT id FROM __httplib_cache WHERE id = :id");
             std::optional<int64_t> v1;
-            co_await stmt.bind(1).into(v1, 0).execute();
+            co_await stmt.bind(1).execute(mysql::into(v1, 0));
             REQUIRE(v1 == 1);
 
             std::optional<int64_t> v2;
-            co_await stmt.bind(2).into(v2, 0).execute();
+            co_await stmt.bind(2).execute(mysql::into(v2, 0));
             REQUIRE(v2 == 2);
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_cache");
@@ -698,9 +717,9 @@ TEST_CASE("db: statement cache eviction", "[db][integration]")
             for (int round = 0; round < 3; ++round)
             {
                 std::optional<int64_t> a, b, c;
-                co_await sess.stmt("SELECT id FROM __httplib_sc WHERE id = :id").bind(1).into(a, 0).execute();
-                co_await sess.stmt("SELECT id FROM __httplib_sc WHERE id > :id").bind(3).into(b, 0).execute();
-                co_await sess.stmt("SELECT id FROM __httplib_sc WHERE id >= :id").bind(5).into(c, 0).execute();
+                co_await sess.stmt("SELECT id FROM __httplib_sc WHERE id = :id").bind(1).execute(mysql::into(a, 0));
+                co_await sess.stmt("SELECT id FROM __httplib_sc WHERE id > :id").bind(3).execute(mysql::into(b, 0));
+                co_await sess.stmt("SELECT id FROM __httplib_sc WHERE id >= :id").bind(5).execute(mysql::into(c, 0));
                 REQUIRE(a == 1);
                 REQUIRE(b == 4);
                 REQUIRE(c == 5);
@@ -757,9 +776,7 @@ TEST_CASE("db: named params reuse across cache", "[db][integration]")
                 std::optional<std::string> name;
                 co_await sess.stmt("SELECT id, name FROM __httplib_nc WHERE name = :n")
                     .bind("n", "a")
-                    .into(id, "id")
-                    .into(name, "name")
-                    .execute();
+                    .execute(mysql::into(id, "id"), mysql::into(name, "name"));
                 REQUIRE(id == 1);
                 REQUIRE(name == "a");
             }
@@ -1202,11 +1219,11 @@ TEST_CASE("db: into replaced across executes", "[db][integration]")
 
             auto stmt = sess.stmt("SELECT id FROM __httplib_ext WHERE id = :id");
             std::optional<int64_t> v1;
-            co_await stmt.bind(1).into(v1, 0).execute();
+            co_await stmt.bind(1).execute(mysql::into(v1, 0));
             REQUIRE(v1 == 1);
 
             std::optional<int64_t> v2;
-            co_await stmt.bind(2).into(v2, 0).execute();
+            co_await stmt.bind(2).execute(mysql::into(v2, 0));
             REQUIRE(v1 == 1); // 重新 into 替换旧 extractor，v1 不再被写
             REQUIRE(v2 == 2);
 
@@ -1214,7 +1231,7 @@ TEST_CASE("db: into replaced across executes", "[db][integration]")
         });
 }
 
-TEST_CASE("db: into persists across executes", "[db][integration]")
+TEST_CASE("db: into re-declared per execute", "[db][integration]")
 {
     run(
         [](mysql::session& sess) -> net::awaitable<void>
@@ -1223,13 +1240,12 @@ TEST_CASE("db: into persists across executes", "[db][integration]")
             co_await sess.query("DELETE FROM __httplib_ip");
             co_await sess.query("INSERT INTO __httplib_ip VALUES (10),(20)");
 
-            // 输出只绑一次，循环里只重绑输入，输出每次自动更新
+            // 每次执行前声明输出（一次性，不持久）
             auto stmt = sess.stmt("SELECT v FROM __httplib_ip WHERE v = :v");
             std::optional<int64_t> out;
-            stmt.into(out, "v");
-            co_await stmt.bind(10).execute();
+            co_await stmt.bind(10).execute(mysql::into(out, "v"));
             REQUIRE(out == 10);
-            co_await stmt.bind(20).execute();
+            co_await stmt.bind(20).execute(mysql::into(out, "v"));
             REQUIRE(out == 20);
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_ip");
@@ -1247,18 +1263,18 @@ TEST_CASE("db: into vector", "[db][integration]")
 
             // 按列下标
             std::vector<int64_t> ids;
-            co_await sess.stmt("SELECT id FROM __httplib_vec ORDER BY id").into(ids, 0).execute();
+            co_await sess.stmt("SELECT id FROM __httplib_vec ORDER BY id").execute(mysql::into(ids, 0));
             REQUIRE(ids == std::vector<int64_t> { 1, 2, 3 });
 
             // 按列名
             std::vector<std::string> names;
-            co_await sess.stmt("SELECT name FROM __httplib_vec ORDER BY id").into(names, "name").execute();
+            co_await sess.stmt("SELECT name FROM __httplib_vec ORDER BY id").execute(mysql::into(names, "name"));
             REQUIRE(names == std::vector<std::string> { "a", "b", "c" });
 
             // 含 NULL 行时抛异常
             co_await sess.query("INSERT INTO __httplib_vec VALUES (NULL, NULL)");
             std::vector<int64_t> all;
-            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT id FROM __httplib_vec").into(all, "id").execute(),
+            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT id FROM __httplib_vec").execute(mysql::into(all, "id")),
                               std::runtime_error);
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_vec");
@@ -1279,25 +1295,24 @@ TEST_CASE("db: into positional column", "[db][integration]")
             std::optional<std::string> name;
             co_await sess.stmt("SELECT id, name FROM __httplib_ipc WHERE id = :id")
                 .bind("id", 1)
-                .into(id)
-                .into(name)
-                .execute();
+                .execute(mysql::into(id), mysql::into(name));
             REQUIRE(id == 1);
             REQUIRE(name == "a");
 
             // vector：第 N 次 into 对应第 N 列
             std::vector<int64_t> ids;
             std::vector<std::string> names;
-            co_await sess.stmt("SELECT id, name FROM __httplib_ipc ORDER BY id").into(ids).into(names).execute();
+            co_await sess.stmt("SELECT id, name FROM __httplib_ipc ORDER BY id")
+                .execute(mysql::into(ids), mysql::into(names));
             REQUIRE(ids == std::vector<int64_t> { 1, 2 });
             REQUIRE(names == std::vector<std::string> { "a", "b" });
 
             // 重新 into 时计数器从 0 重新计
             std::optional<int64_t> v;
             auto stmt = sess.stmt("SELECT id FROM __httplib_ipc WHERE id = :id");
-            co_await stmt.bind("id", 1).into(v).execute();
+            co_await stmt.bind("id", 1).execute(mysql::into(v));
             REQUIRE(v == 1);
-            co_await stmt.bind("id", 2).into(v).execute();
+            co_await stmt.bind("id", 2).execute(mysql::into(v));
             REQUIRE(v == 2);
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_ipc");
@@ -1644,32 +1659,34 @@ TEST_CASE("db: into edge cases", "[db][integration]")
             // 越界列下标
             {
                 std::optional<int64_t> v;
-                REQUIRE_THROWS_AS(co_await sess.stmt("SELECT id FROM __httplib_intoedge").into(v, 999).execute(),
-                                  std::out_of_range);
+                REQUIRE_THROWS_AS(
+                    co_await sess.stmt("SELECT id FROM __httplib_intoedge").execute(mysql::into(v, 999)),
+                    std::out_of_range);
             }
             // 列名不存在
             {
                 std::optional<int64_t> v;
-                REQUIRE_THROWS_AS(co_await sess.stmt("SELECT id FROM __httplib_intoedge").into(v, "nope").execute(),
-                                  std::runtime_error);
+                REQUIRE_THROWS_AS(
+                    co_await sess.stmt("SELECT id FROM __httplib_intoedge").execute(mysql::into(v, "nope")),
+                    std::runtime_error);
             }
             // 类型不匹配
             {
                 std::optional<int64_t> v;
                 REQUIRE_THROWS_AS(
-                    co_await sess.stmt("SELECT name FROM __httplib_intoedge WHERE id = 1").into(v, "name").execute(),
+                    co_await sess.stmt("SELECT name FROM __httplib_intoedge WHERE id = 1").execute(mysql::into(v, "name")),
                     std::runtime_error);
             }
             // 空结果不写 optional
             {
                 std::optional<int64_t> v = 7;
-                co_await sess.stmt("SELECT id FROM __httplib_intoedge WHERE id = 999").into(v, "id").execute();
+                co_await sess.stmt("SELECT id FROM __httplib_intoedge WHERE id = 999").execute(mysql::into(v, "id"));
                 REQUIRE(v == 7);
             }
             // NULL 值 -> nullopt
             {
                 std::optional<int64_t> v = 7;
-                co_await sess.stmt("SELECT id FROM __httplib_intoedge WHERE name IS NULL").into(v, "id").execute();
+                co_await sess.stmt("SELECT id FROM __httplib_intoedge WHERE name IS NULL").execute(mysql::into(v, "id"));
                 REQUIRE(!v.has_value());
             }
 

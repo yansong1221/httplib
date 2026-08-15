@@ -553,28 +553,8 @@ namespace httplib::mysql
             imp.query_logger(entry);
         }
 
-        if (res.row_count() > 0)
-        {
-            for (auto& ex : impl_->extractors)
-            {
-                ex(res);
-            }
-        }
         impl_->need_params_reset = true;
-        impl_->need_extractors_reset = true;
         co_return res;
-    }
-
-    void
-    prepared_statement::add_extractor(std::function<void(result const&)> ex)
-    {
-        impl_->add_extractor(std::move(ex));
-    }
-
-    size_t
-    prepared_statement::alloc_into_col()
-    {
-        return impl_->alloc_into_col();
     }
 
 } // namespace httplib::mysql

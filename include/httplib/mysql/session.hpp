@@ -3,6 +3,7 @@
 
 #include "httplib/config.hpp"
 #include "httplib/mysql/config.hpp"
+#include "httplib/mysql/extractor.hpp"
 #include "httplib/mysql/prepared_statement.hpp"
 #include "httplib/mysql/result.hpp"
 #include <boost/asio/awaitable.hpp>
@@ -15,6 +16,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 
 namespace httplib::mysql
 {
@@ -69,6 +71,22 @@ namespace httplib::mysql
          * \throws mysql_exception 执行失败。
          */
         net::awaitable<result> query(std::string_view sql);
+
+        /**
+         * \brief 执行一条 SQL 语句并把结果提取到变量。
+         * \param sql SQL 文本。
+         * \param ex 一个或多个 \ref into 提取声明。
+         * \returns 结果集。
+         * \throws mysql_exception 执行失败。
+         */
+        template <typename... Ex>
+        net::awaitable<result>
+        query(std::string_view sql, Ex&&... ex)
+        {
+            auto res = co_await query(sql);
+            detail::apply_extractors(res, std::forward<Ex>(ex)...);
+            co_return res;
+        }
 
         /**
          * \brief 创建一个 prepared statement（支持 `?` 与 `:name` 占位符）。
