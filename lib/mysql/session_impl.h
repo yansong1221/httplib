@@ -83,9 +83,12 @@ namespace httplib::mysql
         if (f.is_datetime())
         {
             auto d = f.as_datetime();
-            return std::to_string(static_cast<int>(d.year())) + "-" + std::to_string(static_cast<int>(d.month())) + "-"
-                   + std::to_string(static_cast<int>(d.day())) + " " + std::to_string(static_cast<int>(d.hour())) + ":"
-                   + std::to_string(static_cast<int>(d.minute())) + ":" + std::to_string(static_cast<int>(d.second()));
+            return datetime { d.year(), d.month(), d.day(), d.hour(), d.minute(), d.second(), d.microsecond() }
+                .to_string();
+        }
+        if (f.is_time())
+        {
+            return time::from_duration(f.as_time()).to_string();
         }
         return "?";
     }
@@ -267,6 +270,9 @@ namespace httplib::mysql
         bool live = true;
         session::query_logger query_logger;
 
+        std::shared_ptr<spdlog::logger> default_logger_;
+        std::shared_ptr<spdlog::logger> custom_logger_;
+
         std::chrono::steady_clock::time_point last_active = std::chrono::steady_clock::now();
         std::chrono::steady_clock::time_point last_ping;
         std::chrono::seconds utc_offset { 0 };
@@ -286,10 +292,30 @@ namespace httplib::mysql
             size_t capacity = 64;
         } stmt_cache;
 
+        impl();
+
+        std::shared_ptr<spdlog::logger>
+        logger() const
+        {
+            return custom_logger_ ? custom_logger_ : default_logger_;
+        }
+
+        void
+        set_logger(std::shared_ptr<spdlog::logger> l)
+        {
+            custom_logger_ = std::move(l);
+        }
+
         boost::mysql::any_connection&
         get_conn()
         {
             return *conn;
+        }
+
+        void
+        touch()
+        {
+            last_active = std::chrono::steady_clock::now();
         }
 
         void

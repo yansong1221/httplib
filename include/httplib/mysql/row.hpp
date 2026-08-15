@@ -1,8 +1,10 @@
 #pragma once
 #ifdef HTTPLIB_ENABLED_DATABASE
 
+#include "httplib/config.hpp"
 #include "mysql_fwd.hpp"
 #include "temporal.hpp"
+#include <boost/json/value.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>

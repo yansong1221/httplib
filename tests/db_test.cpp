@@ -14,6 +14,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
 #include <span>
+#include "mysql/session_impl.h"
 
 namespace mysql = httplib::mysql;
 namespace mw = httplib::server::middleware;
@@ -119,6 +120,43 @@ TEST_CASE("config: defaults", "[db]")
     REQUIRE_FALSE(p.validate_on_borrow);
 }
 
+TEST_CASE("db: format_param handles time fields", "[db][unit]")
+{
+    // TIME 参数应被格式化为 [-]HH:MM:SS[.ffffff]，而不是落到默认的 "?"
+    boost::mysql::time tv = std::chrono::microseconds { -3723456789 };
+    boost::mysql::field_view f { tv };
+    REQUIRE(f.is_time());
+
+    auto s = mysql::format_param(f);
+    REQUIRE(s != "?");
+    REQUIRE(s.find(':') != std::string::npos);
+}
+
+TEST_CASE("db: format_param handles null and negative time", "[db][unit]")
+{
+    // NULL 应输出 "NULL"
+    boost::mysql::field_view nullf {};
+    REQUIRE(mysql::format_param(nullf) == "NULL");
+
+    // 正 TIME 与负 TIME 都能区分符号
+    boost::mysql::time pos = std::chrono::microseconds { 3723456789 };
+    boost::mysql::time neg = std::chrono::microseconds { -3723456789 };
+    auto sp = mysql::format_param(boost::mysql::field_view { pos });
+    auto sn = mysql::format_param(boost::mysql::field_view { neg });
+    REQUIRE(sp != sn);
+    REQUIRE(sn.find('-') != std::string::npos);
+}
+
+TEST_CASE("db: format_param datetime keeps microseconds", "[db][unit]")
+{
+    boost::mysql::datetime dt { 2024, 1, 15, 12, 34, 56, 123456 };
+    boost::mysql::field_view f { dt };
+    REQUIRE(f.is_datetime());
+
+    auto s = mysql::format_param(f);
+    REQUIRE(s.find("123456") != std::string::npos);
+}
+
 // ===========================================================================
 // Connection pool
 // ===========================================================================
@@ -162,6 +200,124 @@ TEST_CASE("db: connection_pool concurrent acquire", "[db][integration]")
     }
 }
 
+TEST_CASE("db: pool honors max_connections over min_connections", "[db][integration]")
+{
+    // min_connections 不应突破 max_connections 上限
+    auto cfg = make_cfg();
+    cfg.min_connections = 5;
+    cfg.max_connections = 2;
+
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            mysql::connection_pool pool(ioc.get_executor(), cfg);
+            pool.start();
+
+            // 等待后台预建完成（最多 3s；DB 不可用则 total_count 保持 0，测试不误报）
+            auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+            while (pool.total_count() < cfg.min_connections && std::chrono::steady_clock::now() < deadline)
+            {
+                net::steady_timer settle(ioc.get_executor());
+                settle.expires_after(std::chrono::milliseconds(50));
+                co_await settle.async_wait(boost::asio::use_awaitable);
+            }
+
+            REQUIRE(pool.total_count() <= cfg.max_connections);
+            pool.stop();
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
+TEST_CASE("db: idle connections are reaped by idle_timeout", "[db][integration]")
+{
+    // 即使 health_check 周期比 idle_timeout 短，空闲连接也应被 idle_timeout 回收
+    auto cfg = make_cfg();
+    cfg.min_connections = 1;
+    cfg.max_connections = 4;
+    cfg.idle_check_interval = std::chrono::seconds(1);
+    cfg.idle_timeout = std::chrono::seconds(2);
+    cfg.health_check_interval = std::chrono::seconds(1);
+
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            mysql::connection_pool pool(ioc.get_executor(), cfg);
+            pool.start();
+
+            {
+                std::vector<mysql::connection_pool::session_handle> handles;
+                for (int i = 0; i < 3; ++i)
+                {
+                    handles.push_back(co_await pool.async_acquire());
+                }
+                REQUIRE(pool.total_count() >= 3);
+            } // handles 析构 → 全部归还为 idle
+
+            // 轮询等待 maintenance 回收，最多 10s
+            auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            while (pool.total_count() > cfg.min_connections && std::chrono::steady_clock::now() < deadline)
+            {
+                net::steady_timer settle(ioc.get_executor());
+                settle.expires_after(std::chrono::milliseconds(100));
+                co_await settle.async_wait(boost::asio::use_awaitable);
+            }
+
+            REQUIRE(pool.total_count() == cfg.min_connections);
+            pool.stop();
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
+TEST_CASE("db: pool survives unreachable server", "[db][integration]")
+{
+    // 连接失败应被维护协程捕获并记录日志，而不是冒泡到 completion handler 导致崩溃
+    auto cfg = make_cfg();
+    cfg.port = 1; // 无 MySQL 监听
+    cfg.min_connections = 2;
+    cfg.connect_timeout = std::chrono::seconds(1);
+    cfg.idle_check_interval = std::chrono::seconds(1);
+
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            mysql::connection_pool pool(ioc.get_executor(), cfg);
+            pool.start();
+
+            // 给 pre-create 失败 + maintenance refill 失败留时间
+            net::steady_timer settle(ioc.get_executor());
+            settle.expires_after(std::chrono::seconds(2));
+            co_await settle.async_wait(boost::asio::use_awaitable);
+
+            REQUIRE(pool.total_count() == 0);
+            pool.stop();
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
 // ===========================================================================
 // Basic query + result
 // ===========================================================================
@@ -177,6 +333,18 @@ TEST_CASE("db: simple query", "[db][integration]")
             REQUIRE(r.column_name(0) == "n");
             REQUIRE(*r[0].as_int64("n") == 42);
             REQUIRE(*r[0].as_string("s") == "hi");
+        });
+}
+
+TEST_CASE("db: touch updates last_active on query", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            auto t0 = sess.last_active_time();
+            co_await sess.query("SELECT 1");
+            auto t1 = sess.last_active_time();
+            REQUIRE(t1 > t0);
         });
 }
 
@@ -1398,6 +1566,17 @@ TEST_CASE("db: named placeholder bound positionally", "[db][integration]")
             // :name 占位符按出现顺序做位置绑定（SOCI 风格）
             auto r = co_await sess.stmt("SELECT :a + :b AS x").bind(1).bind(2).execute();
             REQUIRE(*r[0].as_int64("x") == 3);
+        });
+}
+
+TEST_CASE("db: named param ignores # comment", "[db][integration]")
+{
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            // MySQL 的 # 到行尾都是注释；注释里的 :tmp 不应被当作命名参数
+            auto r = co_await sess.stmt("SELECT :a AS x # 调试 :tmp").bind("a", 42).execute();
+            REQUIRE(*r[0].as_int64("x") == 42);
         });
 }
 

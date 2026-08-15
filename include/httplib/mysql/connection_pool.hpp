@@ -95,6 +95,9 @@ namespace httplib::mysql
         size_t total_count() const;
         net::any_io_executor get_executor() noexcept;
 
+        std::shared_ptr<spdlog::logger> logger() const;
+        void set_logger(std::shared_ptr<spdlog::logger> logger);
+
       private:
         std::shared_ptr<impl> impl_;
     };

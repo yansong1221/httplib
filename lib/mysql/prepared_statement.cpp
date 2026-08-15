@@ -57,7 +57,20 @@ namespace httplib::mysql
                 }
                 continue;
             }
-            if (c == '-' && i + 1 < imp.sql.size() && imp.sql[i + 1] == '-')
+            if (c == '#')
+            {
+                while (i < imp.sql.size() && imp.sql[i] != '\n')
+                {
+                    ++i;
+                }
+                if (i < imp.sql.size())
+                {
+                    result += imp.sql[i];
+                }
+                continue;
+            }
+            if (c == '-' && i + 1 < imp.sql.size() && imp.sql[i + 1] == '-'
+                && (i + 2 >= imp.sql.size() || std::isspace(static_cast<unsigned char>(imp.sql[i + 2]))))
             {
                 while (i < imp.sql.size() && imp.sql[i] != '\n')
                 {
@@ -508,6 +521,7 @@ namespace httplib::mysql
         {
             imp.raise_error(ec, diag, impl_->original_sql, make_params_str());
         }
+        imp.touch();
 
         auto res = result(std::make_unique<result::impl>(std::move(data), imp.utc_offset));
 

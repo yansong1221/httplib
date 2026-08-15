@@ -5,6 +5,7 @@
 #include "httplib/mysql/config.hpp"
 #include "httplib/mysql/prepared_statement.hpp"
 #include "httplib/mysql/result.hpp"
+#include <boost/asio/awaitable.hpp>
 #include <chrono>
 #include <concepts>
 #include <cstdint>
@@ -132,10 +133,9 @@ namespace httplib::mysql
          */
         void set_query_logger(query_logger cb);
 
-        /**
-         * \brief 更新最近活跃时间（供连接池判断空闲）。
-         */
-        void touch();
+        std::shared_ptr<spdlog::logger> logger() const;
+        void set_logger(std::shared_ptr<spdlog::logger> logger);
+
         std::chrono::steady_clock::time_point last_active_time() const;
         std::chrono::steady_clock::time_point last_ping_time() const;
         /**

@@ -4,6 +4,8 @@
 #include "httplib/config.hpp"
 #include "httplib/mysql/mysql_fwd.hpp"
 #include "httplib/mysql/result.hpp"
+#include <boost/asio/awaitable.hpp>
+#include <boost/json/value.hpp>
 #include <cstddef>
 #include <cstdint>
 #include <functional>

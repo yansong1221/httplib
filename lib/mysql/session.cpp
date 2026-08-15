@@ -6,10 +6,20 @@
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/mysql.hpp>
+#include <spdlog/sinks/stdout_color_sinks.h>
+#include <spdlog/spdlog.h>
 #include <stdexcept>
 
 namespace httplib::mysql
 {
+
+    session::impl::impl()
+    {
+        auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+        spdlog::sinks_init_list sink_list = { console_sink };
+        default_logger_ = std::make_shared<spdlog::logger>("httplib.mysql", sink_list);
+        default_logger_->set_level(spdlog::level::info);
+    }
 
     session::session(std::unique_ptr<impl> p) : impl_(std::move(p)) {}
 
@@ -59,6 +69,7 @@ namespace httplib::mysql
                                               diag,
                                               boost::asio::redirect_error(boost::asio::use_awaitable, ec));
         imp.raise_error(ec, diag, sql);
+        imp.touch();
 
         auto res = result(std::make_unique<result::impl>(std::move(data), imp.utc_offset));
 
@@ -110,7 +121,6 @@ namespace httplib::mysql
         {
             co_await imp.get_conn().async_ping(boost::asio::use_awaitable);
             imp.last_ping = std::chrono::steady_clock::now();
-            imp.last_active = imp.last_ping;
             co_return true;
         }
         catch (...)
@@ -126,10 +136,16 @@ namespace httplib::mysql
         get_impl(*this).query_logger = std::move(cb);
     }
 
-    void
-    session::touch()
+    std::shared_ptr<spdlog::logger>
+    session::logger() const
     {
-        get_impl(*this).last_active = std::chrono::steady_clock::now();
+        return get_impl(*this).logger();
+    }
+
+    void
+    session::set_logger(std::shared_ptr<spdlog::logger> logger)
+    {
+        get_impl(*this).set_logger(std::move(logger));
     }
 
     std::chrono::steady_clock::time_point
