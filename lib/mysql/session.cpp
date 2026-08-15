@@ -27,7 +27,7 @@ namespace httplib::mysql
     session::connect(net::any_io_executor ex, connect_params cfg)
     {
         auto conn = std::make_unique<boost::mysql::any_connection>(ex);
-        auto offset = co_await connect_session(*conn, cfg);
+        auto offset = co_await detail::connect_session(*conn, cfg);
 
         auto imp = std::make_unique<impl>();
         imp->params = std::move(cfg);
@@ -119,7 +119,7 @@ namespace httplib::mysql
         imp.clear_statement_cache();
         imp.conn = std::make_unique<boost::mysql::any_connection>(imp.conn->get_executor());
 
-        imp.utc_offset = co_await connect_session(*imp.conn, imp.params);
+        imp.utc_offset = co_await detail::connect_session(*imp.conn, imp.params);
         imp.live = true;
         imp.in_transaction = false;
     }

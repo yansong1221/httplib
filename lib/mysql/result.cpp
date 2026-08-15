@@ -1,10 +1,55 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 #include "httplib/mysql/result.hpp"
-#include "mysql/detail_helpers.h"
 #include "mysql/result_impl.h"
 
 namespace httplib::mysql
 {
+    namespace detail
+    {
+
+        static column_type
+        map_column_type(boost::mysql::column_type t, bool u)
+        {
+            using b = boost::mysql::column_type;
+            switch (t)
+            {
+                case b::tinyint:
+                case b::smallint:
+                case b::mediumint:
+                case b::int_:
+                case b::bigint:
+                case b::year:
+                    return u ? column_type::uint64 : column_type::int64;
+                case b::bit:
+                    return column_type::uint64;
+                case b::float_:
+                case b::double_:
+                case b::decimal:
+                    return column_type::double_;
+                case b::varchar:
+                case b::char_:
+                case b::text:
+                case b::enum_:
+                case b::set:
+                case b::json:
+                    return column_type::string;
+                case b::blob:
+                case b::geometry:
+                    return column_type::blob;
+                case b::date:
+                    return column_type::date;
+                case b::datetime:
+                    return column_type::datetime;
+                case b::timestamp:
+                    return column_type::timestamp;
+                case b::time:
+                    return column_type::time;
+                default:
+                    return column_type::unknown;
+            }
+        }
+
+    } // namespace detail
 
     void
     result::impl::load_resultset(size_t idx)

@@ -72,9 +72,12 @@ namespace httplib::mysql
         inline param to_param(boost::json::value const& v) { return boost::json::serialize(v); }
         inline param to_param(std::chrono::system_clock::time_point tp) { return tp; }
 
-        /// 渲染带参数 SQL（`:name` → 参数文本）。定义在 lib/mysql/session_impl.h。
+        /// 渲染带参数 SQL（`:name` → 参数文本）。定义在 lib/mysql/session_impl.cpp。
         std::string render_query(std::string_view sql, std::vector<binder> const& binders,
                                  std::chrono::seconds utc_offset);
+
+        /// 把单个字段值渲染为 SQL 字面量（字符串/数值/日期/时间/二进制）。定义在 lib/mysql/session_impl.cpp。
+        std::string format_param(boost::mysql::field_view const& f);
 
         /// 从混合变参里收集 binder（非 binder 跳过）。
         template <typename E>

@@ -2,6 +2,7 @@
 #include "httplib/mysql/prepared_statement.hpp"
 #include "httplib/mysql/mysql_exception.hpp"
 #include "httplib/mysql/session.hpp"
+#include "mysql/prepared_statement_impl.h"
 #include "mysql/result_impl.h"
 #include "mysql/session_impl.h"
 #include <boost/asio/redirect_error.hpp>
@@ -128,6 +129,51 @@ namespace httplib::mysql
         }
         imp.has_named_bind = true;
         imp.named_values[std::move(key)] = std::move(value);
+    }
+
+    static std::string
+    format_params(std::vector<boost::mysql::field_view> const& params)
+    {
+        if (params.empty())
+        {
+            return {};
+        }
+        std::string out = "[";
+        for (size_t i = 0; i < params.size(); ++i)
+        {
+            if (i != 0)
+            {
+                out += ", ";
+            }
+            out += detail::format_param(params[i]);
+        }
+        out += "]";
+        return out;
+    }
+
+    static std::string
+    format_named_params(std::vector<std::string> const& names, std::vector<boost::mysql::field_view> const& params)
+    {
+        if (params.empty())
+        {
+            return {};
+        }
+        std::string out = "[";
+        for (size_t i = 0; i < params.size(); ++i)
+        {
+            if (i != 0)
+            {
+                out += ", ";
+            }
+            if (i < names.size())
+            {
+                out += names[i];
+                out += "=";
+            }
+            out += detail::format_param(params[i]);
+        }
+        out += "]";
+        return out;
     }
 
     prepared_statement::prepared_statement(session& sess, std::string sql) : impl_(std::make_unique<impl>())

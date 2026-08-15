@@ -1,11 +1,114 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 #include "httplib/mysql/row.hpp"
-#include "mysql/detail_helpers.h"
 #include "mysql/result_impl.h"
 #include <boost/json.hpp>
+#include <limits>
 
 namespace httplib::mysql
 {
+    namespace detail
+    {
+
+        static boost::mysql::field_view
+        ff(result::impl const& i, size_t r, size_t c)
+        {
+            return i.rows().at(r).at(c);
+        }
+
+        static int64_t
+        fi(boost::mysql::field_view const& f)
+        {
+            if (f.is_int64())
+            {
+                return f.as_int64();
+            }
+            if (f.is_uint64())
+            {
+                auto v = f.as_uint64();
+                if (v > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+                {
+                    throw std::runtime_error("db: value out of range for int64");
+                }
+                return static_cast<int64_t>(v);
+            }
+            if (f.is_double())
+            {
+                auto v = f.as_double();
+                if (v < static_cast<double>(std::numeric_limits<int64_t>::min())
+                    || v >= static_cast<double>(std::numeric_limits<int64_t>::max()))
+                {
+                    throw std::runtime_error("db: value out of range for int64");
+                }
+                return static_cast<int64_t>(v);
+            }
+            throw std::runtime_error("db: cannot convert to int64");
+        }
+
+        static uint64_t
+        fu(boost::mysql::field_view const& f)
+        {
+            if (f.is_uint64())
+            {
+                return f.as_uint64();
+            }
+            if (f.is_int64())
+            {
+                auto v = f.as_int64();
+                if (v < 0)
+                {
+                    throw std::runtime_error("db: value out of range for uint64");
+                }
+                return static_cast<uint64_t>(v);
+            }
+            if (f.is_double())
+            {
+                auto v = f.as_double();
+                if (v < 0.0 || v >= static_cast<double>(std::numeric_limits<uint64_t>::max()))
+                {
+                    throw std::runtime_error("db: value out of range for uint64");
+                }
+                return static_cast<uint64_t>(v);
+            }
+            throw std::runtime_error("db: cannot convert to uint64");
+        }
+
+        static double
+        fd(boost::mysql::field_view const& f)
+        {
+            if (f.is_double())
+            {
+                return f.as_double();
+            }
+            if (f.is_int64())
+            {
+                return (double)f.as_int64();
+            }
+            if (f.is_uint64())
+            {
+                return (double)f.as_uint64();
+            }
+            throw std::runtime_error("db: cannot convert to double");
+        }
+
+        static std::chrono::system_clock::time_point
+        d2e(datetime const& dt)
+        {
+            return dt.to_time_point();
+        }
+
+        template <typename T, typename Conv>
+        std::optional<T>
+        detail_value(result::impl const& i, size_t idx, size_t col, Conv&& conv)
+        {
+            auto f = ff(i, idx, col);
+            if (f.is_null())
+            {
+                return std::nullopt;
+            }
+            return conv(f);
+        }
+
+    } // namespace detail
 
     row::row(result const* parent, size_t idx) noexcept : parent_(parent), idx_(idx) {}
 

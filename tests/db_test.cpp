@@ -14,7 +14,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
 #include <span>
-#include "mysql/session_impl.h"
 
 namespace mysql = httplib::mysql;
 namespace mw = httplib::server::middleware;
@@ -120,55 +119,31 @@ TEST_CASE("config: defaults", "[db]")
     REQUIRE_FALSE(p.validate_on_borrow);
 }
 
-TEST_CASE("db: format_param handles time fields", "[db][unit]")
+TEST_CASE("db: query bind time/datetime/null round-trip", "[db][integration]")
 {
-    // TIME 参数应被格式化为 [-]HH:MM:SS[.ffffff]，而不是落到默认的 "?"
-    boost::mysql::time tv = std::chrono::microseconds { -3723456789 };
-    boost::mysql::field_view f { tv };
-    REQUIRE(f.is_time());
+    run(
+        [](mysql::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_temporal "
+                                "(id INT, t TIME(6), dt DATETIME(6), n VARCHAR(10))");
+            co_await sess.query("DELETE FROM __httplib_temporal");
 
-    auto s = mysql::format_param(f);
-    REQUIRE(s != "?");
-    REQUIRE(s.find(':') != std::string::npos);
-}
+            // 负 TIME、带微秒的 DATETIME、NULL 都要能无损往返
+            auto neg_t = mysql::time::from_duration(std::chrono::microseconds { -3723456789 });
+            mysql::datetime dt { 2024, 1, 15, 12, 34, 56, 123456 };
+            co_await sess.query("INSERT INTO __httplib_temporal VALUES (:id, :t, :dt, :n)",
+                                mysql::bind("id", 1),
+                                mysql::bind("t", neg_t),
+                                mysql::bind("dt", dt),
+                                mysql::bind("n", nullptr));
+            auto r = co_await sess.query("SELECT t, dt, n FROM __httplib_temporal WHERE id = 1");
 
-TEST_CASE("db: format_param handles null and negative time", "[db][unit]")
-{
-    // NULL 应输出 "NULL"
-    boost::mysql::field_view nullf {};
-    REQUIRE(mysql::format_param(nullf) == "NULL");
+            REQUIRE(*r[0].as_time("t") == neg_t);
+            REQUIRE(*r[0].as_datetime("dt") == dt);
+            REQUIRE(r[0].is_null("n"));
 
-    // 正 TIME 与负 TIME 都能区分符号
-    boost::mysql::time pos = std::chrono::microseconds { 3723456789 };
-    boost::mysql::time neg = std::chrono::microseconds { -3723456789 };
-    auto sp = mysql::format_param(boost::mysql::field_view { pos });
-    auto sn = mysql::format_param(boost::mysql::field_view { neg });
-    REQUIRE(sp != sn);
-    REQUIRE(sn.find('-') != std::string::npos);
-}
-
-TEST_CASE("db: format_param datetime keeps microseconds", "[db][unit]")
-{
-    boost::mysql::datetime dt { 2024, 1, 15, 12, 34, 56, 123456 };
-    boost::mysql::field_view f { dt };
-    REQUIRE(f.is_datetime());
-
-    auto s = mysql::format_param(f);
-    REQUIRE(s.find("123456") != std::string::npos);
-}
-
-TEST_CASE("db: quote_mysql_string escapes backslash", "[db][unit]")
-{
-    // 单引号用 '' 转义（现有正确行为）
-    REQUIRE(mysql::quote_mysql_string("a'b") == "'a''b'");
-
-    // 反斜杠必须转义成 \\：MySQL 默认 NO_BACKSLASH_ESCAPES 关闭时，\ 是转义符。
-    // 不转义的话：
-    //   1) 值末尾的反斜杠会吞掉闭合引号 → SQL 语法错误
-    //   2) 值中的 \n / \b / \t 等会被解释成控制字符，破坏原值
-    REQUIRE(mysql::quote_mysql_string("abc\\") == "'abc\\\\'");
-    REQUIRE(mysql::quote_mysql_string("a\\nb") == "'a\\\\nb'");
-    REQUIRE(mysql::quote_mysql_string("a\\'b") == "'a\\\\''b'");
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_temporal");
+        });
 }
 
 // ===========================================================================
@@ -664,12 +639,20 @@ TEST_CASE("db: query bind named + escaping", "[db][integration]")
             co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_qe (id INT, name VARCHAR(100))");
             co_await sess.query("DELETE FROM __httplib_qe");
 
-            std::string evil = "a'b\\c";
-            co_await sess.query("INSERT INTO __httplib_qe VALUES (:id, :n)",
-                                mysql::bind("id", 1),
-                                mysql::bind("n", evil));
-            auto r = co_await sess.query("SELECT name FROM __httplib_qe WHERE id = 1");
-            REQUIRE(*r[0].as_string("name") == evil);
+            // 单引号、反斜杠、末尾反斜杠、反斜杠+单引号都要能无损往返
+            std::vector<std::string> evil = { "a'b", "abc\\", "a\\nb", "a\\'b" };
+            for (size_t i = 0; i < evil.size(); ++i)
+            {
+                co_await sess.query("INSERT INTO __httplib_qe VALUES (:id, :n)",
+                                    mysql::bind("id", static_cast<int64_t>(i)),
+                                    mysql::bind("n", evil[i]));
+            }
+            auto r = co_await sess.query("SELECT name FROM __httplib_qe ORDER BY id");
+            REQUIRE(r.row_count() == evil.size());
+            for (size_t i = 0; i < evil.size(); ++i)
+            {
+                REQUIRE(*r[i].as_string("name") == evil[i]);
+            }
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_qe");
         });
