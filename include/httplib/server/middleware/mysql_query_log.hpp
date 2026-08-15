@@ -1,7 +1,7 @@
 #pragma once
 #ifdef HTTPLIB_ENABLED_DATABASE
 #include "httplib/config.hpp"
-#include "httplib/mysql/session.hpp"
+#include "httplib/db/session.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/server_fwd.hpp"
 #include <functional>
@@ -13,15 +13,14 @@ namespace httplib::server::middleware
 
     struct query_log_options
     {
-        using value_type = std::vector<mysql::query_log_entry>;
+        using value_type = std::vector<db::query_log_entry>;
 
-        using log_callback
-            = std::function<void(request const& req, value_type const& entries)>;
+        using log_callback = std::function<void(request const& req, value_type const& entries)>;
         log_callback on_request_complete;
 
         std::chrono::microseconds slow_query_threshold { 0 };
 
-        using slow_query_callback = std::function<void(mysql::query_log_entry const& entry)>;
+        using slow_query_callback = std::function<void(db::query_log_entry const& entry)>;
         slow_query_callback on_slow_query;
     };
 

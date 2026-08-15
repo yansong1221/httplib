@@ -1,8 +1,7 @@
 #pragma once
-#ifdef HTTPLIB_ENABLED_DATABASE
 
 #include "httplib/config.hpp"
-#include "httplib/mysql/result.hpp"
+#include "result.hpp"
 #include <boost/json/value.hpp>
 #include <chrono>
 #include <cstddef>
@@ -17,7 +16,7 @@
 #include <utility>
 #include <vector>
 
-namespace httplib::mysql
+namespace httplib::db
 {
 
     /**
@@ -33,10 +32,6 @@ namespace httplib::mysql
 
     namespace detail
     {
-        /**
-         * \brief `into(std::vector<T>&)` 支持的元素类型。
-         * \details 仅包含可拥有/可复制的值类型；view 类型（string_view / std::span<const std::byte>）被排除。
-         */
         template <typename T>
         inline constexpr bool is_vector_into_type_v
             = std::is_same_v<T, int64_t> || std::is_same_v<T, uint64_t> || std::is_same_v<T, int>
@@ -46,14 +41,10 @@ namespace httplib::mysql
               || std::is_same_v<T, time> || std::is_same_v<T, std::chrono::system_clock::time_point>
               || std::is_same_v<T, boost::json::value>;
 
-        /**
-         * \brief `into(std::optional<T>&)` 支持的元素类型（在 vector 基础上额外支持 std::span<const std::byte>）。
-         */
         template <typename T>
         inline constexpr bool is_optional_into_type_v
-            = is_vector_into_type_v<T> || std::is_same_v<T, std::span<const std::byte>>;
+            = is_vector_into_type_v<T> || std::is_same_v<T, std::span<std::byte const>>;
 
-        /// 提取器签名 `(result const&, size_t& next_col)`；位置式 into 使用并递增 next_col。
         using extractor = std::function<void(result const&, size_t& next_col)>;
 
         template <typename E>
@@ -64,7 +55,6 @@ namespace httplib::mysql
             {
                 e(res, next_col);
             }
-            // 其他类型（如 binder）跳过
         }
 
         template <typename... Ex>
@@ -89,7 +79,6 @@ namespace httplib::mysql
         return [&v, col](result const& r, size_t&) { v = r[0].get<T>(col); };
     }
 
-    /// 把第一行指定列（列名）提取到 optional（NULL → nullopt）。
     template <typename T>
     detail::extractor
     into(std::optional<T>& v, std::string_view name)
@@ -98,7 +87,6 @@ namespace httplib::mysql
         return [&v, n = std::string(name)](result const& r, size_t&) { v = r[0].get<T>(n); };
     }
 
-    /// 把第一行按位置提取到 optional（按声明顺序对应第 N 列，NULL → nullopt）。
     template <typename T>
     detail::extractor
     into(std::optional<T>& v)
@@ -129,7 +117,6 @@ namespace httplib::mysql
         };
     }
 
-    /// 把所有行指定列（列名）提取到 vector（先 clear；含 NULL 抛异常）。
     template <typename T>
     detail::extractor
     into(std::vector<T>& v, std::string_view name)
@@ -156,7 +143,6 @@ namespace httplib::mysql
         };
     }
 
-    /// 把所有行按位置提取到 vector（按声明顺序对应第 N 列；先 clear；含 NULL 抛异常）。
     template <typename T>
     detail::extractor
     into(std::vector<T>& v)
@@ -179,5 +165,4 @@ namespace httplib::mysql
         };
     }
 
-} // namespace httplib::mysql
-#endif // HTTPLIB_ENABLED_DATABASE
+} // namespace httplib::db

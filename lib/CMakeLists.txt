@@ -10,7 +10,7 @@ configure_file(
 file(GLOB_RECURSE HTTPLIB_HEADER_FILES "${HTTPLIB_INCLUDE_DIR}/*.h" "${HTTPLIB_INCLUDE_DIR}/*.hpp" "${HTTPLIB_INCLUDE_DIR}/*.inl")
 source_group(TREE ${HTTPLIB_INCLUDE_DIR} PREFIX "include" FILES ${HTTPLIB_HEADER_FILES})
 
-file(GLOB_RECURSE HTTPLIB_SOURCE_FILES  ${HTTPLIB_LIB_DIR}/*.h ${HTTPLIB_LIB_DIR}/*.c ${HTTPLIB_LIB_DIR}/*.cxx ${HTTPLIB_LIB_DIR}/*.cpp ${HTTPLIB_LIB_DIR}/*.hpp)
+file(GLOB_RECURSE HTTPLIB_SOURCE_FILES ${HTTPLIB_LIB_DIR}/*.h ${HTTPLIB_LIB_DIR}/*.c ${HTTPLIB_LIB_DIR}/*.cxx ${HTTPLIB_LIB_DIR}/*.cpp ${HTTPLIB_LIB_DIR}/*.hpp)
 source_group(TREE ${HTTPLIB_LIB_DIR} PREFIX "lib" FILES ${HTTPLIB_SOURCE_FILES})
 
 find_package(Boost REQUIRED COMPONENTS beast json url CONFIG)
@@ -70,6 +70,9 @@ if(HTTPLIB_ENABLED_DATABASE)
 
     target_compile_definitions(${MODULE} PUBLIC HTTPLIB_ENABLED_DATABASE)
     target_link_libraries(${MODULE} PUBLIC Boost::mysql Boost::charconv)
+
+    find_library(SQLITE3_LIB sqlite3 REQUIRED)
+    target_link_libraries(${MODULE} PRIVATE ${SQLITE3_LIB})
 endif()
 
 

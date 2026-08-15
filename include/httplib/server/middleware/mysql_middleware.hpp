@@ -1,8 +1,8 @@
 #pragma once
 #ifdef HTTPLIB_ENABLED_DATABASE
 #include "httplib/config.hpp"
-#include "httplib/mysql/connection_pool.hpp"
-#include "httplib/mysql/session.hpp"
+#include "httplib/db/connection_pool.hpp"
+#include "httplib/db/session.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/server_fwd.hpp"
 #include <memory>
@@ -20,16 +20,16 @@ namespace httplib::server::middleware
     class HTTPLIB_API mysql_middleware
     {
       public:
-        using value_type = std::shared_ptr<mysql::connection_pool::session_handle>;
-        using pool_type = std::shared_ptr<mysql::connection_pool>;
+        using value_type = std::shared_ptr<db::connection_pool::session_handle>;
+        using pool_type = std::shared_ptr<db::connection_pool>;
 
-        inline static std::shared_ptr<mysql::connection_pool>
+        inline static std::shared_ptr<db::connection_pool>
         fetch_pool(request& req)
         {
-            return req.data().fetch<std::shared_ptr<mysql::connection_pool>>();
+            return req.data().fetch<std::shared_ptr<db::connection_pool>>();
         }
 
-        explicit mysql_middleware(std::shared_ptr<mysql::connection_pool> pool, mysql_middleware_options opts = {});
+        explicit mysql_middleware(std::shared_ptr<db::connection_pool> pool, mysql_middleware_options opts = {});
         ~mysql_middleware();
         mysql_middleware(mysql_middleware const&);
         mysql_middleware& operator=(mysql_middleware const&);

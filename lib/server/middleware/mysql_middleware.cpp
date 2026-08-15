@@ -10,17 +10,17 @@ namespace httplib::server::middleware
     class mysql_middleware::impl
     {
       public:
-        std::shared_ptr<mysql::connection_pool> pool;
+        std::shared_ptr<db::connection_pool> pool;
         mysql_middleware_options opts;
 
-        impl(std::shared_ptr<mysql::connection_pool> p, mysql_middleware_options o)
+        impl(std::shared_ptr<db::connection_pool> p, mysql_middleware_options o)
             : pool(std::move(p))
             , opts(std::move(o))
         {
         }
     };
 
-    mysql_middleware::mysql_middleware(std::shared_ptr<mysql::connection_pool> pool, mysql_middleware_options opts)
+    mysql_middleware::mysql_middleware(std::shared_ptr<db::connection_pool> pool, mysql_middleware_options opts)
         : impl_(std::make_unique<impl>(std::move(pool), std::move(opts)))
     {
     }
@@ -48,7 +48,7 @@ namespace httplib::server::middleware
     net::awaitable<bool>
     mysql_middleware::before(request& req, response&)
     {
-        auto handle = std::make_shared<mysql::connection_pool::session_handle>(
+        auto handle = std::make_shared<db::connection_pool::session_handle>(
             co_await impl_->pool->async_acquire(impl_->opts.acquire_timeout));
 
         req.data().store(handle);

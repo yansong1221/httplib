@@ -1,8 +1,7 @@
 #pragma once
-#ifdef HTTPLIB_ENABLED_DATABASE
 
 #include "httplib/config.hpp"
-#include "httplib/mysql/temporal.hpp"
+#include "temporal.hpp"
 #include <boost/json/serialize.hpp>
 #include <boost/json/value.hpp>
 #include <chrono>
@@ -16,7 +15,7 @@
 #include <variant>
 #include <vector>
 
-namespace httplib::mysql
+namespace httplib::db
 {
 
     /**
@@ -37,7 +36,7 @@ namespace httplib::mysql
                                    uint64_t,
                                    double,
                                    std::string,
-                                   std::span<const std::byte>,
+                                   std::span<std::byte const>,
                                    date,
                                    datetime,
                                    time,
@@ -51,25 +50,101 @@ namespace httplib::mysql
         };
 
         // ---- 值 → param ----
-        inline param to_param(std::string_view v) { return std::string(v); }
-        inline param to_param(std::string const& v) { return v; }
-        inline param to_param(char const* v) { return std::string(v); }
-        inline param to_param(int64_t v) { return v; }
-        inline param to_param(uint64_t v) { return v; }
-        inline param to_param(int v) { return static_cast<int64_t>(v); }
-        inline param to_param(unsigned v) { return static_cast<uint64_t>(v); }
-        inline param to_param(short v) { return static_cast<int64_t>(v); }
-        inline param to_param(unsigned short v) { return static_cast<uint64_t>(v); }
-        inline param to_param(double v) { return v; }
-        inline param to_param(float v) { return static_cast<double>(v); }
-        inline param to_param(bool v) { return static_cast<int64_t>(v ? 1 : 0); }
-        inline param to_param(std::nullptr_t) { return std::monostate {}; }
-        inline param to_param(date v) { return v; }
-        inline param to_param(datetime v) { return v; }
-        inline param to_param(time v) { return v; }
-        inline param to_param(std::span<const std::byte> v) { return v; }
-        inline param to_param(boost::json::value const& v) { return boost::json::serialize(v); }
-        inline param to_param(std::chrono::system_clock::time_point tp) { return tp; }
+        inline param
+        to_param(std::string_view v)
+        {
+            return std::string(v);
+        }
+        inline param
+        to_param(std::string const& v)
+        {
+            return v;
+        }
+        inline param
+        to_param(char const* v)
+        {
+            return std::string(v);
+        }
+        inline param
+        to_param(int64_t v)
+        {
+            return v;
+        }
+        inline param
+        to_param(uint64_t v)
+        {
+            return v;
+        }
+        inline param
+        to_param(int v)
+        {
+            return static_cast<int64_t>(v);
+        }
+        inline param
+        to_param(unsigned v)
+        {
+            return static_cast<uint64_t>(v);
+        }
+        inline param
+        to_param(short v)
+        {
+            return static_cast<int64_t>(v);
+        }
+        inline param
+        to_param(unsigned short v)
+        {
+            return static_cast<uint64_t>(v);
+        }
+        inline param
+        to_param(double v)
+        {
+            return v;
+        }
+        inline param
+        to_param(float v)
+        {
+            return static_cast<double>(v);
+        }
+        inline param
+        to_param(bool v)
+        {
+            return static_cast<int64_t>(v ? 1 : 0);
+        }
+        inline param
+        to_param(std::nullptr_t)
+        {
+            return std::monostate {};
+        }
+        inline param
+        to_param(date v)
+        {
+            return v;
+        }
+        inline param
+        to_param(datetime v)
+        {
+            return v;
+        }
+        inline param
+        to_param(time v)
+        {
+            return v;
+        }
+        inline param
+        to_param(std::span<std::byte const> v)
+        {
+            return v;
+        }
+        inline param
+        to_param(boost::json::value const& v)
+        {
+            return boost::json::serialize(v);
+        }
+        inline param
+        to_param(std::chrono::system_clock::time_point tp)
+        {
+            return tp;
+        }
 
         /// 从混合变参里收集 binder（非 binder 跳过）。
         template <typename E>
@@ -99,5 +174,4 @@ namespace httplib::mysql
         return { std::string(name), detail::to_param(std::forward<T>(v)) };
     }
 
-} // namespace httplib::mysql
-#endif // HTTPLIB_ENABLED_DATABASE
+} // namespace httplib::db

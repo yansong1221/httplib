@@ -1,0 +1,545 @@
+#ifdef HTTPLIB_ENABLED_DATABASE
+#include "mysql_backend.hpp"
+#include "httplib/db/exception.hpp"
+#include <boost/asio/cancel_after.hpp>
+#include <boost/asio/redirect_error.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <boost/mysql.hpp>
+#include <charconv>
+
+namespace httplib::db::detail
+{
+    namespace
+    {
+        // 把公开的标量参数转成 Boost.MySQL 字段视图。
+        boost::mysql::field_view
+        to_field_view(param const& p, std::chrono::seconds utc_offset)
+        {
+            return std::visit(
+                [&](auto const& v) -> boost::mysql::field_view
+                {
+                    using T = std::decay_t<decltype(v)>;
+                    if constexpr (std::is_same_v<T, std::monostate>)
+                    {
+                        return {};
+                    }
+                    else if constexpr (std::is_same_v<T, int64_t>)
+                    {
+                        return boost::mysql::field_view(v);
+                    }
+                    else if constexpr (std::is_same_v<T, uint64_t>)
+                    {
+                        return boost::mysql::field_view(v);
+                    }
+                    else if constexpr (std::is_same_v<T, double>)
+                    {
+                        return boost::mysql::field_view(v);
+                    }
+                    else if constexpr (std::is_same_v<T, std::string>)
+                    {
+                        return boost::mysql::field_view(v);
+                    }
+                    else if constexpr (std::is_same_v<T, std::span<std::byte const>>)
+                    {
+                        return boost::mysql::field_view(
+                            boost::mysql::blob_view(reinterpret_cast<unsigned char const*>(v.data()), v.size()));
+                    }
+                    else if constexpr (std::is_same_v<T, date>)
+                    {
+                        return boost::mysql::field_view(boost::mysql::date(v.year, v.month, v.day));
+                    }
+                    else if constexpr (std::is_same_v<T, datetime>)
+                    {
+                        return boost::mysql::field_view(
+                            boost::mysql::datetime(v.year, v.month, v.day, v.hour, v.minute, v.second, v.microsecond));
+                    }
+                    else if constexpr (std::is_same_v<T, time>)
+                    {
+                        return boost::mysql::field_view(v.to_duration());
+                    }
+                    else
+                    {
+                        // time_point：延迟时区换算
+                        auto dt = datetime::from_time_point(v + utc_offset);
+                        return boost::mysql::field_view(boost::mysql::datetime(dt.year,
+                                                                               dt.month,
+                                                                               dt.day,
+                                                                               dt.hour,
+                                                                               dt.minute,
+                                                                               dt.second,
+                                                                               dt.microsecond));
+                    }
+                },
+                p);
+        }
+
+        // Boost.MySQL 列类型 → 统一列类型。
+        db::column_type
+        map_column_type(boost::mysql::column_type t, bool u)
+        {
+            using b = boost::mysql::column_type;
+            switch (t)
+            {
+                case b::tinyint:
+                case b::smallint:
+                case b::mediumint:
+                case b::int_:
+                case b::bigint:
+                case b::year:
+                    return u ? db::column_type::uint64 : db::column_type::int64;
+                case b::bit:
+                    return db::column_type::uint64;
+                case b::float_:
+                case b::double_:
+                case b::decimal:
+                    return db::column_type::double_;
+                case b::varchar:
+                case b::char_:
+                case b::text:
+                case b::enum_:
+                case b::set:
+                case b::json:
+                    return db::column_type::string;
+                case b::blob:
+                case b::geometry:
+                    return db::column_type::blob;
+                case b::date:
+                    return db::column_type::date;
+                case b::datetime:
+                    return db::column_type::datetime;
+                case b::timestamp:
+                    return db::column_type::timestamp;
+                case b::time:
+                    return db::column_type::time;
+                default:
+                    return db::column_type::unknown;
+            }
+        }
+
+        // Boost.MySQL 字段视图 → 拥有型 db::field。
+        // 注意：MySQL DECIMAL（如 SUM()/AVG() 的返回）以字符串传回，
+        // 按列类型还原为数值，避免聚合结果无法用 as_int64/as_double 读取。
+        field
+        to_field(boost::mysql::field_view const& f, db::column_type ct)
+        {
+            if (f.is_null())
+            {
+                return std::monostate {};
+            }
+            if (f.is_int64())
+            {
+                return f.as_int64();
+            }
+            if (f.is_uint64())
+            {
+                return f.as_uint64();
+            }
+            if (f.is_float())
+            {
+                return static_cast<double>(f.as_float());
+            }
+            if (f.is_double())
+            {
+                return f.as_double();
+            }
+            if (f.is_string())
+            {
+                std::string_view sv = f.as_string();
+                if (ct == db::column_type::double_)
+                {
+                    // 整数形式（无小数点/指数）优先解析为 int64，保留精度。
+                    // 注意：sv 不保证 null 结尾，须用 from_chars。
+                    if (!sv.empty() && sv.find('.') == std::string_view::npos && sv.find('e') == std::string_view::npos
+                        && sv.find('E') == std::string_view::npos)
+                    {
+                        int64_t ll = 0;
+                        auto [ptr, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), ll);
+                        if (ec == std::errc {} && ptr == sv.data() + sv.size())
+                        {
+                            return static_cast<int64_t>(ll);
+                        }
+                        uint64_t ull = 0;
+                        auto [ptr2, ec2] = std::from_chars(sv.data(), sv.data() + sv.size(), ull);
+                        if (ec2 == std::errc {} && ptr2 == sv.data() + sv.size())
+                        {
+                            return static_cast<uint64_t>(ull);
+                        }
+                    }
+                    double d = 0;
+                    auto [ptr3, ec3] = std::from_chars(sv.data(), sv.data() + sv.size(), d);
+                    if (ec3 == std::errc {} && ptr3 == sv.data() + sv.size())
+                    {
+                        return d;
+                    }
+                    throw std::runtime_error("db: cannot parse DECIMAL value: " + std::string(sv));
+                }
+                return std::string(sv);
+            }
+            if (f.is_blob())
+            {
+                auto b = f.as_blob();
+                return std::vector<std::byte>(reinterpret_cast<std::byte const*>(b.data()),
+                                              reinterpret_cast<std::byte const*>(b.data()) + b.size());
+            }
+            if (f.is_date())
+            {
+                auto d = f.as_date();
+                return date { d.year(), d.month(), d.day() };
+            }
+            if (f.is_datetime())
+            {
+                auto d = f.as_datetime();
+                return datetime { d.year(), d.month(), d.day(), d.hour(), d.minute(), d.second(), d.microsecond() };
+            }
+            if (f.is_time())
+            {
+                return time::from_duration(std::chrono::duration_cast<std::chrono::microseconds>(f.as_time()));
+            }
+            return std::monostate {};
+        }
+
+        // boost::mysql::results → db::result。
+        result
+        build_result(boost::mysql::results&& data, std::chrono::seconds utc_offset)
+        {
+            std::vector<result::resultset> sets;
+            if (data.has_value())
+            {
+                for (size_t rs_idx = 0; rs_idx < data.size(); ++rs_idx)
+                {
+                    auto rs = data[rs_idx];
+                    result::resultset s;
+                    s.affected = rs.affected_rows();
+                    s.last_insert_id = rs.last_insert_id();
+
+                    if (rs.has_value())
+                    {
+                        auto m = rs.meta();
+                        s.names.reserve(m.size());
+                        s.types.reserve(m.size());
+                        for (auto& c : m)
+                        {
+                            auto name = c.column_name();
+                            s.names.emplace_back(name.data(), name.size());
+                            s.types.push_back(map_column_type(c.type(), c.is_unsigned()));
+                        }
+
+                        auto rows = rs.rows();
+                        s.rows.reserve(rows.size());
+                        for (auto rv : rows)
+                        {
+                            std::vector<field> values;
+                            values.reserve(rv.size());
+                            for (size_t ci = 0; ci < rv.size(); ++ci)
+                            {
+                                values.push_back(to_field(rv[ci], s.types[ci]));
+                            }
+                            s.rows.push_back(std::move(values));
+                        }
+                    }
+                    sets.push_back(std::move(s));
+                }
+            }
+            return result(std::move(sets), utc_offset);
+        }
+    } // namespace
+
+    mysql_backend::mysql_backend(net::any_io_executor ex, mysql_config cfg) : cfg_(std::move(cfg))
+    {
+        conn_ = std::make_unique<boost::mysql::any_connection>(ex);
+        stmt_cache_.capacity = cfg_.max_cached_statements;
+    }
+
+    bool
+    mysql_backend::is_connection_lost(boost::system::error_code ec, boost::mysql::diagnostics const& diag)
+    {
+        if (!ec)
+        {
+            return false;
+        }
+        if (!diag.server_message().empty())
+        {
+            return false;
+        }
+        if (ec == boost::mysql::client_errc::wrong_num_params)
+        {
+            return false;
+        }
+        return true;
+    }
+
+    void
+    mysql_backend::raise_error(boost::system::error_code ec,
+                               boost::mysql::diagnostics const& diag,
+                               std::string_view sql,
+                               std::string_view params)
+    {
+        if (!ec)
+        {
+            return;
+        }
+        if (is_connection_lost(ec, diag))
+        {
+            live_ = false;
+        }
+        auto what
+            = std::string("[") + std::to_string(ec.value()) + "] " + ec.message() + " (SQL: " + std::string(sql) + ")";
+        if (!params.empty())
+        {
+            what += " params: " + std::string(params);
+        }
+        auto msg = diag.server_message();
+        if (!msg.empty())
+        {
+            what += ": " + std::string(msg.data(), msg.size());
+        }
+        throw db_exception(ec, what);
+    }
+
+    net::awaitable<void>
+    mysql_backend::connect()
+    {
+        boost::mysql::connect_params params;
+        params.server_address.emplace_host_and_port(cfg_.host, cfg_.port);
+        params.username = cfg_.user;
+        params.password = cfg_.password;
+        if (!cfg_.database.empty())
+        {
+            params.database = cfg_.database;
+        }
+        params.ssl = cfg_.ssl ? boost::mysql::ssl_mode::enable : boost::mysql::ssl_mode::disable;
+        params.multi_queries = true;
+
+        if (cfg_.connect_timeout.count() > 0)
+        {
+            co_await conn_->async_connect(params, net::cancel_after(cfg_.connect_timeout, net::use_awaitable));
+        }
+        else
+        {
+            co_await conn_->async_connect(params, net::use_awaitable);
+        }
+
+        conn_->set_meta_mode(boost::mysql::metadata_mode::full);
+
+        boost::mysql::results r;
+        boost::mysql::diagnostics diag;
+        boost::system::error_code ec;
+
+        if (!cfg_.charset.empty())
+        {
+            co_await conn_->async_execute("SET NAMES '" + cfg_.charset + "'",
+                                          r,
+                                          diag,
+                                          net::redirect_error(net::use_awaitable, ec));
+            raise_error(ec, diag);
+        }
+
+        if (!cfg_.time_zone.empty())
+        {
+            co_await conn_->async_execute("SET time_zone = '" + cfg_.time_zone + "'",
+                                          r,
+                                          diag,
+                                          net::redirect_error(net::use_awaitable, ec));
+            raise_error(ec, diag);
+        }
+
+        co_await conn_->async_execute("SELECT TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(), NOW())",
+                                      r,
+                                      diag,
+                                      net::redirect_error(net::use_awaitable, ec));
+        raise_error(ec, diag);
+        if (r.has_value() && !r.rows().empty())
+        {
+            auto f = r.rows()[0][0];
+            if (f.is_int64())
+            {
+                utc_offset_ = std::chrono::seconds(f.as_int64());
+            }
+            else if (f.is_uint64())
+            {
+                utc_offset_ = std::chrono::seconds(static_cast<int64_t>(f.as_uint64()));
+            }
+        }
+        co_return;
+    }
+
+    net::awaitable<void>
+    mysql_backend::reconnect()
+    {
+        if (conn_)
+        {
+            boost::system::error_code ec;
+            co_await conn_->async_close(net::redirect_error(net::use_awaitable, ec));
+        }
+        stmt_cache_ = statement_cache {};
+        stmt_cache_.capacity = cfg_.max_cached_statements;
+        live_ = true;
+        co_await connect();
+    }
+
+    net::awaitable<bool>
+    mysql_backend::ping()
+    {
+        try
+        {
+            boost::system::error_code ec;
+            co_await conn_->async_ping(net::redirect_error(net::use_awaitable, ec));
+            if (ec)
+            {
+                live_ = false;
+                co_return false;
+            }
+            co_return true;
+        }
+        catch (...)
+        {
+            live_ = false;
+            co_return false;
+        }
+    }
+
+    net::awaitable<result>
+    mysql_backend::execute(std::string_view sql)
+    {
+        boost::mysql::diagnostics diag;
+        boost::system::error_code ec;
+        boost::mysql::results data;
+        co_await conn_->async_execute(sql, data, diag, net::redirect_error(net::use_awaitable, ec));
+        raise_error(ec, diag, sql);
+
+        co_return build_result(std::move(data), utc_offset_);
+    }
+
+    net::awaitable<result>
+    mysql_backend::execute(std::string_view sql, std::vector<param> const& params)
+    {
+        boost::mysql::diagnostics diag;
+        boost::system::error_code ec;
+
+        std::vector<boost::mysql::field_view> views;
+        views.reserve(params.size());
+        for (auto const& p : params)
+        {
+            views.push_back(to_field_view(p, utc_offset_));
+        }
+
+        boost::mysql::statement stmt;
+        std::optional<boost::mysql::statement> to_close;
+        if (auto* cached = find_statement(sql))
+        {
+            stmt = *cached;
+        }
+        else
+        {
+            stmt = co_await conn_->async_prepare_statement(sql, diag, net::redirect_error(net::use_awaitable, ec));
+            if (ec)
+            {
+                raise_error(ec, diag, sql);
+            }
+            to_close = store_statement(std::string(sql), stmt);
+        }
+
+        boost::mysql::results data;
+        if (views.empty())
+        {
+            co_await conn_->async_execute(stmt.bind(), data, diag, net::redirect_error(net::use_awaitable, ec));
+        }
+        else
+        {
+            co_await conn_->async_execute(stmt.bind(views.begin(), views.end()),
+                                          data,
+                                          diag,
+                                          net::redirect_error(net::use_awaitable, ec));
+        }
+        if (ec)
+        {
+            raise_error(ec, diag, sql);
+        }
+
+        if (to_close && to_close->valid())
+        {
+            boost::system::error_code close_ec;
+            boost::mysql::diagnostics close_diag;
+            co_await conn_->async_close_statement(*to_close,
+                                                  close_diag,
+                                                  net::redirect_error(net::use_awaitable, close_ec));
+            if (close_ec)
+            {
+                live_ = false;
+            }
+        }
+
+        co_return build_result(std::move(data), utc_offset_);
+    }
+
+    net::awaitable<void>
+    mysql_backend::begin()
+    {
+        boost::mysql::results r;
+        boost::mysql::diagnostics diag;
+        boost::system::error_code ec;
+        co_await conn_->async_execute("START TRANSACTION", r, diag, net::redirect_error(net::use_awaitable, ec));
+        raise_error(ec, diag);
+        co_return;
+    }
+
+    net::awaitable<void>
+    mysql_backend::commit()
+    {
+        boost::mysql::results r;
+        boost::mysql::diagnostics diag;
+        boost::system::error_code ec;
+        co_await conn_->async_execute("COMMIT", r, diag, net::redirect_error(net::use_awaitable, ec));
+        raise_error(ec, diag);
+        co_return;
+    }
+
+    net::awaitable<void>
+    mysql_backend::rollback()
+    {
+        boost::mysql::results r;
+        boost::mysql::diagnostics diag;
+        boost::system::error_code ec;
+        co_await conn_->async_execute("ROLLBACK", r, diag, net::redirect_error(net::use_awaitable, ec));
+        raise_error(ec, diag);
+        co_return;
+    }
+
+    boost::mysql::statement*
+    mysql_backend::find_statement(std::string_view sql)
+    {
+        auto it = stmt_cache_.map.find(sql);
+        if (it == stmt_cache_.map.end())
+        {
+            return nullptr;
+        }
+        stmt_cache_.lru.splice(stmt_cache_.lru.begin(), stmt_cache_.lru, it->second.lru_it);
+        return &it->second.stmt;
+    }
+
+    std::optional<boost::mysql::statement>
+    mysql_backend::store_statement(std::string sql, boost::mysql::statement stmt)
+    {
+        if (stmt_cache_.capacity == 0)
+        {
+            return std::move(stmt);
+        }
+        std::optional<boost::mysql::statement> evicted;
+        if (stmt_cache_.map.size() >= stmt_cache_.capacity)
+        {
+            auto evict_key = std::move(stmt_cache_.lru.back());
+            stmt_cache_.lru.pop_back();
+            auto evict_it = stmt_cache_.map.find(evict_key);
+            if (evict_it != stmt_cache_.map.end())
+            {
+                evicted = std::move(evict_it->second.stmt);
+                stmt_cache_.map.erase(evict_it);
+            }
+        }
+        stmt_cache_.lru.push_front(sql);
+        stmt_cache_.map.emplace(std::move(sql), statement_cache::entry { std::move(stmt), stmt_cache_.lru.begin() });
+        return evicted;
+    }
+
+} // namespace httplib::db::detail
+#endif // HTTPLIB_ENABLED_DATABASE

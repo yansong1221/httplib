@@ -55,7 +55,7 @@ namespace httplib::server::middleware
         auto sess = fetch<mysql_middleware>(req);
 
         sess->get()->set_query_logger(
-            [log, opts](mysql::query_log_entry const& entry) mutable
+            [log, opts](db::query_log_entry const& entry) mutable
             {
                 if (opts.slow_query_threshold.count() > 0 && entry.duration >= opts.slow_query_threshold
                     && opts.on_slow_query)

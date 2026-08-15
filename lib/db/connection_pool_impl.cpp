@@ -1,18 +1,18 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
-#include "mysql/connection_pool_impl.h"
+#include "connection_pool_impl.h"
 #include "httplib/util/use_awaitable.hpp"
-#include "mysql/session_impl.h"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
-namespace httplib::mysql
+namespace httplib::db
 {
 
-    connection_pool::impl::impl(net::any_io_executor ex, pool_params cfg)
+    connection_pool::impl::impl(net::any_io_executor ex, pool_params cfg, connection_pool::connect_fn connect)
         : ex_(ex)
         , cfg_(std::move(cfg))
+        , connect_(std::move(connect))
         , maintain_timer_(ex)
     {
         if (cfg_.min_connections > cfg_.max_connections)
@@ -22,14 +22,11 @@ namespace httplib::mysql
 
         auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
         spdlog::sinks_init_list sink_list = { console_sink };
-        default_logger_ = std::make_shared<spdlog::logger>("httplib.mysql_pool", sink_list);
+        default_logger_ = std::make_shared<spdlog::logger>("httplib.db_pool", sink_list);
         default_logger_->set_level(spdlog::level::info);
     }
 
-    connection_pool::impl::~impl()
-    {
-        stop();
-    }
+    connection_pool::impl::~impl() { stop(); }
 
     std::shared_ptr<spdlog::logger>
     connection_pool::impl::logger() const
@@ -65,11 +62,11 @@ namespace httplib::mysql
                     }
                     catch (std::exception const& ex)
                     {
-                        self->logger()->error("mysql pool maintenance failed: {}", ex.what());
+                        self->logger()->error("db pool maintenance failed: {}", ex.what());
                     }
                     catch (...)
                     {
-                        self->logger()->error("mysql pool maintenance failed: unknown error");
+                        self->logger()->error("db pool maintenance failed: unknown error");
                     }
                 }
             });
@@ -83,7 +80,6 @@ namespace httplib::mysql
             throw std::runtime_error("connection_pool: pool is shut down");
         }
 
-        // 0（默认）表示不设超时，一直等到有连接可用
         auto deadline = wait_timeout <= std::chrono::steady_clock::duration::zero()
                             ? std::chrono::steady_clock::time_point::max()
                             : std::chrono::steady_clock::now() + wait_timeout;
@@ -134,7 +130,6 @@ namespace httplib::mysql
             auto node = std::make_shared<net::steady_timer>(self->ex_);
             if (deadline == std::chrono::steady_clock::time_point::max())
             {
-                // 无超时：设一个很长的唤醒间隔兜底，正常靠 release 时 cancel 打断
                 node->expires_after(std::chrono::hours(24));
             }
             else
@@ -159,10 +154,9 @@ namespace httplib::mysql
             return;
         }
 
-        auto& imp = get_impl(*sess);
-        imp.query_logger = {};
+        sess->set_query_logger({});
 
-        if (!imp.live)
+        if (!sess->is_live())
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (active_count_ > 0)
@@ -173,7 +167,7 @@ namespace httplib::mysql
             return;
         }
 
-        if (!imp.in_transaction)
+        if (!sess->in_transaction())
         {
             push_idle(std::move(sess));
             return;
@@ -263,8 +257,7 @@ namespace httplib::mysql
             {
                 continue;
             }
-            auto& imp = get_impl(*sess);
-            if (!imp.conn || !imp.live)
+            if (!sess->is_live())
             {
                 continue;
             }
@@ -293,7 +286,6 @@ namespace httplib::mysql
             co_return sess;
         }
 
-        // 连接已失效：丢弃，由外层重新创建新连接
         std::lock_guard<std::mutex> lock(mutex_);
         if (active_count_ > 0)
         {
@@ -322,7 +314,7 @@ namespace httplib::mysql
     {
         if (sess)
         {
-            get_impl(*sess).touch();
+            sess->touch();
         }
 
         std::lock_guard<std::mutex> lock(mutex_);
@@ -343,7 +335,7 @@ namespace httplib::mysql
     net::awaitable<std::unique_ptr<session>>
     connection_pool::impl::create_session()
     {
-        co_return std::make_unique<session>(co_await session::connect(ex_, cfg_));
+        co_return co_await connect_(ex_);
     }
 
     net::awaitable<void>
@@ -362,11 +354,11 @@ namespace httplib::mysql
             }
             catch (std::exception const& ex)
             {
-                logger()->warn("mysql pool pre-create connection failed: {}", ex.what());
+                logger()->warn("db pool pre-create connection failed: {}", ex.what());
             }
             catch (...)
             {
-                logger()->warn("mysql pool pre-create connection failed: unknown error");
+                logger()->warn("db pool pre-create connection failed: unknown error");
             }
         }
 
@@ -414,9 +406,10 @@ namespace httplib::mysql
 
                 for (auto it = idle_.begin(); it != idle_.end();)
                 {
-                    auto& imp = get_impl(**it);
-                    auto idle_elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - imp.last_active);
-                    auto since_ping = std::chrono::duration_cast<std::chrono::seconds>(now - imp.last_ping);
+                    auto last_active = (*it)->last_active_time();
+                    auto last_ping = (*it)->last_ping_time();
+                    auto idle_elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_active);
+                    auto since_ping = std::chrono::duration_cast<std::chrono::seconds>(now - last_ping);
 
                     if (cfg_.idle_timeout.count() > 0 && idle_elapsed >= cfg_.idle_timeout)
                     {
@@ -449,21 +442,7 @@ namespace httplib::mysql
                 bool alive = false;
                 if (sess)
                 {
-                    auto& imp = get_impl(*sess);
-                    if (imp.conn)
-                    {
-                        try
-                        {
-                            co_await imp.conn->async_ping(boost::asio::use_awaitable);
-                            imp.last_ping = std::chrono::steady_clock::now();
-                            imp.live = true;
-                            alive = true;
-                        }
-                        catch (...)
-                        {
-                            imp.live = false;
-                        }
-                    }
+                    alive = co_await sess->ping();
                 }
 
                 if (alive)
@@ -506,15 +485,15 @@ namespace httplib::mysql
                 }
                 catch (std::exception const& ex)
                 {
-                    logger()->warn("mysql pool refill connection failed: {}", ex.what());
+                    logger()->warn("db pool refill connection failed: {}", ex.what());
                 }
                 catch (...)
                 {
-                    logger()->warn("mysql pool refill connection failed: unknown error");
+                    logger()->warn("db pool refill connection failed: unknown error");
                 }
             }
         }
     }
 
-} // namespace httplib::mysql
+} // namespace httplib::db
 #endif // HTTPLIB_ENABLED_DATABASE

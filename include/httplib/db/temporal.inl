@@ -5,7 +5,7 @@
 #include <stdexcept>
 #include <system_error>
 
-namespace httplib::mysql
+namespace httplib::db
 {
 
     constexpr bool
@@ -32,7 +32,7 @@ namespace httplib::mysql
             return 0;
         }
         std::chrono::year_month_day_last ymdl { std::chrono::year { static_cast<int>(year) },
-                                                 std::chrono::month_day_last { std::chrono::month { month } } };
+                                                std::chrono::month_day_last { std::chrono::month { month } } };
         return static_cast<unsigned>(ymdl.day());
     }
 
@@ -43,9 +43,8 @@ namespace httplib::mysql
         {
             throw std::runtime_error("db: invalid date value");
         }
-        return std::chrono::sys_days { std::chrono::year { static_cast<int>(year) }
-                                        / std::chrono::month { month }
-                                        / std::chrono::day { day } };
+        return std::chrono::sys_days { std::chrono::year { static_cast<int>(year) } / std::chrono::month { month }
+                                       / std::chrono::day { day } };
     }
 
     constexpr date
@@ -356,15 +355,15 @@ namespace httplib::mysql
         return std::chrono::duration_cast<std::chrono::microseconds>(a.to_time_point() - b.to_time_point());
     }
 
-} // namespace httplib::mysql
+} // namespace httplib::db
 
 namespace std
 {
     template <>
-    struct hash<httplib::mysql::date>
+    struct hash<httplib::db::date>
     {
         size_t
-        operator()(httplib::mysql::date const& d) const noexcept
+        operator()(httplib::db::date const& d) const noexcept
         {
             size_t h = std::hash<unsigned> {}(d.year);
             h = h * 31u + std::hash<unsigned> {}(d.month);
@@ -374,23 +373,23 @@ namespace std
     };
 
     template <>
-    struct hash<httplib::mysql::time>
+    struct hash<httplib::db::time>
     {
         size_t
-        operator()(httplib::mysql::time const& t) const noexcept
+        operator()(httplib::db::time const& t) const noexcept
         {
             return std::hash<int64_t> {}(t.to_duration().count());
         }
     };
 
     template <>
-    struct hash<httplib::mysql::datetime>
+    struct hash<httplib::db::datetime>
     {
         size_t
-        operator()(httplib::mysql::datetime const& dt) const noexcept
+        operator()(httplib::db::datetime const& dt) const noexcept
         {
-            size_t h = std::hash<httplib::mysql::date> {}(static_cast<httplib::mysql::date const&>(dt));
-            h = h * 31u + std::hash<httplib::mysql::time> {}(static_cast<httplib::mysql::time const&>(dt));
+            size_t h = std::hash<httplib::db::date> {}(static_cast<httplib::db::date const&>(dt));
+            h = h * 31u + std::hash<httplib::db::time> {}(static_cast<httplib::db::time const&>(dt));
             return h;
         }
     };

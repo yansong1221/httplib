@@ -1,8 +1,8 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
-#include "httplib/mysql/connection_pool.hpp"
-#include "mysql/connection_pool_impl.h"
+#include "httplib/db/connection_pool.hpp"
+#include "connection_pool_impl.h"
 
-namespace httplib::mysql
+namespace httplib::db
 {
 
     // ---- session_handle ----
@@ -83,8 +83,8 @@ namespace httplib::mysql
 
     // ---- connection_pool ----
 
-    connection_pool::connection_pool(net::any_io_executor ex, pool_params c)
-        : impl_(std::make_shared<impl>(ex, std::move(c)))
+    connection_pool::connection_pool(net::any_io_executor ex, pool_params c, connect_fn connect)
+        : impl_(std::make_shared<impl>(ex, std::move(c), std::move(connect)))
     {
     }
 
@@ -147,5 +147,5 @@ namespace httplib::mysql
         impl_->set_logger(std::move(logger));
     }
 
-} // namespace httplib::mysql
+} // namespace httplib::db
 #endif // HTTPLIB_ENABLED_DATABASE

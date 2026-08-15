@@ -1,22 +1,37 @@
 #pragma once
-#ifdef HTTPLIB_ENABLED_DATABASE
 
+#include "config.hpp"
+#include "fwd.hpp"
 #include "httplib/config.hpp"
-#include "httplib/mysql/config.hpp"
-#include "httplib/mysql/mysql_fwd.hpp"
 #include <boost/asio/awaitable.hpp>
+#include <chrono>
 #include <cstddef>
+#include <functional>
 #include <memory>
+#include <utility>
 
-namespace httplib::mysql
+namespace httplib::db
 {
 
     /**
-     * \brief MySQL 连接池。
+     * \brief 连接池参数（backend 无关）。
+     */
+    struct pool_params
+    {
+        size_t min_connections = 2;
+        size_t max_connections = 16;
+        std::chrono::seconds idle_timeout { 300 };
+        std::chrono::seconds idle_check_interval { 60 };
+        std::chrono::seconds health_check_interval { 30 };
+        bool validate_on_borrow = false;
+    };
+
+    /**
+     * \brief 连接池。
      * \details
      * 维护一批可复用的连接，通过 \ref async_acquire 借出、句柄析构时归还。
-     * \n
-     * 后台协程负责空闲连接的回收与健康检查（见 \ref pool_params）。
+     * 池本身不关心后端：由调用方提供 \c connect 工厂按需创建会话，
+     * 池只负责生命周期、健康检查与等待唤醒。
      */
     class HTTPLIB_API connection_pool
     {
@@ -56,14 +71,15 @@ namespace httplib::mysql
             session& operator*();
             session const& operator*() const;
 
-            /**
-             * \brief 提前归还连接。
-             */
+            /// 提前归还连接。
             void release();
         };
 
       public:
-        connection_pool(net::any_io_executor ex, pool_params cfg);
+        /// 创建一条新连接的工厂；参数为池所属 executor。
+        using connect_fn = std::function<net::awaitable<std::unique_ptr<session>>(net::any_io_executor)>;
+
+        connection_pool(net::any_io_executor ex, pool_params cfg, connect_fn connect);
         ~connection_pool();
 
         connection_pool(connection_pool const&) = delete;
@@ -71,23 +87,14 @@ namespace httplib::mysql
         connection_pool(connection_pool&&) noexcept;
         connection_pool& operator=(connection_pool&&) noexcept;
 
-        /**
-         * \brief 启动池（预建 min_connections 条连接，并启动维护协程）。
-         */
+        /// 启动池（预建 min_connections 条连接，并启动维护协程）。
         void start();
 
-        /**
-         * \brief 借出一条连接。
-         * \param wait_timeout 池满时的等待超时；0（默认）表示不设超时，一直等到有连接可用。
-         * \returns 连接句柄。
-         * \throws std::runtime_error 池已关闭或等待超时。
-         */
+        /// 借出一条连接。
         net::awaitable<session_handle> async_acquire(std::chrono::steady_clock::duration wait_timeout
                                                      = std::chrono::steady_clock::duration::zero());
 
-        /**
-         * \brief 关闭池，唤醒所有等待者。
-         */
+        /// 关闭池，唤醒所有等待者。
         void stop();
 
         size_t active_count() const;
@@ -102,5 +109,4 @@ namespace httplib::mysql
         std::shared_ptr<impl> impl_;
     };
 
-} // namespace httplib::mysql
-#endif // HTTPLIB_ENABLED_DATABASE
+} // namespace httplib::db

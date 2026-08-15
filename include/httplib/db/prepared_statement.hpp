@@ -1,12 +1,13 @@
 #pragma once
-#ifdef HTTPLIB_ENABLED_DATABASE
 
+#include "binder.hpp"
+#include "extractor.hpp"
+#include "fwd.hpp"
 #include "httplib/config.hpp"
-#include "httplib/mysql/extractor.hpp"
-#include "httplib/mysql/mysql_fwd.hpp"
-#include "httplib/mysql/result.hpp"
+#include "result.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <boost/json/value.hpp>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -15,23 +16,21 @@
 #include <string_view>
 #include <utility>
 
-namespace httplib::mysql
+namespace httplib::db
 {
 
     /**
      * \brief 预编译语句。
      * \details
-     * 由 \ref session::stmt 创建，使用命名占位符 `:name`（内部重写为 MySQL 原生的 `?`）。
+     * 由 \ref session::stmt 创建，使用命名占位符 `:name`（内部重写为 `?`）。
      * \n
-     * 用法：`bind(...)` 绑定参数后 `execute()` 执行；可用 `execute(into(...))` 一次性把结果提取到变量。
+     * `bind(...)` 绑定参数后 `execute()` 执行；可用 `execute(into(...))` 一次性把结果提取到变量。
      * \n
-     * `:name` 占位符既可按名字绑定（`bind("name", v)`），也可按出现顺序做位置绑定（`bind(v)`，
-     * SOCI 风格）；同一语句内不能混用两种方式。
+     * `:name` 占位符既可按名字绑定（`bind("name", v)`），也可按出现顺序做位置绑定（`bind(v)`）；
+     * 同一语句内不能混用两种方式。
      * \n
-     * 绑定参数在语句生命周期内持久：重复 `execute()` 复用上次参数，重新 `bind` 则替换。
-     * \n
-     * \warning 语句是 \ref session::stmt 创建的临时视图：请勿保存到 session 之外，session 销毁或归还
-     *          连接池后语句即失效，再执行属于未定义行为。
+     * \warning 语句是 \ref session::stmt 创建的临时视图：请勿保存到 session 之外，session 销毁后
+     *          语句即失效。
      */
     class HTTPLIB_API prepared_statement
     {
@@ -84,19 +83,10 @@ namespace httplib::mysql
         prepared_statement& bind(std::string_view name, boost::json::value const& v);
         prepared_statement& bind(std::string_view name, std::chrono::system_clock::time_point tp);
 
-        /**
-         * \brief 执行语句。
-         * \returns 结果集。
-         * \throws mysql_exception 执行失败。
-         */
+        /// 执行语句。
         net::awaitable<result> execute();
 
-        /**
-         * \brief 执行语句并把结果提取到变量。
-         * \param ex 一个或多个 \ref into 提取声明。
-         * \returns 结果集。
-         * \throws mysql_exception 执行失败。
-         */
+        /// 执行语句并把结果提取到变量。
         template <typename... Ex>
         net::awaitable<result>
         execute(Ex&&... ex)
@@ -113,5 +103,4 @@ namespace httplib::mysql
         std::unique_ptr<impl> impl_;
     };
 
-} // namespace httplib::mysql
-#endif // HTTPLIB_ENABLED_DATABASE
+} // namespace httplib::db

@@ -4,14 +4,12 @@
 #include <string>
 #include <type_traits>
 
-namespace httplib::mysql
+namespace httplib::db
 {
 
     namespace detail
     {
-        /**
-         * \brief 把 int64 窄化到更小的整数类型，越界抛异常。
-         */
+        /// 把 int64 窄化到更小的整数类型，越界抛异常。
         template <typename T>
         std::optional<T>
         narrow_int(std::optional<int64_t> v)
@@ -28,9 +26,6 @@ namespace httplib::mysql
             return static_cast<T>(*v);
         }
 
-        /**
-         * \brief 把 uint64 窄化到更小的无符号整数类型，越界抛异常。
-         */
         template <typename T>
         std::optional<T>
         narrow_uint(std::optional<uint64_t> v)
@@ -96,7 +91,7 @@ namespace httplib::mysql
             auto sv = as_string(col);
             return sv ? std::optional<std::string>(std::string(*sv)) : std::nullopt;
         }
-        else if constexpr (std::is_same_v<T, std::span<const std::byte>>)
+        else if constexpr (std::is_same_v<T, std::span<std::byte const>>)
         {
             return as_blob(col);
         }
@@ -122,7 +117,7 @@ namespace httplib::mysql
         }
         else
         {
-            static_assert(sizeof(T) == 0, "unsupported get<T> type");
+            static_assert(sizeof(T) == 0, "db: unsupported get<T> type");
         }
     }
 
@@ -133,4 +128,4 @@ namespace httplib::mysql
         return get<T>(column(name));
     }
 
-} // namespace httplib::mysql
+} // namespace httplib::db

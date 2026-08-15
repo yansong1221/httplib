@@ -1,11 +1,10 @@
 #pragma once
-#ifdef HTTPLIB_ENABLED_DATABASE
 
-#include "httplib/mysql/connection_pool.hpp"
-#include "httplib/mysql/session.hpp"
+#include "httplib/db/connection_pool.hpp"
+#include "httplib/db/session.hpp"
+#include <atomic>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/steady_timer.hpp>
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -13,12 +12,12 @@
 #include <mutex>
 #include <vector>
 
-namespace httplib::mysql
+namespace httplib::db
 {
 
     struct connection_pool::impl : public std::enable_shared_from_this<impl>
     {
-        impl(net::any_io_executor ex, pool_params cfg);
+        impl(net::any_io_executor ex, pool_params cfg, connection_pool::connect_fn connect);
         ~impl();
 
         std::shared_ptr<spdlog::logger> logger() const;
@@ -57,6 +56,7 @@ namespace httplib::mysql
 
         net::any_io_executor ex_;
         pool_params cfg_;
+        connection_pool::connect_fn connect_;
 
         std::shared_ptr<spdlog::logger> default_logger_;
         std::shared_ptr<spdlog::logger> custom_logger_;
@@ -66,5 +66,4 @@ namespace httplib::mysql
         net::steady_timer maintain_timer_;
     };
 
-} // namespace httplib::mysql
-#endif // HTTPLIB_ENABLED_DATABASE
+} // namespace httplib::db

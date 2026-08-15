@@ -1,7 +1,7 @@
 #pragma once
-#ifdef HTTPLIB_ENABLED_DATABASE
+#include <cstdint>
 
-namespace httplib::mysql
+namespace httplib::db
 {
     /// 日期（年/月/日）。
     struct date;
@@ -11,12 +11,10 @@ namespace httplib::mysql
     struct time;
 
     class result;
-    class session;
-    class connection_pool;
     class row;
+    class session;
     class prepared_statement;
+    class connection_pool;
 
     struct query_log_entry;
-
-} // namespace httplib::mysql
-#endif // HTTPLIB_ENABLED_DATABASE
+} // namespace httplib::db
