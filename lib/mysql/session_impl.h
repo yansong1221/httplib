@@ -2,35 +2,22 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 
 #include "httplib/mysql/binder.hpp"
-#include "httplib/mysql/mysql_exception.hpp"
 #include "httplib/mysql/session.hpp"
 #include "httplib/util/string_hash.hpp"
-#include <boost/asio/cancel_after.hpp>
-#include <boost/asio/redirect_error.hpp>
-#include <boost/asio/use_awaitable.hpp>
+#include <boost/asio/awaitable.hpp>
 #include <boost/mysql.hpp>
 #include <boost/mysql/diagnostics.hpp>
-#include <boost/mysql/field_view.hpp>
 #include <boost/mysql/statement.hpp>
 #include <chrono>
 #include <cstddef>
-#include <functional>
 #include <list>
+#include <memory>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace httplib::mysql
 {
-
-    namespace detail
-    {
-        /// 建立连接并完成会话初始化（charset / time_zone / 元数据模式），返回相对 UTC 的偏移（秒）。
-        net::awaitable<std::chrono::seconds> connect_session(boost::mysql::any_connection& conn,
-                                                             connect_params const& cfg);
-    }
 
     struct session::impl
     {

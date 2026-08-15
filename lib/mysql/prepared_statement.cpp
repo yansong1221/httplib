@@ -5,6 +5,7 @@
 #include "mysql/prepared_statement_impl.h"
 #include "mysql/result_impl.h"
 #include "mysql/session_impl.h"
+#include "mysql/util.hpp"
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/mysql.hpp>
@@ -145,7 +146,7 @@ namespace httplib::mysql
             {
                 out += ", ";
             }
-            out += detail::format_param(params[i]);
+            out += util::format_param(params[i]);
         }
         out += "]";
         return out;
@@ -170,7 +171,7 @@ namespace httplib::mysql
                 out += names[i];
                 out += "=";
             }
-            out += detail::format_param(params[i]);
+            out += util::format_param(params[i]);
         }
         out += "]";
         return out;
