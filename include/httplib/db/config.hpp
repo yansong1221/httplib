@@ -21,8 +21,9 @@ namespace httplib::db
         std::string database;
         /// 连接字符集（连接后执行 `SET NAMES`）。
         std::string charset = "utf8mb4";
-        /// 会话时区（连接后执行 `SET time_zone`），固定偏移如 `"+00:00"`。
-        std::string time_zone = "+00:00";
+        /// 会话时区（连接后执行 `SET time_zone`），固定偏移如 `"+08:00"`。
+        /// 为空表示不覆盖，沿用服务器默认会话时区（与 mysql 客户端行为一致）。
+        std::string time_zone;
         /// 连接超时（0 表示不设超时）。
         std::chrono::seconds connect_timeout { 5 };
         /// 是否使用 SSL。
