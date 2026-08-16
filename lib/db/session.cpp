@@ -1,5 +1,6 @@
 #include "httplib/db/session.hpp"
 #include "httplib/db/exception.hpp"
+#include "httplib/util/string_hash.hpp"
 #include "registry.hpp"
 #include "render.hpp"
 #include <boost/system/error_code.hpp>
@@ -25,7 +26,7 @@ namespace httplib::db
             detail::statement_handle handle;
             std::list<std::string>::iterator lru_it;
         };
-        std::unordered_map<std::string, cached_statement> stmt_cache;
+        util::string_map<cached_statement> stmt_cache;
         std::list<std::string> stmt_lru;
         size_t stmt_cache_capacity = 64;
 
@@ -165,8 +166,7 @@ namespace httplib::db
             }
             else if (cacheable && imp.stmt_cache_capacity > 0)
             {
-                auto key = std::string(sql);
-                auto it = imp.stmt_cache.find(key);
+                auto it = imp.stmt_cache.find(sql);
                 if (it == imp.stmt_cache.end())
                 {
                     auto h = co_await imp.backend->prepare(sql);
@@ -182,8 +182,8 @@ namespace httplib::db
                         co_await imp.backend->close_statement(evict_it->second.handle);
                         imp.stmt_cache.erase(evict_it);
                     }
-                    imp.stmt_lru.push_front(key);
-                    it = imp.stmt_cache.emplace(key, impl::cached_statement { h, imp.stmt_lru.begin() }).first;
+                    imp.stmt_lru.emplace_front(sql);
+                    it = imp.stmt_cache.emplace(sql, impl::cached_statement { h, imp.stmt_lru.begin() }).first;
                 }
                 else
                 {
