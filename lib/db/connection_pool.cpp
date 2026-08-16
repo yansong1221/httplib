@@ -114,7 +114,10 @@ namespace httplib::db
     void
     connection_pool::stop()
     {
-        impl_->stop();
+        if (impl_)
+        {
+            impl_->stop();
+        }
     }
 
     size_t

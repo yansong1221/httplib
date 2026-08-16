@@ -12,7 +12,12 @@
 #include "httplib/server/response.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/cancellation_signal.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <atomic>
 #include <cstddef>
 #include <span>
 
@@ -1608,6 +1613,95 @@ TEST_CASE("db: datetime date time unaffected by timezone", "[db][integration]")
             REQUIRE(t.second == 56);
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_tzn");
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
+TEST_CASE("db: mysql bit columns read as uint64", "[db][integration]")
+{
+    run(
+        [](db::session& sess) -> net::awaitable<void>
+        {
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_bit");
+            co_await sess.query("CREATE TABLE __httplib_bit (b1 BIT(1), b8 BIT(8), b64 BIT(64))");
+            co_await sess.query("INSERT INTO __httplib_bit VALUES "
+                                "(b'1', b'101011', b'1111000011110000'), "
+                                "(b'0', b'0', b'1111111111111111111111111111111111111111111111111111111111111111')");
+
+            auto r = co_await sess.query("SELECT b1, b8, b64 FROM __httplib_bit ORDER BY b1 DESC");
+            REQUIRE(r.row_count() == 2);
+            // 修复前 BIT(n>1) 读回为 string，as_uint64 抛类型不匹配异常。
+            REQUIRE(r.column_type(0) == db::column_type::uint64);
+            REQUIRE(r.column_type(1) == db::column_type::uint64);
+            REQUIRE(r.column_type(2) == db::column_type::uint64);
+            REQUIRE(*r[0].as_uint64("b1") == 1);
+            REQUIRE(*r[0].as_uint64("b8") == 43);       // b'101011'
+            REQUIRE(*r[0].as_uint64("b64") == 0xF0F0);  // b'1111000011110000'
+            // 全宽 BIT(64) 极值必须无损读出。
+            REQUIRE(*r[1].as_uint64("b64") == std::numeric_limits<uint64_t>::max());
+
+            co_await sess.query("DROP TABLE IF EXISTS __httplib_bit");
+        });
+}
+
+TEST_CASE("db: cancelled query does not mark connection dead", "[db][integration]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            db::mysql_config cfg;
+            cfg.user = "root";
+            cfg.password = "123456";
+            auto sess = co_await db::session::connect(ioc.get_executor(), cfg);
+            co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
+            co_await sess.query("USE test");
+            REQUIRE(sess.is_live());
+
+            std::atomic_bool query_done { false };
+            std::exception_ptr qerr;
+            net::cancellation_signal sig;
+
+            // 独立协程：在专用取消槽上跑慢查询，等待主协程取消。
+            net::co_spawn(
+                ioc.get_executor(),
+                [&]() -> net::awaitable<void>
+                {
+                    try
+                    {
+                        co_await sess.query("SELECT SLEEP(2)");
+                    }
+                    catch (...)
+                    {
+                        qerr = std::current_exception();
+                    }
+                    query_done.store(true);
+                },
+                net::bind_cancellation_slot(sig.slot(), [](std::exception_ptr) {}));
+
+            net::steady_timer t(ioc.get_executor());
+            t.expires_after(std::chrono::milliseconds(300));
+            co_await t.async_wait(net::use_awaitable);
+            sig.emit(net::cancellation_type::terminal);
+
+            auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            while (!query_done.load() && std::chrono::steady_clock::now() < deadline)
+            {
+                net::steady_timer poll(ioc.get_executor());
+                poll.expires_after(std::chrono::milliseconds(50));
+                co_await poll.async_wait(net::use_awaitable);
+            }
+            REQUIRE(query_done.load());
+            REQUIRE(qerr != nullptr); // 取消后查询抛异常
+            // 关键断言：取消不应把连接标记为失效（修复前 is_connection_lost 误判为断开）。
+            REQUIRE(sess.is_live());
         },
         [&](std::exception_ptr e) { err = e; });
     ioc.run();

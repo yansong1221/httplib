@@ -17,6 +17,7 @@ namespace httplib::db::detail
     {
       public:
         explicit sqlite_backend(sqlite_config cfg);
+        ~sqlite_backend() override;
 
         net::awaitable<void> connect() override;
         net::awaitable<void> reconnect() override;

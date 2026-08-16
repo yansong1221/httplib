@@ -14,6 +14,16 @@
 #ifndef SQL_SS_TIME2
 #define SQL_SS_TIME2 (-154)
 #endif
+#ifndef SQL_SS_TIME2_STRUCT
+// SQL Server 专用 TIME2 结构（sqltypes.h 不含）；fraction 单位纳秒。
+struct SQL_SS_TIME2_STRUCT
+{
+    SQLUSMALLINT hour;
+    SQLUSMALLINT minute;
+    SQLUSMALLINT second;
+    SQLUINTEGER fraction;
+};
+#endif
 #ifndef SQL_SS_TIMESTAMP2
 #define SQL_SS_TIMESTAMP2 (-153)
 #endif
@@ -37,9 +47,11 @@ namespace httplib::db::detail
             SQLSMALLINT msg_len = 0;
             SQLINTEGER native = 0;
             SQLGetDiagRec(handle_type, handle, 1, state, &native, msg, static_cast<SQLSMALLINT>(sizeof(msg)), &msg_len);
+            // msg_len 是"完整消息长度"，某些驱动会报告超过缓冲的实际长度；
+            // 必须钳制到缓冲大小，否则 std::string(msg, msg_len) 栈越界读。
+            auto len = static_cast<size_t>(std::min<SQLSMALLINT>(msg_len, static_cast<SQLSMALLINT>(sizeof(msg) - 1)));
             return std::string("odbc error [") + reinterpret_cast<char*>(state) + "] "
-                   + std::string(reinterpret_cast<char*>(msg), static_cast<size_t>(msg_len)) + " (native "
-                   + std::to_string(native) + ")";
+                   + std::string(reinterpret_cast<char*>(msg), len) + " (native " + std::to_string(native) + ")";
         }
 
         void
@@ -86,7 +98,8 @@ namespace httplib::db::detail
                          std::vector<std::byte>,
                          SQL_DATE_STRUCT,
                          SQL_TIME_STRUCT,
-                         SQL_TIMESTAMP_STRUCT>
+                         SQL_TIMESTAMP_STRUCT,
+                         SQL_SS_TIME2_STRUCT>
                 data;
 
             void*
@@ -212,13 +225,17 @@ namespace httplib::db::detail
                     }
                     else if constexpr (std::is_same_v<T, time>)
                     {
-                        SQL_TIME_STRUCT t {};
+                        // SQL_SS_TIME2 + SQL_C_BINARY 才能携带小数秒；
+                        // 旧实现用 SQL_C_TYPE_TIME/SQL_TIME_STRUCT，fraction 恒为 0。
+                        SQL_SS_TIME2_STRUCT t {};
                         t.hour = static_cast<SQLUSMALLINT>(v.hour);
                         t.minute = static_cast<SQLUSMALLINT>(v.minute);
                         t.second = static_cast<SQLUSMALLINT>(v.second);
-                        b.ctype = SQL_C_TYPE_TIME;
-                        b.sqltype = SQL_TYPE_TIME;
-                        b.colsize = 7;
+                        t.fraction = static_cast<SQLUINTEGER>(v.microsecond * 1000); ///< 纳秒
+                        b.ctype = SQL_C_BINARY;
+                        b.sqltype = SQL_SS_TIME2;
+                        b.colsize = 16;
+                        b.dec = 7;
                         b.len = static_cast<SQLLEN>(sizeof(t));
                         b.ind = static_cast<SQLLEN>(sizeof(t));
                         b.data = t;
@@ -592,6 +609,27 @@ namespace httplib::db::detail
                 }
                 case db::column_type::time:
                 {
+                    if (sqltype == SQL_SS_TIME2)
+                    {
+                        // SQL Server TIME → SQL_SS_TIME2：用 SQL_C_BINARY 取 SQL_SS_TIME2_STRUCT 以保留小数秒。
+                        SQL_SS_TIME2_STRUCT t {};
+                        rc = co_await odbc_async(stmt,
+                                                 SQL_HANDLE_STMT,
+                                                 obj,
+                                                 [&]
+                                                 { return SQLGetData(stmt, col, SQL_C_BINARY, &t, sizeof(t), &ind); });
+                        check_ok(rc, stmt, SQL_HANDLE_STMT, "odbc read time2");
+                        if (ind == SQL_NULL_DATA)
+                        {
+                            co_return std::monostate {};
+                        }
+                        // fraction 单位纳秒 → 微秒。
+                        co_return time { static_cast<unsigned>(t.hour),
+                                         static_cast<unsigned>(t.minute),
+                                         static_cast<unsigned>(t.second),
+                                         static_cast<unsigned>(t.fraction / 1000) };
+                    }
+                    // 通用 SQL_TYPE_TIME（非 SQL Server）仅支持秒级精度。
                     SQL_TIME_STRUCT t {};
                     rc = co_await odbc_async(stmt,
                                              SQL_HANDLE_STMT,

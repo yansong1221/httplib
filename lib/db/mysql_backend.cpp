@@ -270,6 +270,11 @@ namespace httplib::db::detail
         {
             return false;
         }
+        // 取消/超时（operation_aborted）不是断连：连接对象仍可复用。
+        if (ec == net::error::operation_aborted)
+        {
+            return false;
+        }
         return true;
     }
 

@@ -431,12 +431,59 @@ TEST_CASE("db(odbc): datetimeoffset / time2 type mapping", "[db][odbc]")
             // DATETIMEOFFSET → SQL_SS_TIMESTAMPOFFSET → datetime
             REQUIRE(r.column_type(0) == db::column_type::datetime);
             REQUIRE(*r[0].as_datetime("o") == o_expected);
-            // TIME(3) → SQL_SS_TIME2 → time（秒以下不读小数）
+            // TIME(3) → SQL_SS_TIME2 → time（小数秒须保留，修复前恒为 0）
             REQUIRE(r.column_type(1) == db::column_type::time);
-            REQUIRE(*r[0].as_time("t") == db::time { 10, 20, 30, 0 });
+            REQUIRE(*r[0].as_time("t") == db::time { 10, 20, 30, 123000 });
             // DATETIME2(7) → SQL_SS_TIMESTAMP2 → datetime
             REQUIRE(r.column_type(2) == db::column_type::datetime);
             REQUIRE(*r[0].as_datetime("ts") == db::datetime { 2024, 3, 5, 10, 20, 30, 123456 });
+
+            // TIME 参数绑定也须保留小数秒（SQL_SS_TIME2 + SQL_C_BINARY）。
+            co_await sess.query("INSERT INTO httplib_odbc_map (t) VALUES (:t)",
+                                db::bind("t", db::time { 11, 22, 33, 456000 }));
+            auto r2 = co_await sess.query("SELECT TOP 1 t FROM httplib_odbc_map ORDER BY id DESC");
+            REQUIRE(*r2[0].as_time("t") == db::time { 11, 22, 33, 456000 });
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    rethrow_or_skip(err);
+}
+
+TEST_CASE("db(odbc): long error message is clamped", "[db][odbc]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            auto sess = co_await db::session::connect(ioc.get_executor(), odbc_test_config());
+
+            // RAISERROR 消息上限 2047 字节；此处 1500+，足以越过 odbc_error_text 的 1024 栈缓冲。
+            std::string msg;
+            msg.reserve(1500);
+            while (msg.size() < 1500)
+            {
+                msg += "httplib_odbc_longerr_";
+            }
+
+            bool threw = false;
+            std::string what;
+            try
+            {
+                co_await sess.query("RAISERROR('" + msg + "', 16, 1)");
+            }
+            catch (db::db_exception const& ex)
+            {
+                threw = true;
+                what = ex.what();
+            }
+            REQUIRE(threw);
+            // SQL Server 驱动会把诊断消息截到 1023 字节，本用例是防御性钳制守卫：
+            // odbc_error_text 内部必须把 msg_len 钳到缓冲大小，否则其他驱动
+            // 报告完整长度时会栈越界读，what() 也可能膨胀到 1500+ 字节。
+            REQUIRE(what.size() < 1300);
+            REQUIRE(what.find("httplib_odbc_longerr_") != std::string::npos);
         },
         [&](std::exception_ptr e) { err = e; });
     ioc.run();

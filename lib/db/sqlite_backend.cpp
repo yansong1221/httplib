@@ -163,6 +163,15 @@ namespace httplib::db::detail
 
     sqlite_backend::sqlite_backend(sqlite_config cfg) : cfg_(std::move(cfg)) {}
 
+    sqlite_backend::~sqlite_backend()
+    {
+        if (db_)
+        {
+            sqlite3_close(db_);
+            db_ = nullptr;
+        }
+    }
+
     net::awaitable<void>
     sqlite_backend::connect()
     {
