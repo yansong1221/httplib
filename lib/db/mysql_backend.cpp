@@ -253,7 +253,6 @@ namespace httplib::db::detail
     mysql_backend::mysql_backend(net::any_io_executor ex, mysql_config cfg) : cfg_(std::move(cfg))
     {
         conn_ = std::make_unique<boost::mysql::any_connection>(ex);
-        stmt_cache_.capacity = cfg_.max_cached_statements;
     }
 
     bool
@@ -377,8 +376,7 @@ namespace httplib::db::detail
             boost::system::error_code ec;
             co_await conn_->async_close(net::redirect_error(net::use_awaitable, ec));
         }
-        stmt_cache_ = statement_cache {};
-        stmt_cache_.capacity = cfg_.max_cached_statements;
+        // 连接断开后服务器端 prepared statement 全部失效，统一层会先清空语句缓存。
         live_ = true;
         co_await connect();
     }
@@ -416,9 +414,20 @@ namespace httplib::db::detail
         co_return build_result(std::move(data), utc_offset_);
     }
 
-    net::awaitable<result>
-    mysql_backend::execute(std::string_view sql, std::vector<param> const& params, bool cacheable)
+    net::awaitable<statement_handle>
+    mysql_backend::prepare(std::string_view sql)
     {
+        boost::mysql::diagnostics diag;
+        boost::system::error_code ec;
+        auto stmt = co_await conn_->async_prepare_statement(sql, diag, net::redirect_error(net::use_awaitable, ec));
+        raise_error(ec, diag, sql);
+        co_return statement_handle { new boost::mysql::statement(std::move(stmt)) };
+    }
+
+    net::awaitable<result>
+    mysql_backend::execute_statement(statement_handle h, std::vector<param> const& params)
+    {
+        auto* stmt = static_cast<boost::mysql::statement*>(h.state);
         boost::mysql::diagnostics diag;
         boost::system::error_code ec;
 
@@ -429,66 +438,47 @@ namespace httplib::db::detail
             views.push_back(to_field_view(p, utc_offset_));
         }
 
-        boost::mysql::statement stmt;
-        std::optional<boost::mysql::statement> to_close;
-        if (cacheable)
-        {
-            if (auto* cached = find_statement(sql))
-            {
-                stmt = *cached;
-            }
-            else
-            {
-                stmt = co_await conn_->async_prepare_statement(sql, diag, net::redirect_error(net::use_awaitable, ec));
-                if (ec)
-                {
-                    raise_error(ec, diag, sql);
-                }
-                to_close = store_statement(std::string(sql), stmt);
-            }
-        }
-        else
-        {
-            // 数组展开的语句占位符数量随参数变化，缓存会随数组长度无限膨胀，直接每次 prepare。
-            stmt = co_await conn_->async_prepare_statement(sql, diag, net::redirect_error(net::use_awaitable, ec));
-            if (ec)
-            {
-                raise_error(ec, diag, sql);
-            }
-            to_close = stmt;
-        }
-
         boost::mysql::results data;
         if (views.empty())
         {
-            co_await conn_->async_execute(stmt.bind(), data, diag, net::redirect_error(net::use_awaitable, ec));
+            co_await conn_->async_execute(stmt->bind(), data, diag, net::redirect_error(net::use_awaitable, ec));
         }
         else
         {
-            co_await conn_->async_execute(stmt.bind(views.begin(), views.end()),
+            co_await conn_->async_execute(stmt->bind(views.begin(), views.end()),
                                           data,
                                           diag,
                                           net::redirect_error(net::use_awaitable, ec));
         }
-        if (ec)
-        {
-            raise_error(ec, diag, sql);
-        }
+        raise_error(ec, diag);
 
-        if (to_close && to_close->valid())
+        co_return build_result(std::move(data), utc_offset_);
+    }
+
+    net::awaitable<void>
+    mysql_backend::close_statement(statement_handle h) noexcept
+    {
+        auto* stmt = static_cast<boost::mysql::statement*>(h.state);
+        if (stmt && stmt->valid() && conn_)
         {
             boost::system::error_code close_ec;
             boost::mysql::diagnostics close_diag;
-            co_await conn_->async_close_statement(*to_close,
-                                                  close_diag,
-                                                  net::redirect_error(net::use_awaitable, close_ec));
+            try
+            {
+                co_await conn_->async_close_statement(*stmt,
+                                                      close_diag,
+                                                      net::redirect_error(net::use_awaitable, close_ec));
+            }
+            catch (...)
+            {
+                close_ec = boost::mysql::client_errc::server_unsupported;
+            }
             if (close_ec)
             {
                 live_ = false;
             }
         }
-
-        co_return build_result(std::move(data), utc_offset_);
+        delete stmt;
     }
 
     net::awaitable<void>
@@ -524,63 +514,24 @@ namespace httplib::db::detail
         co_return;
     }
 
-    boost::mysql::statement*
-    mysql_backend::find_statement(std::string_view sql)
-    {
-        auto it = stmt_cache_.map.find(sql);
-        if (it == stmt_cache_.map.end())
-        {
-            return nullptr;
-        }
-        stmt_cache_.lru.splice(stmt_cache_.lru.begin(), stmt_cache_.lru, it->second.lru_it);
-        return &it->second.stmt;
-    }
-
-    std::optional<boost::mysql::statement>
-    mysql_backend::store_statement(std::string sql, boost::mysql::statement stmt)
-    {
-        if (stmt_cache_.capacity == 0)
-        {
-            return std::move(stmt);
-        }
-        std::optional<boost::mysql::statement> evicted;
-        if (stmt_cache_.map.size() >= stmt_cache_.capacity)
-        {
-            auto evict_key = std::move(stmt_cache_.lru.back());
-            stmt_cache_.lru.pop_back();
-            auto evict_it = stmt_cache_.map.find(evict_key);
-            if (evict_it != stmt_cache_.map.end())
-            {
-                evicted = std::move(evict_it->second.stmt);
-                stmt_cache_.map.erase(evict_it);
-            }
-        }
-        stmt_cache_.lru.push_front(sql);
-        stmt_cache_.map.emplace(std::move(sql), statement_cache::entry { std::move(stmt), stmt_cache_.lru.begin() });
-        return evicted;
-    }
-
     void
     register_mysql_backend()
     {
-        register_backend(
-            "mysql",
-            [](net::any_io_executor ex, options const& opts) -> std::unique_ptr<backend>
-            {
-                mysql_config cfg;
-                cfg.host = opts.get_or("host", cfg.host);
-                cfg.port = opts.as_uint16("port").value_or(cfg.port);
-                cfg.user = opts.get_or("user", cfg.user);
-                cfg.password = opts.get_or("password", cfg.password);
-                cfg.database = opts.get_or("db", opts.get_or("database", cfg.database));
-                cfg.charset = opts.get_or("charset", cfg.charset);
-                cfg.time_zone = opts.get_or("time_zone", cfg.time_zone);
-                cfg.connect_timeout = opts.as_seconds("connect_timeout").value_or(cfg.connect_timeout);
-                cfg.ssl = opts.as_bool("ssl").value_or(cfg.ssl);
-                cfg.max_cached_statements = static_cast<size_t>(
-                    opts.as_int("max_cached_statements").value_or(static_cast<int>(cfg.max_cached_statements)));
-                return std::make_unique<mysql_backend>(ex, std::move(cfg));
-            });
+        register_backend("mysql",
+                         [](net::any_io_executor ex, options const& opts) -> std::unique_ptr<backend>
+                         {
+                             mysql_config cfg;
+                             cfg.host = opts.get_or("host", cfg.host);
+                             cfg.port = opts.as_uint16("port").value_or(cfg.port);
+                             cfg.user = opts.get_or("user", cfg.user);
+                             cfg.password = opts.get_or("password", cfg.password);
+                             cfg.database = opts.get_or("db", opts.get_or("database", cfg.database));
+                             cfg.charset = opts.get_or("charset", cfg.charset);
+                             cfg.time_zone = opts.get_or("time_zone", cfg.time_zone);
+                             cfg.connect_timeout = opts.as_seconds("connect_timeout").value_or(cfg.connect_timeout);
+                             cfg.ssl = opts.as_bool("ssl").value_or(cfg.ssl);
+                             return std::make_unique<mysql_backend>(ex, std::move(cfg));
+                         });
     }
 
 } // namespace httplib::db::detail

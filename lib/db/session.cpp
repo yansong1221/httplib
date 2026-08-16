@@ -1,9 +1,12 @@
 #include "httplib/db/session.hpp"
 #include "httplib/db/exception.hpp"
-#include "prepared_statement_impl.h"
 #include "registry.hpp"
 #include "render.hpp"
 #include <boost/system/error_code.hpp>
+#include <list>
+#include <optional>
+#include <string>
+#include <unordered_map>
 #include <utility>
 
 namespace httplib::db
@@ -15,6 +18,16 @@ namespace httplib::db
         bool in_transaction = false;
         bool live = true;
         session::query_logger query_logger;
+
+        /// prepared statement 统一缓存（LRU；capacity 0 表示不缓存）。
+        struct cached_statement
+        {
+            detail::statement_handle handle;
+            std::list<std::string>::iterator lru_it;
+        };
+        std::unordered_map<std::string, cached_statement> stmt_cache;
+        std::list<std::string> stmt_lru;
+        size_t stmt_cache_capacity = 64;
 
         std::chrono::steady_clock::time_point last_active = std::chrono::steady_clock::now();
         std::chrono::steady_clock::time_point last_ping;
@@ -62,6 +75,8 @@ namespace httplib::db
         }
         auto imp = std::make_unique<impl>();
         imp->backend = (*factory)(ex, opts);
+        imp->stmt_cache_capacity = static_cast<size_t>(
+            opts.as_int("max_cached_statements").value_or(static_cast<int>(imp->stmt_cache_capacity)));
         co_await imp->backend->connect();
         imp->live = true;
         co_return session(std::move(imp));
@@ -126,11 +141,7 @@ namespace httplib::db
             names = std::move(parsed_names);
         }
 
-        co_return co_await execute_rendered(rendered.sql,
-                                            std::move(rendered.params),
-                                            sql,
-                                            names,
-                                            !rendered.expanded);
+        co_return co_await execute_rendered(rendered.sql, std::move(rendered.params), sql, names, !rendered.expanded);
     }
 
     net::awaitable<result>
@@ -144,17 +155,81 @@ namespace httplib::db
         auto start = std::chrono::steady_clock::now();
 
         result res;
+        std::optional<db_exception> failure;
         try
         {
-            res = co_await imp.backend->execute(sql, params, cacheable);
+            if (params.empty())
+            {
+                // 无占位符：纯文本，直接执行，不占用语句缓存。
+                res = co_await imp.backend->execute(sql);
+            }
+            else if (cacheable && imp.stmt_cache_capacity > 0)
+            {
+                auto key = std::string(sql);
+                auto it = imp.stmt_cache.find(key);
+                if (it == imp.stmt_cache.end())
+                {
+                    auto h = co_await imp.backend->prepare(sql);
+                    while (imp.stmt_cache.size() >= imp.stmt_cache_capacity)
+                    {
+                        auto evict_key = std::move(imp.stmt_lru.back());
+                        imp.stmt_lru.pop_back();
+                        auto evict_it = imp.stmt_cache.find(evict_key);
+                        if (evict_it == imp.stmt_cache.end())
+                        {
+                            break;
+                        }
+                        co_await imp.backend->close_statement(evict_it->second.handle);
+                        imp.stmt_cache.erase(evict_it);
+                    }
+                    imp.stmt_lru.push_front(key);
+                    it = imp.stmt_cache.emplace(key, impl::cached_statement { h, imp.stmt_lru.begin() }).first;
+                }
+                else
+                {
+                    imp.stmt_lru.splice(imp.stmt_lru.begin(), imp.stmt_lru, it->second.lru_it);
+                }
+                res = co_await imp.backend->execute_statement(it->second.handle, params);
+            }
+            else
+            {
+                // 不缓存（capacity 0 或占位符数量随参数变化）：每次 prepare → 执行 → close。
+                auto h = co_await imp.backend->prepare(sql);
+                std::exception_ptr e;
+                try
+                {
+                    res = co_await imp.backend->execute_statement(h, params);
+                }
+                catch (...)
+                {
+                    e = std::current_exception();
+                }
+                co_await imp.backend->close_statement(h);
+                if (e)
+                {
+                    std::rethrow_exception(e);
+                }
+            }
         }
         catch (db_exception const& ex)
+        {
+            // MSVC 不允许在 catch 块内 co_await，先保存异常，清理与 enrich 在块外做。
+            failure = ex;
+        }
+        if (failure)
         {
             if (!imp.backend->alive())
             {
                 imp.live = false;
+                // 连接失效后服务器端语句全部作废，清空缓存避免复用坏句柄。
+                for (auto& [key, cs] : imp.stmt_cache)
+                {
+                    co_await imp.backend->close_statement(cs.handle);
+                }
+                imp.stmt_cache.clear();
+                imp.stmt_lru.clear();
             }
-            throw detail::enrich_error(ex, original_sql, names, params);
+            throw detail::enrich_error(*failure, original_sql, names, params);
         }
         imp.touch();
 
@@ -215,6 +290,13 @@ namespace httplib::db
     session::reconnect()
     {
         auto& imp = *impl_;
+        // 断开重连后服务器端 prepared statement 全部失效，先释放所有缓存句柄。
+        for (auto& [key, cs] : imp.stmt_cache)
+        {
+            co_await imp.backend->close_statement(cs.handle);
+        }
+        imp.stmt_cache.clear();
+        imp.stmt_lru.clear();
         co_await imp.backend->reconnect();
         imp.live = true;
         imp.in_transaction = false;

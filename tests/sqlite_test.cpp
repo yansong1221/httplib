@@ -724,10 +724,14 @@ TEST_CASE("db(sqlite): array binds expand for INSERT and IN", "[db][sqlite]")
             co_await sess.query("CREATE TABLE t (id INTEGER PRIMARY KEY, a INTEGER, b TEXT)");
 
             // 命名数组：展开为多个 ?（INSERT 多列）
-            co_await sess.query("INSERT INTO t (id, a, b) VALUES (:row)",
-                                db::bind("row", std::vector<db::param> { db::to_param(1), db::to_param(42), db::to_param(std::string("x")) }));
-            co_await sess.query("INSERT INTO t (id, a, b) VALUES (:row)",
-                                db::bind("row", std::vector<db::param> { db::to_param(2), db::to_param(7), db::to_param(std::string("y")) }));
+            co_await sess.query(
+                "INSERT INTO t (id, a, b) VALUES (:row)",
+                db::bind("row",
+                         std::vector<db::param> { db::to_param(1), db::to_param(42), db::to_param(std::string("x")) }));
+            co_await sess.query(
+                "INSERT INTO t (id, a, b) VALUES (:row)",
+                db::bind("row",
+                         std::vector<db::param> { db::to_param(2), db::to_param(7), db::to_param(std::string("y")) }));
 
             // IN 子句：展开为 ?,?,?
             auto r = co_await sess.query("SELECT id, a FROM t WHERE id IN (:ids) ORDER BY id",
@@ -745,22 +749,27 @@ TEST_CASE("db(sqlite): array binds expand for INSERT and IN", "[db][sqlite]")
 
             // prepared_statement 命名数组绑定
             auto stmt = sess.stmt("INSERT INTO t (id, a, b) VALUES (:row)");
-            co_await stmt.bind("row", std::vector<db::param> { db::to_param(3), db::to_param(1), db::to_param(std::string("z")) }).execute();
+            co_await stmt
+                .bind("row",
+                      std::vector<db::param> { db::to_param(3), db::to_param(1), db::to_param(std::string("z")) })
+                .execute();
             auto rs = co_await sess.query("SELECT a, b FROM t WHERE id = 3");
             REQUIRE(*rs[0].as_int64("a") == 1);
             REQUIRE(*rs[0].as_string("b") == "z");
 
             // 位置数组绑定（prepared_statement）
             auto stmt2 = sess.stmt("INSERT INTO t (id, a, b) VALUES (:row)");
-            co_await stmt2.bind(std::vector<db::param> { db::to_param(4), db::to_param(9), db::to_param(std::string("w")) }).execute();
+            co_await stmt2
+                .bind(std::vector<db::param> { db::to_param(4), db::to_param(9), db::to_param(std::string("w")) })
+                .execute();
             auto rs2 = co_await sess.query("SELECT a, b FROM t WHERE id = 4");
             REQUIRE(*rs2[0].as_int64("a") == 9);
             REQUIRE(*rs2[0].as_string("b") == "w");
 
             // 空数组 → 异常
-            REQUIRE_THROWS_AS(co_await sess.query("SELECT id FROM t WHERE id IN (:ids)",
-                                                  db::bind("ids", std::vector<int64_t> {})),
-                              std::runtime_error);
+            REQUIRE_THROWS_AS(
+                co_await sess.query("SELECT id FROM t WHERE id IN (:ids)", db::bind("ids", std::vector<int64_t> {})),
+                std::runtime_error);
         },
         [&](std::exception_ptr e) { err = e; });
     ioc.run();
@@ -892,16 +901,51 @@ TEST_CASE("db: render_query placeholder comes from backend", "[db]")
 
     struct stub_backend : detail::backend
     {
-        net::awaitable<void> connect() override { co_return; }
-        net::awaitable<bool> ping() override { co_return true; }
-        net::awaitable<db::result> execute(std::string_view) override { co_return db::result {}; }
-        net::awaitable<db::result> execute(std::string_view, std::vector<db::param> const&, bool) override
+        net::awaitable<void>
+        connect() override
+        {
+            co_return;
+        }
+        net::awaitable<bool>
+        ping() override
+        {
+            co_return true;
+        }
+        net::awaitable<db::result>
+        execute(std::string_view) override
         {
             co_return db::result {};
         }
-        net::awaitable<void> begin() override { co_return; }
-        net::awaitable<void> commit() override { co_return; }
-        net::awaitable<void> rollback() override { co_return; }
+        net::awaitable<detail::statement_handle>
+        prepare(std::string_view) override
+        {
+            co_return detail::statement_handle {};
+        }
+        net::awaitable<db::result>
+        execute_statement(detail::statement_handle, std::vector<db::param> const&) override
+        {
+            co_return db::result {};
+        }
+        net::awaitable<void>
+        close_statement(detail::statement_handle) noexcept override
+        {
+            co_return;
+        }
+        net::awaitable<void>
+        begin() override
+        {
+            co_return;
+        }
+        net::awaitable<void>
+        commit() override
+        {
+            co_return;
+        }
+        net::awaitable<void>
+        rollback() override
+        {
+            co_return;
+        }
     };
 
     // 后端决定占位符文本：默认 `?`（MySQL/SQLite 同款）
@@ -913,7 +957,8 @@ TEST_CASE("db: render_query placeholder comes from backend", "[db]")
     // `$N` 风格：同名重复也独立编号（每处独立参数）
     struct dollar_backend : stub_backend
     {
-        std::string placeholder(size_t index, std::string_view) const override
+        std::string
+        placeholder(size_t index, std::string_view) const override
         {
             return "$" + std::to_string(index + 1);
         }
@@ -939,7 +984,8 @@ TEST_CASE("db: render_query placeholder comes from backend", "[db]")
     // 命名风格后端：直接使用参数名
     struct name_backend : stub_backend
     {
-        std::string placeholder(size_t, std::string_view name) const override
+        std::string
+        placeholder(size_t, std::string_view name) const override
         {
             return name.empty() ? "?" : ":" + std::string(name);
         }

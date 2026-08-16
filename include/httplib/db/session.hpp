@@ -140,6 +140,7 @@ namespace httplib::db
                                                         options opts);
 
         /// 内部：执行已渲染的参数化语句（`?` SQL + 平铺参数），统一错误处理 / touch / 日志。
+        /// 参数化语句经统一层 prepared statement 缓存（LRU）执行，cacheable=false 时每次 prepare→close。
         net::awaitable<result> execute_rendered(std::string_view sql,
                                                 std::vector<detail::param> params,
                                                 std::string_view original_sql,

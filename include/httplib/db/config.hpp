@@ -25,7 +25,7 @@ namespace httplib::db
      *   为空表示不覆盖，沿用服务器默认会话时区（与 mysql 客户端行为一致），默认空；
      * - `connect_timeout`：连接超时（秒），`0` 表示不设超时，默认 `5`；
      * - `ssl`：是否使用 SSL，`1/true/yes/on` 或 `0/false/no/off`，默认 `0`；
-     * - `max_cached_statements`：prepared statement 缓存上限，`0` 表示不缓存，默认 `64`。
+     * - `max_cached_statements`：prepared statement 缓存上限（由统一层 session 管理），`0` 表示不缓存，默认 `64`。
      * \n
      * 例：`"host=127.0.0.1 port=3306 user=root password=123456 db=main time_zone=+08:00"`
      */

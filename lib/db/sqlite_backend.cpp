@@ -268,10 +268,95 @@ namespace httplib::db::detail
         co_return exec(sql, {});
     }
 
-    net::awaitable<result>
-    sqlite_backend::execute(std::string_view sql, std::vector<param> const& params, bool /*cacheable*/)
+    net::awaitable<statement_handle>
+    sqlite_backend::prepare(std::string_view sql)
     {
-        co_return exec(sql, params);
+        if (!db_)
+        {
+            throw db_exception(boost::system::error_code {}, "db: sqlite not connected");
+        }
+        sqlite3_stmt* stmt = nullptr;
+        int rc = sqlite3_prepare_v2(db_, std::string(sql).c_str(), -1, &stmt, nullptr);
+        if (rc != SQLITE_OK)
+        {
+            throw db_exception(boost::system::error_code {},
+                               std::string("db: sqlite prepare failed: ") + sqlite3_errmsg(db_));
+        }
+        co_return statement_handle { stmt };
+    }
+
+    net::awaitable<result>
+    sqlite_backend::execute_statement(statement_handle h, std::vector<param> const& params)
+    {
+        auto* stmt = static_cast<sqlite3_stmt*>(h.state);
+        if (!stmt)
+        {
+            throw db_exception(boost::system::error_code {}, "db: sqlite statement not prepared");
+        }
+
+        // 复用语句：先 reset 再清残留绑定（上一次参数多于本次时会残留 NULL 以外的值）。
+        int rc = sqlite3_reset(stmt);
+        if (rc == SQLITE_OK)
+        {
+            rc = sqlite3_clear_bindings(stmt);
+        }
+        if (rc != SQLITE_OK)
+        {
+            throw db_exception(boost::system::error_code {},
+                               std::string("db: sqlite reset failed: ") + sqlite3_errmsg(db_));
+        }
+        bind_params(stmt, params);
+
+        result::resultset s;
+        int col_count = sqlite3_column_count(stmt);
+        s.names.reserve(col_count);
+        s.types.reserve(col_count);
+        for (int i = 0; i < col_count; ++i)
+        {
+            s.names.emplace_back(sqlite3_column_name(stmt, i));
+            s.types.push_back(decltype_to_column_type(sqlite3_column_decltype(stmt, i)));
+        }
+
+        while (true)
+        {
+            rc = sqlite3_step(stmt);
+            if (rc == SQLITE_ROW)
+            {
+                std::vector<field> values;
+                values.reserve(col_count);
+                for (int i = 0; i < col_count; ++i)
+                {
+                    values.push_back(column_to_field(stmt, i, s.types[i]));
+                }
+                s.rows.push_back(std::move(values));
+            }
+            else if (rc == SQLITE_DONE)
+            {
+                break;
+            }
+            else
+            {
+                throw db_exception(boost::system::error_code {},
+                                   std::string("db: sqlite step failed: ") + sqlite3_errmsg(db_));
+            }
+        }
+
+        // 只读语句（SELECT 等）不影响行数；sqlite3_changes 只对 INSERT/UPDATE/DELETE 有意义，
+        // 否则会把上一条 DML 的计数泄漏给 SELECT 结果。
+        s.affected = sqlite3_stmt_readonly(stmt) ? 0 : static_cast<uint64_t>(sqlite3_changes(db_));
+        s.last_insert_id = static_cast<uint64_t>(sqlite3_last_insert_rowid(db_));
+
+        std::vector<result::resultset> sets;
+        sets.push_back(std::move(s));
+        co_return result(std::move(sets), std::chrono::seconds { 0 });
+    }
+
+    net::awaitable<void>
+    sqlite_backend::close_statement(statement_handle h) noexcept
+    {
+        auto* stmt = static_cast<sqlite3_stmt*>(h.state);
+        sqlite3_finalize(stmt);
+        co_return;
     }
 
     net::awaitable<void>

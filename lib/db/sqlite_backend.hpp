@@ -21,12 +21,16 @@ namespace httplib::db::detail
         net::awaitable<void> connect() override;
         net::awaitable<void> reconnect() override;
         net::awaitable<bool> ping() override;
-        bool alive() const override { return db_ != nullptr; }
+        bool
+        alive() const override
+        {
+            return db_ != nullptr;
+        }
 
         net::awaitable<result> execute(std::string_view sql) override;
-        net::awaitable<result> execute(std::string_view sql,
-                                       std::vector<param> const& params,
-                                       bool cacheable = true) override;
+        net::awaitable<statement_handle> prepare(std::string_view sql) override;
+        net::awaitable<result> execute_statement(statement_handle h, std::vector<param> const& params) override;
+        net::awaitable<void> close_statement(statement_handle h) noexcept override;
 
         net::awaitable<void> begin() override;
         net::awaitable<void> commit() override;
