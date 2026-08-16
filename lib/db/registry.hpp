@@ -15,7 +15,8 @@ namespace httplib::db::detail
     using backend_factory = std::function<std::unique_ptr<backend>(net::any_io_executor ex, options const& opts)>;
 
     /// 注册一个后端；同名重复注册返回 false。
-    bool register_backend(std::string_view name, backend_factory factory);
+    /// HTTPLIB_API：内部细节，导出仅供测试注入假后端。
+    HTTPLIB_API bool register_backend(std::string_view name, backend_factory factory);
 
     /// 查找后端工厂；未注册返回 nullptr。
     backend_factory const* find_backend(std::string_view name);

@@ -671,22 +671,17 @@ namespace httplib::db::detail
 
     odbc_backend::odbc_backend(net::any_io_executor ex, odbc_config cfg) : ex_(std::move(ex)), cfg_(std::move(cfg))
     {
-        conn_event_ = CreateEvent(nullptr, FALSE, FALSE, nullptr); // auto-reset, 初始非信号态
-        if (!conn_event_)
+        auto conn_event = CreateEvent(nullptr, FALSE, FALSE, nullptr); // auto-reset, 初始非信号态
+        if (!conn_event)
         {
             throw db_exception(boost::system::error_code {}, "db: odbc create connection event failed");
         }
-        conn_obj_ = std::make_unique<net::windows::object_handle>(ex_, static_cast<HANDLE>(conn_event_));
+        conn_obj_ = std::make_unique<net::windows::object_handle>(ex_, static_cast<HANDLE>(conn_event));
     }
 
     odbc_backend::~odbc_backend()
     {
         conn_obj_.reset();
-        if (conn_event_)
-        {
-            CloseHandle(static_cast<HANDLE>(conn_event_));
-            conn_event_ = nullptr;
-        }
         disconnect();
     }
 
@@ -714,12 +709,8 @@ namespace httplib::db::detail
     void
     odbc_backend::free_stmt(odbc_stmt& s) noexcept
     {
-        s.obj.reset();
-        if (s.event)
-        {
-            CloseHandle(static_cast<HANDLE>(s.event));
-            s.event = nullptr;
-        }
+        s.obj.reset();     // destroys windows::object_handle, which closes the HANDLE
+        s.event = nullptr; // prevent double-close (obj already closed the handle)
         if (s.stmt)
         {
             SQLFreeHandle(SQL_HANDLE_STMT, s.stmt);
@@ -795,7 +786,7 @@ namespace httplib::db::detail
                                reinterpret_cast<SQLPOINTER>(SQL_ASYNC_ENABLE_ON),
                                SQL_IS_INTEGER);
         check_ok(rc, dbc_, SQL_HANDLE_DBC, "odbc enable dbc async");
-        rc = SQLSetConnectAttr(dbc_, SQL_ATTR_ASYNC_DBC_EVENT, conn_event_, SQL_IS_POINTER);
+        rc = SQLSetConnectAttr(dbc_, SQL_ATTR_ASYNC_DBC_EVENT, conn_obj_->native_handle(), SQL_IS_POINTER);
         check_ok(rc, dbc_, SQL_HANDLE_DBC, "odbc set dbc event");
 
         if (!cfg_.connection_string.empty())

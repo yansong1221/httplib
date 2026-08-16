@@ -69,7 +69,6 @@ namespace httplib::db::detail
         void disconnect() noexcept;
 
         net::any_io_executor ex_;
-        void* conn_event_ = nullptr; ///< 连接级异步通知事件（HANDLE）。
         std::unique_ptr<net::windows::object_handle> conn_obj_;
         odbc_config cfg_;
         void* env_ = nullptr; ///< SQLHENV

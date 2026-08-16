@@ -473,6 +473,10 @@ namespace httplib::db::detail
             char c = sql[i];
             if (c == '\'' || c == '"' || c == '`')
             {
+                if (!groups.empty() && groups.back().is_values && groups.back().has_array)
+                {
+                    throw std::runtime_error("db: cannot mix literal with array column in VALUES");
+                }
                 i = copy_quoted(out, sql, i);
                 continue;
             }
@@ -541,6 +545,10 @@ namespace httplib::db::detail
             }
             if (c == '(')
             {
+                if (!groups.empty() && groups.back().is_values && groups.back().has_array)
+                {
+                    throw std::runtime_error("db: cannot mix literal with array column in VALUES");
+                }
                 groups.push_back(values_group_ctx { last_word == "values" });
                 last_word.clear();
                 out += c;
@@ -578,8 +586,8 @@ namespace httplib::db::detail
             {
                 last_word.clear();
             }
-            // VALUES 数组组的结构字符（逗号/空白等）由展开统一重建，这里跳过；
-            // 无数组组原样保留（含字面量），并标记为已输出。
+            // VALUES 数组组的结构字符（逗号/空白）由展开统一重建，这里跳过；
+            // 其余字面量（数字/标识符等）无法与按行展开对齐，拒绝混用，禁止静默丢弃。
             if (groups.empty() || !groups.back().is_values || !groups.back().has_array)
             {
                 out += c;
@@ -587,6 +595,10 @@ namespace httplib::db::detail
                 {
                     groups.back().emitted = true;
                 }
+            }
+            else if (c != ',' && !std::isspace(static_cast<unsigned char>(c)))
+            {
+                throw std::runtime_error("db: cannot mix literal with array column in VALUES");
             }
         }
         if (!idx.has_named && pos_idx != idx.pos.size())

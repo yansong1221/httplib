@@ -25,7 +25,7 @@ namespace httplib::db::detail
         }
     } // namespace
 
-    bool
+    HTTPLIB_API bool
     register_backend(std::string_view name, backend_factory factory)
     {
         std::lock_guard<std::mutex> lk(registry_mutex());
