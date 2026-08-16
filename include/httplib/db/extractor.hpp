@@ -63,6 +63,7 @@ namespace httplib::db
             std::function<size_t(size_t& next_col)> resolve_col; ///< 解析目标列（位置序按声明顺序递增）。
             size_t col = 0;                                      ///< 解析出的列号，供 apply 使用。
             std::function<void(row const&, size_t col, size_t row_count)> apply;
+            std::function<void()> on_empty;                      ///< 结果集为空时回调（如 vector 提取清空已有数据）。
         };
 
         template <typename E>
@@ -85,17 +86,32 @@ namespace httplib::db
             }
         }
 
+        template <typename E>
+        void
+        on_empty_one(E&& e)
+        {
+            if constexpr (std::is_same_v<std::decay_t<E>, extractor>)
+            {
+                if (e.on_empty)
+                {
+                    e.on_empty();
+                }
+            }
+        }
+
         template <typename... Ex>
         void
         apply_extractors(result const& res, Ex&&... ex)
         {
-            if (res.row_count() == 0)
-            {
-                return;
-            }
             size_t const n = res.row_count();
             size_t next_col = 0;
             (static_cast<void>(resolve_one(next_col, std::forward<Ex>(ex))), ...);
+            if (n == 0)
+            {
+                // 空结果：仍要让 vector 提取器清空已有数据，避免残留上一批结果。
+                (static_cast<void>(on_empty_one(std::forward<Ex>(ex))), ...);
+                return;
+            }
             for (size_t i = 0; i < n; ++i)
             {
                 row r = res[i];
@@ -178,7 +194,8 @@ namespace httplib::db
                          throw std::runtime_error("db: NULL value when extracting into vector");
                      }
                      v.push_back(std::move(*val));
-                 } };
+                 },
+                 [&v] { v.clear(); } };
     }
 
     template <typename T>
@@ -202,7 +219,8 @@ namespace httplib::db
                          throw std::runtime_error("db: NULL value when extracting into vector");
                      }
                      v.push_back(std::move(*val));
-                 } };
+                 },
+                 [&v] { v.clear(); } };
     }
 
     template <typename T>
@@ -226,7 +244,8 @@ namespace httplib::db
                          throw std::runtime_error("db: NULL value when extracting into vector");
                      }
                      v.push_back(std::move(*val));
-                 } };
+                 },
+                 [&v] { v.clear(); } };
     }
 
     /// 把第一行指定列提取到裸标量（NULL 抛异常）。

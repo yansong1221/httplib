@@ -82,8 +82,9 @@ namespace httplib::db
         }
         auto imp = std::make_unique<impl>();
         imp->backend = (*factory)(ex, opts);
-        imp->stmt_cache_capacity = static_cast<size_t>(
-            opts.as_int("max_cached_statements").value_or(static_cast<int>(imp->stmt_cache_capacity)));
+        int const cache_cap = opts.as_int("max_cached_statements").value_or(static_cast<int>(imp->stmt_cache_capacity));
+        // 负数视为禁用语句缓存（-1 曾因 cast 成 SIZE_MAX 导致缓存无上限）。
+        imp->stmt_cache_capacity = cache_cap < 0 ? 0 : static_cast<size_t>(cache_cap);
         co_await imp->backend->connect();
         imp->live = true;
         co_return session(std::move(imp));

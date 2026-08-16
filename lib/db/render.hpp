@@ -549,7 +549,7 @@ namespace httplib::db::detail
                 {
                     throw std::runtime_error("db: cannot mix literal with array column in VALUES");
                 }
-                groups.push_back(values_group_ctx { last_word == "values" });
+                groups.push_back(values_group_ctx { last_word == "values" || last_word == "value" });
                 last_word.clear();
                 out += c;
                 continue;

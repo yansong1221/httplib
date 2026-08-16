@@ -183,7 +183,8 @@ namespace httplib::db
             }
             out += k;
             out += '=';
-            bool const need_quote = v.empty() || v.find_first_of(" \t\"'=") != std::string::npos;
+            bool const need_quote
+                = v.empty() || v.find_first_of(" \t\r\n\f\v\"'=") != std::string::npos;
             if (need_quote)
             {
                 out += '"';

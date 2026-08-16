@@ -116,6 +116,8 @@ namespace httplib::db
                     {
                         --active_count_;
                     }
+                    // 本协程建连失败后槽位已释放，唤醒下一个等待者接手，避免其睡到超时。
+                    self->wake_one_waiter();
                     throw;
                 }
             }
@@ -445,13 +447,13 @@ namespace httplib::db
                     alive = co_await sess->ping();
                 }
 
-                if (alive)
+                std::lock_guard<std::mutex> lock(mutex_);
+                // 健康检查期间池子可能已被新连接补满：超容量时直接关闭刚检查完的连接，
+                // 避免总连接数短暂突破 max_connections 后迟迟不回收。
+                if (alive && !stopped_ && idle_.size() + active_count_ < cfg_.max_connections)
                 {
-                    std::lock_guard<std::mutex> lock(mutex_);
-                    if (!stopped_)
-                    {
-                        idle_.push_back(std::move(sess));
-                    }
+                    idle_.push_back(std::move(sess));
+                    wake_one_waiter();
                 }
             }
 
@@ -480,6 +482,7 @@ namespace httplib::db
                         if (!stopped_)
                         {
                             idle_.push_back(std::move(sess));
+                            wake_one_waiter();
                         }
                     }
                 }
