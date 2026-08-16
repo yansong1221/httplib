@@ -156,7 +156,7 @@ namespace httplib::db::detail
                     {
                         std::vector<std::byte> blob(v.begin(), v.end());
                         b.ctype = SQL_C_BINARY;
-                        b.sqltype = SQL_VARBINARY;
+                        b.sqltype = blob.size() > 8000 ? SQL_LONGVARBINARY : SQL_VARBINARY;
                         b.colsize = static_cast<SQLULEN>(blob.size());
                         b.len = static_cast<SQLLEN>(blob.size());
                         b.ind = static_cast<SQLLEN>(blob.size());
@@ -313,7 +313,9 @@ namespace httplib::db::detail
                 {
                     break;
                 }
-                size_t n = ind == SQL_NO_TOTAL ? std::strlen(buf) : static_cast<size_t>(ind);
+                // SQL Server (MAX) 类型在 SQL_SUCCESS_WITH_INFO 时 ind 是剩余字节数，
+                // 此时缓冲区必然已填满；仅 SQL_SUCCESS（末块）时 ind 才是本块实际长度。
+                size_t n = rc == SQL_SUCCESS ? static_cast<size_t>(ind) : sizeof(buf);
                 out.append(buf, n);
                 if (rc == SQL_SUCCESS)
                 {
@@ -357,7 +359,9 @@ namespace httplib::db::detail
                 {
                     break;
                 }
-                size_t n = ind == SQL_NO_TOTAL ? sizeof(buf) : static_cast<size_t>(ind);
+                // SQL Server (MAX) 类型在 SQL_SUCCESS_WITH_INFO 时 ind 是剩余字节数，
+                // 此时缓冲区必然已填满；仅 SQL_SUCCESS（末块）时 ind 才是本块实际长度。
+                size_t n = rc == SQL_SUCCESS ? static_cast<size_t>(ind) : sizeof(buf);
                 out.insert(out.end(), buf, buf + n);
                 if (rc == SQL_SUCCESS)
                 {

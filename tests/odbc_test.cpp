@@ -127,6 +127,25 @@ TEST_CASE("db(odbc): query and bindings", "[db][odbc]")
             auto r4 = co_await sess.query("SELECT :x + :y AS s", db::bind(40), db::bind(2));
             REQUIRE(*r4[0].as_int64("s") == 42);
 
+            // 大 blob（>4096B，触发 read_blob 的 SQLGetData 分块读取路径）
+            co_await sess.query(
+                "IF OBJECT_ID('httplib_odbc_bigblob', 'U') IS NOT NULL DROP TABLE httplib_odbc_bigblob");
+            co_await sess.query(
+                "CREATE TABLE httplib_odbc_bigblob (id INT IDENTITY(1,1) PRIMARY KEY, b VARBINARY(MAX) NOT NULL)");
+            std::vector<std::byte> big(10000);
+            for (size_t i = 0; i < big.size(); ++i)
+            {
+                big[i] = std::byte { static_cast<uint8_t>(i * 31) };
+            }
+            co_await sess.query("INSERT INTO httplib_odbc_bigblob (b) VALUES (:b)",
+                                db::bind("b", std::span<std::byte const>(big)));
+            auto rbig = co_await sess.query("SELECT TOP 1 b FROM httplib_odbc_bigblob ORDER BY id DESC");
+            REQUIRE(rbig.row_count() == 1);
+            auto got = rbig[0].as_blob("b");
+            REQUIRE(got.has_value());
+            REQUIRE(got->size() == big.size());
+            REQUIRE(std::equal(big.begin(), big.end(), got->begin(), got->end()));
+
             // time_point 绑定（UTC 墙上时钟）
             auto tp = std::chrono::system_clock::time_point { std::chrono::milliseconds { 1709629230000 } };
             co_await sess.query("INSERT INTO httplib_odbc_t (f) VALUES (:f)", db::bind("f", tp));
