@@ -279,4 +279,36 @@ TEST_CASE("db(odbc): reconnect", "[db][odbc]")
     ioc.run();
     rethrow_or_skip(err);
 }
+
+TEST_CASE("db(odbc): uniqueidentifier", "[db][odbc]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            auto sess = co_await db::session::connect(ioc.get_executor(), odbc_test_config());
+            co_await sess.query("IF OBJECT_ID('httplib_odbc_u', 'U') IS NOT NULL DROP TABLE httplib_odbc_u");
+            co_await sess.query(
+                "CREATE TABLE httplib_odbc_u (id INT IDENTITY(1,1) PRIMARY KEY, g UNIQUEIDENTIFIER NULL)");
+
+            // 字符串绑定 GUID → SQL Server 隐式转换
+            co_await sess.query("INSERT INTO httplib_odbc_u (g) VALUES (:g)",
+                                db::bind("g", std::string("6F9619FF-8B86-D011-B42D-00C04FC964FF")));
+            auto r = co_await sess.query("SELECT g FROM httplib_odbc_u");
+            REQUIRE(r.row_count() == 1);
+            REQUIRE(*r[0].as_string("g") == "6F9619FF-8B86-D011-B42D-00C04FC964FF");
+
+            // NULL GUID（optional nullopt → NULL 绑定）
+            co_await sess.query("INSERT INTO httplib_odbc_u (g) VALUES (:g)",
+                                db::bind("g", std::optional<std::string> {}));
+            auto rn = co_await sess.query("SELECT g FROM httplib_odbc_u WHERE g IS NULL");
+            REQUIRE(rn.row_count() == 1);
+            REQUIRE(!rn[0].as_string("g").has_value());
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    rethrow_or_skip(err);
+}
 #endif // HTTPLIB_ENABLED_DATABASE

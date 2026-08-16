@@ -18,6 +18,7 @@
 #define SQL_SS_TIMESTAMP2 (-153)
 #endif
 #include <charconv>
+#include <cstdio>
 #include <cstring>
 #include <stdexcept>
 #include <string>
@@ -285,7 +286,7 @@ namespace httplib::db::detail
         {
             SQLLEN ind = 0;
             SQLRETURN rc = SQLGetData(stmt, col, SQL_C_CHAR, nullptr, 0, &ind);
-            if (ind == SQL_NULL_DATA)
+            if (rc == SQL_NO_DATA || ind == SQL_NULL_DATA)
             {
                 is_null = true;
                 return {};
@@ -402,10 +403,38 @@ namespace httplib::db::detail
 
         // 读单个字段。
         field
-        read_field(SQLHSTMT stmt, SQLSMALLINT col, db::column_type ct)
+        read_field(SQLHSTMT stmt, SQLSMALLINT col, db::column_type ct, SQLSMALLINT sqltype)
         {
             SQLLEN ind = 0;
             SQLRETURN rc = SQL_SUCCESS;
+            if (sqltype == SQL_GUID)
+            {
+                // uniqueidentifier 必须用 SQL_C_GUID 读取，NULL 才会正确报告 SQL_NULL_DATA
+                // （SQL_C_CHAR 会把 NULL 读成空串）。
+                SQLGUID g {};
+                rc = SQLGetData(stmt, col, SQL_C_GUID, &g, sizeof(g), &ind);
+                check_ok(rc, stmt, SQL_HANDLE_STMT, "odbc read guid");
+                if (ind == SQL_NULL_DATA)
+                {
+                    return std::monostate {};
+                }
+                char buf[37];
+                std::snprintf(buf,
+                              sizeof(buf),
+                              "%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X",
+                              g.Data1,
+                              g.Data2,
+                              g.Data3,
+                              g.Data4[0],
+                              g.Data4[1],
+                              g.Data4[2],
+                              g.Data4[3],
+                              g.Data4[4],
+                              g.Data4[5],
+                              g.Data4[6],
+                              g.Data4[7]);
+                return std::string(buf);
+            }
             switch (ct)
             {
                 case db::column_type::int64:
@@ -530,6 +559,8 @@ namespace httplib::db::detail
                 {
                     s.names.reserve(static_cast<size_t>(ncols));
                     s.types.reserve(static_cast<size_t>(ncols));
+                    std::vector<SQLSMALLINT> sqltypes;
+                    sqltypes.reserve(static_cast<size_t>(ncols));
                     for (SQLSMALLINT i = 1; i <= ncols; ++i)
                     {
                         SQLCHAR name[1024] = {};
@@ -550,6 +581,7 @@ namespace httplib::db::detail
                         check_ok(rc, stmt, SQL_HANDLE_STMT, "odbc describe col");
                         s.names.emplace_back(reinterpret_cast<char*>(name), static_cast<size_t>(name_len));
                         s.types.push_back(map_sql_type(sqltype));
+                        sqltypes.push_back(sqltype);
                     }
 
                     while (SQLFetch(stmt) == SQL_SUCCESS)
@@ -558,7 +590,10 @@ namespace httplib::db::detail
                         values.reserve(static_cast<size_t>(ncols));
                         for (SQLSMALLINT i = 1; i <= ncols; ++i)
                         {
-                            values.push_back(read_field(stmt, i, s.types[static_cast<size_t>(i - 1)]));
+                            values.push_back(read_field(stmt,
+                                                        i,
+                                                        s.types[static_cast<size_t>(i - 1)],
+                                                        sqltypes[static_cast<size_t>(i - 1)]));
                         }
                         s.rows.push_back(std::move(values));
                     }
