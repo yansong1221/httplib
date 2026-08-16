@@ -2426,6 +2426,74 @@ TEST_CASE("db: invalid SQL throws", "[db][integration]")
         { REQUIRE_THROWS_AS(co_await sess.query("BOGUS SYNTAX ERROR"), db::db_exception); });
 }
 
+TEST_CASE("db: error paths", "[db][integration]")
+{
+    run(
+        [](db::session& sess) -> net::awaitable<void>
+        {
+            // 主键冲突 → MySQL 原生错误 1062 → db_exception
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_errpk (id INT PRIMARY KEY, v INT NOT NULL)");
+            co_await sess.query("DELETE FROM __httplib_errpk");
+            co_await sess.query("INSERT INTO __httplib_errpk VALUES (1, 10)");
+            REQUIRE_THROWS_AS(co_await sess.query("INSERT INTO __httplib_errpk VALUES (1, 20)"), db::db_exception);
+
+            // 类型转换失败（strict 模式）→ MySQL 原生错误 1366 → db_exception
+            co_await sess.query(
+                "CREATE TABLE IF NOT EXISTS __httplib_errconv (id INT AUTO_INCREMENT PRIMARY KEY, v INT NULL)");
+            co_await sess.query("DELETE FROM __httplib_errconv");
+            REQUIRE_THROWS_AS(co_await sess.query("INSERT INTO __httplib_errconv (v) VALUES (:v)",
+                                                  db::bind("v", std::string("not_a_number"))),
+                              db::db_exception);
+
+            // 数值越界（超出 SMALLINT 范围）→ MySQL 原生错误 1264 → db_exception
+            co_await sess.query(
+                "CREATE TABLE IF NOT EXISTS __httplib_errrange (id INT AUTO_INCREMENT PRIMARY KEY, v SMALLINT NULL)");
+            co_await sess.query("DELETE FROM __httplib_errrange");
+            REQUIRE_THROWS_AS(co_await sess.query("INSERT INTO __httplib_errrange (v) VALUES (:v)",
+                                                  db::bind("v", int64_t { 99999999 })),
+                              db::db_exception);
+
+            // 唯一约束冲突 → db_exception
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_erruq (id INT AUTO_INCREMENT PRIMARY KEY, v INT "
+                                "UNIQUE NOT NULL)");
+            co_await sess.query("DELETE FROM __httplib_erruq");
+            co_await sess.query("INSERT INTO __httplib_erruq (v) VALUES (:v)", db::bind("v", 7));
+            REQUIRE_THROWS_AS(co_await sess.query("INSERT INTO __httplib_erruq (v) VALUES (:v)", db::bind("v", 7)),
+                              db::db_exception);
+
+            // 绑定位置/命名混用 → 通用层抛 runtime_error
+            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x").bind(1).bind("a", 2).execute(), std::runtime_error);
+            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x").bind("a", 2).bind(1).execute(), std::runtime_error);
+
+            // 同名重复绑定 → 后者生效（不抛）
+            auto dup = co_await sess.stmt("SELECT :v AS x").bind("v", 1).bind("v", 2).execute();
+            REQUIRE(*dup[0].as_int64("x") == 2);
+
+            // 位置绑定数量多于占位符 → db_exception（后端参数不匹配）
+            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x").bind(1).bind(2).execute(), db::db_exception);
+
+            // 事务内出错 → with_transaction 自动回滚，数据不落库
+            REQUIRE_THROWS_AS(co_await sess.with_transaction(
+                                  [&](db::session& s) -> net::awaitable<void>
+                                  {
+                                      co_await s.query("INSERT INTO __httplib_errpk VALUES (2, 99)");
+                                      co_await s.query("INSERT INTO __httplib_errpk VALUES (1, 100)");
+                                  }),
+                              db::db_exception);
+            auto after = co_await sess.query("SELECT COUNT(*) AS c FROM __httplib_errpk WHERE v = 99");
+            REQUIRE(*after[0].as_int64("c") == 0);
+
+            // NULL 读回：字符串/二进制 NULL 列 → as_string / as_blob 返回 nullopt
+            co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_errnull (s VARCHAR(100) NULL, b BLOB NULL)");
+            co_await sess.query("DELETE FROM __httplib_errnull");
+            co_await sess.query("INSERT INTO __httplib_errnull VALUES (NULL, NULL)");
+            auto rn = co_await sess.query("SELECT s, b FROM __httplib_errnull LIMIT 1");
+            REQUIRE(rn.row_count() == 1);
+            REQUIRE(!rn[0].as_string("s").has_value());
+            REQUIRE(!rn[0].as_blob("b").has_value());
+        });
+}
+
 TEST_CASE("db: row out of bounds", "[db][integration]")
 {
     run(
