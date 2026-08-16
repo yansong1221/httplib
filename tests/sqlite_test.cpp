@@ -1,4 +1,5 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
+#include "db/render.hpp"
 #include "httplib/db/binder.hpp"
 #include "httplib/db/connection_pool.hpp"
 #include "httplib/db/exception.hpp"
@@ -767,5 +768,185 @@ TEST_CASE("db(sqlite): array binds expand for INSERT and IN", "[db][sqlite]")
     {
         std::rethrow_exception(err);
     }
+}
+
+TEST_CASE("db(sqlite): repeated named placeholders", "[db][sqlite]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            auto sess = co_await db::session::connect(ioc.get_executor(), "sqlite", "db=:memory:");
+
+            // 同一个命名参数出现多次：每处占位符都取同一绑定值
+            auto r = co_await sess.stmt("SELECT :a + :a AS x").bind("a", 21).execute();
+            REQUIRE(*r[0].as_int64("x") == 42);
+
+            // 与另一个命名参数交错
+            auto r2 = co_await sess.stmt("SELECT :a + :b + :a AS x").bind("a", 10).bind("b", 5).execute();
+            REQUIRE(*r2[0].as_int64("x") == 25);
+
+            // query 路径同样支持
+            auto r3 = co_await sess.query("SELECT :a + :a AS x", db::bind("a", 7));
+            REQUIRE(*r3[0].as_int64("x") == 14);
+
+            // 同名重复绑定 → 后者生效（每处占位符都取最终值）
+            auto r4 = co_await sess.stmt("SELECT :a + :a AS x").bind("a", 1).bind("a", 2).execute();
+            REQUIRE(*r4[0].as_int64("x") == 4);
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
+TEST_CASE("db(sqlite): query bind parity with stmt", "[db][sqlite]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            auto sess = co_await db::session::connect(ioc.get_executor(), "sqlite", "db=:memory:");
+
+            // 位置绑定
+            auto r = co_await sess.query("SELECT :a + :b AS x", db::bind(1), db::bind(2));
+            REQUIRE(*r[0].as_int64("x") == 3);
+
+            // 位置绑定 + into
+            std::optional<int64_t> v;
+            co_await sess.query("SELECT :a AS x", db::bind(42), db::into(v, 0));
+            REQUIRE(*v == 42);
+
+            // 命名绑定
+            auto r2 = co_await sess.query("SELECT :a AS x", db::bind("a", 42));
+            REQUIRE(*r2[0].as_int64("x") == 42);
+
+            // 同名重复绑定 → 后者生效
+            auto r3 = co_await sess.query("SELECT :a AS x", db::bind("a", 1), db::bind("a", 2));
+            REQUIRE(*r3[0].as_int64("x") == 2);
+
+            // 位置/命名混用 → 通用层抛
+            REQUIRE_THROWS_AS(co_await sess.query("SELECT :a AS x", db::bind(1), db::bind("a", 2)), std::runtime_error);
+
+            // 位置绑定数量多于占位符 → sqlite 层抛 db_exception
+            REQUIRE_THROWS_AS(co_await sess.query("SELECT :a AS x", db::bind(1), db::bind(2)), db::db_exception);
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
+TEST_CASE("db(sqlite): execute with bind args", "[db][sqlite]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            auto sess = co_await db::session::connect(ioc.get_executor(), "sqlite", "db=:memory:");
+
+            // 命名 + into
+            std::optional<int64_t> v;
+            co_await sess.stmt("SELECT :a AS x").execute(db::bind("a", 42), db::into(v, 0));
+            REQUIRE(*v == 42);
+
+            // 位置绑定
+            auto r = co_await sess.stmt("SELECT :a + :b AS x").execute(db::bind(10), db::bind(32));
+            REQUIRE(*r[0].as_int64("x") == 42);
+
+            // 数组展开
+            co_await sess.query("CREATE TABLE t (id INTEGER PRIMARY KEY)");
+            co_await sess.query("INSERT INTO t VALUES (1), (2), (3)");
+            auto rs = co_await sess.stmt("SELECT COUNT(*) AS c FROM t WHERE id IN (:ids)")
+                          .execute(db::bind("ids", std::vector<int64_t> { 1, 3 }));
+            REQUIRE(*rs[0].as_int64("c") == 2);
+
+            // 与链式 bind 混用
+            auto mix = co_await sess.stmt("SELECT :a + :b AS x").bind(10).execute(db::bind(32));
+            REQUIRE(*mix[0].as_int64("x") == 42);
+
+            // 绑定了 SQL 中不存在的名字 → 抛
+            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x").execute(db::bind("nope", 1)), std::runtime_error);
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
+TEST_CASE("db: render_query placeholder comes from backend", "[db]")
+{
+    namespace detail = db::detail;
+
+    struct stub_backend : detail::backend
+    {
+        net::awaitable<void> connect() override { co_return; }
+        net::awaitable<bool> ping() override { co_return true; }
+        net::awaitable<db::result> execute(std::string_view) override { co_return db::result {}; }
+        net::awaitable<db::result> execute(std::string_view, std::vector<db::param> const&, bool) override
+        {
+            co_return db::result {};
+        }
+        net::awaitable<void> begin() override { co_return; }
+        net::awaitable<void> commit() override { co_return; }
+        net::awaitable<void> rollback() override { co_return; }
+    };
+
+    // 后端决定占位符文本：默认 `?`（MySQL/SQLite 同款）
+    stub_backend def;
+    auto r1 = detail::render_query("SELECT :a + :a AS x", { db::bind("a", 5) }, def);
+    REQUIRE(r1.sql == "SELECT ? + ? AS x");
+    REQUIRE(r1.params.size() == 2);
+
+    // `$N` 风格：同名重复也独立编号（每处独立参数）
+    struct dollar_backend : stub_backend
+    {
+        std::string placeholder(size_t index, std::string_view) const override
+        {
+            return "$" + std::to_string(index + 1);
+        }
+    };
+    dollar_backend dollar;
+    auto r2 = detail::render_query("SELECT :a + :a AS x", { db::bind("a", 5) }, dollar);
+    REQUIRE(r2.sql == "SELECT $1 + $2 AS x");
+    REQUIRE(r2.params.size() == 2);
+
+    // `$N` 数组展开 + 标量混合编号
+    auto r3 = detail::render_query("SELECT * FROM t WHERE id = :id AND x IN (:xs)",
+                                   { db::bind("id", 7), db::bind("xs", std::vector<int64_t> { 1, 2 }) },
+                                   dollar);
+    REQUIRE(r3.sql == "SELECT * FROM t WHERE id = $1 AND x IN ($2,$3)");
+    REQUIRE(r3.params.size() == 3);
+    REQUIRE(r3.expanded);
+
+    // `$N` 位置绑定按序编号
+    auto r4 = detail::render_query("SELECT :a + :b AS x", { db::bind(1), db::bind(2) }, dollar);
+    REQUIRE(r4.sql == "SELECT $1 + $2 AS x");
+    REQUIRE(r4.params.size() == 2);
+
+    // 命名风格后端：直接使用参数名
+    struct name_backend : stub_backend
+    {
+        std::string placeholder(size_t, std::string_view name) const override
+        {
+            return name.empty() ? "?" : ":" + std::string(name);
+        }
+    };
+    name_backend named;
+    auto r5 = detail::render_query("SELECT :a + :a AS x", { db::bind("a", 5) }, named);
+    REQUIRE(r5.sql == "SELECT :a + :a AS x");
+    REQUIRE(r5.params.size() == 2);
 }
 #endif

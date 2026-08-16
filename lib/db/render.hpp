@@ -1,5 +1,6 @@
 #pragma once
 
+#include "backend.hpp"
 #include "httplib/db/binder.hpp"
 #include "httplib/db/exception.hpp"
 #include <cctype>
@@ -66,7 +67,7 @@ namespace httplib::db::detail
                 {
                     return quote_string(x);
                 }
-                else if constexpr (std::is_same_v<T, std::span<const std::byte>>)
+                else if constexpr (std::is_same_v<T, std::span<std::byte const>>)
                 {
                     static char const* digits = "0123456789ABCDEF";
                     std::string out;
@@ -225,7 +226,8 @@ namespace httplib::db::detail
             if (c == ':')
             {
                 size_t start = i + 1;
-                while (start < sql.size() && (std::isalnum(static_cast<unsigned char>(sql[start])) || sql[start] == '_'))
+                while (start < sql.size()
+                       && (std::isalnum(static_cast<unsigned char>(sql[start])) || sql[start] == '_'))
                 {
                     ++start;
                 }
@@ -243,17 +245,19 @@ namespace httplib::db::detail
     }
 
     /**
-     * \brief 把 SQL 中的 `:name` 占位符重写为 `?`，并按出现顺序收集参数。
+     * \brief 把 SQL 中的 `:name` 占位符重写为后端占位符，并按出现顺序收集参数。
      * \details
-     * 后端无关：MySQL / SQLite 都使用 `?` 作为绑定占位符。
+     * 占位符文本由后端 \ref backend::placeholder(index, name) 提供，渲染层只维护编号（0 起递增）。
      * \n
      * 命名绑定按名字查表；位置绑定按占位符出现顺序消费。
      * \n
-     * 数组参数（param 为 param_array）会被展开为多个 `?`，例如 `IN (:ids)` 配 `[1,2,3]`
-     * 渲染为 `IN (?,?,?)`；空数组抛异常（无法表达空列表）。
+     * 数组参数（param 为 param_array）会被展开为多个占位符，例如 `IN (:ids)` 配 `[1,2,3]`
+     * 渲染为 `IN (?,?,?)`（`?` 风格）或 `IN ($1,$2,$3)`（`$N` 风格）；空数组抛异常（无法表达空列表）。
+     * \n
+     * 每个占位符（含同名重复出现）都独立编号并收集一次值，后端决定编号如何映射为文本。
      */
     inline rendered_query
-    render_query(std::string_view sql, std::vector<binder> const& binders)
+    render_query(std::string_view sql, std::vector<binder> const& binders, backend const& b)
     {
         bool has_named = false;
         bool has_pos = false;
@@ -269,7 +273,8 @@ namespace httplib::db::detail
             else
             {
                 has_named = true;
-                named.emplace(b.name, &b.value);
+                // 重复绑定同名参数：与 prepared_statement 一致，后者生效。
+                named[b.name] = &b.value;
             }
         }
         if (has_named && has_pos)
@@ -281,6 +286,38 @@ namespace httplib::db::detail
         out.reserve(sql.size() + 16);
         std::vector<param> params;
         bool expanded = false;
+        size_t ph = 0; ///< 下一个占位符编号（0 起）
+
+        auto emit_placeholder = [&](param const* value, std::string_view label)
+        {
+            if (auto* arr = std::get_if<param_array>(value))
+            {
+                if (arr->values.empty())
+                {
+                    std::string what = "db: empty array parameter";
+                    if (!label.empty())
+                    {
+                        what += " ':" + std::string(label) + "'";
+                    }
+                    throw std::runtime_error(what);
+                }
+                for (size_t k = 0; k < arr->values.size(); ++k)
+                {
+                    if (k > 0)
+                    {
+                        out += ',';
+                    }
+                    out += b.placeholder(ph++, label);
+                    params.push_back(arr->values[k]);
+                }
+                expanded = true;
+            }
+            else
+            {
+                out += b.placeholder(ph++, label);
+                params.push_back(*value);
+            }
+        };
 
         size_t pos_idx = 0;
         for (size_t i = 0; i < sql.size(); ++i)
@@ -350,7 +387,6 @@ namespace httplib::db::detail
                 if (start > i + 1)
                 {
                     std::string name(sql.substr(i + 1, start - i - 1));
-                    param const* value = nullptr;
                     if (has_named)
                     {
                         auto it = named.find(name);
@@ -358,39 +394,22 @@ namespace httplib::db::detail
                         {
                             throw std::runtime_error("db: unbound named parameter ':" + name + "'");
                         }
-                        value = it->second;
+                        // 每处出现独立编号并收集值（`?` 无法引用同一参数；`$N` 风格下多占位符同值也正确）。
+                        emit_placeholder(it->second, name);
+                    }
+                    else if (pos.empty())
+                    {
+                        // 没有位置绑定但 SQL 存在占位符 → 未绑定（与命名未绑定语义一致）。
+                        throw std::runtime_error("db: unbound named parameter ':" + name + "'");
                     }
                     else
                     {
                         if (pos_idx >= pos.size())
                         {
                             // 参数数量少于占位符：与后端 prepare 的 arity 检查一致，视为数据库层错误。
-                            throw db_exception(boost::system::error_code {},
-                                               "db: too few parameters for placeholders");
+                            throw db_exception(boost::system::error_code {}, "db: too few parameters for placeholders");
                         }
-                        value = pos[pos_idx++];
-                    }
-                    if (auto* arr = std::get_if<param_array>(value))
-                    {
-                        if (arr->values.empty())
-                        {
-                            throw std::runtime_error("db: empty array parameter ':" + name + "'");
-                        }
-                        for (size_t k = 0; k < arr->values.size(); ++k)
-                        {
-                            if (k > 0)
-                            {
-                                out += ',';
-                            }
-                            out += '?';
-                            params.push_back(arr->values[k]);
-                        }
-                        expanded = true;
-                    }
-                    else
-                    {
-                        out += '?';
-                        params.push_back(*value);
+                        emit_placeholder(pos[pos_idx++], {});
                     }
                     i = start - 1;
                     continue;

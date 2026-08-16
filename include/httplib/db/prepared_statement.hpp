@@ -42,83 +42,45 @@ namespace httplib::db
         prepared_statement(prepared_statement const&) = delete;
         prepared_statement& operator=(prepared_statement const&) = delete;
 
-        /** 位置式绑定，按调用顺序对应 `:name` 占位符。 */
-        prepared_statement& bind(std::string_view v);
-        prepared_statement& bind(std::string const& v);
-        prepared_statement& bind(char const* v);
-        prepared_statement& bind(int64_t v);
-        prepared_statement& bind(uint64_t v);
-        prepared_statement& bind(int v);
-        prepared_statement& bind(unsigned v);
-        prepared_statement& bind(short v);
-        prepared_statement& bind(unsigned short v);
-        prepared_statement& bind(double v);
-        prepared_statement& bind(float v);
-        prepared_statement& bind(bool v);
-        prepared_statement& bind(std::nullptr_t);
-        prepared_statement& bind(date v);
-        prepared_statement& bind(datetime v);
-        prepared_statement& bind(time v);
-        prepared_statement& bind(std::span<std::byte const> v);
-        prepared_statement& bind(boost::json::value const& v);
-        prepared_statement& bind(std::chrono::system_clock::time_point tp);
-
-        /// 位置式数组绑定：渲染时展开为多个 `?`（如 `IN (:ids)`）。
+        /** 位置式绑定，按调用顺序对应 `:name` 占位符。
+         *  数组（std::vector / std::array）会展开为多个 `?`（如 `IN (:ids)`）。 */
         template <typename T>
         prepared_statement&
-        bind(std::vector<T> const& v)
+        bind(T&& v)
         {
-            return bind_param(detail::to_param(v));
-        }
-        template <typename T, size_t N>
-        prepared_statement&
-        bind(std::array<T, N> const& v)
-        {
-            return bind_param(detail::to_param(v));
+            return bind_param(detail::to_param(std::forward<T>(v)));
         }
 
         /** 命名式绑定（对应 `:name` 占位符，绑定不存在的名字会抛异常）。 */
-        prepared_statement& bind(std::string_view name, std::string_view v);
-        prepared_statement& bind(std::string_view name, char const* v);
-        prepared_statement& bind(std::string_view name, int64_t v);
-        prepared_statement& bind(std::string_view name, uint64_t v);
-        prepared_statement& bind(std::string_view name, int v);
-        prepared_statement& bind(std::string_view name, unsigned v);
-        prepared_statement& bind(std::string_view name, short v);
-        prepared_statement& bind(std::string_view name, unsigned short v);
-        prepared_statement& bind(std::string_view name, double v);
-        prepared_statement& bind(std::string_view name, float v);
-        prepared_statement& bind(std::string_view name, bool v);
-        prepared_statement& bind(std::string_view name, std::nullptr_t);
-        prepared_statement& bind(std::string_view name, date v);
-        prepared_statement& bind(std::string_view name, datetime v);
-        prepared_statement& bind(std::string_view name, time v);
-        prepared_statement& bind(std::string_view name, std::span<std::byte const> v);
-        prepared_statement& bind(std::string_view name, boost::json::value const& v);
-        prepared_statement& bind(std::string_view name, std::chrono::system_clock::time_point tp);
-
-        /// 命名式数组绑定：渲染时展开为多个 `?`（如 `INSERT INTO t (a,b,c) VALUES (:arr)`）。
         template <typename T>
         prepared_statement&
-        bind(std::string_view name, std::vector<T> const& v)
+        bind(std::string_view name, T&& v)
         {
-            return bind_param(name, detail::to_param(v));
-        }
-        template <typename T, size_t N>
-        prepared_statement&
-        bind(std::string_view name, std::array<T, N> const& v)
-        {
-            return bind_param(name, detail::to_param(v));
+            return bind_param(name, detail::to_param(std::forward<T>(v)));
         }
 
         /// 执行语句。
         net::awaitable<result> execute();
 
         /// 执行语句并把结果提取到变量。
+        /// 参数里的 `db::bind(...)` 会作为额外绑定合并进语句（命名做名字校验，位置按序追加）。
         template <typename... Ex>
         net::awaitable<result>
         execute(Ex&&... ex)
         {
+            std::vector<detail::binder> extra;
+            (detail::collect_binder(extra, std::forward<Ex>(ex)), ...);
+            for (auto& b : extra)
+            {
+                if (b.name.empty())
+                {
+                    bind_param(std::move(b.value));
+                }
+                else
+                {
+                    bind_param(b.name, std::move(b.value));
+                }
+            }
             auto res = co_await execute();
             detail::apply_extractors(res, std::forward<Ex>(ex)...);
             co_return res;

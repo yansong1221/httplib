@@ -103,65 +103,41 @@ namespace httplib::db
     net::awaitable<result>
     session::execute_query(std::string_view sql, std::vector<detail::binder> binders)
     {
-        if (binders.empty())
-        {
-            co_return co_await query(sql);
-        }
-
         auto& imp = *impl_;
-        auto start = std::chrono::steady_clock::now();
 
-        // 收集命名/位置参数，重写 `:name` → `?`，得到按占位符顺序的参数列表。
-        auto rendered = detail::render_query(sql, binders);
+        // 总是渲染：有绑定则替换占位符；无绑定（纯文本）也校验 SQL 中残留的 `:name`，
+        // 与 prepared_statement 语义一致（未绑定命名参数 → 抛）。
+        auto rendered = detail::render_query(sql, binders, *imp.backend);
 
-        result res;
-        try
+        // 含命名绑定时解析占位符名字（供异常信息与日志使用）。
+        std::vector<std::string> names;
+        bool all_positional = true;
+        for (auto const& b : binders)
         {
-            res = co_await imp.backend->execute(rendered.sql, rendered.params, !rendered.expanded);
+            if (!b.name.empty())
+            {
+                all_positional = false;
+                break;
+            }
         }
-        catch (db_exception const& ex)
+        if (!all_positional)
         {
-            if (!imp.backend->alive())
-            {
-                imp.live = false;
-            }
-            std::vector<std::string> names;
-            bool all_positional = true;
-            for (auto const& b : binders)
-            {
-                if (!b.name.empty())
-                {
-                    all_positional = false;
-                    break;
-                }
-            }
-            if (!all_positional)
-            {
-                auto [_, parsed_names] = detail::parse_placeholders(sql);
-                names = std::move(parsed_names);
-            }
-            throw detail::enrich_error(ex, sql, names, rendered.params);
+            auto [_, parsed_names] = detail::parse_placeholders(sql);
+            names = std::move(parsed_names);
         }
-        imp.touch();
 
-        if (imp.query_logger)
-        {
-            query_log_entry entry;
-            entry.sql = std::string(sql);
-            entry.duration = std::chrono::steady_clock::now() - start;
-            entry.row_count = res.row_count();
-            entry.affected_rows = res.affected_rows();
-            entry.is_parameterized = true;
-            imp.query_logger(entry);
-        }
-        co_return res;
+        co_return co_await execute_rendered(rendered.sql,
+                                            std::move(rendered.params),
+                                            sql,
+                                            names,
+                                            !rendered.expanded);
     }
 
     net::awaitable<result>
-    session::execute_prepared(std::string_view sql,
+    session::execute_rendered(std::string_view sql,
                               std::vector<detail::param> params,
                               std::string_view original_sql,
-                              std::vector<std::string> names,
+                              std::vector<std::string> const& names,
                               bool cacheable)
     {
         auto& imp = *impl_;

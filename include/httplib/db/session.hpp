@@ -126,12 +126,9 @@ namespace httplib::db
         std::chrono::steady_clock::time_point last_ping_time() const;
         bool in_transaction() const;
 
-        /// 内部：执行已重写为 `?` 的参数化 SQL（供 \ref prepared_statement 使用）。
-        net::awaitable<result> execute_prepared(std::string_view sql,
-                                                std::vector<detail::param> params,
-                                                std::string_view original_sql,
-                                                std::vector<std::string> names,
-                                                bool cacheable = true);
+        /// 内部：收集/渲染参数化 SQL（binders → `?` + 平铺参数）并执行。
+        /// query 与 prepared_statement 共用；数组参数会展开为多个 `?` 并自动跳过缓存。
+        net::awaitable<result> execute_query(std::string_view sql, std::vector<detail::binder> binders);
 
       private:
         struct impl;
@@ -142,7 +139,12 @@ namespace httplib::db
                                                         std::string_view backend_name,
                                                         options opts);
 
-        net::awaitable<result> execute_query(std::string_view sql, std::vector<detail::binder> binders);
+        /// 内部：执行已渲染的参数化语句（`?` SQL + 平铺参数），统一错误处理 / touch / 日志。
+        net::awaitable<result> execute_rendered(std::string_view sql,
+                                                std::vector<detail::param> params,
+                                                std::string_view original_sql,
+                                                std::vector<std::string> const& names,
+                                                bool cacheable);
 
         std::unique_ptr<impl> impl_;
     };
