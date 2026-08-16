@@ -29,6 +29,7 @@ namespace httplib::db::detail
     // 各后端提供的注册函数（在各自的实现文件里定义）。
     void register_mysql_backend();
     void register_sqlite_backend();
+    void register_odbc_backend();
 
 } // namespace httplib::db::detail
 #endif // HTTPLIB_ENABLED_DATABASE

@@ -52,9 +52,12 @@ namespace httplib::db
         /// 打开 SQLite 数据库。
         static net::awaitable<session> connect(net::any_io_executor ex, sqlite_config cfg);
 
+        /// 建立 ODBC 连接（DSN 或完整连接串，见 \ref odbc_config）。
+        static net::awaitable<session> connect(net::any_io_executor ex, odbc_config cfg);
+
         /// 按后端名 + 连接串建立连接（backend 无关）。
         /// 例：`connect(ex, "mysql", "host=127.0.0.1 user=root password=123456 db=main")`。
-        /// 各后端支持的连接串键见 \ref mysql_config 与 \ref sqlite_config。
+        /// 各后端支持的连接串键见 \ref mysql_config 与 \ref sqlite_config 与 \ref odbc_config。
         static net::awaitable<session> connect(net::any_io_executor ex,
                                                std::string_view backend_name,
                                                std::string_view conn_string);

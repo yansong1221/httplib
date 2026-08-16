@@ -58,6 +58,12 @@ namespace httplib::db
     }
 
     net::awaitable<session>
+    session::connect(net::any_io_executor ex, odbc_config cfg)
+    {
+        co_return co_await connect_internal(ex, "odbc", cfg.to_options());
+    }
+
+    net::awaitable<session>
     session::connect(net::any_io_executor ex, std::string_view backend_name, std::string_view conn_string)
     {
         co_return co_await connect_internal(ex, backend_name, options::parse(conn_string));

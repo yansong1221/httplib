@@ -73,6 +73,13 @@ if(HTTPLIB_ENABLED_DATABASE)
 
     find_library(SQLITE3_LIB sqlite3 REQUIRED)
     target_link_libraries(${MODULE} PRIVATE ${SQLITE3_LIB})
+
+    if(WIN32)
+        target_link_libraries(${MODULE} PRIVATE odbc32)
+    else()
+        find_library(ODBC_LIB odbc REQUIRED)
+        target_link_libraries(${MODULE} PRIVATE ${ODBC_LIB})
+    endif()
 endif()
 
 

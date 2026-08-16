@@ -65,6 +65,7 @@ namespace httplib::db::detail
                        {
                            register_mysql_backend();
                            register_sqlite_backend();
+                           register_odbc_backend();
                        });
     }
 
