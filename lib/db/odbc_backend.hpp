@@ -3,18 +3,30 @@
 
 #include "backend.hpp"
 #include "httplib/db/config.hpp"
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <boost/asio/windows/object_handle.hpp>
+#include <functional>
 #include <memory>
+#include <sql.h>
+#include <sqlext.h>
 #include <string>
+#include <windows.h>
 
 namespace httplib::db::detail
 {
-
-    /// ODBC 后端：同步阻塞（接受阻塞当前 io 线程），通过 ODBC C API 与底层数据库交互。
+    /// ODBC 后端：异步接口（同 MySQL/SQLite 的协程签名）。
+    /// \details
+    /// 使用 ODBC 3.8 原生异步通知（Asynchronous Execution - Notification Method），不额外开线程：
+    /// 连接/语句启用异步后，ODBC 函数可能返回 SQL_STILL_EXECUTING，完成时会信号关联的 Win32 事件；
+    /// 本后端把事件交给 asio \c windows::object_handle 挂在 io 线程上等待，事件触发后调用
+    /// SQLCompleteAsync 取最终返回码，全程不阻塞事件循环。
+    /// \n
     /// 占位符固定为 `?`（SQL 标准），事务用 SQL_ATTR_AUTOCOMMIT 开关 + SQLEndTran 控制。
     class odbc_backend : public backend
     {
       public:
-        explicit odbc_backend(odbc_config cfg);
+        explicit odbc_backend(net::any_io_executor ex, odbc_config cfg);
         ~odbc_backend() override;
 
         net::awaitable<void> connect() override;
@@ -36,9 +48,29 @@ namespace httplib::db::detail
         net::awaitable<void> rollback() override;
 
       private:
-        result exec(std::string_view sql, std::vector<param> const& params);
+        /// 已 prepare 的语句 + 关联的异步通知事件（Win32 auto-reset event）。
+        struct odbc_stmt
+        {
+            SQLHSTMT stmt = nullptr;
+            void* event = nullptr; ///< HANDLE
+            std::unique_ptr<net::windows::object_handle> obj;
+        };
+
+        /// 分配语句句柄并启用语句级异步通知。
+        std::unique_ptr<odbc_stmt> new_stmt();
+        /// 释放语句资源（object_handle、事件、句柄），不抛异常。
+        static void free_stmt(odbc_stmt& s) noexcept;
+        /// 异步调用 statement 函数（fn 首次调用；SQL_STILL_EXECUTING 时等事件并 SQLCompleteAsync）。
+        net::awaitable<SQLRETURN> stmt_async(odbc_stmt& s, std::function<SQLRETURN()> fn);
+        /// 异步调用 connection 函数（同 stmt_async，但用连接级事件）。
+        net::awaitable<SQLRETURN> conn_async(std::function<SQLRETURN()> fn);
+        /// 读取语句全部结果集（含多结果集）。
+        net::awaitable<result> read_all(odbc_stmt& s);
         void disconnect() noexcept;
 
+        net::any_io_executor ex_;
+        void* conn_event_ = nullptr; ///< 连接级异步通知事件（HANDLE）。
+        std::unique_ptr<net::windows::object_handle> conn_obj_;
         odbc_config cfg_;
         void* env_ = nullptr; ///< SQLHENV
         void* dbc_ = nullptr; ///< SQLHDBC
