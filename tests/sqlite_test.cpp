@@ -473,6 +473,50 @@ TEST_CASE("db(sqlite): error paths", "[db][sqlite]")
             REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x").bind("b", 42).execute(), std::runtime_error);
             REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x").execute(), std::runtime_error);
 
+            // 主键冲突 → SQLITE_CONSTRAINT → db_exception
+            co_await sess.query("CREATE TABLE t_pk (id INTEGER PRIMARY KEY, v INTEGER NOT NULL)");
+            co_await sess.query("INSERT INTO t_pk VALUES (1, 10)");
+            REQUIRE_THROWS_AS(co_await sess.query("INSERT INTO t_pk VALUES (1, 20)"), db::db_exception);
+
+            // 唯一约束冲突 → db_exception
+            co_await sess.query("CREATE TABLE t_uq (id INTEGER PRIMARY KEY, v INTEGER UNIQUE NOT NULL)");
+            co_await sess.query("INSERT INTO t_uq VALUES (1, 7)");
+            REQUIRE_THROWS_AS(co_await sess.query("INSERT INTO t_uq VALUES (2, 7)"), db::db_exception);
+
+            // NOT NULL 约束冲突（sqlite 动态类型，无类型转换/越界错误）→ db_exception
+            co_await sess.query("CREATE TABLE t_nn (id INTEGER PRIMARY KEY, v INTEGER NOT NULL)");
+            REQUIRE_THROWS_AS(co_await sess.query("INSERT INTO t_nn (id, v) VALUES (1, NULL)"), db::db_exception);
+
+            // 绑定位置/命名混用 → 通用层抛 runtime_error
+            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x").bind(1).bind("a", 2).execute(), std::runtime_error);
+            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x").bind("a", 2).bind(1).execute(), std::runtime_error);
+
+            // 同名重复绑定 → 后者生效（不抛）
+            auto dup = co_await sess.stmt("SELECT :v AS x").bind("v", 1).bind("v", 2).execute();
+            REQUIRE(*dup[0].as_int64("x") == 2);
+
+            // 位置绑定数量多于占位符 → db_exception（后端参数不匹配）
+            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x").bind(1).bind(2).execute(), db::db_exception);
+
+            // 事务内出错（SQL 层错误）→ with_transaction 自动回滚，数据不落库
+            REQUIRE_THROWS_AS(co_await sess.with_transaction(
+                                  [&](db::session& s) -> net::awaitable<void>
+                                  {
+                                      co_await s.query("INSERT INTO t_pk VALUES (2, 99)");
+                                      co_await s.query("INSERT INTO t_pk VALUES (1, 100)");
+                                  }),
+                              db::db_exception);
+            auto after = co_await sess.query("SELECT COUNT(*) AS c FROM t_pk WHERE v = 99");
+            REQUIRE(*after[0].as_int64("c") == 0);
+
+            // NULL 读回：字符串/二进制 NULL 列 → as_string / as_blob 返回 nullopt
+            co_await sess.query("CREATE TABLE t_null (s TEXT NULL, b BLOB NULL)");
+            co_await sess.query("INSERT INTO t_null VALUES (NULL, NULL)");
+            auto rn = co_await sess.query("SELECT s, b FROM t_null LIMIT 1");
+            REQUIRE(rn.row_count() == 1);
+            REQUIRE(!rn[0].as_string("s").has_value());
+            REQUIRE(!rn[0].as_blob("b").has_value());
+
             // 正常绑定不受影响
             auto r = co_await sess.stmt("SELECT :a AS x").bind("a", 42).execute();
             REQUIRE(*r[0].as_int64("x") == 42);
