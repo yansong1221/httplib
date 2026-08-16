@@ -27,6 +27,11 @@ namespace httplib::db
      * \n
      * 支持三种列寻址：下标 `into(v, 0)`、列名 `into(v, "name")`、位置 `into(v)`（按声明顺序对应第 N 列，
      * SOCI 风格）。
+     * \n
+     * 目标变量支持三种形态：`std::optional<T>`（NULL → nullopt）、`std::vector<T>`（全部行；含 NULL 抛异常）、
+     * 裸标量 `T`（仅第一行；NULL 抛异常）。
+     * \n
+     * 多个提取器同时使用时，先统一解析各目标列，再一次性遍历结果集，避免每个提取器各自遍历一遍。
      * \warning 提取器持有目标变量的引用，须保证目标变量在 `query`/`execute` 返回前有效。
      */
 
@@ -45,15 +50,38 @@ namespace httplib::db
         inline constexpr bool is_optional_into_type_v
             = is_vector_into_type_v<T> || std::is_same_v<T, std::span<std::byte const>>;
 
-        using extractor = std::function<void(result const&, size_t& next_col)>;
+        template <typename T>
+        inline constexpr bool is_scalar_into_type_v = is_optional_into_type_v<T>;
+
+        /**
+         * \brief 提取器：先解析目标列，再按行填充。
+         * \details 多提取器场景下由 apply_extractors 先统一 resolve 所有列，再一次性遍历结果集，
+         * 每个提取器只处理当前行的目标列。
+         */
+        struct extractor
+        {
+            std::function<size_t(size_t& next_col)> resolve_col; ///< 解析目标列（位置序按声明顺序递增）。
+            size_t col = 0;                                      ///< 解析出的列号，供 apply 使用。
+            std::function<void(row const&, size_t col, size_t row_count)> apply;
+        };
 
         template <typename E>
         void
-        apply_one(result const& res, size_t& next_col, E&& e)
+        resolve_one(size_t& next_col, E&& e)
         {
             if constexpr (std::is_same_v<std::decay_t<E>, extractor>)
             {
-                e(res, next_col);
+                e.col = e.resolve_col(next_col);
+            }
+        }
+
+        template <typename E>
+        void
+        apply_one(row const& r, size_t row_count, E&& e)
+        {
+            if constexpr (std::is_same_v<std::decay_t<E>, extractor>)
+            {
+                e.apply(r, e.col, row_count);
             }
         }
 
@@ -65,8 +93,14 @@ namespace httplib::db
             {
                 return;
             }
+            size_t const n = res.row_count();
             size_t next_col = 0;
-            (apply_one(res, next_col, std::forward<Ex>(ex)), ...);
+            (static_cast<void>(resolve_one(next_col, std::forward<Ex>(ex))), ...);
+            for (size_t i = 0; i < n; ++i)
+            {
+                row r = res[i];
+                (static_cast<void>(apply_one(r, n, std::forward<Ex>(ex))), ...);
+            }
         }
     } // namespace detail
 
@@ -76,7 +110,16 @@ namespace httplib::db
     into(std::optional<T>& v, size_t col)
     {
         static_assert(detail::is_optional_into_type_v<T>, "db: unsupported type for into(std::optional)");
-        return [&v, col](result const& r, size_t&) { v = r[0].get<T>(col); };
+        return { [col](size_t&) { return col; },
+                 col,
+                 [&v, first = true](row const& r, size_t c, size_t) mutable
+                 {
+                     if (first)
+                     {
+                         v = r.get<T>(c);
+                         first = false;
+                     }
+                 } };
     }
 
     template <typename T>
@@ -84,7 +127,16 @@ namespace httplib::db
     into(std::optional<T>& v, std::string_view name)
     {
         static_assert(detail::is_optional_into_type_v<T>, "db: unsupported type for into(std::optional)");
-        return [&v, n = std::string(name)](result const& r, size_t&) { v = r[0].get<T>(n); };
+        return { [](size_t&) { return 0; },
+                 0,
+                 [&v, n = std::string(name), first = true](row const& r, size_t, size_t) mutable
+                 {
+                     if (first)
+                     {
+                         v = r.get<T>(n);
+                         first = false;
+                     }
+                 } };
     }
 
     template <typename T>
@@ -92,7 +144,16 @@ namespace httplib::db
     into(std::optional<T>& v)
     {
         static_assert(detail::is_optional_into_type_v<T>, "db: unsupported type for into(std::optional)");
-        return [&v](result const& r, size_t& col) { v = r[0].get<T>(col++); };
+        return { [](size_t& next_col) { return next_col++; },
+                 0,
+                 [&v, first = true](row const& r, size_t c, size_t) mutable
+                 {
+                     if (first)
+                     {
+                         v = r.get<T>(c);
+                         first = false;
+                     }
+                 } };
     }
 
     /// 把所有行指定列提取到 vector（先 clear；含 NULL 抛异常）。
@@ -101,20 +162,23 @@ namespace httplib::db
     into(std::vector<T>& v, size_t col)
     {
         static_assert(detail::is_vector_into_type_v<T>, "db: unsupported type for into(std::vector)");
-        return [&v, col](result const& r, size_t&)
-        {
-            v.clear();
-            v.reserve(r.row_count());
-            for (size_t i = 0; i < r.row_count(); ++i)
-            {
-                auto val = r[i].get<T>(col);
-                if (!val)
-                {
-                    throw std::runtime_error("db: NULL value when extracting into vector");
-                }
-                v.push_back(std::move(*val));
-            }
-        };
+        return { [col](size_t&) { return col; },
+                 col,
+                 [&v, first = true](row const& r, size_t c, size_t row_count) mutable
+                 {
+                     if (first)
+                     {
+                         v.clear();
+                         v.reserve(row_count);
+                         first = false;
+                     }
+                     auto val = r.get<T>(c);
+                     if (!val)
+                     {
+                         throw std::runtime_error("db: NULL value when extracting into vector");
+                     }
+                     v.push_back(std::move(*val));
+                 } };
     }
 
     template <typename T>
@@ -122,25 +186,23 @@ namespace httplib::db
     into(std::vector<T>& v, std::string_view name)
     {
         static_assert(detail::is_vector_into_type_v<T>, "db: unsupported type for into(std::vector)");
-        return [&v, n = std::string(name)](result const& r, size_t&)
-        {
-            v.clear();
-            if (r.row_count() == 0)
-            {
-                return;
-            }
-            size_t col = r.column_index(n);
-            v.reserve(r.row_count());
-            for (size_t i = 0; i < r.row_count(); ++i)
-            {
-                auto val = r[i].get<T>(col);
-                if (!val)
-                {
-                    throw std::runtime_error("db: NULL value when extracting into vector");
-                }
-                v.push_back(std::move(*val));
-            }
-        };
+        return { [](size_t&) { return 0; },
+                 0,
+                 [&v, n = std::string(name), first = true](row const& r, size_t, size_t row_count) mutable
+                 {
+                     if (first)
+                     {
+                         v.clear();
+                         v.reserve(row_count);
+                         first = false;
+                     }
+                     auto val = r.get<T>(n);
+                     if (!val)
+                     {
+                         throw std::runtime_error("db: NULL value when extracting into vector");
+                     }
+                     v.push_back(std::move(*val));
+                 } };
     }
 
     template <typename T>
@@ -148,21 +210,90 @@ namespace httplib::db
     into(std::vector<T>& v)
     {
         static_assert(detail::is_vector_into_type_v<T>, "db: unsupported type for into(std::vector)");
-        return [&v](result const& r, size_t& col)
-        {
-            size_t c = col++;
-            v.clear();
-            v.reserve(r.row_count());
-            for (size_t i = 0; i < r.row_count(); ++i)
-            {
-                auto val = r[i].get<T>(c);
-                if (!val)
-                {
-                    throw std::runtime_error("db: NULL value when extracting into vector");
-                }
-                v.push_back(std::move(*val));
-            }
-        };
+        return { [](size_t& next_col) { return next_col++; },
+                 0,
+                 [&v, first = true](row const& r, size_t c, size_t row_count) mutable
+                 {
+                     if (first)
+                     {
+                         v.clear();
+                         v.reserve(row_count);
+                         first = false;
+                     }
+                     auto val = r.get<T>(c);
+                     if (!val)
+                     {
+                         throw std::runtime_error("db: NULL value when extracting into vector");
+                     }
+                     v.push_back(std::move(*val));
+                 } };
+    }
+
+    /// 把第一行指定列提取到裸标量（NULL 抛异常）。
+    template <typename T>
+    detail::extractor
+    into(T& v, size_t col)
+    {
+        static_assert(detail::is_scalar_into_type_v<T>, "db: unsupported type for into(scalar)");
+        return { [col](size_t&) { return col; },
+                 col,
+                 [&v, first = true](row const& r, size_t c, size_t) mutable
+                 {
+                     if (first)
+                     {
+                         auto val = r.get<T>(c);
+                         if (!val)
+                         {
+                             throw std::runtime_error("db: NULL value when extracting into scalar");
+                         }
+                         v = std::move(*val);
+                         first = false;
+                     }
+                 } };
+    }
+
+    template <typename T>
+    detail::extractor
+    into(T& v, std::string_view name)
+    {
+        static_assert(detail::is_scalar_into_type_v<T>, "db: unsupported type for into(scalar)");
+        return { [](size_t&) { return 0; },
+                 0,
+                 [&v, n = std::string(name), first = true](row const& r, size_t, size_t) mutable
+                 {
+                     if (first)
+                     {
+                         auto val = r.get<T>(n);
+                         if (!val)
+                         {
+                             throw std::runtime_error("db: NULL value when extracting into scalar");
+                         }
+                         v = std::move(*val);
+                         first = false;
+                     }
+                 } };
+    }
+
+    template <typename T>
+    detail::extractor
+    into(T& v)
+    {
+        static_assert(detail::is_scalar_into_type_v<T>, "db: unsupported type for into(scalar)");
+        return { [](size_t& next_col) { return next_col++; },
+                 0,
+                 [&v, first = true](row const& r, size_t c, size_t) mutable
+                 {
+                     if (first)
+                     {
+                         auto val = r.get<T>(c);
+                         if (!val)
+                         {
+                             throw std::runtime_error("db: NULL value when extracting into scalar");
+                         }
+                         v = std::move(*val);
+                         first = false;
+                     }
+                 } };
     }
 
 } // namespace httplib::db

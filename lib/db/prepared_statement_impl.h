@@ -12,16 +12,7 @@ namespace httplib::db
 
     struct prepared_statement::impl
     {
-        using param = std::variant<std::monostate,
-                                   int64_t,
-                                   uint64_t,
-                                   double,
-                                   std::string,
-                                   std::span<std::byte const>,
-                                   date,
-                                   datetime,
-                                   time,
-                                   std::chrono::system_clock::time_point>;
+        using param = detail::param;
 
         session* session = nullptr;
         std::string sql;           ///< 重写后的 `?` SQL

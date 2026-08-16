@@ -52,6 +52,13 @@ namespace httplib::db
         /// 打开 SQLite 数据库。
         static net::awaitable<session> connect(net::any_io_executor ex, sqlite_config cfg);
 
+        /// 按后端名 + 连接串建立连接（backend 无关）。
+        /// 例：`connect(ex, "mysql", "host=127.0.0.1 user=root password=123456 db=main")`。
+        /// 各后端支持的连接串键见 \ref mysql_config 与 \ref sqlite_config。
+        static net::awaitable<session> connect(net::any_io_executor ex,
+                                               std::string_view backend_name,
+                                               std::string_view conn_string);
+
         /// 执行一条 SQL 语句。
         net::awaitable<result> query(std::string_view sql);
 
@@ -123,11 +130,17 @@ namespace httplib::db
         net::awaitable<result> execute_prepared(std::string_view sql,
                                                 std::vector<detail::param> params,
                                                 std::string_view original_sql,
-                                                std::vector<std::string> names);
+                                                std::vector<std::string> names,
+                                                bool cacheable = true);
 
       private:
         struct impl;
         explicit session(std::unique_ptr<impl> p);
+
+        /// 统一连接入口：注册表查后端工厂并建立连接。
+        static net::awaitable<session> connect_internal(net::any_io_executor ex,
+                                                        std::string_view backend_name,
+                                                        options opts);
 
         net::awaitable<result> execute_query(std::string_view sql, std::vector<detail::binder> binders);
 

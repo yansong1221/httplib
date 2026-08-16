@@ -1,5 +1,6 @@
 #pragma once
 
+#include "options.hpp"
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -9,7 +10,24 @@ namespace httplib::db
 {
 
     /**
-     * \brief MySQL 连接配置。
+     * \brief MySQL 连接配置（`"mysql"` 后端）。
+     * \details
+     * 既可作为类型化配置传给 \ref session::connect(ex, mysql_config)，
+     * 也可等价地用连接串 `connect(ex, "mysql", "...")` / \ref make_pool，连接串支持的键如下：
+     * \n
+     * - `host`：服务器地址，默认 `127.0.0.1`；
+     * - `port`：端口，默认 `3306`；
+     * - `user`：用户名，默认空；
+     * - `password`：密码，默认空；
+     * - `db` / `database`：连接后默认使用的数据库（可为空），默认空；
+     * - `charset`：连接字符集（连接后执行 `SET NAMES`），默认 `utf8mb4`；
+     * - `time_zone`：会话时区（连接后执行 `SET time_zone`），固定偏移如 `+08:00`；
+     *   为空表示不覆盖，沿用服务器默认会话时区（与 mysql 客户端行为一致），默认空；
+     * - `connect_timeout`：连接超时（秒），`0` 表示不设超时，默认 `5`；
+     * - `ssl`：是否使用 SSL，`1/true/yes/on` 或 `0/false/no/off`，默认 `0`；
+     * - `max_cached_statements`：prepared statement 缓存上限，`0` 表示不缓存，默认 `64`。
+     * \n
+     * 例：`"host=127.0.0.1 port=3306 user=root password=123456 db=main time_zone=+08:00"`
      */
     struct mysql_config
     {
@@ -30,15 +48,49 @@ namespace httplib::db
         bool ssl = false;
         /// prepared statement 缓存上限（0 表示不缓存）。
         size_t max_cached_statements = 64;
+
+        /// 转成等价的后端连接选项（供字符串连接 API 复用）。
+        options
+        to_options() const
+        {
+            options o;
+            o.set("host", host);
+            o.set("port", std::to_string(port));
+            o.set("user", user);
+            o.set("password", password);
+            o.set("db", database);
+            o.set("charset", charset);
+            o.set("time_zone", time_zone);
+            o.set("connect_timeout", std::to_string(connect_timeout.count()));
+            o.set("ssl", ssl ? "1" : "0");
+            o.set("max_cached_statements", std::to_string(max_cached_statements));
+            return o;
+        }
     };
 
     /**
-     * \brief SQLite 连接配置。
+     * \brief SQLite 连接配置（`"sqlite"` 后端）。
+     * \details
+     * 既可作为类型化配置传给 \ref session::connect(ex, sqlite_config)，
+     * 也可等价地用连接串 `connect(ex, "sqlite", "...")` / \ref make_pool，连接串支持的键如下：
+     * \n
+     * - `db` / `path`：数据库文件路径；`:memory:` 表示内存库，默认 `:memory:`。
+     * \n
+     * 例：`"db=./data.db"`
      */
     struct sqlite_config
     {
         /// 数据库文件路径；":memory:" 表示内存库。
         std::string path = ":memory:";
+
+        /// 转成等价的后端连接选项（供字符串连接 API 复用）。
+        options
+        to_options() const
+        {
+            options o;
+            o.set("db", path);
+            return o;
+        }
     };
 
 } // namespace httplib::db

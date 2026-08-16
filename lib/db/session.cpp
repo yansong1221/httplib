@@ -1,8 +1,9 @@
 #include "httplib/db/session.hpp"
-#include "mysql_backend.hpp"
+#include "httplib/db/exception.hpp"
 #include "prepared_statement_impl.h"
+#include "registry.hpp"
 #include "render.hpp"
-#include "sqlite_backend.hpp"
+#include <boost/system/error_code.hpp>
 #include <utility>
 
 namespace httplib::db
@@ -33,19 +34,34 @@ namespace httplib::db
     net::awaitable<session>
     session::connect(net::any_io_executor ex, mysql_config cfg)
     {
-        auto imp = std::make_unique<impl>();
-        imp->backend = std::make_unique<detail::mysql_backend>(ex, cfg);
-        co_await imp->backend->connect();
-        imp->live = true;
-        co_return session(std::move(imp));
+        co_return co_await connect_internal(ex, "mysql", cfg.to_options());
     }
 
     net::awaitable<session>
     session::connect(net::any_io_executor ex, sqlite_config cfg)
     {
-        (void)ex;
+        co_return co_await connect_internal(ex, "sqlite", cfg.to_options());
+    }
+
+    net::awaitable<session>
+    session::connect(net::any_io_executor ex, std::string_view backend_name, std::string_view conn_string)
+    {
+        co_return co_await connect_internal(ex, backend_name, options::parse(conn_string));
+    }
+
+    net::awaitable<session>
+    session::connect_internal(net::any_io_executor ex, std::string_view backend_name, options opts)
+    {
+        detail::register_backends();
+        auto const* factory = detail::find_backend(backend_name);
+        if (!factory)
+        {
+            throw db_exception(boost::system::error_code {},
+                               "db: unknown backend '" + std::string(backend_name)
+                                   + "' (registered: " + detail::registered_backend_names() + ")");
+        }
         auto imp = std::make_unique<impl>();
-        imp->backend = std::make_unique<detail::sqlite_backend>(cfg);
+        imp->backend = (*factory)(ex, opts);
         co_await imp->backend->connect();
         imp->live = true;
         co_return session(std::move(imp));
@@ -96,12 +112,12 @@ namespace httplib::db
         auto start = std::chrono::steady_clock::now();
 
         // 收集命名/位置参数，重写 `:name` → `?`，得到按占位符顺序的参数列表。
-        auto [rewritten, params] = detail::render_query(sql, binders);
+        auto rendered = detail::render_query(sql, binders);
 
         result res;
         try
         {
-            res = co_await imp.backend->execute(rewritten, params);
+            res = co_await imp.backend->execute(rendered.sql, rendered.params, !rendered.expanded);
         }
         catch (db_exception const& ex)
         {
@@ -124,7 +140,7 @@ namespace httplib::db
                 auto [_, parsed_names] = detail::parse_placeholders(sql);
                 names = std::move(parsed_names);
             }
-            throw detail::enrich_error(ex, sql, names, params);
+            throw detail::enrich_error(ex, sql, names, rendered.params);
         }
         imp.touch();
 
@@ -145,7 +161,8 @@ namespace httplib::db
     session::execute_prepared(std::string_view sql,
                               std::vector<detail::param> params,
                               std::string_view original_sql,
-                              std::vector<std::string> names)
+                              std::vector<std::string> names,
+                              bool cacheable)
     {
         auto& imp = *impl_;
         auto start = std::chrono::steady_clock::now();
@@ -153,7 +170,7 @@ namespace httplib::db
         result res;
         try
         {
-            res = co_await imp.backend->execute(sql, params);
+            res = co_await imp.backend->execute(sql, params, cacheable);
         }
         catch (db_exception const& ex)
         {

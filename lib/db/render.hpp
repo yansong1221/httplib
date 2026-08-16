@@ -97,6 +97,20 @@ namespace httplib::db::detail
                 {
                     return quote_string(datetime::from_time_point(x).to_string());
                 }
+                else if constexpr (std::is_same_v<T, param_array>)
+                {
+                    std::string out = "[";
+                    for (size_t i = 0; i < x.values.size(); ++i)
+                    {
+                        if (i > 0)
+                        {
+                            out += ", ";
+                        }
+                        out += format_param(x.values[i]);
+                    }
+                    out += "]";
+                    return out;
+                }
                 else
                 {
                     return "?";
@@ -136,10 +150,12 @@ namespace httplib::db::detail
     }
 
     /// 渲染结果：重写后的 `?` SQL 与按占位符顺序排列的参数。
+    /// expanded 表示本次渲染是否发生数组展开（渲染出的 `?` 数量随数组长度变化，不可缓存）。
     struct rendered_query
     {
         std::string sql;
         std::vector<param> params;
+        bool expanded = false;
     };
 
     /// 解析 `:name` 占位符：把 SQL 重写为 `?`，并按出现顺序返回占位符名字列表。
@@ -232,6 +248,9 @@ namespace httplib::db::detail
      * 后端无关：MySQL / SQLite 都使用 `?` 作为绑定占位符。
      * \n
      * 命名绑定按名字查表；位置绑定按占位符出现顺序消费。
+     * \n
+     * 数组参数（param 为 param_array）会被展开为多个 `?`，例如 `IN (:ids)` 配 `[1,2,3]`
+     * 渲染为 `IN (?,?,?)`；空数组抛异常（无法表达空列表）。
      */
     inline rendered_query
     render_query(std::string_view sql, std::vector<binder> const& binders)
@@ -258,37 +277,133 @@ namespace httplib::db::detail
             throw std::runtime_error("db: cannot mix positional and named parameters");
         }
 
-        auto [rewritten, names] = parse_placeholders(sql);
+        std::string out;
+        out.reserve(sql.size() + 16);
+        std::vector<param> params;
+        bool expanded = false;
 
-        rendered_query out;
-        out.sql = std::move(rewritten);
-        out.params.reserve(names.size());
         size_t pos_idx = 0;
-        for (auto const& name : names)
+        for (size_t i = 0; i < sql.size(); ++i)
         {
-            if (has_named)
+            char c = sql[i];
+            if (c == '\'' || c == '"' || c == '`')
             {
-                auto it = named.find(name);
-                if (it == named.end())
+                char quote = c;
+                out += c;
+                while (++i < sql.size())
                 {
-                    throw std::runtime_error("db: unbound named parameter ':" + name + "'");
+                    out += sql[i];
+                    if (sql[i] == quote && (i + 1 >= sql.size() || sql[i + 1] != quote))
+                    {
+                        break;
+                    }
+                    if (sql[i] == '\\' && i + 1 < sql.size())
+                    {
+                        out += sql[++i];
+                    }
                 }
-                out.params.push_back(*it->second);
+                continue;
             }
-            else
+            if (c == '#')
             {
-                if (pos_idx >= pos.size())
+                while (i < sql.size() && sql[i] != '\n')
                 {
-                    throw std::runtime_error("db: too few parameters for placeholders");
+                    ++i;
                 }
-                out.params.push_back(*pos[pos_idx++]);
+                if (i < sql.size())
+                {
+                    out += sql[i];
+                }
+                continue;
             }
+            if (c == '-' && i + 1 < sql.size() && sql[i + 1] == '-'
+                && (i + 2 >= sql.size() || std::isspace(static_cast<unsigned char>(sql[i + 2]))))
+            {
+                while (i < sql.size() && sql[i] != '\n')
+                {
+                    ++i;
+                }
+                if (i < sql.size())
+                {
+                    out += sql[i];
+                }
+                continue;
+            }
+            if (c == '/' && i + 1 < sql.size() && sql[i + 1] == '*')
+            {
+                i += 2;
+                while (i + 1 < sql.size() && !(sql[i] == '*' && sql[i + 1] == '/'))
+                {
+                    ++i;
+                }
+                i += 1;
+                continue;
+            }
+            if (c == ':')
+            {
+                size_t start = i + 1;
+                while (start < sql.size()
+                       && (std::isalnum(static_cast<unsigned char>(sql[start])) || sql[start] == '_'))
+                {
+                    ++start;
+                }
+                if (start > i + 1)
+                {
+                    std::string name(sql.substr(i + 1, start - i - 1));
+                    param const* value = nullptr;
+                    if (has_named)
+                    {
+                        auto it = named.find(name);
+                        if (it == named.end())
+                        {
+                            throw std::runtime_error("db: unbound named parameter ':" + name + "'");
+                        }
+                        value = it->second;
+                    }
+                    else
+                    {
+                        if (pos_idx >= pos.size())
+                        {
+                            // 参数数量少于占位符：与后端 prepare 的 arity 检查一致，视为数据库层错误。
+                            throw db_exception(boost::system::error_code {},
+                                               "db: too few parameters for placeholders");
+                        }
+                        value = pos[pos_idx++];
+                    }
+                    if (auto* arr = std::get_if<param_array>(value))
+                    {
+                        if (arr->values.empty())
+                        {
+                            throw std::runtime_error("db: empty array parameter ':" + name + "'");
+                        }
+                        for (size_t k = 0; k < arr->values.size(); ++k)
+                        {
+                            if (k > 0)
+                            {
+                                out += ',';
+                            }
+                            out += '?';
+                            params.push_back(arr->values[k]);
+                        }
+                        expanded = true;
+                    }
+                    else
+                    {
+                        out += '?';
+                        params.push_back(*value);
+                    }
+                    i = start - 1;
+                    continue;
+                }
+            }
+            out += c;
         }
         if (!has_named && pos_idx != pos.size())
         {
-            throw std::runtime_error("db: too many parameters");
+            // 位置参数多于占位符：与后端 prepare 的 arity 检查一致，视为数据库层错误。
+            throw db_exception(boost::system::error_code {}, "db: too many parameters for placeholders");
         }
-        return out;
+        return { std::move(out), std::move(params), expanded };
     }
 
 } // namespace httplib::db::detail

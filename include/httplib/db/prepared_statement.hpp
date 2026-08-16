@@ -63,6 +63,20 @@ namespace httplib::db
         prepared_statement& bind(boost::json::value const& v);
         prepared_statement& bind(std::chrono::system_clock::time_point tp);
 
+        /// 位置式数组绑定：渲染时展开为多个 `?`（如 `IN (:ids)`）。
+        template <typename T>
+        prepared_statement&
+        bind(std::vector<T> const& v)
+        {
+            return bind_param(detail::to_param(v));
+        }
+        template <typename T, size_t N>
+        prepared_statement&
+        bind(std::array<T, N> const& v)
+        {
+            return bind_param(detail::to_param(v));
+        }
+
         /** 命名式绑定（对应 `:name` 占位符，绑定不存在的名字会抛异常）。 */
         prepared_statement& bind(std::string_view name, std::string_view v);
         prepared_statement& bind(std::string_view name, char const* v);
@@ -83,6 +97,20 @@ namespace httplib::db
         prepared_statement& bind(std::string_view name, boost::json::value const& v);
         prepared_statement& bind(std::string_view name, std::chrono::system_clock::time_point tp);
 
+        /// 命名式数组绑定：渲染时展开为多个 `?`（如 `INSERT INTO t (a,b,c) VALUES (:arr)`）。
+        template <typename T>
+        prepared_statement&
+        bind(std::string_view name, std::vector<T> const& v)
+        {
+            return bind_param(name, detail::to_param(v));
+        }
+        template <typename T, size_t N>
+        prepared_statement&
+        bind(std::string_view name, std::array<T, N> const& v)
+        {
+            return bind_param(name, detail::to_param(v));
+        }
+
         /// 执行语句。
         net::awaitable<result> execute();
 
@@ -100,6 +128,9 @@ namespace httplib::db
         explicit prepared_statement(session& sess, std::string sql);
 
       private:
+        prepared_statement& bind_param(detail::param v);
+        prepared_statement& bind_param(std::string_view name, detail::param v);
+
         std::unique_ptr<impl> impl_;
     };
 

@@ -275,14 +275,30 @@ namespace httplib::db
         return *this;
     }
 
+    prepared_statement&
+    prepared_statement::bind_param(detail::param v)
+    {
+        impl_->begin_bind();
+        impl_->params.emplace_back(std::move(v));
+        return *this;
+    }
+
+    prepared_statement&
+    prepared_statement::bind_param(std::string_view name, detail::param v)
+    {
+        impl_->begin_named(name);
+        impl_->named_values[std::string(name)] = std::move(v);
+        return *this;
+    }
+
     net::awaitable<result>
     prepared_statement::execute()
     {
-        // 命名绑定（或未绑定的 :name 语句）→ 从 named_values 重建参数；纯位置绑定 → 直接用 params
+        // 统一走 render_query：数组参数会展开为多个 `?` 占位符。
+        std::vector<detail::binder> binders;
         if (impl_->has_named_bind || (!impl_->has_positional_bind && !impl_->param_names.empty()))
         {
-            impl_->params.clear();
-            impl_->params.reserve(impl_->param_names.size());
+            binders.reserve(impl_->param_names.size());
             for (auto const& name : impl_->param_names)
             {
                 auto it = impl_->named_values.find(name);
@@ -290,16 +306,19 @@ namespace httplib::db
                 {
                     throw std::runtime_error("db: unbound named parameter '" + name + "'");
                 }
-                impl_->params.push_back(it->second);
+                binders.push_back({ name, it->second });
+            }
+        }
+        else
+        {
+            binders.reserve(impl_->params.size());
+            for (auto const& p : impl_->params)
+            {
+                binders.push_back({ {}, p });
             }
         }
 
-        std::vector<detail::param> params;
-        params.reserve(impl_->params.size());
-        for (auto const& p : impl_->params)
-        {
-            params.push_back(std::visit([](auto const& v) -> detail::param { return v; }, p));
-        }
+        auto rendered = detail::render_query(impl_->original_sql, binders);
 
         std::vector<std::string> names;
         if (!impl_->has_positional_bind)
@@ -308,10 +327,11 @@ namespace httplib::db
         }
 
         impl_->need_params_reset = true;
-        co_return co_await impl_->session->execute_prepared(impl_->sql,
-                                                            std::move(params),
+        co_return co_await impl_->session->execute_prepared(rendered.sql,
+                                                            std::move(rendered.params),
                                                             impl_->original_sql,
-                                                            std::move(names));
+                                                            std::move(names),
+                                                            !rendered.expanded);
     }
 
 } // namespace httplib::db

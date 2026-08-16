@@ -11,13 +11,13 @@
 namespace httplib::server::middleware
 {
 
-    struct mysql_middleware_options
+    struct db_middleware_options
     {
         bool auto_transaction = false;
         std::chrono::steady_clock::duration acquire_timeout = std::chrono::seconds(5);
     };
 
-    class HTTPLIB_API mysql_middleware
+    class HTTPLIB_API db_middleware
     {
       public:
         using value_type = std::shared_ptr<db::connection_pool::session_handle>;
@@ -29,12 +29,12 @@ namespace httplib::server::middleware
             return req.data().fetch<std::shared_ptr<db::connection_pool>>();
         }
 
-        explicit mysql_middleware(std::shared_ptr<db::connection_pool> pool, mysql_middleware_options opts = {});
-        ~mysql_middleware();
-        mysql_middleware(mysql_middleware const&);
-        mysql_middleware& operator=(mysql_middleware const&);
-        mysql_middleware(mysql_middleware&&) noexcept;
-        mysql_middleware& operator=(mysql_middleware&&) noexcept;
+        explicit db_middleware(std::shared_ptr<db::connection_pool> pool, db_middleware_options opts = {});
+        ~db_middleware();
+        db_middleware(db_middleware const&);
+        db_middleware& operator=(db_middleware const&);
+        db_middleware(db_middleware&&) noexcept;
+        db_middleware& operator=(db_middleware&&) noexcept;
 
         net::awaitable<bool> before(request& req, response& resp);
         net::awaitable<bool> after(request& req, response& resp);

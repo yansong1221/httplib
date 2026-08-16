@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <string_view>
 #include <utility>
 
 namespace httplib::db
@@ -108,5 +109,16 @@ namespace httplib::db
       private:
         std::shared_ptr<impl> impl_;
     };
+
+    /**
+     * \brief 便捷工厂：按后端名 + 连接串创建连接池。
+     * \details 池内每条连接都由 \ref session::connect 建立；backend 相关配置只需一份连接串。
+     * 例：`make_pool(ex, p, "mysql", "host=127.0.0.1 user=root password=123456 db=main")`。
+     * 各后端支持的连接串键见 \ref mysql_config 与 \ref sqlite_config。
+     */
+    HTTPLIB_API connection_pool make_pool(net::any_io_executor ex,
+                                          pool_params cfg,
+                                          std::string_view backend_name,
+                                          std::string_view conn_string);
 
 } // namespace httplib::db

@@ -1,6 +1,12 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 #include "httplib/db/connection_pool.hpp"
 #include "connection_pool_impl.h"
+#include "httplib/db/exception.hpp"
+#include "httplib/db/session.hpp"
+#include "registry.hpp"
+#include <boost/system/error_code.hpp>
+#include <string>
+#include <utility>
 
 namespace httplib::db
 {
@@ -145,6 +151,24 @@ namespace httplib::db
     connection_pool::set_logger(std::shared_ptr<spdlog::logger> logger)
     {
         impl_->set_logger(std::move(logger));
+    }
+
+    connection_pool
+    make_pool(net::any_io_executor ex, pool_params cfg, std::string_view backend_name, std::string_view conn_string)
+    {
+        detail::register_backends();
+        if (!detail::find_backend(backend_name))
+        {
+            throw db_exception(boost::system::error_code {},
+                               "db: unknown backend '" + std::string(backend_name)
+                                   + "' (registered: " + detail::registered_backend_names() + ")");
+        }
+        return connection_pool(
+            ex,
+            std::move(cfg),
+            [name = std::string(backend_name),
+             conn = std::string(conn_string)](net::any_io_executor pool_ex) -> net::awaitable<std::unique_ptr<session>>
+            { co_return std::make_unique<session>(co_await session::connect(pool_ex, name, conn)); });
     }
 
 } // namespace httplib::db

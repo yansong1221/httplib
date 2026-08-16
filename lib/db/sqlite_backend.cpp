@@ -1,6 +1,7 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 #include "sqlite_backend.hpp"
 #include "httplib/db/exception.hpp"
+#include "registry.hpp"
 #include <sqlite3.h>
 #include <stdexcept>
 
@@ -58,6 +59,11 @@ namespace httplib::db::detail
                         {
                             auto s = v.to_string();
                             rc = sqlite3_bind_text(stmt, idx, s.data(), static_cast<int>(s.size()), SQLITE_TRANSIENT);
+                        }
+                        else if constexpr (std::is_same_v<T, param_array>)
+                        {
+                            // 数组参数已在渲染层展开，不应到达后端。
+                            throw db_exception(boost::system::error_code {}, "db: array parameter not expanded");
                         }
                         else
                         {
@@ -244,10 +250,12 @@ namespace httplib::db::detail
             }
         }
 
-        sqlite3_finalize(stmt);
-
-        s.affected = static_cast<uint64_t>(sqlite3_changes(db_));
+        // 只读语句（SELECT 等）不影响行数；sqlite3_changes 只对 INSERT/UPDATE/DELETE 有意义，
+        // 否则会把上一条 DML 的计数泄漏给 SELECT 结果。必须在 finalize 之前取值。
+        s.affected = sqlite3_stmt_readonly(stmt) ? 0 : static_cast<uint64_t>(sqlite3_changes(db_));
         s.last_insert_id = static_cast<uint64_t>(sqlite3_last_insert_rowid(db_));
+
+        sqlite3_finalize(stmt);
 
         std::vector<result::resultset> sets;
         sets.push_back(std::move(s));
@@ -261,7 +269,7 @@ namespace httplib::db::detail
     }
 
     net::awaitable<result>
-    sqlite_backend::execute(std::string_view sql, std::vector<param> const& params)
+    sqlite_backend::execute(std::string_view sql, std::vector<param> const& params, bool /*cacheable*/)
     {
         co_return exec(sql, params);
     }
@@ -285,6 +293,19 @@ namespace httplib::db::detail
     {
         co_await execute("ROLLBACK");
         co_return;
+    }
+
+    void
+    register_sqlite_backend()
+    {
+        register_backend("sqlite",
+                         [](net::any_io_executor ex, options const& opts) -> std::unique_ptr<backend>
+                         {
+                             (void)ex;
+                             sqlite_config cfg;
+                             cfg.path = opts.get_or("db", opts.get_or("path", cfg.path));
+                             return std::make_unique<sqlite_backend>(std::move(cfg));
+                         });
     }
 
 } // namespace httplib::db::detail

@@ -41,7 +41,10 @@ namespace httplib::db::detail
         virtual net::awaitable<result> execute(std::string_view sql) = 0;
 
         /// 执行带参数 SQL（参数按占位符出现顺序排列）。
-        virtual net::awaitable<result> execute(std::string_view sql, std::vector<param> const& params) = 0;
+        /// cacheable=false 表示占位符数量随参数变化（数组展开），后端不得缓存该语句。
+        virtual net::awaitable<result> execute(std::string_view sql,
+                                               std::vector<param> const& params,
+                                               bool cacheable = true) = 0;
 
         virtual net::awaitable<void> begin() = 0;
         virtual net::awaitable<void> commit() = 0;

@@ -24,7 +24,9 @@ namespace httplib::db::detail
         bool alive() const override { return db_ != nullptr; }
 
         net::awaitable<result> execute(std::string_view sql) override;
-        net::awaitable<result> execute(std::string_view sql, std::vector<param> const& params) override;
+        net::awaitable<result> execute(std::string_view sql,
+                                       std::vector<param> const& params,
+                                       bool cacheable = true) override;
 
         net::awaitable<void> begin() override;
         net::awaitable<void> commit() override;

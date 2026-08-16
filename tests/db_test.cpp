@@ -3,10 +3,11 @@
 #include "httplib/db/config.hpp"
 #include "httplib/db/connection_pool.hpp"
 #include "httplib/db/exception.hpp"
+#include "httplib/db/options.hpp"
 #include "httplib/db/result.hpp"
 #include "httplib/db/session.hpp"
 #include "httplib/server/middleware/data.hpp"
-#include "httplib/server/middleware/mysql_middleware.hpp"
+#include "httplib/server/middleware/db_middleware.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include <boost/asio/co_spawn.hpp>
@@ -43,11 +44,7 @@ namespace
     db::connection_pool
     make_pool(net::any_io_executor ex, db::pool_params p = make_cfg(), db::mysql_config mc = make_mysql_cfg())
     {
-        return db::connection_pool(
-            ex,
-            std::move(p),
-            [mc = std::move(mc)](net::any_io_executor ex) -> net::awaitable<std::unique_ptr<db::session>>
-            { co_return std::make_unique<db::session>(co_await db::session::connect(ex, mc)); });
+        return db::make_pool(ex, std::move(p), "mysql", mc.to_options().to_connection_string());
     }
 
     template <typename F>
@@ -128,12 +125,270 @@ TEST_CASE("config: defaults", "[db]")
     REQUIRE(c.port == 3306);
     REQUIRE(c.connect_timeout == std::chrono::seconds(5));
     REQUIRE(c.max_cached_statements == 64);
-    REQUIRE(c.time_zone == "+00:00");
+    REQUIRE(c.time_zone.empty());
 
     db::pool_params p;
     REQUIRE(p.min_connections == 2);
     REQUIRE(p.max_connections == 16);
     REQUIRE_FALSE(p.validate_on_borrow);
+}
+
+TEST_CASE("db options: parse connection string", "[db]")
+{
+    auto o = db::options::parse("host=127.0.0.1 port=3306 user=root password=123456 db=main");
+    REQUIRE(o.get_or("host") == "127.0.0.1");
+    REQUIRE(*o.as_uint16("port") == 3306);
+    REQUIRE(o.get_or("user") == "root");
+    REQUIRE(o.get_or("password") == "123456");
+    REQUIRE(o.get_or("db") == "main");
+    REQUIRE_FALSE(o.has("time_zone"));
+    REQUIRE(o.get_or("missing", "default") == "default");
+
+    auto q = db::options::parse("db=\"my db\" time_zone='+08:00' ssl=1 connect_timeout=3");
+    REQUIRE(q.get_or("db") == "my db");
+    REQUIRE(q.get_or("time_zone") == "+08:00");
+    REQUIRE(*q.as_bool("ssl"));
+    REQUIRE(*q.as_seconds("connect_timeout") == std::chrono::seconds(3));
+
+    REQUIRE(db::options::parse("").get_or("x", "y") == "y");
+    REQUIRE_FALSE(db::options::parse("port=abc").as_uint16("port").has_value());
+}
+
+TEST_CASE("db options: parse syntax edge cases", "[db]")
+{
+    // 重复键：后者覆盖前者
+    auto dup = db::options::parse("user=a user=b");
+    REQUIRE(dup.get_or("user") == "b");
+
+    // 值含 '='（不加引号，读到空白为止）
+    auto eq = db::options::parse("token=sha256:abc=def db=main");
+    REQUIRE(eq.get_or("token") == "sha256:abc=def");
+    REQUIRE(eq.get_or("db") == "main");
+
+    // 引号内转义：反斜杠转义双引号；未加引号的值里反斜杠原样保留
+    auto esc = db::options::parse("db=\"my \\\"db\\\"\" path=a\\b");
+    REQUIRE(esc.get_or("db") == "my \"db\"");
+    REQUIRE(esc.get_or("path") == "a\\b");
+
+    // 裸键无 '=' → 值为空
+    auto bare = db::options::parse("user");
+    REQUIRE(bare.has("user"));
+    REQUIRE(bare.get_or("user").empty());
+
+    // 显式空值
+    auto emptyv = db::options::parse("a= b=c");
+    REQUIRE(emptyv.get_or("a").empty());
+    REQUIRE(emptyv.get_or("b") == "c");
+
+    // 多余/首尾空白
+    auto ws = db::options::parse("   a=1 \t b=2   ");
+    REQUIRE(ws.get_or("a") == "1");
+    REQUIRE(ws.get_or("b") == "2");
+
+    // 以 '=' 开头的垃圾 token 被忽略
+    auto junk = db::options::parse("=1 user=root");
+    REQUIRE(junk.get_or("user") == "root");
+
+    // 单引号与双引号等价
+    auto sq = db::options::parse("db='a b' x=\"c d\"");
+    REQUIRE(sq.get_or("db") == "a b");
+    REQUIRE(sq.get_or("x") == "c d");
+}
+
+TEST_CASE("db options: typed getters", "[db]")
+{
+    auto o = db::options::parse("neg=-5 big=99999 small=123 sec=-3 sec0=0 fl=12.5 bad=abc "
+                                "b=true y=yes o=on f=false n=no ff=off z=0 u=TRUE");
+
+    REQUIRE(*o.as_int("neg") == -5);
+    REQUIRE(*o.as_uint16("small") == 123);
+    REQUIRE_FALSE(o.as_uint16("big").has_value()); // 越界
+    REQUIRE_FALSE(o.as_uint16("neg").has_value()); // 负数
+    REQUIRE_FALSE(o.as_uint16("bad").has_value()); // 非法
+    REQUIRE_FALSE(o.as_uint16("missing").has_value());
+
+    REQUIRE(*o.as_seconds("sec") == std::chrono::seconds(-3));
+    REQUIRE(*o.as_seconds("sec0") == std::chrono::seconds(0));
+    REQUIRE_FALSE(o.as_seconds("fl").has_value()); // 小数
+    REQUIRE_FALSE(o.as_seconds("bad").has_value());
+
+    REQUIRE(*o.as_bool("b"));
+    REQUIRE(*o.as_bool("y"));
+    REQUIRE(*o.as_bool("o"));
+    REQUIRE_FALSE(*o.as_bool("f"));
+    REQUIRE_FALSE(*o.as_bool("n"));
+    REQUIRE_FALSE(*o.as_bool("ff"));
+    REQUIRE_FALSE(*o.as_bool("z"));
+    REQUIRE_FALSE(o.as_bool("u").has_value()); // 大小写敏感
+    REQUIRE_FALSE(o.as_bool("bad").has_value());
+    REQUIRE_FALSE(o.as_bool("missing").has_value());
+
+    // get / has / get_or
+    REQUIRE_FALSE(o.has("missing"));
+    REQUIRE_FALSE(o.get("missing").has_value());
+    REQUIRE(o.get_or("missing", "d") == "d");
+    REQUIRE(o.has("neg"));
+    REQUIRE(*o.get("neg") == "-5");
+}
+
+TEST_CASE("db options: to_connection_string round-trip", "[db]")
+{
+    db::options a;
+    a.set("host", "127.0.0.1");
+    a.set("port", "3306");
+    auto a2 = db::options::parse(a.to_connection_string());
+    REQUIRE(a2.get_or("host") == "127.0.0.1");
+    REQUIRE(a2.to_connection_string() == a.to_connection_string());
+
+    // 含空格 / '=' / 引号的值 → 序列化加引号，可往返
+    db::options b;
+    b.set("password", "my pass");
+    b.set("db", "a=b");
+    b.set("note", "say \"hi\"");
+    auto b2 = db::options::parse(b.to_connection_string());
+    REQUIRE(b2.get_or("password") == "my pass");
+    REQUIRE(b2.get_or("db") == "a=b");
+    REQUIRE(b2.get_or("note") == "say \"hi\"");
+    REQUIRE(b2.to_connection_string() == b.to_connection_string());
+
+    // 空值
+    db::options c;
+    c.set("time_zone", "");
+    auto c2 = db::options::parse(c.to_connection_string());
+    REQUIRE(c2.has("time_zone"));
+    REQUIRE(c2.get_or("time_zone").empty());
+    REQUIRE(c2.to_connection_string() == c.to_connection_string());
+
+    // 空 options → 空串 → 空 options
+    db::options empty;
+    REQUIRE(empty.to_connection_string().empty());
+    REQUIRE(db::options::parse("").to_connection_string().empty());
+}
+
+TEST_CASE("db: connect via connection string", "[db][integration]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            std::string conn = make_mysql_cfg().to_options().to_connection_string();
+            auto sess = co_await db::session::connect(ioc.get_executor(), "mysql", conn);
+            auto r = co_await sess.query("SELECT 1 AS n");
+            REQUIRE(r.row_count() == 1);
+            REQUIRE(*r[0].as_int64("n") == 1);
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
+TEST_CASE("db: string connect aliases and defaults", "[db][integration]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            // 只给 user/password：host/port 走默认 127.0.0.1:3306
+            {
+                auto sess = co_await db::session::connect(ioc.get_executor(), "mysql", "user=root password=123456");
+                auto r = co_await sess.query("SELECT 1 AS n");
+                REQUIRE(r.row_count() == 1);
+            }
+
+            auto s0 = co_await db::session::connect(ioc.get_executor(), "mysql", "user=root password=123456");
+            co_await s0.query("CREATE DATABASE IF NOT EXISTS test");
+
+            // database= 与 db= 别名等价，且连接后默认库生效
+            for (auto const* db_key : { "database", "db" })
+            {
+                std::string conn = std::string("user=root password=123456 ") + db_key + "=test";
+                auto sess = co_await db::session::connect(ioc.get_executor(), "mysql", conn);
+                auto r = co_await sess.query("SELECT DATABASE() AS d");
+                REQUIRE(*r[0].as_string("d") == "test");
+            }
+
+            // 引号值：host 用双引号包裹
+            {
+                auto sess = co_await db::session::connect(ioc.get_executor(),
+                                                          "mysql",
+                                                          "host=\"127.0.0.1\" port=3306 user=root password=123456");
+                auto r = co_await sess.query("SELECT 1 AS n");
+                REQUIRE(r.row_count() == 1);
+            }
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
+TEST_CASE("db: string connect time_zone and charset", "[db][integration]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            {
+                auto sess = co_await db::session::connect(ioc.get_executor(),
+                                                          "mysql",
+                                                          "user=root password=123456 time_zone=+00:00");
+                auto r = co_await sess.query("SELECT @@session.time_zone AS tz");
+                REQUIRE(*r[0].as_string("tz") == "+00:00");
+            }
+            {
+                auto sess = co_await db::session::connect(ioc.get_executor(),
+                                                          "mysql",
+                                                          "user=root password=123456 charset=utf8mb4");
+                auto r = co_await sess.query("SELECT @@character_set_connection AS cs");
+                REQUIRE(*r[0].as_string("cs") == "utf8mb4");
+            }
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
+TEST_CASE("db: unknown backend throws", "[db]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            bool thrown = false;
+            try
+            {
+                auto sess = co_await db::session::connect(ioc.get_executor(), "oracle", "user=x");
+            }
+            catch (db::db_exception const&)
+            {
+                thrown = true;
+            }
+            REQUIRE(thrown);
+            REQUIRE_THROWS_AS(db::make_pool(ioc.get_executor(), db::pool_params {}, "oracle", "user=x"),
+                              db::db_exception);
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
 }
 
 TEST_CASE("db: query bind time/datetime/null round-trip", "[db][integration]")
@@ -1229,7 +1484,7 @@ TEST_CASE("db: timestamp timezone conversion", "[db][integration]")
     }
 }
 
-TEST_CASE("db: timestamp default utc", "[db][integration]")
+TEST_CASE("db: timestamp utc explicit +00:00", "[db][integration]")
 {
     net::io_context ioc;
     std::exception_ptr err;
@@ -1239,7 +1494,8 @@ TEST_CASE("db: timestamp default utc", "[db][integration]")
         {
             db::mysql_config cfg;
             cfg.user = "root";
-            cfg.password = "123456"; // 默认 time_zone = "+00:00"
+            cfg.password = "123456";
+            cfg.time_zone = "+00:00"; // 显式 UTC 会话时区（默认空表示沿用服务器时区）
             auto sess = co_await db::session::connect(ioc.get_executor(), cfg);
             co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
             co_await sess.query("USE test");
@@ -2212,7 +2468,7 @@ TEST_CASE("db: column access on empty resultset", "[db][integration]")
 // Middleware
 // ===========================================================================
 
-TEST_CASE("mysql_middleware: throws when not registered", "[db][middleware]")
+TEST_CASE("db_middleware: throws when not registered", "[db][middleware]")
 {
     net::io_context ioc;
     std::exception_ptr err;
@@ -2226,7 +2482,7 @@ TEST_CASE("mysql_middleware: throws when not registered", "[db][middleware]")
                 "/db/nomw",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    REQUIRE_THROWS_AS(mw::fetch<mw::mysql_middleware>(req), std::exception);
+                    REQUIRE_THROWS_AS(mw::fetch<mw::db_middleware>(req), std::exception);
                     resp.set_string_content("ok"sv, "text/plain"sv);
                 });
             server.listen("127.0.0.1", 0);

@@ -2,11 +2,13 @@
 
 #include "httplib/config.hpp"
 #include "temporal.hpp"
+#include <array>
 #include <boost/json/serialize.hpp>
 #include <boost/json/value.hpp>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -23,14 +25,19 @@ namespace httplib::db
      * \details
      * `bind(v)` 为位置绑定，`bind("name", v)` 为命名绑定（对应 SQL 里的 `:name` 占位符）。
      * \n
+     * `std::optional<T>` 可作语法糖：有值 → 绑定值，nullopt → 绑定 NULL。
+     * \n
      * \warning blob（std::span<const std::byte>）以非拥有视图存储，调用方需保证缓冲区在 `query`/`execute`
      *          返回前有效。
      */
 
     namespace detail
     {
+        /// 数组参数：渲染时展开为多个 `?` 占位符。用包装类型支持 variant 自引用。
+        struct param_array;
+
         /// 参数值：monostate 表示 NULL；std::string 为拥有型字符串/JSON 序列化结果；std::span 为 blob 视图；
-        /// time_point 延迟到渲染时做时区换算。
+        /// time_point 延迟到渲染时做时区换算；param_array 表示数组（渲染时展开为多个 `?`）。
         using param = std::variant<std::monostate,
                                    int64_t,
                                    uint64_t,
@@ -40,7 +47,13 @@ namespace httplib::db
                                    date,
                                    datetime,
                                    time,
-                                   std::chrono::system_clock::time_point>;
+                                   std::chrono::system_clock::time_point,
+                                   param_array>;
+
+        struct param_array
+        {
+            std::vector<param> values;
+        };
 
         /// 参数绑定声明：name 为空表示位置绑定，否则为命名绑定。
         struct binder
@@ -146,6 +159,61 @@ namespace httplib::db
             return tp;
         }
 
+        /// std::optional：有值 → 值；nullopt → NULL。
+        template <typename T>
+        param
+        to_param(std::optional<T> v)
+        {
+            if (v)
+            {
+                return to_param(std::move(*v));
+            }
+            return std::monostate {};
+        }
+
+        /// std::array：展开为数组参数（渲染成多个 `?` 占位符）。
+        template <typename T, size_t N>
+        param
+        to_param(std::array<T, N> const& v)
+        {
+            param_array arr;
+            arr.values.reserve(N);
+            for (auto const& e : v)
+            {
+                if constexpr (std::is_same_v<T, param>)
+                {
+                    arr.values.push_back(e);
+                }
+                else
+                {
+                    arr.values.push_back(to_param(e));
+                }
+            }
+            return arr;
+        }
+
+        /// std::vector<T>：展开为数组参数（渲染成多个 `?` 占位符）。blob 请用 std::span<const std::byte>。
+        template <typename T>
+        param
+        to_param(std::vector<T> const& v)
+        {
+            static_assert(!std::is_same_v<T, std::byte>, "db: use std::span<const std::byte> for blobs");
+            param_array arr;
+            arr.values.reserve(v.size());
+            for (auto const& e : v)
+            {
+                if constexpr (std::is_same_v<T, param>)
+                {
+                    arr.values.push_back(e);
+                }
+                else
+                {
+                    arr.values.push_back(to_param(e));
+                }
+            }
+            return arr;
+        }
+
         /// 从混合变参里收集 binder（非 binder 跳过）。
         template <typename E>
         void
@@ -157,6 +225,10 @@ namespace httplib::db
             }
         }
     } // namespace detail
+
+    /// 公共别名：参数类型与转换函数（构造异构数组绑定时可显式使用）。
+    using detail::param;
+    using detail::to_param;
 
     /// 位置式参数绑定（按出现顺序对应 `:name` 占位符）。
     template <typename T>
