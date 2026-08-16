@@ -164,7 +164,7 @@ namespace httplib::db::detail
                     else if constexpr (std::is_same_v<T, std::string>)
                     {
                         b.ctype = SQL_C_CHAR;
-                        b.sqltype = SQL_VARCHAR;
+                        b.sqltype = v.size() > 8000 ? SQL_LONGVARCHAR : SQL_VARCHAR;
                         b.colsize = static_cast<SQLULEN>(v.size());
                         b.len = static_cast<SQLLEN>(v.size()) + 1;
                         b.ind = static_cast<SQLLEN>(v.size());
@@ -338,8 +338,9 @@ namespace httplib::db::detail
                     break;
                 }
                 // SQL Server (MAX) 类型在 SQL_SUCCESS_WITH_INFO 时 ind 是剩余字节数，
-                // 此时缓冲区必然已填满；仅 SQL_SUCCESS（末块）时 ind 才是本块实际长度。
-                size_t n = rc == SQL_SUCCESS ? static_cast<size_t>(ind) : sizeof(buf);
+                // 此时缓冲区必然已填满（字符数据最多 bufferlen-1，留 null 终止位），
+                // 仅 SQL_SUCCESS（末块）时 ind 才是本块实际长度。
+                size_t n = rc == SQL_SUCCESS ? static_cast<size_t>(ind) : sizeof(buf) - 1;
                 out.append(buf, n);
                 if (rc == SQL_SUCCESS)
                 {

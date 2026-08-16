@@ -3,7 +3,10 @@
 #include "httplib/db/exception.hpp"
 #include "httplib/db/session.hpp"
 #include "httplib/db/temporal.hpp"
+#include <atomic>
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/use_awaitable.hpp>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
@@ -306,6 +309,161 @@ TEST_CASE("db(odbc): uniqueidentifier", "[db][odbc]")
             auto rn = co_await sess.query("SELECT g FROM httplib_odbc_u WHERE g IS NULL");
             REQUIRE(rn.row_count() == 1);
             REQUIRE(!rn[0].as_string("g").has_value());
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    rethrow_or_skip(err);
+}
+
+TEST_CASE("db(odbc): async notification (slow query does not block io thread)", "[db][odbc]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    std::atomic_bool query_done { false };
+    bool timer_fired_while_pending = false;
+
+    // 慢查询协程：WAITFOR DELAY 强制驱动走 SQL_STILL_EXECUTING → 事件通知 → SQLCompleteAsync。
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            auto sess = co_await db::session::connect(ioc.get_executor(), odbc_test_config());
+            co_await sess.query("WAITFOR DELAY '00:00:02'");
+            query_done.store(true);
+        },
+        [&](std::exception_ptr e) { err = e; });
+
+    // 定时器协程：300ms 后检查慢查询是否仍在执行。若 ODBC 调用阻塞了 io 线程，
+    // 该定时器要等慢查询结束（2s）后才能触发，timer_fired_while_pending 为 false。
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            net::steady_timer timer(ioc.get_executor(), std::chrono::milliseconds { 300 });
+            co_await timer.async_wait(net::use_awaitable);
+            timer_fired_while_pending = !query_done.load();
+        },
+        [&](std::exception_ptr e) { err = e; });
+
+    ioc.run();
+    rethrow_or_skip(err);
+    REQUIRE(timer_fired_while_pending);
+}
+
+TEST_CASE("db(odbc): multiple result sets", "[db][odbc]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            auto sess = co_await db::session::connect(ioc.get_executor(), odbc_test_config());
+            auto r = co_await sess.query("SELECT 1 AS a; SELECT 'x' AS b");
+            REQUIRE(r.resultset_count() == 2);
+            REQUIRE(*r[0].as_int64("a") == 1);
+            REQUIRE(r.next_resultset());
+            REQUIRE(*r[0].as_string("b") == "x");
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    rethrow_or_skip(err);
+}
+
+TEST_CASE("db(odbc): big text VARCHAR(MAX) chunked read", "[db][odbc]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            auto sess = co_await db::session::connect(ioc.get_executor(), odbc_test_config());
+            co_await sess.query(
+                "IF OBJECT_ID('httplib_odbc_bigtext', 'U') IS NOT NULL DROP TABLE httplib_odbc_bigtext");
+            co_await sess.query(
+                "CREATE TABLE httplib_odbc_bigtext (id INT IDENTITY(1,1) PRIMARY KEY, t VARCHAR(MAX) NOT NULL)");
+
+            // 12000 字节文本：触发 SQL_LONGVARCHAR 绑定 + read_text 的 SQL_SUCCESS_WITH_INFO 分块路径。
+            std::string txt;
+            txt.reserve(12000);
+            for (int i = 0; i < 12000; ++i)
+            {
+                txt.push_back(static_cast<char>('a' + (i % 26)));
+            }
+            co_await sess.query("INSERT INTO httplib_odbc_bigtext (t) VALUES (:t)", db::bind("t", txt));
+            auto r = co_await sess.query("SELECT TOP 1 t FROM httplib_odbc_bigtext ORDER BY id DESC");
+            REQUIRE(r.row_count() == 1);
+            REQUIRE(*r[0].as_string("t") == txt);
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    rethrow_or_skip(err);
+}
+
+TEST_CASE("db(odbc): datetimeoffset / time2 type mapping", "[db][odbc]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            auto sess = co_await db::session::connect(ioc.get_executor(), odbc_test_config());
+            co_await sess.query("IF OBJECT_ID('httplib_odbc_map', 'U') IS NOT NULL DROP TABLE httplib_odbc_map");
+            co_await sess.query("CREATE TABLE httplib_odbc_map (id INT IDENTITY(1,1) PRIMARY KEY, "
+                                "o DATETIMEOFFSET(6) NULL, t TIME(3) NULL, ts DATETIME2(7) NULL)");
+
+            co_await sess.query("INSERT INTO httplib_odbc_map (o, t, ts) VALUES "
+                                "(CAST('2024-03-05 10:20:30.123456' AS DATETIME2), "
+                                "CAST('10:20:30.123' AS TIME(3)), "
+                                "CAST('2024-03-05 10:20:30.1234567' AS DATETIME2(7)))");
+            // DATETIMEOFFSET 列按客户端本地时区还原，故先取会话时区偏移（分钟）来算期望值；
+            // 无偏移的 datetime2 字面量按服务器本地时区写入 DATETIMEOFFSET 列。
+            auto offq = co_await sess.query("SELECT DATEDIFF(MINUTE, GETUTCDATE(), GETDATE()) AS offset_min");
+            int64_t off_min = *offq[0].as_int64("offset_min");
+            int64_t total = 10 * 60 + 20 + off_min;
+            db::datetime o_expected {
+                2024, 3, 5, static_cast<unsigned>((total / 60) % 24), static_cast<unsigned>(total % 60), 30, 123456
+            };
+            auto r = co_await sess.query("SELECT TOP 1 o, t, ts FROM httplib_odbc_map ORDER BY id DESC");
+            REQUIRE(r.row_count() == 1);
+            // DATETIMEOFFSET → SQL_SS_TIMESTAMPOFFSET → datetime
+            REQUIRE(r.column_type(0) == db::column_type::datetime);
+            REQUIRE(*r[0].as_datetime("o") == o_expected);
+            // TIME(3) → SQL_SS_TIME2 → time（秒以下不读小数）
+            REQUIRE(r.column_type(1) == db::column_type::time);
+            REQUIRE(*r[0].as_time("t") == db::time { 10, 20, 30, 0 });
+            // DATETIME2(7) → SQL_SS_TIMESTAMP2 → datetime
+            REQUIRE(r.column_type(2) == db::column_type::datetime);
+            REQUIRE(*r[0].as_datetime("ts") == db::datetime { 2024, 3, 5, 10, 20, 30, 123456 });
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    rethrow_or_skip(err);
+}
+
+TEST_CASE("db(odbc): ping and close_statement lifecycle", "[db][odbc]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            auto sess = co_await db::session::connect(ioc.get_executor(), odbc_test_config());
+            REQUIRE(co_await sess.ping());
+
+            // 反复创建/销毁 prepared statement，触发 close_statement 资源释放路径。
+            for (int i = 0; i < 10; ++i)
+            {
+                auto r = co_await sess.stmt("SELECT :a AS x").execute(db::bind("a", i));
+                REQUIRE(*r[0].as_int64("x") == i);
+            }
+            // 销毁后连接仍可正常使用，且 prepared 语句可重建。
+            REQUIRE(co_await sess.ping());
+            auto r = co_await sess.stmt("SELECT :a AS x").execute(db::bind("a", 99));
+            REQUIRE(*r[0].as_int64("x") == 99);
         },
         [&](std::exception_ptr e) { err = e; });
     ioc.run();
