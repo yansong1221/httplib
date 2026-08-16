@@ -469,4 +469,78 @@ TEST_CASE("db(odbc): ping and close_statement lifecycle", "[db][odbc]")
     ioc.run();
     rethrow_or_skip(err);
 }
+TEST_CASE("db(odbc): error paths", "[db][odbc]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            auto sess = co_await db::session::connect(ioc.get_executor(), odbc_test_config());
+            co_await setup_database(sess);
+
+            // 主键冲突 → SQL Server 原生错误 2627 → db_exception（含诊断文本）
+            co_await sess.query("IF OBJECT_ID('httplib_odbc_pk', 'U') IS NOT NULL DROP TABLE httplib_odbc_pk");
+            co_await sess.query("CREATE TABLE httplib_odbc_pk (id INT PRIMARY KEY, v INT NOT NULL)");
+            co_await sess.query("INSERT INTO httplib_odbc_pk (id, v) VALUES (1, 10)");
+            REQUIRE_THROWS_AS(co_await sess.query("INSERT INTO httplib_odbc_pk (id, v) VALUES (1, 20)"),
+                              db::db_exception);
+
+            // 类型转换失败 → SQL Server 原生错误 245 → db_exception
+            co_await sess.query("IF OBJECT_ID('httplib_odbc_conv', 'U') IS NOT NULL DROP TABLE httplib_odbc_conv");
+            co_await sess.query("CREATE TABLE httplib_odbc_conv (id INT IDENTITY(1,1) PRIMARY KEY, v INT NULL)");
+            REQUIRE_THROWS_AS(co_await sess.query("INSERT INTO httplib_odbc_conv (v) VALUES (:v)",
+                                                  db::bind("v", std::string("not_a_number"))),
+                              db::db_exception);
+
+            // 数值越界（超出 INT 范围）→ SQL Server 原生错误 220/2628 → db_exception
+            co_await sess.query("IF OBJECT_ID('httplib_odbc_range', 'U') IS NOT NULL DROP TABLE httplib_odbc_range");
+            co_await sess.query("CREATE TABLE httplib_odbc_range (id INT IDENTITY(1,1) PRIMARY KEY, v SMALLINT NULL)");
+            REQUIRE_THROWS_AS(co_await sess.query("INSERT INTO httplib_odbc_range (v) VALUES (:v)",
+                                                  db::bind("v", int64_t { 99999999 })),
+                              db::db_exception);
+
+            // 唯一约束冲突 → db_exception
+            co_await sess.query("IF OBJECT_ID('httplib_odbc_uniq', 'U') IS NOT NULL DROP TABLE httplib_odbc_uniq");
+            co_await sess.query(
+                "CREATE TABLE httplib_odbc_uniq (id INT IDENTITY(1,1) PRIMARY KEY, v INT UNIQUE NOT NULL)");
+            co_await sess.query("INSERT INTO httplib_odbc_uniq (v) VALUES (:v)", db::bind("v", 7));
+            REQUIRE_THROWS_AS(co_await sess.query("INSERT INTO httplib_odbc_uniq (v) VALUES (:v)", db::bind("v", 7)),
+                              db::db_exception);
+
+            // 绑定位置/命名混用 → 通用层抛 runtime_error
+            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x").bind(1).bind("a", 2).execute(), std::runtime_error);
+            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x").bind("a", 2).bind(1).execute(), std::runtime_error);
+
+            // 同名重复绑定 → 后者生效（不抛）
+            auto dup = co_await sess.stmt("SELECT :v AS x").bind("v", 1).bind("v", 2).execute();
+            REQUIRE(*dup[0].as_int64("x") == 2);
+
+            // 位置绑定数量多于占位符 → db_exception（后端参数不匹配）
+            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x").bind(1).bind(2).execute(), db::db_exception);
+
+            // 事务内出错 → with_transaction 自动回滚，数据不落库
+            REQUIRE_THROWS_AS(co_await sess.with_transaction(
+                                  [&](db::session& s) -> net::awaitable<void>
+                                  {
+                                      co_await s.query("INSERT INTO httplib_odbc_i (v) VALUES (:v)", db::bind("v", 99));
+                                      co_await s.query("INSERT INTO httplib_odbc_pk (id, v) VALUES (1, 99)");
+                                  }),
+                              db::db_exception);
+            auto after = co_await sess.query("SELECT COUNT(*) AS c FROM httplib_odbc_i WHERE v = 99");
+            REQUIRE(*after[0].as_int64("c") == 0);
+
+            // NULL 读回：字符串/二进制 NULL 列 → as_string / as_blob 返回 nullopt
+            // （NULL 绑定走 VARCHAR 类型，插不进 VARBINARY 列，故用 SQL 字面 NULL）
+            co_await sess.query("INSERT INTO httplib_odbc_t (b, d) VALUES (NULL, NULL)");
+            auto rn = co_await sess.query("SELECT TOP 1 b, d FROM httplib_odbc_t WHERE b IS NULL ORDER BY id DESC");
+            REQUIRE(rn.row_count() == 1);
+            REQUIRE(!rn[0].as_string("b").has_value());
+            REQUIRE(!rn[0].as_blob("d").has_value());
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    rethrow_or_skip(err);
+}
 #endif // HTTPLIB_ENABLED_DATABASE

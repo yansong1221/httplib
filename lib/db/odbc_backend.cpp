@@ -301,15 +301,23 @@ namespace httplib::db::detail
         net::awaitable<std::string>
         read_text(SQLHSTMT stmt, net::windows::object_handle& obj, SQLSMALLINT col, bool& is_null)
         {
+            // 用真实小缓冲探测：NULL 列在本驱动下以 SQL_NULL_DATA 报告（nullptr/0 探测会 SQL_ERROR）。
             SQLLEN ind = 0;
-            SQLRETURN rc = co_await odbc_async(stmt,
-                                               SQL_HANDLE_STMT,
-                                               obj,
-                                               [&] { return SQLGetData(stmt, col, SQL_C_CHAR, nullptr, 0, &ind); });
+            char probe[256];
+            SQLRETURN rc
+                = co_await odbc_async(stmt,
+                                      SQL_HANDLE_STMT,
+                                      obj,
+                                      [&] { return SQLGetData(stmt, col, SQL_C_CHAR, probe, sizeof(probe), &ind); });
             if (rc == SQL_NO_DATA || ind == SQL_NULL_DATA)
             {
                 is_null = true;
                 co_return std::string {};
+            }
+            if (rc != SQL_SUCCESS && rc != SQL_SUCCESS_WITH_INFO)
+            {
+                throw db_exception(boost::system::error_code {},
+                                   "db: odbc read text: " + odbc_error_text(stmt, SQL_HANDLE_STMT));
             }
             is_null = false;
             std::string out;
@@ -317,6 +325,14 @@ namespace httplib::db::detail
             {
                 out.reserve(static_cast<size_t>(ind) + 1);
             }
+            if (rc == SQL_SUCCESS)
+            {
+                // 整个值已放进探测缓冲（字符数据带 null 终止位，长度取 ind）。
+                out.append(probe, static_cast<size_t>(ind));
+                co_return out;
+            }
+            // 值超出一个缓冲：探测缓冲已填满（字符数据最多 bufferlen-1，留 null 终止位）。
+            out.append(probe, sizeof(probe) - 1);
             char buf[4096];
             while (true)
             {
@@ -354,15 +370,23 @@ namespace httplib::db::detail
         net::awaitable<std::vector<std::byte>>
         read_blob(SQLHSTMT stmt, net::windows::object_handle& obj, SQLSMALLINT col, bool& is_null)
         {
+            // 用真实小缓冲探测：NULL 列在本驱动下以 SQL_NULL_DATA 报告（nullptr/0 探测会 SQL_ERROR）。
             SQLLEN ind = 0;
-            SQLRETURN rc = co_await odbc_async(stmt,
-                                               SQL_HANDLE_STMT,
-                                               obj,
-                                               [&] { return SQLGetData(stmt, col, SQL_C_BINARY, nullptr, 0, &ind); });
-            if (ind == SQL_NULL_DATA)
+            std::byte probe[256];
+            SQLRETURN rc
+                = co_await odbc_async(stmt,
+                                      SQL_HANDLE_STMT,
+                                      obj,
+                                      [&] { return SQLGetData(stmt, col, SQL_C_BINARY, probe, sizeof(probe), &ind); });
+            if (rc == SQL_NO_DATA || ind == SQL_NULL_DATA)
             {
                 is_null = true;
                 co_return std::vector<std::byte> {};
+            }
+            if (rc != SQL_SUCCESS && rc != SQL_SUCCESS_WITH_INFO)
+            {
+                throw db_exception(boost::system::error_code {},
+                                   "db: odbc read blob: " + odbc_error_text(stmt, SQL_HANDLE_STMT));
             }
             is_null = false;
             std::vector<std::byte> out;
@@ -370,6 +394,12 @@ namespace httplib::db::detail
             {
                 out.reserve(static_cast<size_t>(ind));
             }
+            if (rc == SQL_SUCCESS)
+            {
+                out.insert(out.end(), probe, probe + static_cast<size_t>(ind));
+                co_return out;
+            }
+            out.insert(out.end(), probe, probe + sizeof(probe));
             std::byte buf[4096];
             while (true)
             {
