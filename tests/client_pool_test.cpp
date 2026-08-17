@@ -1,10 +1,14 @@
 #include "common.hpp"
 #include "httplib/client/client_pool.hpp"
+#include "httplib/server/request.hpp"
+#include "httplib/server/response.hpp"
 #include "httplib/util/use_awaitable.hpp"
+#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <type_traits>
 
 namespace
 {
@@ -19,6 +23,34 @@ namespace
             [&]() -> net::awaitable<void> { co_await f(ioc); },
             [&](std::exception_ptr e) { err = e; });
         ioc.run();
+        if (err)
+            std::rethrow_exception(err);
+    }
+
+    template <typename Setup, typename Test>
+    void
+    run_with_server(Setup&& setup, Test&& test)
+    {
+        net::thread_pool pool{ 1 };
+        std::exception_ptr err;
+        net::co_spawn(
+            pool.get_executor(),
+            [&]() -> net::awaitable<void>
+            {
+                httplib::server::http_server server(pool.get_executor());
+                auto null_sink = std::make_shared<spdlog::sinks::null_sink_mt>();
+                server.set_logger(std::make_shared<spdlog::logger>("test", null_sink));
+                setup(server);
+                server.listen("127.0.0.1", 0);
+                auto ep = server.local_endpoint();
+                server.run();
+
+                co_await test(pool.get_executor(), ep);
+
+                server.stop();
+            },
+            [&](std::exception_ptr e) { err = e; });
+        pool.join();
         if (err)
             std::rethrow_exception(err);
     }
@@ -361,6 +393,164 @@ TEST_CASE("client_pool: release with unmatched url is safe", "[client_pool]")
 
             h_b = {};
             REQUIRE(p.stats("10.0.0.1", 80, false).idle == 1);
+
+            p.stop();
+        });
+}
+
+// ===========================================================================
+// URL normalization, max-size semantics, error codes and move semantics
+// ===========================================================================
+
+TEST_CASE("client_pool: stats(url) should match acquire(url) normalization", "[client_pool]")
+{
+    run(
+        [](net::io_context& ioc) -> net::awaitable<void>
+        {
+            httplib::client::http_client_pool p(ioc.get_executor(), 4);
+            p.start();
+
+            auto h = co_await p.async_acquire("http://127.0.0.1:80");
+            REQUIRE(h);
+            REQUIRE_FALSE(h.has_error());
+
+            // pool key drops the default port ("http://127.0.0.1"), but stats(url)
+            // looks up the raw string, so the two disagree.
+            auto sUrl = p.stats("http://127.0.0.1:80");
+            auto sHost = p.stats("127.0.0.1", 80, false);
+            CHECK(sHost.active == 1);
+            CHECK(sUrl.active == sHost.active);
+
+            p.stop();
+        });
+}
+
+TEST_CASE("client_pool: stats(url) with path/query does not resolve to pool key", "[client_pool]")
+{
+    run(
+        [](net::io_context& ioc) -> net::awaitable<void>
+        {
+            httplib::client::http_client_pool p(ioc.get_executor(), 4);
+            p.start();
+
+            auto h = co_await p.async_acquire("http://127.0.0.1:9999");
+            REQUIRE(h);
+            REQUIRE_FALSE(h.has_error());
+
+            auto s = p.stats("http://127.0.0.1:9999/some/path?x=1");
+            CHECK(s.active == 1);
+
+            p.stop();
+        });
+}
+
+TEST_CASE("client_pool: set_max_size shrinks pool by evicting on release", "[client_pool]")
+{
+    run(
+        [](net::io_context& ioc) -> net::awaitable<void>
+        {
+            httplib::client::http_client_pool p(ioc.get_executor(), 2);
+            p.start();
+
+            auto h1 = co_await p.async_acquire("127.0.0.1", 80, false);
+            auto h2 = co_await p.async_acquire("127.0.0.1", 80, false);
+            REQUIRE(h1);
+            REQUIRE(h2);
+            CHECK(p.stats("127.0.0.1", 80, false).active == 2);
+
+            p.set_max_size(1);
+
+            // Releasing while active still exceeds the new max must close the
+            // connection instead of returning it to the pool.
+            h1 = {};
+            CHECK(p.stats("127.0.0.1", 80, false).active == 1);
+            CHECK(p.stats("127.0.0.1", 80, false).idle == 0);
+
+            h2 = {};
+            CHECK(p.stats("127.0.0.1", 80, false).active == 0);
+            CHECK(p.stats("127.0.0.1", 80, false).idle == 1);
+
+            p.stop();
+        });
+}
+
+TEST_CASE("client_pool: acquire before start reports operation_canceled", "[client_pool]")
+{
+    run(
+        [](net::io_context& ioc) -> net::awaitable<void>
+        {
+            httplib::client::http_client_pool p(ioc.get_executor(), 4);
+            auto h = co_await p.async_acquire("127.0.0.1", 80, false, std::chrono::milliseconds(50));
+            REQUIRE(h.has_error());
+            CHECK(h.error() == boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
+            p.stop();
+        });
+}
+
+TEST_CASE("client_pool: pool should be movable", "[client_pool]")
+{
+    CHECK(std::is_move_constructible_v<httplib::client::http_client_pool>);
+    CHECK(std::is_move_assignable_v<httplib::client::http_client_pool>);
+}
+
+TEST_CASE("client_pool: max_size is enforced per host", "[client_pool]")
+{
+    run(
+        [](net::io_context& ioc) -> net::awaitable<void>
+        {
+            httplib::client::http_client_pool p(ioc.get_executor(), 1);
+            p.start();
+
+            auto ha = co_await p.async_acquire("127.0.0.1", 80, false);
+            auto hb = co_await p.async_acquire("192.168.0.1", 80, false);
+            REQUIRE(ha);
+            REQUIRE(hb);
+            CHECK(p.stats("127.0.0.1", 80, false).active == 1);
+            CHECK(p.stats("192.168.0.1", 80, false).active == 1);
+
+            p.stop();
+        });
+}
+
+TEST_CASE("client_pool: reuses a server-closed connection transparently", "[client_pool]")
+{
+    run_with_server(
+        [](httplib::server::http_server& server)
+        {
+            server.set_read_timeout(std::chrono::milliseconds(200));
+            server.router().template set_http_handler<http::verb::get>(
+                "/ok",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"); });
+        },
+        [](net::any_io_executor ex, httplib::tcp::endpoint const& ep) -> net::awaitable<void>
+        {
+            httplib::client::http_client_pool p(ex, 1, std::chrono::seconds(30));
+            p.start();
+
+            auto host = ep.address().to_string();
+            auto port = ep.port();
+
+            {
+                auto h = co_await p.async_acquire(host, port, false);
+                REQUIRE(h);
+                auto r = co_await h->async_get("/ok");
+                REQUIRE(r.has_value());
+            }
+            CHECK(p.stats(host, port, false).idle == 1);
+
+            // The server closes the idle connection after its read timeout.
+            net::steady_timer timer(ex);
+            timer.expires_after(std::chrono::milliseconds(800));
+            boost::system::error_code ec;
+            co_await timer.async_wait(httplib::util::net_awaitable[ec]);
+
+            // The pool hands back the same (now-dead) connection; http_client must
+            // transparently reconnect instead of failing the request.
+            auto h2 = co_await p.async_acquire(host, port, false);
+            REQUIRE(h2);
+            auto r2 = co_await h2->async_get("/ok");
+            CHECK(r2.has_value());
 
             p.stop();
         });

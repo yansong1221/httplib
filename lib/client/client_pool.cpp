@@ -80,7 +80,7 @@ namespace httplib::client
         {
             if (stopped_)
             {
-                co_return client_handle(boost::system::errc::make_error_code(boost::system::errc::wrong_protocol_type));
+                co_return client_handle(boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
             }
 
             auto self = shared_from_this();
@@ -143,7 +143,7 @@ namespace httplib::client
             }
             st_it->second.active_count--;
 
-            if (!conn->has_active_session())
+            if (!conn->has_active_session() && st_it->second.active_count < static_cast<int64_t>(max_size_))
             {
                 // conn->close();
                 // FIXME: close disabled for testing
@@ -441,7 +441,18 @@ namespace httplib::client
     {
     }
 
-    http_client_pool::~http_client_pool() { impl_->stop(); }
+    http_client_pool::~http_client_pool()
+    {
+        if (impl_)
+        {
+            impl_->stop();
+        }
+    }
+
+    http_client_pool::http_client_pool(http_client_pool&& other) noexcept = default;
+
+    http_client_pool&
+    http_client_pool::operator=(http_client_pool&& other) noexcept = default;
 
     void
     http_client_pool::start()
@@ -536,8 +547,16 @@ namespace httplib::client
     httplib::client::http_client_pool::pool_stats
     http_client_pool::stats(std::string_view url) const
     {
-        std::string u(url);
-        return impl_->stats(u);
+        auto r = boost::urls::parse_uri(url);
+        if (!r)
+        {
+            return {};
+        }
+        auto const& u = *r;
+        auto host = u.host();
+        auto port = u.port_number() ? u.port_number() : (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
+        auto ssl = u.scheme_id() == boost::urls::scheme::https;
+        return impl_->stats(util::make_url_value(host, port, ssl));
     }
 
 } // namespace httplib::client

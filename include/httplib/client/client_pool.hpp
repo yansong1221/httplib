@@ -69,6 +69,9 @@ namespace httplib::client
         http_client_pool(http_client_pool const&) = delete;
         http_client_pool& operator=(http_client_pool const&) = delete;
 
+        http_client_pool(http_client_pool&& other) noexcept;
+        http_client_pool& operator=(http_client_pool&& other) noexcept;
+
         static constexpr auto default_timeout = std::chrono::seconds(3);
 
         std::future<client_handle> acquire(std::string_view host,
