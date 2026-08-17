@@ -126,7 +126,7 @@ TEST_CASE("db(sqlite): connection pool round-trip", "[db][sqlite]")
             db::pool_params p;
             p.min_connections = 1;
             p.max_connections = 2;
-            db::connection_pool pool = db::make_pool(ioc.get_executor(), p, "sqlite", "db=" + path);
+            db::connection_pool pool = db::make_pool(ioc.get_executor(), "sqlite", "db=" + path, p);
             pool.start();
 
             auto h1 = co_await pool.async_acquire();

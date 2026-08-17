@@ -9,12 +9,12 @@
 #include "httplib/db/options.hpp"
 #include "httplib/db/result.hpp"
 #include "httplib/db/session.hpp"
+#include <atomic>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <functional>
@@ -41,9 +41,10 @@ namespace
         net::io_context ioc;
         auto ex = ioc.get_executor();
         std::exception_ptr err;
-        net::co_spawn(ex,
-                      [fn = std::forward<Fn>(fn), ex]() mutable -> net::awaitable<void> { co_await fn(ex); },
-                      [&](std::exception_ptr e) { err = e; });
+        net::co_spawn(
+            ex,
+            [fn = std::forward<Fn>(fn), ex]() mutable -> net::awaitable<void> { co_await fn(ex); },
+            [&](std::exception_ptr e) { err = e; });
         ioc.run();
         if (err)
         {
@@ -133,7 +134,7 @@ namespace
         std::atomic_bool ping_ok { true };     ///< ping 返回值（false → 连接判死）
         std::atomic<int> connect_calls { 0 };
         std::atomic<int> prepare_calls { 0 };
-        int fail_connect_at = -1;              ///< 第几次 connect 抛异常；-1 = 从不
+        int fail_connect_at = -1; ///< 第几次 connect 抛异常；-1 = 从不
     };
 
     struct fake_backend : detail::backend
@@ -221,9 +222,9 @@ TEST_CASE("db: into(vector) is cleared on empty result", "[db][regression]")
     REQUIRE(ids.empty());
 
     // sanity：非空结果先 clear 再填充。
-    db::result one({ db::result::resultset { { { db::field { static_cast<int64_t>(9) } } },
-                                              { "v" },
-                                              { db::column_type::int64 } } });
+    db::result one({
+        db::result::resultset { { { db::field { static_cast<int64_t>(9) } } }, { "v" }, { db::column_type::int64 } }
+    });
     std::vector<int64_t> vals { 1 };
     db::detail::apply_extractors(one, db::into(vals));
     REQUIRE(vals == std::vector<int64_t> { 9 });
@@ -263,7 +264,7 @@ TEST_CASE("db: pool wakes waiters when connection creation fails", "[db][regress
             cfg.health_check_interval = std::chrono::seconds(0); // 禁用健康检查
             cfg.idle_timeout = std::chrono::seconds(0);
 
-            db::connection_pool pool = db::make_pool(ex, cfg, backend_name, "");
+            db::connection_pool pool = db::make_pool(ex, backend_name, "", cfg);
             pool.start();
 
             auto h1 = co_await pool.async_acquire();
@@ -276,36 +277,38 @@ TEST_CASE("db: pool wakes waiters when connection creation fails", "[db][regress
             };
             auto r3 = std::make_shared<waiter_result>();
             auto r4 = std::make_shared<waiter_result>();
-            net::co_spawn(ex,
-                          [&pool, r3]() -> net::awaitable<void>
-                          {
-                              try
-                              {
-                                  auto h = co_await pool.async_acquire(std::chrono::milliseconds(800));
-                                  (void)h;
-                                  r3->success = true;
-                              }
-                              catch (...)
-                              {
-                              }
-                              r3->completed = true;
-                          },
-                          [](std::exception_ptr) {});
-            net::co_spawn(ex,
-                          [&pool, r4]() -> net::awaitable<void>
-                          {
-                              try
-                              {
-                                  auto h = co_await pool.async_acquire(std::chrono::milliseconds(800));
-                                  (void)h;
-                                  r4->success = true;
-                              }
-                              catch (...)
-                              {
-                              }
-                              r4->completed = true;
-                          },
-                          [](std::exception_ptr) {});
+            net::co_spawn(
+                ex,
+                [&pool, r3]() -> net::awaitable<void>
+                {
+                    try
+                    {
+                        auto h = co_await pool.async_acquire(std::chrono::milliseconds(800));
+                        (void)h;
+                        r3->success = true;
+                    }
+                    catch (...)
+                    {
+                    }
+                    r3->completed = true;
+                },
+                [](std::exception_ptr) {});
+            net::co_spawn(
+                ex,
+                [&pool, r4]() -> net::awaitable<void>
+                {
+                    try
+                    {
+                        auto h = co_await pool.async_acquire(std::chrono::milliseconds(800));
+                        (void)h;
+                        r4->success = true;
+                    }
+                    catch (...)
+                    {
+                    }
+                    r4->completed = true;
+                },
+                [](std::exception_ptr) {});
 
             // 让两个等待者都注册进 waiters_。
             co_await co_sleep(ex, std::chrono::milliseconds(150));
@@ -315,8 +318,8 @@ TEST_CASE("db: pool wakes waiters when connection creation fails", "[db][regress
             co_await h1->ping(); // live = false
             h1.release();
 
-            bool done = co_await co_wait_for(
-                ex, std::chrono::seconds(3), [&] { return r3->completed && r4->completed; });
+            bool done
+                = co_await co_wait_for(ex, std::chrono::seconds(3), [&] { return r3->completed && r4->completed; });
             REQUIRE(done);
 
             // 修复前：c3 失败时没有唤醒其他等待者，c4 一直睡到 800ms 超时（acquire 抛）。
@@ -345,7 +348,7 @@ TEST_CASE("db: pool stays within max_connections during health checks", "[db][re
             cfg.health_check_interval = std::chrono::seconds(10); // 首次拉取后长时间不重拉，保证断言稳定
             cfg.idle_timeout = std::chrono::seconds(0);
 
-            db::connection_pool pool = db::make_pool(ex, cfg, backend_name, "");
+            db::connection_pool pool = db::make_pool(ex, backend_name, "", cfg);
             pool.start();
 
             // 1) 预建 min 条连接。
@@ -362,19 +365,20 @@ TEST_CASE("db: pool stays within max_connections during health checks", "[db][re
             // 3) 借出：池内没有空闲连接 → 走 capacity 分支新建第 3 条（修复前突破 max_connections）。
             std::optional<db::connection_pool::session_handle> bg;
             std::atomic_bool bg_done = false;
-            net::co_spawn(ex,
-                          [&]() -> net::awaitable<void>
-                          {
-                              try
-                              {
-                                  bg.emplace(co_await pool.async_acquire(std::chrono::milliseconds(500)));
-                              }
-                              catch (...)
-                              {
-                              }
-                              bg_done.store(true);
-                          },
-                          [](std::exception_ptr) {});
+            net::co_spawn(
+                ex,
+                [&]() -> net::awaitable<void>
+                {
+                    try
+                    {
+                        bg.emplace(co_await pool.async_acquire(std::chrono::milliseconds(500)));
+                    }
+                    catch (...)
+                    {
+                    }
+                    bg_done.store(true);
+                },
+                [](std::exception_ptr) {});
             bool acq = co_await co_wait_for(ex, std::chrono::seconds(3), [&] { return bg_done.load(); });
             REQUIRE(acq);
             REQUIRE(bg.has_value());

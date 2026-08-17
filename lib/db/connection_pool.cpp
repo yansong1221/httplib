@@ -157,7 +157,7 @@ namespace httplib::db
     }
 
     connection_pool
-    make_pool(net::any_io_executor ex, pool_params cfg, std::string_view backend_name, std::string_view conn_string)
+    make_pool(net::any_io_executor ex, std::string_view backend_name, std::string_view conn_string, pool_params cfg)
     {
         detail::register_backends();
         if (!detail::find_backend(backend_name))

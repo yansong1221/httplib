@@ -10,14 +10,14 @@
 #include "httplib/server/middleware/db_middleware.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
+#include <atomic>
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/use_awaitable.hpp>
-#include <boost/asio/bind_cancellation_slot.hpp>
-#include <boost/asio/cancellation_signal.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <atomic>
 #include <cstddef>
 #include <span>
 
@@ -49,7 +49,7 @@ namespace
     db::connection_pool
     make_pool(net::any_io_executor ex, db::pool_params p = make_cfg(), db::mysql_config mc = make_mysql_cfg())
     {
-        return db::make_pool(ex, std::move(p), "mysql", mc.to_options().to_connection_string());
+        return db::make_pool(ex, "mysql", mc.to_options().to_connection_string(), std::move(p));
     }
 
     template <typename F>
@@ -385,7 +385,7 @@ TEST_CASE("db: unknown backend throws", "[db]")
                 thrown = true;
             }
             REQUIRE(thrown);
-            REQUIRE_THROWS_AS(db::make_pool(ioc.get_executor(), db::pool_params {}, "oracle", "user=x"),
+            REQUIRE_THROWS_AS(db::make_pool(ioc.get_executor(), "oracle", "user=x"),
                               db::db_exception);
         },
         [&](std::exception_ptr e) { err = e; });
@@ -1640,8 +1640,8 @@ TEST_CASE("db: mysql bit columns read as uint64", "[db][integration]")
             REQUIRE(r.column_type(1) == db::column_type::uint64);
             REQUIRE(r.column_type(2) == db::column_type::uint64);
             REQUIRE(*r[0].as_uint64("b1") == 1);
-            REQUIRE(*r[0].as_uint64("b8") == 43);       // b'101011'
-            REQUIRE(*r[0].as_uint64("b64") == 0xF0F0);  // b'1111000011110000'
+            REQUIRE(*r[0].as_uint64("b8") == 43);      // b'101011'
+            REQUIRE(*r[0].as_uint64("b64") == 0xF0F0); // b'1111000011110000'
             // 全宽 BIT(64) 极值必须无损读出。
             REQUIRE(*r[1].as_uint64("b64") == std::numeric_limits<uint64_t>::max());
 

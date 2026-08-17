@@ -117,8 +117,8 @@ namespace httplib::db
      * 各后端支持的连接串键见 \ref mysql_config 与 \ref sqlite_config。
      */
     HTTPLIB_API connection_pool make_pool(net::any_io_executor ex,
-                                          pool_params cfg,
                                           std::string_view backend_name,
-                                          std::string_view conn_string);
+                                          std::string_view conn_string,
+                                          pool_params cfg = {});
 
 } // namespace httplib::db
