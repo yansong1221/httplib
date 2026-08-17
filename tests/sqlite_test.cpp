@@ -756,122 +756,6 @@ TEST_CASE("db(sqlite): bind optional syntax sugar", "[db][sqlite]")
     }
 }
 
-TEST_CASE("db(sqlite): array binds expand for INSERT and IN", "[db][sqlite]")
-{
-    net::io_context ioc;
-    std::exception_ptr err;
-    net::co_spawn(
-        ioc,
-        [&]() -> net::awaitable<void>
-        {
-            auto sess = co_await db::session::connect(ioc.get_executor(), "sqlite", "db=:memory:");
-            co_await sess.query("CREATE TABLE t (id INTEGER PRIMARY KEY, a INTEGER, b TEXT)");
-
-            // 列式数组：`VALUES (:a, :b, :c)` 每个占位符是一列的数据，长度 1 的数组 = 一行多列
-            co_await sess.query("INSERT INTO t (id, a, b) VALUES (:ids, :as, :bs)",
-                                db::bind("ids", std::vector<int64_t> { 1 }),
-                                db::bind("as", std::vector<int64_t> { 42 }),
-                                db::bind("bs", std::vector<std::string> { std::string("x") }));
-            co_await sess.query("INSERT INTO t (id, a, b) VALUES (:ids, :as, :bs)",
-                                db::bind("ids", std::vector<int64_t> { 2 }),
-                                db::bind("as", std::vector<int64_t> { 7 }),
-                                db::bind("bs", std::vector<std::string> { std::string("y") }));
-
-            // 列式数组：等长数组 = 多行批量插入
-            co_await sess.query("INSERT INTO t (id, a, b) VALUES (:ids, :as, :bs)",
-                                db::bind("ids", std::vector<int64_t> { 5, 6 }),
-                                db::bind("as", std::vector<int64_t> { 1, 2 }),
-                                db::bind("bs", std::vector<std::string> { std::string("u"), std::string("v") }));
-
-            // IN 子句：展开为 ?,?,?
-            auto r = co_await sess.query("SELECT id, a FROM t WHERE id IN (:ids) ORDER BY id",
-                                         db::bind("ids", std::vector<int64_t> { 1, 2 }));
-            REQUIRE(r.row_count() == 2);
-            REQUIRE(*r[0].as_int64("id") == 1);
-            REQUIRE(*r[1].as_int64("id") == 2);
-
-            // std::array 数组绑定
-            auto ra = co_await sess.query("SELECT id FROM t WHERE id IN (:ids) ORDER BY id",
-                                          db::bind("ids", std::array<int64_t, 2> { 2, 1 }));
-            REQUIRE(ra.row_count() == 2);
-            REQUIRE(*ra[0].as_int64("id") == 1);
-            REQUIRE(*ra[1].as_int64("id") == 2);
-
-            // prepared_statement 列式数组绑定（长度 1 = 一行多列）
-            auto stmt = sess.stmt("INSERT INTO t (id, a, b) VALUES (:ids, :as, :bs)");
-            co_await stmt.bind("ids", std::vector<int64_t> { 3 })
-                .bind("as", std::vector<int64_t> { 1 })
-                .bind("bs", std::vector<std::string> { std::string("z") })
-                .execute();
-            auto rs = co_await sess.query("SELECT a, b FROM t WHERE id = 3");
-            REQUIRE(*rs[0].as_int64("a") == 1);
-            REQUIRE(*rs[0].as_string("b") == "z");
-
-            // 位置列式数组绑定（prepared_statement）
-            auto stmt2 = sess.stmt("INSERT INTO t (id, a, b) VALUES (:c1, :c2, :c3)");
-            co_await stmt2.bind(std::vector<int64_t> { 4 })
-                .bind(std::vector<int64_t> { 9 })
-                .bind(std::vector<std::string> { std::string("w") })
-                .execute();
-            auto rs2 = co_await sess.query("SELECT a, b FROM t WHERE id = 4");
-            REQUIRE(*rs2[0].as_int64("a") == 9);
-            REQUIRE(*rs2[0].as_string("b") == "w");
-
-            // 空数组 → 异常
-            REQUIRE_THROWS_AS(
-                co_await sess.query("SELECT id FROM t WHERE id IN (:ids)", db::bind("ids", std::vector<int64_t> {})),
-                std::runtime_error);
-        },
-        [&](std::exception_ptr e) { err = e; });
-    ioc.run();
-    if (err)
-    {
-        std::rethrow_exception(err);
-    }
-}
-
-TEST_CASE("db(sqlite): batch insert 1000 rows", "[db][sqlite]")
-{
-    net::io_context ioc;
-    std::exception_ptr err;
-    net::co_spawn(
-        ioc,
-        [&]() -> net::awaitable<void>
-        {
-            auto sess = co_await db::session::connect(ioc.get_executor(), "sqlite", "db=:memory:");
-            co_await sess.query("CREATE TABLE t (a INTEGER, b INTEGER, c INTEGER)");
-
-            std::vector<int64_t> a, b, c;
-            a.reserve(1000);
-            b.reserve(1000);
-            c.reserve(1000);
-            for (int64_t i = 0; i < 1000; ++i)
-            {
-                a.push_back(i);
-                b.push_back(i * 2);
-                c.push_back(i * 3);
-            }
-
-            auto ins = co_await sess.query("INSERT INTO t (a, b, c) VALUES (:a, :b, :c)",
-                                           db::bind("a", a),
-                                           db::bind("b", b),
-                                           db::bind("c", c));
-            REQUIRE(ins.affected_rows() == 1000);
-
-            auto r = co_await sess.query("SELECT COUNT(*), SUM(a), SUM(b), SUM(c) FROM t");
-            REQUIRE(*r[0].as_int64("COUNT(*)") == 1000);
-            REQUIRE(*r[0].as_int64("SUM(a)") == 499500);
-            REQUIRE(*r[0].as_int64("SUM(b)") == 999000);
-            REQUIRE(*r[0].as_int64("SUM(c)") == 1498500);
-        },
-        [&](std::exception_ptr e) { err = e; });
-    ioc.run();
-    if (err)
-    {
-        std::rethrow_exception(err);
-    }
-}
-
 TEST_CASE("db(sqlite): repeated named placeholders", "[db][sqlite]")
 {
     net::io_context ioc;
@@ -966,20 +850,6 @@ TEST_CASE("db(sqlite): execute with bind args", "[db][sqlite]")
             auto r = co_await sess.stmt("SELECT :a + :b AS x").execute(db::bind(10), db::bind(32));
             REQUIRE(*r[0].as_int64("x") == 42);
 
-            // 数组展开（IN）
-            co_await sess.query("CREATE TABLE t (id INTEGER PRIMARY KEY)");
-            co_await sess.query("INSERT INTO t VALUES (1), (2), (3)");
-            auto rs = co_await sess.stmt("SELECT COUNT(*) AS c FROM t WHERE id IN (:ids)")
-                          .execute(db::bind("ids", std::vector<int64_t> { 1, 3 }));
-            REQUIRE(*rs[0].as_int64("c") == 2);
-
-            // 数组展开（VALUES 多行插入）
-            auto ins = co_await sess.stmt("INSERT INTO t (id) VALUES (:row)")
-                           .execute(db::bind("row", std::vector<db::param> { db::to_param(4), db::to_param(5) }));
-            REQUIRE(ins.affected_rows() == 2);
-            auto rw = co_await sess.query("SELECT id FROM t WHERE id IN (4, 5)");
-            REQUIRE(rw.row_count() == 2);
-
             // 与链式 bind 混用
             auto mix = co_await sess.stmt("SELECT :a + :b AS x").bind(10).execute(db::bind(32));
             REQUIRE(*mix[0].as_int64("x") == 42);
@@ -1068,14 +938,6 @@ TEST_CASE("db: render_query placeholder comes from backend", "[db]")
     REQUIRE(r2.sql == "SELECT $1 + $2 AS x");
     REQUIRE(r2.params.size() == 2);
 
-    // `$N` 数组展开 + 标量混合编号
-    auto r3 = detail::render_query("SELECT * FROM t WHERE id = :id AND x IN (:xs)",
-                                   { db::bind("id", 7), db::bind("xs", std::vector<int64_t> { 1, 2 }) },
-                                   dollar);
-    REQUIRE(r3.sql == "SELECT * FROM t WHERE id = $1 AND x IN ($2,$3)");
-    REQUIRE(r3.params.size() == 3);
-    REQUIRE(r3.expanded);
-
     // `$N` 位置绑定按序编号
     auto r4 = detail::render_query("SELECT :a + :b AS x", { db::bind(1), db::bind(2) }, dollar);
     REQUIRE(r4.sql == "SELECT $1 + $2 AS x");
@@ -1095,63 +957,19 @@ TEST_CASE("db: render_query placeholder comes from backend", "[db]")
     REQUIRE(r5.sql == "SELECT :a + :a AS x");
     REQUIRE(r5.params.size() == 2);
 
-    // VALUES 数组 → 多行展开（批量插入）
-    auto r6 = detail::render_query("INSERT INTO t (id) VALUES (:row)",
-                                   { db::bind("row", std::vector<db::param> { db::to_param(4), db::to_param(5) }) },
-                                   def);
-    REQUIRE(r6.sql == "INSERT INTO t (id) VALUES (?),(?)");
-    REQUIRE(r6.params.size() == 2);
-    REQUIRE(r6.expanded);
-
-    // VALUES 多行 + `$N` 风格
-    auto r7 = detail::render_query("INSERT INTO t (id) VALUES (:row)",
-                                   { db::bind("row", std::vector<int64_t> { 1, 2, 3 }) },
-                                   dollar);
-    REQUIRE(r7.sql == "INSERT INTO t (id) VALUES ($1),($2),($3)");
-    REQUIRE(r7.params.size() == 3);
-
-    // VALUES 多列多行：每个占位符是一列的所有数据，等长数组展开为多行
-    auto r8 = detail::render_query("INSERT INTO t (id, a, b) VALUES (:ids, :as, :bs)",
-                                   { db::bind("ids", std::vector<int64_t> { 1, 2 }),
-                                     db::bind("as", std::vector<int64_t> { 42, 7 }),
-                                     db::bind("bs", std::vector<std::string> { std::string("x"), std::string("y") }) },
-                                   def);
-    REQUIRE(r8.sql == "INSERT INTO t (id, a, b) VALUES (?,?,?),(?,?,?)");
-    REQUIRE(r8.params.size() == 6);
-    REQUIRE(r8.expanded);
-
-    // 关键字小写：`values` 同样触发按列展开
-    auto r9 = detail::render_query("insert into t (id) values (:row)",
-                                   { db::bind("row", std::vector<int64_t> { 1, 2 }) },
-                                   def);
-    REQUIRE(r9.sql == "insert into t (id) values (?),(?)");
-    REQUIRE(r9.params.size() == 2);
-    REQUIRE(r9.expanded);
-
-    // 关键字大小写混合：`ValueS` 同样触发
-    auto r10 = detail::render_query("INSERT INTO t (id) ValueS (:row)",
-                                    { db::bind("row", std::vector<int64_t> { 1, 2 }) },
-                                    def);
-    REQUIRE(r10.sql == "INSERT INTO t (id) ValueS (?),(?)");
-    REQUIRE(r10.params.size() == 2);
-    REQUIRE(r10.expanded);
-
     // 字符串字面量 "values"（普通位置）不会误触发 VALUES 分支
     auto r11 = detail::render_query("SELECT :a AS x FROM t WHERE s = 'values'", { db::bind("a", 7) }, def);
     REQUIRE(r11.sql == "SELECT ? AS x FROM t WHERE s = 'values'");
     REQUIRE(r11.params.size() == 1);
-    REQUIRE(!r11.expanded);
 
     // 绑定值就是字符串 "values"
     auto r12 = detail::render_query("INSERT INTO t (s) VALUES (:s)", { db::bind("s", std::string("values")) }, def);
     REQUIRE(r12.sql == "INSERT INTO t (s) VALUES (?)");
     REQUIRE(r12.params.size() == 1);
-    REQUIRE(!r12.expanded);
 
     // VALUES 组内字符串字面量 + 占位符（单行）：字面量保留，占位符原地展开
     auto r13 = detail::render_query("INSERT INTO t (s, n) VALUES ('values', :n)", { db::bind("n", 3) }, def);
     REQUIRE(r13.sql == "INSERT INTO t (s, n) VALUES ('values', ?)");
     REQUIRE(r13.params.size() == 1);
-    REQUIRE(!r13.expanded);
 }
 #endif

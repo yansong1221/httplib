@@ -158,11 +158,6 @@ TEST_CASE("db(odbc): query and bindings", "[db][odbc]")
             REQUIRE(r5.row_count() >= 1);
             REQUIRE(*r5[0].as_datetime("f") == expected);
 
-            // 数组展开（IN）
-            auto r6 = co_await sess.query("SELECT COUNT(*) AS c FROM httplib_odbc_i WHERE v IN (:vs)",
-                                          db::bind("vs", std::vector<int64_t> { 1, 2 }));
-            REQUIRE(*r6[0].as_int64("c") == 0);
-
             // prepared_statement：命名 + 位置 + into
             co_await sess.stmt("INSERT INTO httplib_odbc_i (v) VALUES (:v)").execute(db::bind("v", 7));
             auto ps
@@ -179,49 +174,6 @@ TEST_CASE("db(odbc): query and bindings", "[db][odbc]")
 
             // 非法 SQL → db_exception
             REQUIRE_THROWS_AS(co_await sess.query("SELECT * FROM no_such_table_xyz"), db::db_exception);
-        },
-        [&](std::exception_ptr e) { err = e; });
-    ioc.run();
-    rethrow_or_skip(err);
-}
-
-TEST_CASE("db(odbc): VALUES column-wise batch insert", "[db][odbc]")
-{
-    net::io_context ioc;
-    std::exception_ptr err;
-    net::co_spawn(
-        ioc,
-        [&]() -> net::awaitable<void>
-        {
-            auto sess = co_await db::session::connect(ioc.get_executor(), odbc_test_config());
-            co_await setup_database(sess);
-
-            // 多列列式：每列一个数组，等长展开为多行
-            auto ins = co_await sess.query(
-                "INSERT INTO httplib_odbc_t (a, b) VALUES (:a, :b)",
-                db::bind("a", std::vector<int64_t> { 1, 2, 3 }),
-                db::bind("b", std::vector<std::string> { std::string("x"), std::string("y"), std::string("z") }));
-            REQUIRE(ins.affected_rows() == 3);
-            auto r = co_await sess.query("SELECT COUNT(*) AS c FROM httplib_odbc_t WHERE a IN (1, 2, 3)");
-            REQUIRE(*r[0].as_int64("c") == 3);
-
-            // 1000 行单列批量插入（SQL Server 单语句参数上限 2100，单列 1000 安全）
-            std::vector<int64_t> ids;
-            ids.reserve(1000);
-            for (int64_t i = 0; i < 1000; ++i)
-            {
-                ids.push_back(i);
-            }
-            auto big = co_await sess.query("INSERT INTO httplib_odbc_i (v) VALUES (:v)", db::bind("v", ids));
-            REQUIRE(big.affected_rows() == 1000);
-            auto sum = co_await sess.query("SELECT COUNT(*) AS c, SUM(v) AS s FROM httplib_odbc_i");
-            REQUIRE(*sum[0].as_int64("c") == 1000);
-            REQUIRE(*sum[0].as_int64("s") == 499500);
-
-            // 空数组 → 抛
-            REQUIRE_THROWS_AS(co_await sess.query("INSERT INTO httplib_odbc_i (v) VALUES (:v)",
-                                                  db::bind("v", std::vector<int64_t> {})),
-                              std::runtime_error);
         },
         [&](std::exception_ptr e) { err = e; });
     ioc.run();

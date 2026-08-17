@@ -60,11 +60,6 @@ namespace httplib::db::detail
                             auto s = v.to_string();
                             rc = sqlite3_bind_text(stmt, idx, s.data(), static_cast<int>(s.size()), SQLITE_TRANSIENT);
                         }
-                        else if constexpr (std::is_same_v<T, param_array>)
-                        {
-                            // 数组参数已在渲染层展开，不应到达后端。
-                            throw db_exception(boost::system::error_code {}, "db: array parameter not expanded");
-                        }
                         else
                         {
                             // time_point：SQLite 无时区，按 UTC 存文本

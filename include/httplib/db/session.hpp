@@ -72,7 +72,7 @@ namespace httplib::db
         {
             std::vector<detail::binder> binders;
             (detail::collect_binder(binders, std::forward<Ex>(ex)), ...);
-            auto res = co_await execute_query(sql, std::move(binders));
+            auto res = co_await execute_query(sql, std::move(binders), false);
             detail::apply_extractors(res, std::forward<Ex>(ex)...);
             co_return res;
         }
@@ -129,11 +129,9 @@ namespace httplib::db
         std::chrono::steady_clock::time_point last_ping_time() const;
         bool in_transaction() const;
 
-        /// 内部：收集/渲染参数化 SQL（binders → `?` + 平铺参数）并执行。
-        /// query 与 prepared_statement 共用；数组参数会展开为多个 `?` 并自动跳过缓存。
-        net::awaitable<result> execute_query(std::string_view sql, std::vector<detail::binder> binders);
-
       private:
+        friend class prepared_statement;
+
         struct impl;
         explicit session(std::unique_ptr<impl> p);
 
@@ -149,6 +147,9 @@ namespace httplib::db
                                                 std::string_view original_sql,
                                                 std::vector<std::string> const& names,
                                                 bool cacheable);
+        /// 内部：收集/渲染参数化 SQL（binders → `?` + 平铺参数）并执行。
+        /// query 与 prepared_statement 共用；数组参数会展开为多个 `?` 并自动跳过缓存。
+        net::awaitable<result> execute_query(std::string_view sql, std::vector<detail::binder> binders, bool cacheable);
 
         std::unique_ptr<impl> impl_;
     };

@@ -210,43 +210,6 @@ namespace
     }
 } // namespace
 
-// ---- bug 1（高）：VALUES 数组列后跟字面量被静默丢弃，必须改为抛错 ----
-
-TEST_CASE("db: VALUES literal after array column must throw", "[db][regression]")
-{
-    stub_backend stub;
-
-    // 修复前：数组列后的字面量被静默丢弃，生成列数不符的 SQL 而不抛错。
-    CHECK_THROWS(detail::render_query("INSERT INTO t (a, b) VALUES (:a, 1)",
-                                      { db::bind("a", std::vector<int64_t> { 1, 2 }) },
-                                      stub));
-    // sanity：字面量在数组列之前的对称情形本来就会抛。
-    CHECK_THROWS(detail::render_query("INSERT INTO t (a, b) VALUES (1, :a)",
-                                      { db::bind("a", std::vector<int64_t> { 1, 2 }) },
-                                      stub));
-    // sanity：数组列 + 数组列仍正常按列展开。
-    auto ok = detail::render_query("INSERT INTO t (a, b) VALUES (:a, :b)",
-                                   { db::bind("a", std::vector<int64_t> { 1, 2 }),
-                                     db::bind("b", std::vector<int64_t> { 3, 4 }) },
-                                   stub);
-    REQUIRE(ok.sql == "INSERT INTO t (a, b) VALUES (?,?),(?,?)");
-}
-
-// ---- bug 7（低）：不识别单数 `VALUE`，数组未按行展开 ----
-
-TEST_CASE("db: render_query expands singular VALUE keyword", "[db][regression]")
-{
-    stub_backend stub;
-
-    // 修复前：只识别 VALUES，`VALUE (:row)` 被当作普通括号组，数组原地展开成单行 (?,?)。
-    auto r = detail::render_query("INSERT INTO t (id) VALUE (:row)",
-                                  { db::bind("row", std::vector<int64_t> { 1, 2 }) },
-                                  stub);
-    REQUIRE(r.sql == "INSERT INTO t (id) VALUE (?),(?)");
-    REQUIRE(r.params.size() == 2);
-    REQUIRE(r.expanded);
-}
-
 // ---- bug 4（中）：into(vector) 在空结果时不清空已有数据 ----
 
 TEST_CASE("db: into(vector) is cleared on empty result", "[db][regression]")

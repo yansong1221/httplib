@@ -58,11 +58,6 @@ namespace httplib::db::detail
                     {
                         return boost::mysql::field_view(v.to_duration());
                     }
-                    else if constexpr (std::is_same_v<T, param_array>)
-                    {
-                        // 数组参数已在渲染层展开，不应到达后端。
-                        throw db_exception(boost::system::error_code {}, "db: array parameter not expanded");
-                    }
                     else
                     {
                         // time_point：延迟时区换算

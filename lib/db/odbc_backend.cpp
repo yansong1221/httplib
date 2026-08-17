@@ -260,11 +260,6 @@ namespace httplib::db::detail
                         b.ind = static_cast<SQLLEN>(sizeof(t));
                         b.data = t;
                     }
-                    else if constexpr (std::is_same_v<T, param_array>)
-                    {
-                        // 数组参数已在渲染层展开，不应到达后端。
-                        throw db_exception(boost::system::error_code {}, "db: array parameter not expanded");
-                    }
                 },
                 p);
             return b;
