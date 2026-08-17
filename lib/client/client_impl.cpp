@@ -340,7 +340,7 @@ namespace httplib::client
         auto sp = write_impl_.lock();
         if (!sp)
         {
-            sp = std::make_shared<write_session_impl>(*this);
+            sp = std::make_shared<write_session_impl>(shared_from_this());
             write_impl_ = sp;
         }
         return sp;
@@ -352,7 +352,7 @@ namespace httplib::client
         auto sp = read_impl_.lock();
         if (!sp)
         {
-            sp = std::make_shared<read_session_impl>(*this);
+            sp = std::make_shared<read_session_impl>(shared_from_this());
             read_impl_ = sp;
         }
         return sp;

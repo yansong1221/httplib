@@ -31,7 +31,7 @@ namespace httplib::client
     }
 
     http_client::http_client(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl)
-        : impl_(std::make_unique<http_client::impl>(ex, host, port, ssl))
+        : impl_(std::make_shared<http_client::impl>(ex, host, port, ssl))
     {
     }
 
@@ -50,7 +50,7 @@ namespace httplib::client
         auto port = (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
         port = u.has_port() ? u.port_number() : port;
 
-        impl_ = std::make_unique<http_client::impl>(ex, u.host(), port, u.scheme_id() == boost::urls::scheme::https);
+        impl_ = std::make_shared<http_client::impl>(ex, u.host(), port, u.scheme_id() == boost::urls::scheme::https);
     }
 
     http_client::~http_client() {}

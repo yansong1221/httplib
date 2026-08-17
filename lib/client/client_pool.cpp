@@ -5,7 +5,6 @@
 #include <atomic>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/steady_timer.hpp>
-#include <boost/asio/use_future.hpp>
 #include <boost/system/system_error.hpp>
 #include <boost/url.hpp>
 #include <deque>
@@ -50,7 +49,6 @@ namespace httplib::client
             : ex_(ex)
             , max_size_(max_size)
             , idle_timeout_(idle_timeout)
-            , cleanup_timer_(ex)
         {
         }
 
@@ -59,13 +57,22 @@ namespace httplib::client
         void
         start()
         {
+            std::lock_guard<std::mutex> lock(mutex_);
             if (!stopped_.exchange(false))
             {
                 return;
             }
+
+            // Each maintenance loop owns a fresh timer. stop() cancels the timer it
+            // finds here, so a stop()/start() sequence can never make two co_maintain
+            // coroutines share a single steady_timer (which would be UB).
+            cleanup_timer_ = std::make_shared<net::steady_timer>(ex_);
+            auto timer = cleanup_timer_;
+
             net::co_spawn(
                 ex_,
-                [this, self = shared_from_this()]() -> net::awaitable<void> { co_await co_maintain(); },
+                [this, self = shared_from_this(), timer]() -> net::awaitable<void>
+                { co_await co_maintain(timer); },
                 [](std::exception_ptr e)
                 {
                     if (e)
@@ -85,9 +92,11 @@ namespace httplib::client
 
             auto self = shared_from_this();
             auto url = util::make_url_value(host, port, ssl);
-            auto deadline = wait_timeout == std::chrono::steady_clock::duration::zero()
-                                ? std::chrono::steady_clock::time_point::max()
-                                : std::chrono::steady_clock::now() + wait_timeout;
+
+            // wait_timeout <= 0 means "fail fast": try once and return timed_out
+            // immediately if no connection is available without waiting. The deadline
+            // is only consulted on the waiting path (wait_timeout > 0).
+            auto deadline = std::chrono::steady_clock::now() + wait_timeout;
 
             do
             {
@@ -176,7 +185,11 @@ namespace httplib::client
             {
                 return;
             }
-            cleanup_timer_.cancel();
+            if (cleanup_timer_)
+            {
+                cleanup_timer_->cancel();
+                cleanup_timer_.reset();
+            }
 
             waiters_list waiters;
             waiters.swap(waiters_);
@@ -236,8 +249,7 @@ namespace httplib::client
         void
         set_idle_timeout(std::chrono::steady_clock::duration timeout)
         {
-            std::lock_guard<std::mutex> lock(mutex_);
-            idle_timeout_ = timeout;
+            idle_timeout_.store(timeout);
         }
 
       private:
@@ -265,15 +277,16 @@ namespace httplib::client
         }
 
         net::awaitable<void>
-        co_maintain()
+        co_maintain(std::shared_ptr<net::steady_timer> timer)
         {
-            auto interval = idle_timeout_ > std::chrono::seconds(0) ? idle_timeout_ : std::chrono::seconds(60);
-
             boost::system::error_code ec;
             while (!stopped_)
             {
-                cleanup_timer_.expires_after(interval);
-                co_await cleanup_timer_.async_wait(util::net_awaitable[ec]);
+                auto timeout = idle_timeout_.load();
+                auto interval = timeout > std::chrono::seconds(0) ? timeout : std::chrono::seconds(60);
+
+                timer->expires_after(interval);
+                co_await timer->async_wait(util::net_awaitable[ec]);
                 if (ec || stopped_)
                 {
                     co_return;
@@ -287,7 +300,7 @@ namespace httplib::client
                     auto it2 = st.idle.begin();
                     while (it2 != st.idle.end())
                     {
-                        if (now - it2->idle_since > idle_timeout_)
+                        if (now - it2->idle_since > idle_timeout_.load())
                         {
                             it2->client->close();
                             it2 = st.idle.erase(it2);
@@ -315,7 +328,7 @@ namespace httplib::client
         mutable std::mutex mutex_;
         std::unordered_map<std::string, pool_state> pools_;
         size_t max_size_;
-        std::chrono::steady_clock::duration idle_timeout_;
+        std::atomic<std::chrono::steady_clock::duration> idle_timeout_;
 
         waiters_list waiters_;
 
@@ -324,7 +337,7 @@ namespace httplib::client
 
       private:
         std::atomic<bool> stopped_ { true };
-        net::steady_timer cleanup_timer_;
+        std::shared_ptr<net::steady_timer> cleanup_timer_;
     };
 
     // ---- client_handle ----
@@ -460,46 +473,20 @@ namespace httplib::client
         impl_->start();
     }
 
-    std::future<http_client_pool::client_handle>
-    http_client_pool::acquire(
-        std::string_view host,
-        uint16_t port,
-        bool ssl /*= false*/,
-        std::chrono::steady_clock::duration wait_timeout /*= std::chrono::steady_clock::duration::zero()*/)
-    {
-        return net::co_spawn(
-            get_executor(),
-            [this, h = std::string(host), port, ssl, wait_timeout]() -> net::awaitable<client_handle>
-            { co_return co_await async_acquire(h, port, ssl, wait_timeout); },
-            net::use_future);
-    }
-
     net::awaitable<http_client_pool::client_handle>
     http_client_pool::async_acquire(
         std::string_view host,
         uint16_t port,
         bool ssl /*= false*/,
-        std::chrono::steady_clock::duration wait_timeout /*= std::chrono::steady_clock::duration::zero()*/)
+        std::chrono::steady_clock::duration wait_timeout /*= default_timeout*/)
     {
         co_return co_await impl_->async_acquire(host, port, ssl, wait_timeout);
     }
 
-    std::future<http_client_pool::client_handle>
-    http_client_pool::acquire(
-        std::string_view url,
-        std::chrono::steady_clock::duration wait_timeout /*= std::chrono::steady_clock::duration::zero()*/)
-    {
-        return net::co_spawn(
-            get_executor(),
-            [this, u = std::string(url), wait_timeout]() -> net::awaitable<client_handle>
-            { co_return co_await async_acquire(u, wait_timeout); },
-            net::use_future);
-    }
-
     net::awaitable<http_client_pool::client_handle>
     http_client_pool::async_acquire(
         std::string_view url,
-        std::chrono::steady_clock::duration wait_timeout /*= std::chrono::steady_clock::duration::zero()*/)
+        std::chrono::steady_clock::duration wait_timeout /*= default_timeout*/)
     {
         auto r = boost::urls::parse_uri(url);
         if (!r)

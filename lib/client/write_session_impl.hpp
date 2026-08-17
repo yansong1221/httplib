@@ -11,7 +11,7 @@ namespace httplib::client
     class http_client::impl::write_session_impl final : public write_session
     {
       public:
-        explicit write_session_impl(http_client::impl& parent) : parent_(parent) {}
+        explicit write_session_impl(std::shared_ptr<http_client::impl> parent) : parent_(std::move(parent)) {}
 
         net::awaitable<boost::system::error_code>
         write_header(http::verb method, std::string_view target, http::fields const& headers, bool relay) override
@@ -23,14 +23,14 @@ namespace httplib::client
             {
                 req_msg_->set(f.name_string(), f.value());
             }
-            req_msg_->set(http::field::host, parent_.host_value_);
+            req_msg_->set(http::field::host, parent_->host_value_);
             req_msg_->keep_alive(true);
             if (!relay)
             {
                 req_msg_->chunked(true);
             }
 
-            co_return co_await parent_.async_write(*req_sr_, true);
+            co_return co_await parent_->async_write(*req_sr_, true);
         }
 
         net::awaitable<boost::system::error_code>
@@ -46,7 +46,7 @@ namespace httplib::client
             body.size = data.size();
             body.more = more;
 
-            auto ec = co_await parent_.async_write(*req_sr_, false, false);
+            auto ec = co_await parent_->async_write(*req_sr_, false, false);
             if (ec == http::error::need_buffer)
             {
                 ec = {};
@@ -54,7 +54,7 @@ namespace httplib::client
             co_return ec;
         }
 
-        http_client::impl& parent_;
+        std::shared_ptr<http_client::impl> parent_;
         std::unique_ptr<http::request<http::buffer_body>> req_msg_;
         std::unique_ptr<http::request_serializer<http::buffer_body>> req_sr_;
     };

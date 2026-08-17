@@ -12,7 +12,7 @@ namespace httplib::client
         , public std::enable_shared_from_this<read_session_impl>
     {
       public:
-        explicit read_session_impl(http_client::impl& parent) : parent_(parent) {}
+        explicit read_session_impl(std::shared_ptr<http_client::impl> parent) : parent_(std::move(parent)) {}
 
         net::awaitable<boost::system::error_code>
         read_header() override
@@ -21,7 +21,7 @@ namespace httplib::client
             resp_parser_->body_limit((std::numeric_limits<std::uint64_t>::max)());
             resp_parser_->header_limit((std::numeric_limits<std::uint32_t>::max)());
 
-            co_return co_await parent_.async_read(*resp_parser_, true);
+            co_return co_await parent_->async_read(*resp_parser_, true);
         }
 
         http::status
@@ -62,7 +62,7 @@ namespace httplib::client
                 body.data = (void*)buf.data();
                 body.size = buf.size();
 
-                auto ec = co_await parent_.async_read(*resp_parser_, false);
+                auto ec = co_await parent_->async_read(*resp_parser_, false);
                 if (ec == http::error::need_buffer)
                 {
                     ec = {};
@@ -86,7 +86,7 @@ namespace httplib::client
         }
 
       private:
-        http_client::impl& parent_;
+        std::shared_ptr<http_client::impl> parent_;
         std::unique_ptr<http::response_parser<http::buffer_body>> resp_parser_;
     };
 } // namespace httplib::client

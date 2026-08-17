@@ -124,16 +124,7 @@ client::http_client client(ex, "https://example.com");
 
 client::http_client_pool pool(ex, 4);  // max 4 active connections
 
-// Synchronous �?returns std::future<client_handle>
-{
-    auto handle = pool.acquire("127.0.0.1", 8080).get();
-    if (handle) {
-        auto resp = handle->get("/api/hello");
-        // handle released back to pool on scope exit
-    }
-}
-
-// Asynchronous �?waits when pool is at capacity
+// Acquire a connection; waits when the pool is at capacity
 net::co_spawn(ex, []() -> net::awaitable<void> {
     auto handle = co_await pool.async_acquire("127.0.0.1", 8080);
     if (handle) {

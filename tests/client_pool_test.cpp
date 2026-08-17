@@ -1,13 +1,17 @@
 #include "common.hpp"
 #include "httplib/client/client_pool.hpp"
+#include "httplib/client/write_session.hpp"
+#include "httplib/server/chunk_writer.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/util/use_awaitable.hpp"
+#include <array>
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <atomic>
 #include <type_traits>
 
 namespace
@@ -246,6 +250,63 @@ TEST_CASE("client_pool: acquire timeout", "[client_pool]")
             auto elapsed = std::chrono::steady_clock::now() - t0;
             REQUIRE(h2.has_error());
             REQUIRE(elapsed >= std::chrono::milliseconds(50));
+
+            p.stop();
+        });
+}
+
+TEST_CASE("client_pool: wait_timeout zero fails fast", "[client_pool]")
+{
+    run(
+        [](net::io_context& ioc) -> net::awaitable<void>
+        {
+            httplib::client::http_client_pool p(ioc.get_executor(), 1);
+            p.start();
+
+            auto h1 = co_await p.async_acquire("127.0.0.1", 80, false);
+            REQUIRE(h1);
+
+            // Pool is at capacity: wait_timeout == 0 must return timed_out
+            // immediately instead of waiting.
+            auto t0 = std::chrono::steady_clock::now();
+            auto h2 = co_await p.async_acquire(
+                "127.0.0.1", 80, false, std::chrono::steady_clock::duration::zero());
+            auto elapsed = std::chrono::steady_clock::now() - t0;
+
+            REQUIRE(h2.has_error());
+            CHECK(h2.error()
+                  == boost::system::errc::make_error_code(boost::system::errc::timed_out));
+            CHECK(elapsed < std::chrono::milliseconds(50));
+
+            p.stop();
+        });
+}
+
+TEST_CASE("client_pool: restart re-arms maintenance", "[client_pool]")
+{
+    run(
+        [](net::io_context& ioc) -> net::awaitable<void>
+        {
+            httplib::client::http_client_pool p(ioc.get_executor(), 4, std::chrono::milliseconds(100));
+            p.start();
+
+            // stop()/start() in quick succession: the maintenance loop must be
+            // re-armed with a fresh timer, and idle eviction must keep working.
+            p.stop();
+            p.start();
+
+            {
+                auto h = co_await p.async_acquire("127.0.0.1", 80, false, std::chrono::milliseconds(50));
+                REQUIRE(h);
+            }
+            CHECK(p.stats("127.0.0.1", 80, false).idle == 1);
+
+            net::steady_timer timer(ioc.get_executor());
+            timer.expires_after(std::chrono::milliseconds(300));
+            boost::system::error_code ec;
+            co_await timer.async_wait(httplib::util::net_awaitable[ec]);
+
+            CHECK(p.stats("127.0.0.1", 80, false).idle == 0);
 
             p.stop();
         });
@@ -512,6 +573,80 @@ TEST_CASE("client_pool: max_size is enforced per host", "[client_pool]")
         });
 }
 
+TEST_CASE("client_pool: concurrent acquire/release under multithreaded executor", "[client_pool]")
+{
+    net::thread_pool pool{ 4 };
+    std::exception_ptr err;
+    net::co_spawn(
+        pool.get_executor(),
+        [&]() -> net::awaitable<void>
+        {
+            httplib::client::http_client_pool p(pool.get_executor(), 8);
+            p.start();
+
+            constexpr int kWorkers = 8;
+            constexpr int kIterations = 50;
+
+            std::atomic<int> acquired { 0 };
+            std::atomic<int> timed_out { 0 };
+            std::atomic<int> remaining { kWorkers };
+
+            for (int i = 0; i < kWorkers; ++i)
+            {
+                net::co_spawn(
+                    pool.get_executor(),
+                    [&]() -> net::awaitable<void>
+                    {
+                        for (int j = 0; j < kIterations; ++j)
+                        {
+                            auto h = co_await p.async_acquire(
+                                "127.0.0.1", 80, false, std::chrono::seconds(5));
+                            if (h)
+                            {
+                                ++acquired;
+                            }
+                            else
+                            {
+                                ++timed_out;
+                            }
+
+                            // Hold the handle briefly so concurrent workers overlap.
+                            net::steady_timer t(pool.get_executor());
+                            t.expires_after(std::chrono::milliseconds(1));
+                            boost::system::error_code ec;
+                            co_await t.async_wait(httplib::util::net_awaitable[ec]);
+                        }
+                        --remaining;
+                    },
+                    [](std::exception_ptr)
+                    {
+                    });
+            }
+
+            while (remaining.load() > 0)
+            {
+                net::steady_timer t(pool.get_executor());
+                t.expires_after(std::chrono::milliseconds(1));
+                boost::system::error_code ec;
+                co_await t.async_wait(httplib::util::net_awaitable[ec]);
+            }
+
+            CHECK(timed_out.load() == 0);
+            CHECK(acquired.load() == kWorkers * kIterations);
+
+            auto s = p.stats("127.0.0.1", 80, false);
+            CHECK(s.active == 0);
+            CHECK(s.idle <= 8);
+            CHECK(s.idle + s.active <= 8);
+
+            p.stop();
+        },
+        [&](std::exception_ptr e) { err = e; });
+    pool.join();
+    if (err)
+        std::rethrow_exception(err);
+}
+
 TEST_CASE("client_pool: reuses a server-closed connection transparently", "[client_pool]")
 {
     run_with_server(
@@ -551,6 +686,67 @@ TEST_CASE("client_pool: reuses a server-closed connection transparently", "[clie
             REQUIRE(h2);
             auto r2 = co_await h2->async_get("/ok");
             CHECK(r2.has_value());
+
+            p.stop();
+        });
+}
+
+TEST_CASE("client_pool: reader survives handle destruction", "[client_pool]")
+{
+    run_with_server(
+        [](httplib::server::http_server& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/stream",
+                [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+                {
+                    auto cw = resp.get_chunk_writer();
+                    http::fields headers;
+                    headers.set(http::field::content_type, "text/plain");
+                    co_await cw->write_header(http::status::ok, headers, false);
+                    co_await cw->write_body(net::buffer("ABC"), false);
+                });
+        },
+        [](net::any_io_executor ex, httplib::tcp::endpoint const& ep) -> net::awaitable<void>
+        {
+            httplib::client::http_client_pool p(ex, 1, std::chrono::seconds(30));
+            p.start();
+
+            auto host = ep.address().to_string();
+            auto port = ep.port();
+
+            std::shared_ptr<httplib::client::read_session> reader;
+            std::string streamed;
+            {
+                auto h = co_await p.async_acquire(host, port, false);
+                REQUIRE(h);
+                auto writer = h->create_writer();
+                reader = h->create_reader();
+
+                co_await writer->write_header(http::verb::get, "/stream", {});
+                co_await writer->write_body(net::buffer("", 0), false);
+                co_await reader->read_header();
+
+                std::array<char, 1> buf;
+                auto r = co_await reader->read_body(net::buffer(buf));
+                REQUIRE_FALSE(r.has_error());
+                REQUIRE(r.value() == 1);
+                streamed.append(buf.data(), r.value());
+            }
+            // handle (and writer) destroyed above; the reader keeps the impl alive.
+
+            std::array<char, 1> buf;
+            for (;;)
+            {
+                auto r = co_await reader->read_body(net::buffer(buf));
+                if (r.has_error() || r.value() == 0)
+                {
+                    break;
+                }
+                streamed.append(buf.data(), r.value());
+            }
+            CHECK(streamed.size() >= 3);
+            CHECK(streamed.substr(0, 3) == "ABC");
 
             p.stop();
         });

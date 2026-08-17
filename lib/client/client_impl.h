@@ -10,7 +10,7 @@
 namespace httplib::client
 {
 
-    class http_client::impl
+    class http_client::impl : public std::enable_shared_from_this<http_client::impl>
     {
       public:
         class read_session_impl;

@@ -3,7 +3,6 @@
 #include <boost/asio/awaitable.hpp>
 #include <boost/system/error_code.hpp>
 #include <chrono>
-#include <future>
 #include <memory>
 
 namespace httplib::client
@@ -72,15 +71,11 @@ namespace httplib::client
         http_client_pool(http_client_pool&& other) noexcept;
         http_client_pool& operator=(http_client_pool&& other) noexcept;
 
+        // wait_timeout controls how long async_acquire() waits for a connection when
+        // the pool is at capacity. A value of zero (or negative) makes the call fail
+        // fast: it returns a handle carrying `timed_out` immediately if no
+        // connection is available without waiting.
         static constexpr auto default_timeout = std::chrono::seconds(3);
-
-        std::future<client_handle> acquire(std::string_view host,
-                                           uint16_t port,
-                                           bool ssl,
-                                           std::chrono::steady_clock::duration wait_timeout = default_timeout);
-
-        std::future<client_handle> acquire(std::string_view url,
-                                           std::chrono::steady_clock::duration wait_timeout = default_timeout);
 
         net::awaitable<client_handle> async_acquire(std::string_view host,
                                                     uint16_t port,
