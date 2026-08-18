@@ -15,6 +15,7 @@ namespace httplib::db
     class session;
     class prepared_statement;
     class connection_pool;
+    class db_exception;
 
     struct query_log_entry;
 } // namespace httplib::db

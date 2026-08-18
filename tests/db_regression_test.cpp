@@ -14,6 +14,7 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/use_awaitable.hpp>
+#include <boost/system/errc.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <cstdint>
@@ -330,7 +331,9 @@ TEST_CASE("db: pool wakes waiters when connection creation fails", "[db][regress
         });
 }
 
-// ---- bug 2（高）：健康检查期间待 ping 连接不占槽位，池可短暂超过 max_connections ----
+// ---- bug 2（高）：健康检查期间待 ping 连接不占槽位，池可短暂超过 max_connections，total_count 少报 ----
+// 修复：验证中的连接计入容量（validating_）。验证窗口内池满时借出方必须等待（或超时），
+// 不得超建连接；total_count 全程如实反映物理连接数。
 
 TEST_CASE("db: pool stays within max_connections during health checks", "[db][regression]")
 {
@@ -356,13 +359,14 @@ TEST_CASE("db: pool stays within max_connections during health checks", "[db][re
             REQUIRE(pre);
             REQUIRE(pool.idle_count() == 2);
 
-            // 2) 阻塞 ping → 维护协程把空闲连接全部拉去健康检查（此刻它们在池中不可见）。
+            // 2) 阻塞 ping → 维护协程把空闲连接全部拉去健康检查。
+            //    修复后：被验证的连接经 validating_ 占容量，total 保持 2（修复前少报为 0）。
             ctrl->block_ping = true;
             bool pulled = co_await co_wait_for(ex, std::chrono::seconds(3), [&] { return pool.idle_count() == 0; });
             REQUIRE(pulled);
-            CHECK(pool.total_count() == 0); // 根因：待 ping 连接既不占 active 槽位也不在 idle_
+            REQUIRE(pool.total_count() == 2);
 
-            // 3) 借出：池内没有空闲连接 → 走 capacity 分支新建第 3 条（修复前突破 max_connections）。
+            // 3) 借出：池已满（2 条在验证）→ 必须等待；修复前此处会超建第 3 条。
             std::optional<db::connection_pool::session_handle> bg;
             std::atomic_bool bg_done = false;
             net::co_spawn(
@@ -381,19 +385,184 @@ TEST_CASE("db: pool stays within max_connections during health checks", "[db][re
                 [](std::exception_ptr) {});
             bool acq = co_await co_wait_for(ex, std::chrono::seconds(3), [&] { return bg_done.load(); });
             REQUIRE(acq);
-            REQUIRE(bg.has_value());
+            REQUIRE_FALSE(bg.has_value()); // 等待 500ms 超时，未超建
+            REQUIRE(pool.total_count() == 2); // 物理连接仍只有 2 条
 
-            // 4) 放开 ping 让维护协程回填；bg 归池前先 ping 一次，避免随后被健康检查拉走导致总数瞬时隐藏。
+            // 4) 放开 ping → 健康检查完成、连接回填，随后借出正常。
             ctrl->block_ping = false;
-            co_await co_sleep(ex, std::chrono::milliseconds(150));
-            co_await bg->get()->ping();
-            bg->release();
-            co_await co_sleep(ex, std::chrono::milliseconds(400));
-
-            // 修复前：3 条 > max_connections；修复后必须不超过上限。
+            bool back = co_await co_wait_for(ex, std::chrono::seconds(3), [&] { return pool.idle_count() == 2; });
+            REQUIRE(back);
+            auto bg2 = co_await pool.async_acquire(std::chrono::seconds(3));
+            CHECK(pool.total_count() == 2);
+            bg2.release();
             REQUIRE(pool.total_count() <= cfg.max_connections);
 
             pool.stop();
+        });
+}
+
+// ---- 增强：健康检查剔除死连接释放槽位时必须唤醒等待者（修复前等待者睡到超时）----
+
+TEST_CASE("db: pool wakes waiter when health check discards a connection", "[db][regression]")
+{
+    auto ctrl = std::make_shared<fake_ctrl>();
+    constexpr char const* backend_name = "fake_discard_wake";
+    REQUIRE(register_fake(backend_name, ctrl));
+
+    run_on_io_context(
+        [ctrl, backend_name](net::any_io_executor ex) -> net::awaitable<void>
+        {
+            db::pool_params cfg;
+            cfg.min_connections = 0;
+            cfg.max_connections = 1;
+            cfg.idle_check_interval = std::chrono::milliseconds(50);
+            cfg.health_check_interval = std::chrono::seconds(300); // 首 tick 靠 since_ping=∞ 触发，之后测试期内不再拉
+            cfg.idle_timeout = std::chrono::seconds(0);
+
+            db::connection_pool pool = db::make_pool(ex, backend_name, "", cfg);
+            pool.start();
+
+            // 1) 借出再归还，得到一条空闲连接。
+            {
+                auto h = co_await pool.async_acquire();
+            }
+            REQUIRE(pool.total_count() == 1);
+            REQUIRE(pool.idle_count() == 1);
+
+            // 2) 阻塞 ping → 维护协程把该连接拉去健康检查（占容量 → 池视为满）。
+            ctrl->block_ping = true;
+            bool pulled = co_await co_wait_for(ex, std::chrono::seconds(3), [&] { return pool.idle_count() == 0; });
+            REQUIRE(pulled);
+            REQUIRE(pool.total_count() == 1);
+
+            // 3) 此时借出必须等待，不得超建（修复前会误判池空而直接新建）。
+            struct waiter_result
+            {
+                bool completed = false;
+                bool success = false;
+                std::chrono::milliseconds elapsed { 0 };
+            };
+            auto r = std::make_shared<waiter_result>();
+            auto start = std::chrono::steady_clock::now();
+            net::co_spawn(
+                ex,
+                [r, start, &pool]() -> net::awaitable<void>
+                {
+                    try
+                    {
+                        auto h = co_await pool.async_acquire(std::chrono::milliseconds(2000));
+                        (void)h;
+                        r->success = true;
+                    }
+                    catch (...)
+                    {
+                    }
+                    r->elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - start);
+                    r->completed = true;
+                },
+                [](std::exception_ptr) {});
+
+            // 让等待者进入队列；池满状态下它应仍在等待。
+            co_await co_sleep(ex, std::chrono::milliseconds(100));
+            REQUIRE_FALSE(r->completed);
+
+            // 4) 放开 ping 且判死 → 连接被剔除、槽位释放，应立刻唤醒等待者。
+            ctrl->ping_ok = false;
+            ctrl->block_ping = false;
+
+            bool done = co_await co_wait_for(ex, std::chrono::seconds(3), [&] { return r->completed; });
+            REQUIRE(done);
+            REQUIRE(r->success); // 被唤醒后新建连接借出成功
+            REQUIRE(r->elapsed < std::chrono::milliseconds(1500)); // 靠剔除唤醒，而非睡满 2s 超时
+            REQUIRE(pool.total_count() == 1); // 池中只剩新连接
+
+            pool.stop();
+        });
+}
+
+// ---- 增强：acquire 失败按 db_exception::code 分类（timed_out / operation_canceled）----
+
+TEST_CASE("db: pool acquire errors are typed db_exceptions", "[db][regression]")
+{
+    auto ctrl = std::make_shared<fake_ctrl>();
+    constexpr char const* backend_name = "fake_pool_errors";
+    REQUIRE(register_fake(backend_name, ctrl));
+
+    run_on_io_context(
+        [ctrl, backend_name](net::any_io_executor ex) -> net::awaitable<void>
+        {
+            db::pool_params cfg;
+            cfg.min_connections = 0;
+            cfg.max_connections = 1;
+            cfg.idle_check_interval = std::chrono::seconds(10);
+            cfg.health_check_interval = std::chrono::seconds(0);
+            cfg.idle_timeout = std::chrono::seconds(0);
+
+            db::connection_pool pool = db::make_pool(ex, backend_name, "", cfg);
+
+            // 未启动 → operation_canceled。
+            try
+            {
+                auto h = co_await pool.async_acquire(std::chrono::milliseconds(50));
+                (void)h;
+                FAIL("expected pool_closed");
+            }
+            catch (db::db_exception const& e)
+            {
+                CHECK(e.code() ==
+                      boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
+            }
+
+            pool.start();
+
+            // 池满 + 等待超时 → timed_out。
+            {
+                auto h1 = co_await pool.async_acquire();
+                try
+                {
+                    auto h = co_await pool.async_acquire(std::chrono::milliseconds(100));
+                    (void)h;
+                    FAIL("expected timeout");
+                }
+                catch (db::db_exception const& e)
+                {
+                    CHECK(e.code() ==
+                          boost::system::errc::make_error_code(boost::system::errc::timed_out));
+                }
+                h1.release();
+            }
+
+            // fail fast（wait_timeout=0）→ 同样 timed_out。
+            {
+                auto h2 = co_await pool.async_acquire();
+                try
+                {
+                    auto h = co_await pool.async_acquire(std::chrono::steady_clock::duration::zero());
+                    (void)h;
+                    FAIL("expected fail-fast timeout");
+                }
+                catch (db::db_exception const& e)
+                {
+                    CHECK(e.code() ==
+                          boost::system::errc::make_error_code(boost::system::errc::timed_out));
+                }
+                h2.release();
+            }
+
+            // 已停止 → operation_canceled。
+            pool.stop();
+            try
+            {
+                auto h = co_await pool.async_acquire(std::chrono::milliseconds(50));
+                (void)h;
+                FAIL("expected pool_closed");
+            }
+            catch (db::db_exception const& e)
+            {
+                CHECK(e.code() ==
+                      boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
+            }
         });
 }
 

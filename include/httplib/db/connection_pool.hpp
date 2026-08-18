@@ -21,9 +21,10 @@ namespace httplib::db
     {
         size_t min_connections = 2;
         size_t max_connections = 16;
-        std::chrono::seconds idle_timeout { 300 };
-        std::chrono::seconds idle_check_interval { 60 };
-        std::chrono::seconds health_check_interval { 30 };
+        // 周期/超时期统一用 steady_clock::duration（与 client::http_client_pool 一致，支持亚秒级）；0 表示禁用。
+        std::chrono::steady_clock::duration idle_timeout { std::chrono::seconds(300) };
+        std::chrono::steady_clock::duration idle_check_interval { std::chrono::seconds(60) };
+        std::chrono::steady_clock::duration health_check_interval { std::chrono::seconds(30) };
         bool validate_on_borrow = false;
     };
 
@@ -94,6 +95,9 @@ namespace httplib::db
         /// 借出一条连接。
         /// \note wait_timeout 语义与 client::http_client_pool 一致：<= 0 表示 fail fast
         /// （不等待，池满立即抛超时）；> 0 表示最多等待该时长。
+        /// \note 失败统一抛 \ref db_exception：池已停止/未启动时 code 为 operation_canceled，
+        ///       等待超时（含 fail fast 未借到）时 code 为 timed_out，可按 code() 分流；
+        ///       建连工厂抛出的异常原样透传。
         static constexpr auto default_timeout = std::chrono::seconds(3);
         net::awaitable<session_handle> async_acquire(std::chrono::steady_clock::duration wait_timeout = default_timeout);
 

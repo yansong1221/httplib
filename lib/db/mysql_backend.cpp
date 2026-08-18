@@ -387,7 +387,18 @@ namespace httplib::db::detail
         try
         {
             boost::system::error_code ec;
-            co_await conn_->async_ping(net::redirect_error(net::use_awaitable, ec));
+            // 带超时探测：网络分区（挂死而非拒绝）时避免 ping 无限阻塞连接池的维护协程。
+            // 超时被 cancel 后 ec 置位，走下方置失效路径（与连接失败一致）。
+            if (cfg_.ping_timeout.count() > 0)
+            {
+                co_await conn_->async_ping(net::redirect_error(
+                    net::cancel_after(cfg_.ping_timeout, net::use_awaitable),
+                    ec));
+            }
+            else
+            {
+                co_await conn_->async_ping(net::redirect_error(net::use_awaitable, ec));
+            }
             if (ec)
             {
                 live_ = false;
@@ -528,8 +539,9 @@ namespace httplib::db::detail
                              cfg.database = opts.get_or("db", opts.get_or("database", cfg.database));
                              cfg.charset = opts.get_or("charset", cfg.charset);
                              cfg.time_zone = opts.get_or("time_zone", cfg.time_zone);
-                             cfg.connect_timeout = opts.as_seconds("connect_timeout").value_or(cfg.connect_timeout);
-                             cfg.ssl = opts.as_bool("ssl").value_or(cfg.ssl);
+                              cfg.connect_timeout = opts.as_seconds("connect_timeout").value_or(cfg.connect_timeout);
+                              cfg.ping_timeout = opts.as_seconds("ping_timeout").value_or(cfg.ping_timeout);
+                              cfg.ssl = opts.as_bool("ssl").value_or(cfg.ssl);
                              return std::make_unique<mysql_backend>(ex, std::move(cfg));
                          });
     }

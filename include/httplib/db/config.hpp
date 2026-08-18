@@ -24,6 +24,8 @@ namespace httplib::db
      * - `time_zone`：会话时区（连接后执行 `SET time_zone`），固定偏移如 `+08:00`；
      *   为空表示不覆盖，沿用服务器默认会话时区（与 mysql 客户端行为一致），默认空；
      * - `connect_timeout`：连接超时（秒），`0` 表示不设超时，默认 `5`；
+     * - `ping_timeout`：存活探测（ping）超时（秒），`0` 表示不设超时，默认 `5`；
+     *   连接挂死（网络分区而非拒绝）时避免 ping 无限阻塞连接池的健康检查与借出校验；
      * - `ssl`：是否使用 SSL，`1/true/yes/on` 或 `0/false/no/off`，默认 `0`；
      * - `max_cached_statements`：prepared statement 缓存上限（由统一层 session 管理），`0` 表示不缓存，默认 `64`。
      * \n
@@ -44,6 +46,8 @@ namespace httplib::db
         std::string time_zone;
         /// 连接超时（0 表示不设超时）。
         std::chrono::seconds connect_timeout { 5 };
+        /// 存活探测（ping）超时（0 表示不设超时）。
+        std::chrono::seconds ping_timeout { 5 };
         /// 是否使用 SSL。
         bool ssl = false;
         /// prepared statement 缓存上限（0 表示不缓存）。
@@ -62,6 +66,7 @@ namespace httplib::db
             o.set("charset", charset);
             o.set("time_zone", time_zone);
             o.set("connect_timeout", std::to_string(connect_timeout.count()));
+            o.set("ping_timeout", std::to_string(ping_timeout.count()));
             o.set("ssl", ssl ? "1" : "0");
             o.set("max_cached_statements", std::to_string(max_cached_statements));
             return o;

@@ -1,13 +1,34 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 #include "connection_pool_impl.h"
+#include "httplib/db/exception.hpp"
 #include "httplib/util/use_awaitable.hpp"
+#include "util/logging.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/use_awaitable.hpp>
-#include "util/logging.hpp"
+#include <boost/system/errc.hpp>
 #include <spdlog/spdlog.h>
 
 namespace httplib::db
 {
+    namespace
+    {
+        /// 池已停止（或从未启动）。与 client::http_client_pool 的 operation_canceled 语义一致，
+        /// 便于调用方按 code() 统一分流，而不必匹配错误消息。
+        db_exception
+        pool_closed_error()
+        {
+            return db_exception(boost::system::errc::make_error_code(boost::system::errc::operation_canceled),
+                                "connection_pool: pool is shut down");
+        }
+
+        /// 借出等待超时（含 fail-fast 未等到连接）。与 client::http_client_pool 的 timed_out 一致。
+        db_exception
+        pool_timeout_error()
+        {
+            return db_exception(boost::system::errc::make_error_code(boost::system::errc::timed_out),
+                                "connection_pool: acquire timeout");
+        }
+    } // namespace
 
     connection_pool::impl::impl(net::any_io_executor ex, pool_params cfg, connection_pool::connect_fn connect)
         : ex_(ex)
@@ -28,13 +49,14 @@ namespace httplib::db
     std::shared_ptr<spdlog::logger>
     connection_pool::impl::logger() const
     {
-        return custom_logger_ ? custom_logger_ : default_logger_;
+        auto l = custom_logger_.load();
+        return l ? l : default_logger_;
     }
 
     void
     connection_pool::impl::set_logger(std::shared_ptr<spdlog::logger> l)
     {
-        custom_logger_ = std::move(l);
+        custom_logger_.store(std::move(l));
     }
 
     void
@@ -74,7 +96,7 @@ namespace httplib::db
     {
         if (stopped_)
         {
-            throw std::runtime_error("connection_pool: pool is shut down");
+            throw pool_closed_error();
         }
 
         auto self = shared_from_this();
@@ -90,26 +112,30 @@ namespace httplib::db
             std::unique_lock<std::mutex> lock(self->mutex_);
             if (self->stopped_)
             {
-                throw std::runtime_error("connection_pool: pool is shut down");
+                throw pool_closed_error();
             }
 
-            if (active_count_ + idle_.size() < cfg_.max_connections)
+            if (has_capacity_locked())
             {
-                ++active_count_;
+                inc_active_locked();
                 lock.unlock();
 
                 try
                 {
                     auto sess = co_await self->create_session();
+                    if (!sess)
+                    {
+                        // 工厂返回空会话视为建连失败，释放槽位并唤醒下一个等待者。
+                        throw db_exception(
+                            boost::system::errc::make_error_code(boost::system::errc::connection_aborted),
+                            "connection_pool: session factory returned an empty session");
+                    }
                     co_return session_handle(self, std::move(sess));
                 }
                 catch (...)
                 {
                     std::lock_guard<std::mutex> lk(self->mutex_);
-                    if (active_count_ > 0)
-                    {
-                        --active_count_;
-                    }
+                    dec_active_locked();
                     // 本协程建连失败后槽位已释放，唤醒下一个等待者接手，避免其睡到超时。
                     self->wake_one_waiter();
                     throw;
@@ -118,7 +144,7 @@ namespace httplib::db
 
             if (wait_timeout <= std::chrono::steady_clock::duration::zero())
             {
-                throw std::runtime_error("connection_pool: acquire timeout");
+                throw pool_timeout_error();
             }
 
             std::erase_if(self->waiters_, [](auto const& w) { return w.expired(); });
@@ -132,7 +158,7 @@ namespace httplib::db
             co_await node->async_wait(util::net_awaitable[ec]);
         } while (deadline > std::chrono::steady_clock::now());
 
-        throw std::runtime_error("connection_pool: acquire timeout");
+        throw pool_timeout_error();
     }
 
     void
@@ -148,10 +174,7 @@ namespace httplib::db
         if (!sess->is_live())
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            if (active_count_ > 0)
-            {
-                --active_count_;
-            }
+            dec_active_locked();
             wake_one_waiter();
             return;
         }
@@ -174,10 +197,7 @@ namespace httplib::db
                 catch (...)
                 {
                     std::lock_guard<std::mutex> lk(self->mutex_);
-                    if (self->active_count_ > 0)
-                    {
-                        --self->active_count_;
-                    }
+                    self->dec_active_locked();
                     self->wake_one_waiter();
                     co_return;
                 }
@@ -231,7 +251,7 @@ namespace httplib::db
     connection_pool::impl::total_count() const
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        return active_count_ + idle_.size();
+        return total_locked();
     }
 
     std::unique_ptr<session>
@@ -251,7 +271,7 @@ namespace httplib::db
                 continue;
             }
 
-            ++active_count_;
+            inc_active_locked();
             return std::move(sess);
         }
         return nullptr;
@@ -276,10 +296,8 @@ namespace httplib::db
         }
 
         std::lock_guard<std::mutex> lock(mutex_);
-        if (active_count_ > 0)
-        {
-            --active_count_;
-        }
+        dec_active_locked();
+        wake_one_waiter(); // 校验剔除死连接释放了槽位，唤醒等待者接手
         co_return nullptr;
     }
 
@@ -307,17 +325,12 @@ namespace httplib::db
         }
 
         std::lock_guard<std::mutex> lock(mutex_);
-
-        if (active_count_ > 0)
-        {
-            --active_count_;
-        }
+        dec_active_locked();
         if (stopped_)
         {
             return;
         }
         idle_.push_back(std::move(sess));
-
         wake_one_waiter();
     }
 
@@ -357,8 +370,13 @@ namespace httplib::db
             {
                 co_return;
             }
+            // 预建期间 acquire 侧可能已把池补满：超容量时丢弃剩余预建连接，避免突破 max_connections。
             for (auto& sess : pre_created)
             {
+                if (!has_capacity_locked())
+                {
+                    break;
+                }
                 idle_.push_back(std::move(sess));
             }
         }
@@ -370,8 +388,17 @@ namespace httplib::db
     net::awaitable<void>
     connection_pool::impl::co_maintain(uint64_t epoch)
     {
-        auto check_interval
-            = cfg_.idle_check_interval.count() > 0 ? cfg_.idle_check_interval : std::chrono::seconds(60);
+        // 维护周期取各启用 interval 的最小值：健康检查实际受循环 tick 粒度钳制，
+        // 取 min 保证每个旋钮都能按其声明的间隔生效（两者都禁用时退回 60s）。
+        std::chrono::steady_clock::duration check_interval = std::chrono::seconds(60);
+        if (cfg_.idle_check_interval.count() > 0)
+        {
+            check_interval = std::min(check_interval, cfg_.idle_check_interval);
+        }
+        if (cfg_.health_check_interval.count() > 0)
+        {
+            check_interval = std::min(check_interval, cfg_.health_check_interval);
+        }
 
         boost::system::error_code ec;
         while (!stopped_ && epoch_ == epoch)
@@ -397,14 +424,16 @@ namespace httplib::db
                 {
                     auto last_active = (*it)->last_active_time();
                     auto last_ping = (*it)->last_ping_time();
-                    auto idle_elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - last_active);
-                    auto since_ping = std::chrono::duration_cast<std::chrono::seconds>(now - last_ping);
+                    // 保持亚秒精度比较（配置周期为 steady_clock::duration），不再向下取整到秒。
+                    auto idle_elapsed = now - last_active;
+                    auto since_ping = now - last_ping;
 
                     if (cfg_.idle_timeout.count() > 0 && idle_elapsed >= cfg_.idle_timeout)
                     {
                         if (idle_.size() > cfg_.min_connections)
                         {
                             it = idle_.erase(it);
+                            wake_one_waiter(); // 空闲回收释放了槽位，唤醒等待者避免其睡到超时
                             continue;
                         }
                     }
@@ -419,36 +448,59 @@ namespace httplib::db
                         ++it;
                     }
                 }
+
+                // 拉去健康检查的连接仍占容量（见 validating_ 注释）。必须在同一临界区内计数，
+                // 与借出侧的容量判断互斥，杜绝验证窗口内的超建。
+                validating_ += to_ping.size();
             }
 
             for (auto& sess : to_ping)
             {
-                if (stopped_ || epoch_ != epoch)
-                {
-                    co_return;
-                }
-
+                // stop()/重启期间不再发 ping，但仍要走下面的归还/剔除记账，
+                // 保证 validating_ 无论何种退出路径都精确归零。
                 bool alive = false;
-                if (sess)
+                if (sess && !stopped_ && epoch_ == epoch)
                 {
-                    alive = co_await sess->ping();
+                    try
+                    {
+                        alive = co_await sess->ping();
+                    }
+                    catch (...)
+                    {
+                        // 后端 ping 未承诺不抛：异常视同连接失效。既保证 validating_ 精确归零，
+                        // 也不让单个坏连接中断整个维护协程。
+                        alive = false;
+                    }
                 }
 
                 std::lock_guard<std::mutex> lock(mutex_);
+                if (validating_ > 0)
+                {
+                    --validating_;
+                }
                 // 健康检查期间池子可能已被新连接补满：超容量时直接关闭刚检查完的连接，
                 // 避免总连接数短暂突破 max_connections 后迟迟不回收。
-                if (alive && !stopped_ && idle_.size() + active_count_ < cfg_.max_connections)
+                if (alive && !stopped_ && epoch_ == epoch && has_capacity_locked())
                 {
                     idle_.push_back(std::move(sess));
                     wake_one_waiter();
                 }
+                else if (!stopped_ && epoch_ == epoch)
+                {
+                    wake_one_waiter(); // 剔除死连接释放了槽位，唤醒等待者接手
+                }
+            }
+
+            if (stopped_ || epoch_ != epoch)
+            {
+                co_return;
             }
 
             size_t deficit = 0;
             {
                 std::lock_guard<std::mutex> lock(mutex_);
-                size_t total = idle_.size() + active_count_;
-                if (total < cfg_.min_connections)
+                // 验证中的连接计入总数，否则健康检查窗口内会误判缺额而超建。
+                if (size_t total = total_locked(); total < cfg_.min_connections)
                 {
                     deficit = cfg_.min_connections - total;
                 }
@@ -466,7 +518,8 @@ namespace httplib::db
                     if (sess)
                     {
                         std::lock_guard<std::mutex> lock(mutex_);
-                        if (!stopped_)
+                        // 建连期间 acquire 侧可能已把池补满：超容量时丢弃，避免总连接数突破 max_connections。
+                        if (!stopped_ && epoch_ == epoch && has_capacity_locked())
                         {
                             idle_.push_back(std::move(sess));
                             wake_one_waiter();
