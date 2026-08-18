@@ -92,8 +92,10 @@ namespace httplib::db
         void start();
 
         /// 借出一条连接。
-        net::awaitable<session_handle> async_acquire(std::chrono::steady_clock::duration wait_timeout
-                                                     = std::chrono::steady_clock::duration::zero());
+        /// \note wait_timeout 语义与 client::http_client_pool 一致：<= 0 表示 fail fast
+        /// （不等待，池满立即抛超时）；> 0 表示最多等待该时长。
+        static constexpr auto default_timeout = std::chrono::seconds(3);
+        net::awaitable<session_handle> async_acquire(std::chrono::steady_clock::duration wait_timeout = default_timeout);
 
         /// 关闭池，唤醒所有等待者。
         void stop();

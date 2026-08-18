@@ -77,11 +77,8 @@ namespace httplib::db
             throw std::runtime_error("connection_pool: pool is shut down");
         }
 
-        auto deadline = wait_timeout <= std::chrono::steady_clock::duration::zero()
-                            ? std::chrono::steady_clock::time_point::max()
-                            : std::chrono::steady_clock::now() + wait_timeout;
-
         auto self = shared_from_this();
+        auto deadline = std::chrono::steady_clock::now() + wait_timeout;
 
         do
         {
@@ -119,7 +116,7 @@ namespace httplib::db
                 }
             }
 
-            if (deadline <= std::chrono::steady_clock::now())
+            if (wait_timeout <= std::chrono::steady_clock::duration::zero())
             {
                 throw std::runtime_error("connection_pool: acquire timeout");
             }
@@ -127,14 +124,7 @@ namespace httplib::db
             std::erase_if(self->waiters_, [](auto const& w) { return w.expired(); });
 
             auto node = std::make_shared<net::steady_timer>(self->ex_);
-            if (deadline == std::chrono::steady_clock::time_point::max())
-            {
-                node->expires_after(std::chrono::hours(24));
-            }
-            else
-            {
-                node->expires_at(deadline);
-            }
+            node->expires_at(deadline);
             self->waiters_.push_back(node);
             lock.unlock();
 

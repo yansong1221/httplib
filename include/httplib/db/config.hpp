@@ -12,8 +12,8 @@ namespace httplib::db
     /**
      * \brief MySQL 连接配置（`"mysql"` 后端）。
      * \details
-     * 既可作为类型化配置传给 \ref session::connect(ex, mysql_config)，
-     * 也可等价地用连接串 `connect(ex, "mysql", "...")` / \ref make_pool，连接串支持的键如下：
+     * 通过连接串 `connect(ex, "mysql", "...")` / \ref make_pool 使用，
+     * 也可用 \c to_connection_string() 把本结构转成等价连接串。连接串支持的键如下：
      * \n
      * - `host`：服务器地址，默认 `127.0.0.1`；
      * - `port`：端口，默认 `3306`；
@@ -66,13 +66,20 @@ namespace httplib::db
             o.set("max_cached_statements", std::to_string(max_cached_statements));
             return o;
         }
+
+        /// 转成等价连接串（供字符串连接 API 复用）。
+        std::string
+        to_connection_string() const
+        {
+            return to_options().to_connection_string();
+        }
     };
 
     /**
      * \brief SQLite 连接配置（`"sqlite"` 后端）。
      * \details
-     * 既可作为类型化配置传给 \ref session::connect(ex, sqlite_config)，
-     * 也可等价地用连接串 `connect(ex, "sqlite", "...")` / \ref make_pool，连接串支持的键如下：
+     * 通过连接串 `connect(ex, "sqlite", "...")` / \ref make_pool 使用，
+     * 也可用 \c to_connection_string() 把本结构转成等价连接串。连接串支持的键如下：
      * \n
      * - `db` / `path`：数据库文件路径；`:memory:` 表示内存库，默认 `:memory:`。
      * \n
@@ -91,13 +98,20 @@ namespace httplib::db
             o.set("db", path);
             return o;
         }
+
+        /// 转成等价连接串（供字符串连接 API 复用）。
+        std::string
+        to_connection_string() const
+        {
+            return to_options().to_connection_string();
+        }
     };
 
     /**
      * \brief ODBC 连接配置（`"odbc"` 后端）。
      * \details
-     * 既可作为类型化配置传给 \ref session::connect(ex, odbc_config)，
-     * 也可等价地用连接串 `connect(ex, "odbc", "...")` / \ref make_pool，连接串支持的键如下：
+     * 通过连接串 `connect(ex, "odbc", "...")` / \ref make_pool 使用，
+     * 也可用 \c to_connection_string() 把本结构转成等价连接串。连接串支持的键如下：
      * \n
      * - `connection_string`：完整 ODBC 连接串（`Driver={...};Server=...;...`），默认空；
      * - `dsn`：数据源名（与 `connection_string` 二选一，优先用连接串），默认空；
@@ -144,6 +158,13 @@ namespace httplib::db
             }
             o.set("max_cached_statements", std::to_string(max_cached_statements));
             return o;
+        }
+
+        /// 转成等价连接串（供字符串连接 API 复用）。
+        std::string
+        to_connection_string() const
+        {
+            return to_options().to_connection_string();
         }
     };
 

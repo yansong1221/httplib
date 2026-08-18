@@ -1120,7 +1120,7 @@ TEST_CASE("db: statement cache eviction", "[db][integration]")
             cfg.user = "root";
             cfg.password = "123456";
             cfg.max_cached_statements = 2;
-            auto sess = co_await db::session::connect(ioc.get_executor(), cfg);
+            auto sess = co_await db::session::connect(ioc.get_executor(), "mysql", cfg.to_connection_string());
             co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
             co_await sess.query("USE test");
             co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_sc (id INT)");
@@ -1241,7 +1241,7 @@ TEST_CASE("db: charset applied on connect", "[db][integration]")
             cfg.user = "root";
             cfg.password = "123456";
             cfg.charset = "latin1";
-            auto sess = co_await db::session::connect(ioc.get_executor(), cfg);
+            auto sess = co_await db::session::connect(ioc.get_executor(), "mysql", cfg.to_connection_string());
             auto r = co_await sess.query("SELECT @@character_set_client AS cs");
             REQUIRE(*r[0].as_string("cs") == "latin1");
         },
@@ -1283,6 +1283,36 @@ TEST_CASE("db: async_acquire honors wait_timeout", "[db][integration]")
     }
 }
 
+TEST_CASE("db: async_acquire zero wait_timeout fails fast", "[db][integration]")
+{
+    auto cfg = make_cfg();
+    cfg.min_connections = 0;
+    cfg.max_connections = 1;
+
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            db::connection_pool pool = make_pool(ioc.get_executor(), cfg);
+            pool.start();
+            auto h1 = co_await pool.async_acquire(); // holds the only connection
+
+            auto t0 = std::chrono::steady_clock::now();
+            REQUIRE_THROWS_AS(co_await pool.async_acquire(std::chrono::steady_clock::duration::zero()),
+                              std::runtime_error);
+            auto elapsed = std::chrono::steady_clock::now() - t0;
+            REQUIRE(elapsed < std::chrono::milliseconds(200));
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
 TEST_CASE("db: transport error marks connection dead", "[db][integration]")
 {
     auto cfg = make_cfg();
@@ -1306,7 +1336,7 @@ TEST_CASE("db: transport error marks connection dead", "[db][integration]")
                 db::mysql_config kcfg;
                 kcfg.user = "root";
                 kcfg.password = "123456";
-                auto killer = co_await db::session::connect(ioc.get_executor(), kcfg);
+                auto killer = co_await db::session::connect(ioc.get_executor(), "mysql", kcfg.to_connection_string());
                 co_await killer.query("KILL " + std::to_string(conn_id));
 
                 REQUIRE_THROWS_AS(co_await h1->query("SELECT 1"), db::db_exception);
@@ -1350,7 +1380,7 @@ TEST_CASE("db: borrow ping drops stale connection", "[db][integration]")
                 db::mysql_config kcfg;
                 kcfg.user = "root";
                 kcfg.password = "123456";
-                auto killer = co_await db::session::connect(ioc.get_executor(), kcfg);
+                auto killer = co_await db::session::connect(ioc.get_executor(), "mysql", kcfg.to_connection_string());
                 co_await killer.query("KILL " + std::to_string(conn_id));
             } // h1 释放回池，live 仍为 true，但底层连接已死
 
@@ -1464,7 +1494,7 @@ TEST_CASE("db: timestamp timezone conversion", "[db][integration]")
             cfg.user = "root";
             cfg.password = "123456";
             cfg.time_zone = "+08:00";
-            auto sess = co_await db::session::connect(ioc.get_executor(), cfg);
+            auto sess = co_await db::session::connect(ioc.get_executor(), "mysql", cfg.to_connection_string());
             co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
             co_await sess.query("USE test");
             co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_ts (t TIMESTAMP)");
@@ -1501,7 +1531,7 @@ TEST_CASE("db: timestamp utc explicit +00:00", "[db][integration]")
             cfg.user = "root";
             cfg.password = "123456";
             cfg.time_zone = "+00:00"; // 显式 UTC 会话时区（默认空表示沿用服务器时区）
-            auto sess = co_await db::session::connect(ioc.get_executor(), cfg);
+            auto sess = co_await db::session::connect(ioc.get_executor(), "mysql", cfg.to_connection_string());
             co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
             co_await sess.query("USE test");
             co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_tsu (t TIMESTAMP)");
@@ -1556,7 +1586,7 @@ TEST_CASE("db: timestamp bind roundtrip offset", "[db][integration]")
             cfg.user = "root";
             cfg.password = "123456";
             cfg.time_zone = "+08:00";
-            auto sess = co_await db::session::connect(ioc.get_executor(), cfg);
+            auto sess = co_await db::session::connect(ioc.get_executor(), "mysql", cfg.to_connection_string());
             co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
             co_await sess.query("USE test");
             co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_tso (t TIMESTAMP)");
@@ -1591,7 +1621,7 @@ TEST_CASE("db: datetime date time unaffected by timezone", "[db][integration]")
             cfg.user = "root";
             cfg.password = "123456";
             cfg.time_zone = "+08:00";
-            auto sess = co_await db::session::connect(ioc.get_executor(), cfg);
+            auto sess = co_await db::session::connect(ioc.get_executor(), "mysql", cfg.to_connection_string());
             co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
             co_await sess.query("USE test");
             co_await sess.query("CREATE TABLE IF NOT EXISTS __httplib_tzn (d DATETIME, dt DATE, t TIME)");
@@ -1660,7 +1690,7 @@ TEST_CASE("db: cancelled query does not mark connection dead", "[db][integration
             db::mysql_config cfg;
             cfg.user = "root";
             cfg.password = "123456";
-            auto sess = co_await db::session::connect(ioc.get_executor(), cfg);
+            auto sess = co_await db::session::connect(ioc.get_executor(), "mysql", cfg.to_connection_string());
             co_await sess.query("CREATE DATABASE IF NOT EXISTS test");
             co_await sess.query("USE test");
             REQUIRE(sess.is_live());
@@ -2210,7 +2240,7 @@ TEST_CASE("db: with_transaction keeps original error", "[db][integration]")
             db::mysql_config kcfg;
             kcfg.user = "root";
             kcfg.password = "123456";
-            auto killer = co_await db::session::connect(ioc.get_executor(), kcfg);
+            auto killer = co_await db::session::connect(ioc.get_executor(), "mysql", kcfg.to_connection_string());
 
             std::string msg;
             try
@@ -2272,7 +2302,7 @@ TEST_CASE("db: dead connection release wakes waiter", "[db][integration]")
                 db::mysql_config kcfg;
                 kcfg.user = "root";
                 kcfg.password = "123456";
-                auto killer = co_await db::session::connect(ioc.get_executor(), kcfg);
+                auto killer = co_await db::session::connect(ioc.get_executor(), "mysql", kcfg.to_connection_string());
                 co_await killer.query("KILL " + std::to_string(conn_id));
             }
             REQUIRE_THROWS_AS(co_await h1->query("SELECT 1"), db::db_exception);
@@ -2460,7 +2490,7 @@ TEST_CASE("db: standalone connect and query", "[db][integration]")
             db::mysql_config cfg;
             cfg.user = "root";
             cfg.password = "123456";
-            auto sess = co_await db::session::connect(ioc.get_executor(), cfg);
+            auto sess = co_await db::session::connect(ioc.get_executor(), "mysql", cfg.to_connection_string());
             auto r = co_await sess.query("SELECT 'standalone' AS msg");
             REQUIRE(*r[0].as_string("msg") == "standalone");
         },
@@ -2483,7 +2513,7 @@ TEST_CASE("db: standalone reconnect", "[db][integration]")
             db::mysql_config cfg;
             cfg.user = "root";
             cfg.password = "123456";
-            auto sess = co_await db::session::connect(ioc.get_executor(), cfg);
+            auto sess = co_await db::session::connect(ioc.get_executor(), "mysql", cfg.to_connection_string());
             auto r1 = co_await sess.query("SELECT 1 AS v");
             REQUIRE(*r1[0].as_int64("v") == 1);
             co_await sess.reconnect();

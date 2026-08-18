@@ -76,7 +76,7 @@ TEST_CASE("db(sqlite): basic round-trip", "[db][sqlite]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            auto sess = co_await db::session::connect(ioc.get_executor(), db::sqlite_config { ":memory:" });
+            auto sess = co_await db::session::connect(ioc.get_executor(), "sqlite", db::sqlite_config { ":memory:" }.to_connection_string());
 
             co_await sess.query("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT, n INTEGER)");
 
@@ -151,7 +151,7 @@ TEST_CASE("db(sqlite): multi-row fetch accuracy", "[db][sqlite]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            auto sess = co_await db::session::connect(ioc.get_executor(), db::sqlite_config { ":memory:" });
+            auto sess = co_await db::session::connect(ioc.get_executor(), "sqlite", db::sqlite_config { ":memory:" }.to_connection_string());
             co_await sess.query("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT, n INTEGER, d REAL, note TEXT)");
             co_await sess.query(
                 "INSERT INTO t VALUES (1,'alpha',10,1.5,'x'),(2,'beta',20,2.5,NULL),(3,'gamma',30,3.5,'z')");
@@ -204,7 +204,7 @@ TEST_CASE("db(sqlite): prepared statement bind types", "[db][sqlite]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            auto sess = co_await db::session::connect(ioc.get_executor(), db::sqlite_config { ":memory:" });
+            auto sess = co_await db::session::connect(ioc.get_executor(), "sqlite", db::sqlite_config { ":memory:" }.to_connection_string());
             co_await sess.query("CREATE TABLE t (u INTEGER, d REAL, b BLOB, dt TEXT, tm TEXT)");
 
             auto stmt = sess.stmt("INSERT INTO t VALUES (:u, :d, :b, :dt, :tm)");
