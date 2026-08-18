@@ -66,6 +66,31 @@ namespace httplib
             return socket().is_open();
         }
 
+        /**
+         * \brief 非阻塞探测对端是否仍存活（TCP 层 FIN/RST 检测）。
+         * \details 对空闲连接用 MSG_PEEK 试读 1 字节：返回 0 表示对端已关闭，
+         * 返回 would_block 表示无数据但连接仍在。TLS 下同样能检测 TCP 层断开，
+         * 但检测不到仅发送了 close_notify 而未关闭 TCP 的对端。
+         */
+        bool
+        is_peer_alive(boost::system::error_code& ec)
+        {
+            auto& sock = socket();
+            sock.non_blocking(true, ec);
+            if (ec)
+            {
+                return false;
+            }
+
+            char c;
+            auto n = sock.receive(net::buffer(&c, 1), net::socket_base::message_peek, ec);
+            if (ec)
+            {
+                return ec == net::error::would_block || ec == net::error::try_again;
+            }
+            return n > 0;
+        }
+
         void
         expires_after(net::steady_timer::duration const& expiry_time)
         {
@@ -150,6 +175,7 @@ namespace httplib
             {
                 socket().set_option(net::socket_base::reuse_address(true));
                 socket().set_option(net::ip::tcp::no_delay(true));
+                socket().set_option(net::socket_base::keep_alive(true));
             }
             co_return ec;
         }

@@ -1,12 +1,34 @@
 #pragma once
+#include "httplib/client/client.hpp"
 #include "httplib/client/client_fwd.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <boost/system/error_code.hpp>
 #include <chrono>
+#include <cstddef>
 #include <memory>
+#include <string>
 
 namespace httplib::client
 {
+
+    /**
+     * \brief HTTP 客户端连接池参数。
+     * \details \c max_size 为每个 host（route）的连接数上限，\c max_total 为全局连接数上限（0 表示不限）。
+     * 其余字段在新建连接时透传给 \c http_client。
+     */
+    struct pool_params
+    {
+        size_t max_size = 100;
+        size_t max_total = 0;
+        std::chrono::steady_clock::duration idle_timeout = std::chrono::seconds(60);
+        bool validate_on_borrow = false;
+
+        http_client::timeout_policy timeout_policy = http_client::timeout_policy::overall;
+        std::chrono::steady_clock::duration timeout = std::chrono::seconds(30);
+        int max_redirects = 0;
+        bool verify_ssl = true;
+        std::string ca_cert;
+    };
 
     class HTTPLIB_API http_client_pool
     {
@@ -60,9 +82,7 @@ namespace httplib::client
         };
 
       public:
-        explicit http_client_pool(net::any_io_executor const& ex,
-                                  size_t max_size = 100,
-                                  std::chrono::steady_clock::duration idle_timeout = std::chrono::seconds(60));
+        explicit http_client_pool(net::any_io_executor const& ex, pool_params params = {});
         ~http_client_pool();
 
         http_client_pool(http_client_pool const&) = delete;
@@ -87,8 +107,12 @@ namespace httplib::client
 
         net::any_io_executor get_executor() noexcept;
 
-        void set_max_size(size_t n);
-        void set_idle_timeout(std::chrono::steady_clock::duration timeout);
+        std::shared_ptr<spdlog::logger> logger() const;
+        void set_logger(std::shared_ptr<spdlog::logger> logger);
+
+        size_t active_count() const;
+        size_t idle_count() const;
+        size_t total_count() const;
 
         void start();
         void stop();

@@ -12,7 +12,7 @@
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/asio/use_future.hpp>
 #include <boost/url.hpp>
-#include <spdlog/sinks/stdout_color_sinks.h>
+#include "util/logging.hpp"
 #include <spdlog/spdlog.h>
 
 #ifdef HTTPLIB_ENABLED_SSL
@@ -91,10 +91,7 @@ namespace httplib::server
 
     http_server::impl::impl(net::any_io_executor const& ex) : ex_(ex), acceptor_(ex)
     {
-        auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-        spdlog::sinks_init_list sink_list = { console_sink };
-        default_logger_ = std::make_shared<spdlog::logger>("httplib.server", sink_list);
-        default_logger_->set_level(spdlog::level::info);
+        default_logger_ = httplib::detail::make_console_logger("httplib.server");
     }
 
     http_server::impl::~impl() = default;

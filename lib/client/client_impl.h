@@ -46,6 +46,7 @@ namespace httplib::client
         void close();
         bool is_open() const;
         bool has_active_session() const;
+        bool is_alive() const;
 
         std::shared_ptr<spdlog::logger> logger() const;
         void set_logger(std::shared_ptr<spdlog::logger> logger);

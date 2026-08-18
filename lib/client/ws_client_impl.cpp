@@ -3,7 +3,7 @@
 #include "httplib/util/use_awaitable.hpp"
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/beast/core/buffers_to_string.hpp>
-#include <spdlog/sinks/stdout_color_sinks.h>
+#include "util/logging.hpp"
 #include <spdlog/spdlog.h>
 
 namespace httplib::client
@@ -16,10 +16,7 @@ namespace httplib::client
         , use_ssl_(ssl)
         , ac_que_(ex)
     {
-        auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-        spdlog::sinks_init_list sink_list = { console_sink };
-        default_logger_ = std::make_shared<spdlog::logger>("httplib.ws_client", sink_list);
-        default_logger_->set_level(spdlog::level::info);
+        default_logger_ = httplib::detail::make_console_logger("httplib.ws_client");
     }
 
     net::awaitable<boost::system::error_code>

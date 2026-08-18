@@ -3,7 +3,7 @@
 #include "httplib/util/use_awaitable.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/use_awaitable.hpp>
-#include <spdlog/sinks/stdout_color_sinks.h>
+#include "util/logging.hpp"
 #include <spdlog/spdlog.h>
 
 namespace httplib::db
@@ -20,10 +20,7 @@ namespace httplib::db
             cfg_.min_connections = cfg_.max_connections;
         }
 
-        auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-        spdlog::sinks_init_list sink_list = { console_sink };
-        default_logger_ = std::make_shared<spdlog::logger>("httplib.db_pool", sink_list);
-        default_logger_->set_level(spdlog::level::info);
+        default_logger_ = httplib::detail::make_console_logger("httplib.db_pool");
     }
 
     connection_pool::impl::~impl() { stop(); }

@@ -96,7 +96,7 @@ namespace
                 auto ep = server.local_endpoint();
                 server.run();
 
-                httplib::client::http_client_pool client_pool(pool.get_executor(), 4);
+                httplib::client::http_client_pool client_pool(pool.get_executor(), {.max_size = 4});
                 client_pool.start();
 
                 co_await test(client_pool, ep);

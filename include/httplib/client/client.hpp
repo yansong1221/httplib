@@ -184,6 +184,7 @@ namespace httplib::client
         void close();
         bool is_open() const;
         bool has_active_session() const;
+        bool is_alive() const;
 
       private:
         http_client(http_client const&) = delete;

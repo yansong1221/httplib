@@ -417,6 +417,12 @@ namespace httplib::client
         return impl_->has_active_session();
     }
 
+    bool
+    http_client::is_alive() const
+    {
+        return impl_->is_alive();
+    }
+
     void
     http_client::set_max_redirects(int n)
     {

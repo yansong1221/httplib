@@ -122,7 +122,7 @@ client::http_client client(ex, "https://example.com");
 ```cpp
 #include <httplib/client/client_pool.hpp>
 
-client::http_client_pool pool(ex, 4);  // max 4 active connections
+client::http_client_pool pool(ex, {.max_size = 4});  // max 4 active connections
 
 // Acquire a connection; waits when the pool is at capacity
 net::co_spawn(ex, []() -> net::awaitable<void> {
