@@ -148,13 +148,20 @@ namespace httplib::util
     }
 
     std::string
-    make_host_value(std::string_view host, uint16_t port, bool ssl)
+    make_host_value(std::string_view host_in, uint16_t port, bool ssl)
     {
+        std::string host(host_in);
+        // IPv6字面量在 Host 头/URL 中需要方括号；已带括号的 host 不重复包裹。
+        if (host.find(':') != std::string::npos && !(host.front() == '[' && host.back() == ']'))
+        {
+            host = fmt::format("[{}]", host);
+        }
+
         if ((ssl && port != 443) || (!ssl && port != 80))
         {
             return fmt::format("{}:{}", host, port);
         }
-        return std::string(host);
+        return host;
     }
 
     std::string

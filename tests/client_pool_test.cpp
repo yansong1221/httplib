@@ -194,7 +194,9 @@ TEST_CASE("client_pool: idle timeout evicts connection", "[client_pool]")
     run(
         [](net::io_context& ioc) -> net::awaitable<void>
         {
-            httplib::client::http_client_pool p(ioc.get_executor(), {.max_size = 4, .idle_timeout = std::chrono::milliseconds(100)});
+            httplib::client::http_client_pool p(
+                ioc.get_executor(),
+                { .max_size = 4, .idle_timeout = std::chrono::milliseconds(100), .idle_check_interval = std::chrono::milliseconds(100) });
             p.start();
 
             {
@@ -296,7 +298,9 @@ TEST_CASE("client_pool: restart re-arms maintenance", "[client_pool]")
     run(
         [](net::io_context& ioc) -> net::awaitable<void>
         {
-            httplib::client::http_client_pool p(ioc.get_executor(), {.max_size = 4, .idle_timeout = std::chrono::milliseconds(100)});
+            httplib::client::http_client_pool p(
+                ioc.get_executor(),
+                { .max_size = 4, .idle_timeout = std::chrono::milliseconds(100), .idle_check_interval = std::chrono::milliseconds(100) });
             p.start();
 
             // stop()/start() in quick succession: the maintenance loop must be
@@ -829,6 +833,157 @@ TEST_CASE("client_pool: reader survives handle destruction", "[client_pool]")
             }
             CHECK(streamed.size() >= 3);
             CHECK(streamed.substr(0, 3) == "ABC");
+
+            p.stop();
+        });
+}
+
+TEST_CASE("client_pool: idle eviction wakes a waiting acquire", "[client_pool]")
+{
+    run_with_server(
+        [](httplib::server::http_server& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/ok",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"); });
+        },
+        [](net::any_io_executor ex, httplib::tcp::endpoint const& ep) -> net::awaitable<void>
+        {
+            httplib::client::http_client_pool p(
+                ex,
+                { .max_size = 2, .idle_timeout = std::chrono::milliseconds(100), .idle_check_interval = std::chrono::milliseconds(100) });
+            p.start();
+
+            auto host = ep.address().to_string();
+            auto port = ep.port();
+
+            auto a = co_await p.async_acquire(host, port, false);
+            REQUIRE(a);
+            auto r0 = co_await a->async_get("/ok");
+            REQUIRE(r0.has_value());
+
+            auto b = co_await p.async_acquire(host, port, false);
+            REQUIRE(b);
+
+            a.release(); // idle=1, active=1, route total=2=max_size
+            CHECK(p.stats(host, port, false).idle == 1);
+            CHECK(p.stats(host, port, false).active == 1);
+
+            struct waiter_result
+            {
+                bool completed = false;
+                bool success = false;
+                std::chrono::milliseconds elapsed { 0 };
+            };
+            auto result = std::make_shared<waiter_result>();
+            auto start = std::chrono::steady_clock::now();
+
+            net::co_spawn(
+                ex,
+                [result, start, &p, host, port]() -> net::awaitable<void>
+                {
+                    try
+                    {
+                        auto h = co_await p.async_acquire(host, port, false, std::chrono::seconds(2));
+                        if (h)
+                        {
+                            auto r = co_await h->async_get("/ok");
+                            result->success = r.has_value();
+                        }
+                    }
+                    catch (...)
+                    {
+                    }
+                    result->elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now() - start);
+                    result->completed = true;
+                },
+                [](std::exception_ptr) {});
+
+            net::steady_timer sleep(ex);
+            sleep.expires_after(std::chrono::milliseconds(700));
+            boost::system::error_code ec;
+            co_await sleep.async_wait(httplib::util::net_awaitable[ec]);
+
+            REQUIRE(result->completed);
+            CHECK(result->success);
+            CHECK(result->elapsed < std::chrono::milliseconds(1500)); // 被驱逐唤醒，而不是睡满 2s
+            b.release();
+            p.stop();
+        });
+}
+
+TEST_CASE("client_pool: stop/start isolates old handles from new pool counts", "[client_pool]")
+{
+    run(
+        [](net::io_context& ioc) -> net::awaitable<void>
+        {
+            httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 2 });
+            p.start();
+
+            constexpr char const* host = "127.0.0.1";
+            uint16_t port = 80;
+
+            auto old = co_await p.async_acquire(host, port, false);
+            REQUIRE(old);
+
+            p.stop();
+            p.start();
+
+            auto f1 = co_await p.async_acquire(host, port, false);
+            REQUIRE(f1);
+            auto f2 = co_await p.async_acquire(host, port, false);
+            REQUIRE(f2);
+
+            CHECK(p.stats(host, port, false).active == 2);
+            CHECK(p.total_count() == 2);
+
+            // 旧 epoch 的 handle 不能再递减新池计数，也不能把旧连接塞回新池。
+            old.release();
+            CHECK(p.stats(host, port, false).active == 2);
+            CHECK(p.total_count() == 2);
+
+            f1.release();
+            CHECK(p.stats(host, port, false).active == 1);
+            CHECK(p.stats(host, port, false).idle == 1);
+            CHECK(p.total_count() == 2);
+
+            f2.release();
+            p.stop();
+        });
+}
+
+TEST_CASE("client_pool: idle_check_interval decouples eviction tick from idle_timeout", "[client_pool]")
+{
+    run(
+        [](net::io_context& ioc) -> net::awaitable<void>
+        {
+            httplib::client::http_client_pool p(
+                ioc.get_executor(),
+                { .max_size = 4, .idle_timeout = std::chrono::milliseconds(100), .idle_check_interval = std::chrono::milliseconds(500) });
+            p.start();
+
+            constexpr char const* host = "127.0.0.1";
+            uint16_t port = 80;
+
+            {
+                auto h = co_await p.async_acquire(host, port, false);
+            }
+            CHECK(p.stats(host, port, false).idle == 1);
+
+            // idle_timeout 已到，但检查周期尚未到：不应回收。
+            net::steady_timer t1(ioc.get_executor());
+            t1.expires_after(std::chrono::milliseconds(200));
+            boost::system::error_code ec;
+            co_await t1.async_wait(httplib::util::net_awaitable[ec]);
+            CHECK(p.stats(host, port, false).idle == 1);
+
+            // 检查周期到达后，按 idle_timeout 回收。
+            net::steady_timer t2(ioc.get_executor());
+            t2.expires_after(std::chrono::milliseconds(600));
+            co_await t2.async_wait(httplib::util::net_awaitable[ec]);
+            CHECK(p.stats(host, port, false).idle == 0);
 
             p.stop();
         });

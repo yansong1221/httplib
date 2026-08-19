@@ -5,6 +5,7 @@
 #include <boost/system/error_code.hpp>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -20,7 +21,10 @@ namespace httplib::client
     {
         size_t max_size = 100;
         size_t max_total = 0;
+        /// 空闲连接过期时间；`0` 表示不按 idle_timeout 回收。
         std::chrono::steady_clock::duration idle_timeout = std::chrono::seconds(60);
+        /// 空闲回收检查周期；`0` 表示使用默认 `60s`。
+        std::chrono::steady_clock::duration idle_check_interval = std::chrono::seconds(60);
         bool validate_on_borrow = false;
 
         http_client::timeout_policy timeout_policy = http_client::timeout_policy::overall;
@@ -43,8 +47,10 @@ namespace httplib::client
             std::weak_ptr<impl> pool_;
             std::unique_ptr<http_client> conn_;
             boost::system::error_code error_;
+            /// 借出时的 pool epoch：stop() 会递增 epoch，旧 handle 不能再改新池计数。
+            uint64_t epoch_ = 0;
 
-            client_handle(std::weak_ptr<impl> pool, std::unique_ptr<http_client> conn);
+            client_handle(std::weak_ptr<impl> pool, std::unique_ptr<http_client> conn, uint64_t epoch);
 
           public:
             client_handle();
