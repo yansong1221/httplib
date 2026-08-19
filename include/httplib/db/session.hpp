@@ -124,7 +124,7 @@ namespace httplib::db
         friend class prepared_statement;
 
         struct impl;
-        explicit session(std::unique_ptr<impl> p);
+        explicit session(std::shared_ptr<impl> p);
 
         /// 统一连接入口：注册表查后端工厂并建立连接。
         static net::awaitable<session> connect_internal(net::any_io_executor ex,
@@ -142,7 +142,10 @@ namespace httplib::db
         /// query 与 prepared_statement 共用；数组参数会展开为多个 `?` 并自动跳过缓存。
         net::awaitable<result> execute_query(std::string_view sql, std::vector<detail::binder> binders, bool cacheable);
 
-        std::unique_ptr<impl> impl_;
+        /// 析构/移动赋值时把 impl 交给后台协程：异步 close 所有缓存语句后自毁。
+        void detach() noexcept;
+
+        std::shared_ptr<impl> impl_;
     };
 
 } // namespace httplib::db

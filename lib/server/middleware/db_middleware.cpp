@@ -68,17 +68,27 @@ namespace httplib::server::middleware
             auto sess = req.data().fetch<value_type>();
             if (sess)
             {
-                std::exception_ptr commit_err;
+                // 仅请求成功（<400）时提交；失败状态回滚，避免把业务错误落库。
+                bool const ok = resp.result_int() < 400;
+                std::exception_ptr op_err;
                 try
                 {
-                    co_await sess->get()->commit();
+                    if (ok)
+                    {
+                        co_await sess->get()->commit();
+                    }
+                    else
+                    {
+                        co_await sess->get()->rollback();
+                    }
                 }
                 catch (...)
                 {
-                    commit_err = std::current_exception();
+                    op_err = std::current_exception();
                 }
-                if (commit_err)
+                if (op_err)
                 {
+                    // 提交失败时尝试回滚；回滚失败则放弃（连接交给 pool 处理）。
                     try
                     {
                         co_await sess->get()->rollback();
@@ -86,7 +96,10 @@ namespace httplib::server::middleware
                     catch (...)
                     {
                     }
-                    resp.set_error_content(http::status::internal_server_error);
+                    if (ok)
+                    {
+                        resp.set_error_content(http::status::internal_server_error);
+                    }
                 }
             }
         }

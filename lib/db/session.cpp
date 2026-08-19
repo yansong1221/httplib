@@ -3,8 +3,11 @@
 #include "httplib/util/string_hash.hpp"
 #include "registry.hpp"
 #include "render.hpp"
+#include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/co_spawn.hpp>
 #include <boost/system/error_code.hpp>
 #include <list>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -13,8 +16,9 @@
 namespace httplib::db
 {
 
-    struct session::impl
+    struct session::impl : public std::enable_shared_from_this<impl>
     {
+        net::any_io_executor ex_;
         std::unique_ptr<detail::backend> backend;
         bool in_transaction = false;
         bool live = true;
@@ -38,12 +42,125 @@ namespace httplib::db
         {
             last_active = std::chrono::steady_clock::now();
         }
+
+        /// 后端失效时标记会话死亡；返回后端是否已失效。
+        bool
+        mark_dead_if_needed()
+        {
+            if (backend->alive())
+            {
+                return false;
+            }
+            live = false;
+            return true;
+        }
+
+        /// 释放所有缓存语句并清空缓存（连接失效 / 重连 / 析构路径复用）。
+        net::awaitable<void>
+        clear_stmt_cache()
+        {
+            for (auto& [key, cs] : stmt_cache)
+            {
+                co_await backend->close_statement(cs.handle);
+            }
+            stmt_cache.clear();
+            stmt_lru.clear();
+            co_return;
+        }
+
+        /// 析构/归还路径：把自身交给后台协程，异步 close 所有缓存语句后自毁。
+        void
+        close_statements_async()
+        {
+            if (stmt_cache.empty())
+            {
+                return;
+            }
+            net::co_spawn(
+                ex_,
+                [self = shared_from_this()]() -> net::awaitable<void> { co_await self->clear_stmt_cache(); },
+                [](std::exception_ptr) {});
+        }
+
+        /// 取缓存语句；未命中则 prepare 并按 LRU 逐出后插入。
+        net::awaitable<detail::statement_handle>
+        acquire_cached(std::string_view sql)
+        {
+            if (auto it = stmt_cache.find(sql); it != stmt_cache.end())
+            {
+                stmt_lru.splice(stmt_lru.begin(), stmt_lru, it->second.lru_it);
+                co_return it->second.handle;
+            }
+
+            auto h = co_await backend->prepare(sql);
+            while (stmt_cache.size() >= stmt_cache_capacity)
+            {
+                auto evict_key = std::move(stmt_lru.back());
+                stmt_lru.pop_back();
+                auto evict_it = stmt_cache.find(evict_key);
+                if (evict_it == stmt_cache.end())
+                {
+                    break;
+                }
+                co_await backend->close_statement(evict_it->second.handle);
+                stmt_cache.erase(evict_it);
+            }
+            stmt_lru.emplace_front(sql);
+            stmt_cache.emplace(sql, cached_statement { h, stmt_lru.begin() });
+            co_return h;
+        }
+
+        /// 记录一次查询日志（query_logger 为空时跳过）。
+        void
+        log_query(std::string_view sql,
+                  std::chrono::steady_clock::duration duration,
+                  size_t row_count,
+                  uint64_t affected_rows,
+                  bool is_parameterized)
+        {
+            if (!query_logger)
+            {
+                return;
+            }
+            query_log_entry entry;
+            entry.sql = std::string(sql);
+            entry.duration = duration;
+            entry.row_count = row_count;
+            entry.affected_rows = affected_rows;
+            entry.is_parameterized = is_parameterized;
+            query_logger(entry);
+        }
     };
 
-    session::session(std::unique_ptr<impl> p) : impl_(std::move(p)) {}
+    session::session(std::shared_ptr<impl> p) : impl_(std::move(p)) {}
     session::session(session&&) noexcept = default;
-    session& session::operator=(session&&) noexcept = default;
-    session::~session() = default;
+
+    session&
+    session::operator=(session&& other) noexcept
+    {
+        if (this != &other)
+        {
+            detach();
+            impl_ = std::move(other.impl_);
+        }
+        return *this;
+    }
+
+    session::~session() { detach(); }
+
+    void
+    session::detach() noexcept
+    {
+        if (!impl_)
+        {
+            return;
+        }
+
+        // 会话析构无法 co_await：把 impl 交给后台协程，异步 close 所有缓存语句后自毁。
+        // shared_ptr 保证 backend / stmt_cache 在协程运行期间存活。
+        impl_->close_statements_async();
+        impl_.reset();
+    }
 
     net::awaitable<session>
     session::connect(net::any_io_executor ex, std::string_view backend_name, std::string_view conn_string)
@@ -62,7 +179,8 @@ namespace httplib::db
                                "db: unknown backend '" + std::string(backend_name)
                                    + "' (registered: " + detail::registered_backend_names() + ")");
         }
-        auto imp = std::make_unique<impl>();
+        auto imp = std::make_shared<impl>();
+        imp->ex_ = ex;
         imp->backend = (*factory)(ex, opts);
         int const cache_cap = opts.as_int("max_cached_statements").value_or(static_cast<int>(imp->stmt_cache_capacity));
         // 负数视为禁用语句缓存（-1 曾因 cast 成 SIZE_MAX 导致缓存无上限）。
@@ -84,23 +202,11 @@ namespace httplib::db
         }
         catch (db_exception const&)
         {
-            if (!impl_->backend->alive())
-            {
-                impl_->live = false;
-            }
+            impl_->mark_dead_if_needed();
             throw;
         }
         impl_->touch();
-
-        if (impl_->query_logger)
-        {
-            query_log_entry entry;
-            entry.sql = std::string(sql);
-            entry.duration = std::chrono::steady_clock::now() - start;
-            entry.row_count = res.row_count();
-            entry.affected_rows = res.affected_rows();
-            impl_->query_logger(entry);
-        }
+        impl_->log_query(sql, std::chrono::steady_clock::now() - start, res.row_count(), res.affected_rows(), false);
         co_return res;
     }
 
@@ -150,30 +256,8 @@ namespace httplib::db
             }
             else if (cacheable && impl_->stmt_cache_capacity > 0)
             {
-                auto it = impl_->stmt_cache.find(sql);
-                if (it == impl_->stmt_cache.end())
-                {
-                    auto h = co_await impl_->backend->prepare(sql);
-                    while (impl_->stmt_cache.size() >= impl_->stmt_cache_capacity)
-                    {
-                        auto evict_key = std::move(impl_->stmt_lru.back());
-                        impl_->stmt_lru.pop_back();
-                        auto evict_it = impl_->stmt_cache.find(evict_key);
-                        if (evict_it == impl_->stmt_cache.end())
-                        {
-                            break;
-                        }
-                        co_await impl_->backend->close_statement(evict_it->second.handle);
-                        impl_->stmt_cache.erase(evict_it);
-                    }
-                    impl_->stmt_lru.emplace_front(sql);
-                    it = impl_->stmt_cache.emplace(sql, impl::cached_statement { h, impl_->stmt_lru.begin() }).first;
-                }
-                else
-                {
-                    impl_->stmt_lru.splice(impl_->stmt_lru.begin(), impl_->stmt_lru, it->second.lru_it);
-                }
-                res = co_await impl_->backend->execute_statement(it->second.handle, params);
+                auto handle = co_await impl_->acquire_cached(sql);
+                res = co_await impl_->backend->execute_statement(handle, params);
             }
             else
             {
@@ -202,31 +286,19 @@ namespace httplib::db
         }
         if (failure)
         {
-            if (!impl_->backend->alive())
+            if (impl_->mark_dead_if_needed())
             {
-                impl_->live = false;
                 // 连接失效后服务器端语句全部作废，清空缓存避免复用坏句柄。
-                for (auto& [key, cs] : impl_->stmt_cache)
-                {
-                    co_await impl_->backend->close_statement(cs.handle);
-                }
-                impl_->stmt_cache.clear();
-                impl_->stmt_lru.clear();
+                co_await impl_->clear_stmt_cache();
             }
             throw detail::enrich_error(*failure, original_sql, names, params);
         }
         impl_->touch();
-
-        if (impl_->query_logger)
-        {
-            query_log_entry entry;
-            entry.sql = std::string(original_sql);
-            entry.duration = std::chrono::steady_clock::now() - start;
-            entry.row_count = res.row_count();
-            entry.affected_rows = res.affected_rows();
-            entry.is_parameterized = !params.empty();
-            impl_->query_logger(entry);
-        }
+        impl_->log_query(original_sql,
+                         std::chrono::steady_clock::now() - start,
+                         res.row_count(),
+                         res.affected_rows(),
+                         !params.empty());
         co_return res;
     }
 
@@ -270,12 +342,7 @@ namespace httplib::db
     session::reconnect()
     {
         // 断开重连后服务器端 prepared statement 全部失效，先释放所有缓存句柄。
-        for (auto& [key, cs] : impl_->stmt_cache)
-        {
-            co_await impl_->backend->close_statement(cs.handle);
-        }
-        impl_->stmt_cache.clear();
-        impl_->stmt_lru.clear();
+        co_await impl_->clear_stmt_cache();
         co_await impl_->backend->reconnect();
         impl_->live = true;
         impl_->in_transaction = false;
