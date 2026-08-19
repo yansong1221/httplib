@@ -311,21 +311,45 @@ namespace httplib::db
     net::awaitable<void>
     session::begin_transaction()
     {
-        co_await impl_->backend->begin();
+        try
+        {
+            co_await impl_->backend->begin();
+        }
+        catch (db_exception const&)
+        {
+            impl_->mark_dead_if_needed();
+            throw;
+        }
         impl_->in_transaction = true;
     }
 
     net::awaitable<void>
     session::commit()
     {
-        co_await impl_->backend->commit();
+        try
+        {
+            co_await impl_->backend->commit();
+        }
+        catch (db_exception const&)
+        {
+            impl_->mark_dead_if_needed();
+            throw;
+        }
         impl_->in_transaction = false;
     }
 
     net::awaitable<void>
     session::rollback()
     {
-        co_await impl_->backend->rollback();
+        try
+        {
+            co_await impl_->backend->rollback();
+        }
+        catch (db_exception const&)
+        {
+            impl_->mark_dead_if_needed();
+            throw;
+        }
         impl_->in_transaction = false;
     }
 

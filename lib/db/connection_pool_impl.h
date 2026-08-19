@@ -41,7 +41,7 @@ namespace httplib::db
       private:
         using waiters_list = std::deque<std::weak_ptr<net::steady_timer>>;
 
-        std::unique_ptr<session> try_pop_idle();
+        std::unique_ptr<session> try_pop_idle(std::vector<std::unique_ptr<session>>& discarded);
         net::awaitable<std::unique_ptr<session>> try_pop_validated();
         void wake_one_waiter();
         void push_idle(std::unique_ptr<session> sess);

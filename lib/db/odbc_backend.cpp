@@ -39,7 +39,7 @@ namespace httplib::db::detail
     namespace
     {
         // 获取 ODBC 错误文本（首个诊断记录），供异常消息使用。
-        std::string
+        static std::string
         odbc_error_text(SQLHANDLE handle, SQLSMALLINT handle_type)
         {
             SQLCHAR state[6] = {};
@@ -54,7 +54,16 @@ namespace httplib::db::detail
                    + std::string(reinterpret_cast<char*>(msg), len) + " (native " + std::to_string(native) + ")";
         }
 
-        void
+        /// 诊断记录是否属于连接异常类（SQLSTATE 以 "08" 开头）。
+        static bool
+        odbc_connection_lost(SQLHANDLE handle, SQLSMALLINT handle_type)
+        {
+            SQLCHAR state[6] = {};
+            SQLGetDiagRec(handle_type, handle, 1, state, nullptr, nullptr, 0, nullptr);
+            return state[0] == '0' && state[1] == '8';
+        }
+
+        static void
         check_ok(SQLRETURN rc, SQLHANDLE handle, SQLSMALLINT handle_type, std::string_view what)
         {
             if (rc != SQL_SUCCESS && rc != SQL_SUCCESS_WITH_INFO)
@@ -130,7 +139,7 @@ namespace httplib::db::detail
             }
         };
 
-        odbc_bind
+        static odbc_bind
         make_bind(param const& p)
         {
             odbc_bind b;
@@ -265,7 +274,7 @@ namespace httplib::db::detail
             return b;
         }
 
-        db::column_type
+        static db::column_type
         map_sql_type(SQLSMALLINT t)
         {
             switch (t)
@@ -310,7 +319,7 @@ namespace httplib::db::detail
         }
 
         // 读可变长文本（SQL_C_CHAR）；先取长度再分块取数据。
-        net::awaitable<std::string>
+        static net::awaitable<std::string>
         read_text(SQLHSTMT stmt, net::windows::object_handle& obj, SQLSMALLINT col, bool& is_null)
         {
             // 用真实小缓冲探测：NULL 列在本驱动下以 SQL_NULL_DATA 报告（nullptr/0 探测会 SQL_ERROR）。
@@ -379,7 +388,7 @@ namespace httplib::db::detail
         }
 
         // 读可变长二进制（SQL_C_BINARY）。
-        net::awaitable<std::vector<std::byte>>
+        static net::awaitable<std::vector<std::byte>>
         read_blob(SQLHSTMT stmt, net::windows::object_handle& obj, SQLSMALLINT col, bool& is_null)
         {
             // 用真实小缓冲探测：NULL 列在本驱动下以 SQL_NULL_DATA 报告（nullptr/0 探测会 SQL_ERROR）。
@@ -664,6 +673,21 @@ namespace httplib::db::detail
         }
     } // namespace
 
+    void
+    odbc_backend::check_ok(SQLRETURN rc, SQLHANDLE handle, SQLSMALLINT handle_type, std::string_view what)
+    {
+        if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)
+        {
+            return;
+        }
+        if (odbc_connection_lost(handle, handle_type))
+        {
+            live_ = false;
+        }
+        throw db_exception(boost::system::error_code {},
+                           "db: " + std::string(what) + ": " + odbc_error_text(handle, handle_type));
+    }
+
     odbc_backend::odbc_backend(net::any_io_executor ex, odbc_config cfg) : ex_(std::move(ex)), cfg_(std::move(cfg))
     {
         auto conn_event = CreateEvent(nullptr, FALSE, FALSE, nullptr); // auto-reset, 初始非信号态
@@ -821,6 +845,7 @@ namespace httplib::db::detail
                 });
             check_ok(rc, dbc_, SQL_HANDLE_DBC, "odbc connect (dsn)");
         }
+        live_ = true;
     }
 
     net::awaitable<void>
@@ -848,10 +873,15 @@ namespace httplib::db::detail
                                                });
             bool ok = rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO;
             free_stmt(*s);
+            if (!ok)
+            {
+                live_ = false;
+            }
             co_return ok;
         }
         catch (...)
         {
+            live_ = false;
             co_return false;
         }
     }

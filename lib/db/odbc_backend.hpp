@@ -35,7 +35,7 @@ namespace httplib::db::detail
         bool
         alive() const override
         {
-            return dbc_ != nullptr;
+            return dbc_ != nullptr && live_;
         }
 
         net::awaitable<result> execute(std::string_view sql) override;
@@ -67,12 +67,15 @@ namespace httplib::db::detail
         /// 读取语句全部结果集（含多结果集）。
         net::awaitable<result> read_all(odbc_stmt& s);
         void disconnect() noexcept;
+        /// ODBC 调用失败时检查返回码；连接异常（SQLSTATE 08xxx）时标记 live_ = false 再抛。
+        void check_ok(SQLRETURN rc, SQLHANDLE handle, SQLSMALLINT handle_type, std::string_view what);
 
         net::any_io_executor ex_;
         std::unique_ptr<net::windows::object_handle> conn_obj_;
         odbc_config cfg_;
         void* env_ = nullptr; ///< SQLHENV
         void* dbc_ = nullptr; ///< SQLHDBC
+        bool live_ = true;    ///< 连接是否存活（连接异常错误时置 false）
     };
 
 } // namespace httplib::db::detail

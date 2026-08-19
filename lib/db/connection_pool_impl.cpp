@@ -210,19 +210,20 @@ namespace httplib::db
     void
     connection_pool::impl::stop()
     {
-        std::unique_lock<std::mutex> lock(mutex_);
-        if (stopped_.exchange(true))
-        {
-            return;
-        }
-        epoch_.fetch_add(1);
-        maintain_timer_.cancel();
-
+        std::vector<std::unique_ptr<session>> to_close;
         waiters_list waiters;
-        waiters.swap(waiters_);
-        idle_.clear();
+        {
+            std::unique_lock<std::mutex> lock(mutex_);
+            if (stopped_.exchange(true))
+            {
+                return;
+            }
+            epoch_.fetch_add(1);
+            maintain_timer_.cancel();
 
-        lock.unlock();
+            waiters.swap(waiters_);
+            to_close = std::move(idle_);
+        }
 
         for (auto& w : waiters)
         {
@@ -231,6 +232,7 @@ namespace httplib::db
                 waiter->cancel();
             }
         }
+        // to_close 在函数返回时于锁外析构（session 析构可能进入后端 close）。
     }
 
     size_t
@@ -255,7 +257,7 @@ namespace httplib::db
     }
 
     std::unique_ptr<session>
-    connection_pool::impl::try_pop_idle()
+    connection_pool::impl::try_pop_idle(std::vector<std::unique_ptr<session>>& discarded)
     {
         while (!idle_.empty())
         {
@@ -268,6 +270,8 @@ namespace httplib::db
             }
             if (!sess->is_live())
             {
+                // 死连接移出 idle 后交给调用方在锁外析构。
+                discarded.push_back(std::move(sess));
                 continue;
             }
 
@@ -281,10 +285,14 @@ namespace httplib::db
     connection_pool::impl::try_pop_validated()
     {
         std::unique_ptr<session> sess;
+        std::vector<std::unique_ptr<session>> discarded;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            sess = try_pop_idle();
+            sess = try_pop_idle(discarded);
         }
+        // 锁外析构被丢弃的死连接，避免池锁内进入后端 close。
+        discarded.clear();
+
         if (!sess)
         {
             co_return nullptr;
@@ -413,6 +421,7 @@ namespace httplib::db
             auto now = std::chrono::steady_clock::now();
 
             std::vector<std::unique_ptr<session>> to_ping;
+            std::vector<std::unique_ptr<session>> to_close;
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 if (stopped_)
@@ -432,6 +441,7 @@ namespace httplib::db
                     {
                         if (idle_.size() > cfg_.min_connections)
                         {
+                            to_close.push_back(std::move(*it));
                             it = idle_.erase(it);
                             wake_one_waiter(); // 空闲回收释放了槽位，唤醒等待者避免其睡到超时
                             continue;
@@ -453,6 +463,9 @@ namespace httplib::db
                 // 与借出侧的容量判断互斥，杜绝验证窗口内的超建。
                 validating_ += to_ping.size();
             }
+
+            // 锁外析构被空闲回收的连接（session 析构可能进入后端 close）。
+            to_close.clear();
 
             for (auto& sess : to_ping)
             {
