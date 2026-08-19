@@ -44,6 +44,8 @@ namespace httplib::client
         void set_verify_ssl(bool verify);
         void set_ca_cert(std::string_view cert);
 
+        net::any_io_executor get_executor() const;
+
       public:
         // ---- HTTP method shorthands (no body) ----
 

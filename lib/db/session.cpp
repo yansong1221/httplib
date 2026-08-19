@@ -408,4 +408,10 @@ namespace httplib::db
         return impl_->in_transaction;
     }
 
+    net::any_io_executor
+    session::get_executor() const
+    {
+        return impl_->ex_;
+    }
+
 } // namespace httplib::db

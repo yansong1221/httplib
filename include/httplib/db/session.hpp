@@ -53,6 +53,9 @@ namespace httplib::db
                                                std::string_view backend_name,
                                                std::string_view conn_string);
 
+        net::any_io_executor get_executor() const;
+        
+        
         /// 执行一条 SQL 语句。
         net::awaitable<result> query(std::string_view sql);
 

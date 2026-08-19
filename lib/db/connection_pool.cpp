@@ -139,7 +139,7 @@ namespace httplib::db
     }
 
     net::any_io_executor
-    connection_pool::get_executor() noexcept
+    connection_pool::get_executor() const noexcept
     {
         return impl_->get_executor();
     }

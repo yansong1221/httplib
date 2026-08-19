@@ -33,7 +33,7 @@ namespace httplib::db
         size_t total_count() const;
 
         net::any_io_executor
-        get_executor() noexcept
+        get_executor() const noexcept
         {
             return ex_;
         }

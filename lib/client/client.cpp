@@ -441,4 +441,10 @@ namespace httplib::client
         impl_->ca_cert_ = cert;
     }
 
+    net::any_io_executor
+    http_client::get_executor() const
+    {
+        return impl_->executor_;
+    }
+
 } // namespace httplib::client
