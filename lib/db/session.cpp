@@ -116,7 +116,7 @@ namespace httplib::db
                   std::chrono::steady_clock::duration duration,
                   size_t row_count,
                   uint64_t affected_rows,
-                  bool is_parameterized)
+                  bool is_parameterized) const
         {
             if (!query_logger)
             {
