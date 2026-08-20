@@ -298,6 +298,10 @@ namespace httplib::db
         {
             return *v;
         }
+        if (auto* v = std::get_if<timestamp>(&f))
+        {
+            return datetime::from_time_point(*v);
+        }
         throw std::runtime_error("db: cannot convert to datetime");
     }
 
@@ -328,7 +332,7 @@ namespace httplib::db
         return as_time(column(name));
     }
 
-    std::optional<std::chrono::system_clock::time_point>
+    std::optional<timestamp>
     row::as_timestamp(size_t col) const
     {
         auto& f = parent_->at(idx_, col);
@@ -336,20 +340,19 @@ namespace httplib::db
         {
             return std::nullopt;
         }
+        if (auto* v = std::get_if<timestamp>(&f))
+        {
+            return *v;
+        }
         if (auto* v = std::get_if<datetime>(&f))
         {
-            auto tp = v->to_time_point();
-            // TIMESTAMP 列是会话时区，换算回 UTC；DATETIME 列则视为字面值。
-            if (parent_->column_type(col) == db::column_type::timestamp)
-            {
-                tp -= parent_->utc_offset();
-            }
-            return tp;
+            // DATETIME 列读回的是无时区墙上时钟，直接视为 UTC 时间点。
+            return v->to_time_point();
         }
         throw std::runtime_error("db: cannot convert to timestamp");
     }
 
-    std::optional<std::chrono::system_clock::time_point>
+    std::optional<timestamp>
     row::as_timestamp(std::string_view name) const
     {
         return as_timestamp(column(name));

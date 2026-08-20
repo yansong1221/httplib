@@ -86,14 +86,18 @@ namespace httplib::db
      * 通过连接串 `connect(ex, "sqlite", "...")` / \ref make_pool 使用，
      * 也可用 \c to_connection_string() 把本结构转成等价连接串。连接串支持的键如下：
      * \n
-     * - `db` / `path`：数据库文件路径；`:memory:` 表示内存库，默认 `:memory:`。
+     * - `db` / `path`：数据库文件路径；`:memory:` 表示内存库，默认 `:memory:`；
+     * - `busy_timeout`：忙等待超时（毫秒），写锁冲突时等待重试至多这么久，
+     *   `0` 表示不等待（立即报告锁失败），默认 `0`。
      * \n
-     * 例：`"db=./data.db"`
+     * 例：`"db=./data.db busy_timeout=1000"`
      */
     struct sqlite_config
     {
         /// 数据库文件路径；":memory:" 表示内存库。
         std::string path = ":memory:";
+        /// 忙等待超时（毫秒）：写锁冲突时等待重试至多这么久，`0` 表示不等待（立即报告锁失败）。
+        std::chrono::milliseconds busy_timeout { 0 };
 
         /// 转成等价的后端连接选项（供字符串连接 API 复用）。
         options
@@ -101,6 +105,7 @@ namespace httplib::db
         {
             options o;
             o.set("db", path);
+            o.set("busy_timeout", std::to_string(busy_timeout.count()));
             return o;
         }
 

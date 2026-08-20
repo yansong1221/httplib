@@ -94,7 +94,7 @@ namespace httplib::db::detail
                 {
                     return quote_string(x.to_string());
                 }
-                else if constexpr (std::is_same_v<T, std::chrono::system_clock::time_point>)
+                else if constexpr (std::is_same_v<T, timestamp>)
                 {
                     return quote_string(datetime::from_time_point(x).to_string());
                 }

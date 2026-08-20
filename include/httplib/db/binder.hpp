@@ -33,7 +33,7 @@ namespace httplib::db
     namespace detail
     {
         /// 参数值：monostate 表示 NULL；std::string 为拥有型字符串/JSON 序列化结果；std::span 为 blob 视图；
-        /// time_point 延迟到渲染时做时区换算。
+        /// timestamp 延迟到渲染时做时区换算。
         using param = std::variant<std::monostate,
                                    int64_t,
                                    uint64_t,
@@ -43,7 +43,7 @@ namespace httplib::db
                                    date,
                                    datetime,
                                    time,
-                                   std::chrono::system_clock::time_point>;
+                                   timestamp>;
 
         /// 参数绑定声明：name 为空表示位置绑定，否则为命名绑定。
         struct binder
@@ -144,7 +144,7 @@ namespace httplib::db
             return boost::json::serialize(v);
         }
         inline param
-        to_param(std::chrono::system_clock::time_point tp)
+        to_param(timestamp tp)
         {
             return tp;
         }

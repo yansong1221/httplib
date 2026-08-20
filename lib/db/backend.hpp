@@ -5,6 +5,7 @@
 #include "httplib/db/result.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <cstddef>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -13,9 +14,12 @@ namespace httplib::db::detail
 {
 
     /// 后端 prepared statement 句柄（不透明）。由统一层（session）缓存并回传给后端执行/关闭。
+    /// 用 std::shared_ptr<void> 持有后端特定资源（后端可带自定义 deleter），
+    /// 句柄按值拷贝/析构自动增减引用；close_statement 显式释放（如 MySQL 需先异步关闭服务端语句），
+    /// 即使未调用 close_statement，缓存析构也会兜底释放底层资源。
     struct statement_handle
     {
-        void* state = nullptr; ///< 后端特定句柄（分配资源，需 close_statement 释放）。
+        std::shared_ptr<void> state;
     };
 
     /**

@@ -2,6 +2,7 @@
 
 #include "httplib/config.hpp"
 #include "temporal.hpp"
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -39,9 +40,18 @@ namespace httplib::db
      * \n
      * - \c std::monostate 表示 NULL
      * - 整数/浮点/字符串/二进制为值
-     * - date/datetime/time 为时间值
+     * - date/datetime/time 为无时区墙上时钟
+     * - \c timestamp 为 UTC 时间点（TIMESTAMP 等时区敏感列专用，与 datetime 不混用）
      */
-    using field = std::
-        variant<std::monostate, int64_t, uint64_t, double, std::string, std::vector<std::byte>, date, datetime, time>;
+    using field = std::variant<std::monostate,
+                               int64_t,
+                               uint64_t,
+                               double,
+                               std::string,
+                               std::vector<std::byte>,
+                               date,
+                               datetime,
+                               time,
+                               timestamp>;
 
 } // namespace httplib::db

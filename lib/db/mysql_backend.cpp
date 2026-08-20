@@ -60,7 +60,8 @@ namespace httplib::db::detail
                     }
                     else
                     {
-                        // time_point：延迟时区换算
+                        // time_point（UTC）：TIMESTAMP 列语义，存会话时区墙上时钟（+offset），
+                        // 服务器会按会话时区换算回 UTC；读回时由 to_field 还原成 UTC time_point。
                         auto dt = datetime::from_time_point(v + utc_offset);
                         return boost::mysql::field_view(boost::mysql::datetime(dt.year,
                                                                                dt.month,
@@ -121,7 +122,7 @@ namespace httplib::db::detail
         // 注意：MySQL DECIMAL（如 SUM()/AVG() 的返回）以字符串传回，
         // 按列类型还原为数值，避免聚合结果无法用 as_int64/as_double 读取。
         field
-        to_field(boost::mysql::field_view const& f, db::column_type ct)
+        to_field(boost::mysql::field_view const& f, db::column_type ct, std::chrono::seconds utc_offset)
         {
             if (f.is_null())
             {
@@ -190,7 +191,14 @@ namespace httplib::db::detail
             if (f.is_datetime())
             {
                 auto d = f.as_datetime();
-                return datetime { d.year(), d.month(), d.day(), d.hour(), d.minute(), d.second(), d.microsecond() };
+                datetime dt { d.year(), d.month(), d.day(), d.hour(), d.minute(), d.second(), d.microsecond() };
+                if (ct == db::column_type::timestamp)
+                {
+                    // TIMESTAMP 列：服务器存取时做会话时区换算，读回的是会话时区墙上时钟，
+                    // 减偏移还原成 UTC 时间点；与 DATETIME 列（datetime 墙上时钟）区分，不混用。
+                    return dt.to_time_point() - utc_offset;
+                }
+                return dt;
             }
             if (f.is_time())
             {
@@ -233,7 +241,7 @@ namespace httplib::db::detail
                             values.reserve(rv.size());
                             for (size_t ci = 0; ci < rv.size(); ++ci)
                             {
-                                values.push_back(to_field(rv[ci], s.types[ci]));
+                                values.push_back(to_field(rv[ci], s.types[ci], utc_offset));
                             }
                             s.rows.push_back(std::move(values));
                         }
@@ -241,7 +249,7 @@ namespace httplib::db::detail
                     sets.push_back(std::move(s));
                 }
             }
-            return result(std::move(sets), utc_offset);
+            return result(std::move(sets));
         }
     } // namespace
 
@@ -432,13 +440,13 @@ namespace httplib::db::detail
         boost::system::error_code ec;
         auto stmt = co_await conn_->async_prepare_statement(sql, diag, net::redirect_error(net::use_awaitable, ec));
         raise_error(ec, diag, sql);
-        co_return statement_handle { new boost::mysql::statement(std::move(stmt)) };
+        co_return statement_handle { std::make_shared<boost::mysql::statement>(std::move(stmt)) };
     }
 
     net::awaitable<result>
     mysql_backend::execute_statement(statement_handle h, std::vector<param> const& params)
     {
-        auto* stmt = static_cast<boost::mysql::statement*>(h.state);
+        auto* stmt = static_cast<boost::mysql::statement*>(h.state.get());
         boost::mysql::diagnostics diag;
         boost::system::error_code ec;
 
@@ -469,7 +477,7 @@ namespace httplib::db::detail
     net::awaitable<void>
     mysql_backend::close_statement(statement_handle h) noexcept
     {
-        auto* stmt = static_cast<boost::mysql::statement*>(h.state);
+        auto* stmt = static_cast<boost::mysql::statement*>(h.state.get());
         if (stmt && stmt->valid() && conn_)
         {
             boost::system::error_code close_ec;
@@ -489,7 +497,7 @@ namespace httplib::db::detail
                 live_ = false;
             }
         }
-        delete stmt;
+        h.state.reset();
     }
 
     net::awaitable<void>

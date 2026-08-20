@@ -5,11 +5,10 @@
 #include <sql.h>
 #include <sqlext.h>
 #include <windows.h>
-#ifndef SQL_TYPE_UTCDATETIME
-#define SQL_TYPE_UTCDATETIME (-155)
-#endif
+// SQL Server 专用类型（msodbcsql.h 里的 -150 ~ -199 保留段；此处只 include 了 sql.h/sqlext.h，
+// 故手动声明与驱动一致的常量值）。注意 DATETIMEOFFSET 是 -155，不是 -140。
 #ifndef SQL_SS_TIMESTAMPOFFSET
-#define SQL_SS_TIMESTAMPOFFSET (-140)
+#define SQL_SS_TIMESTAMPOFFSET (-155)
 #endif
 #ifndef SQL_SS_TIME2
 #define SQL_SS_TIME2 (-154)
@@ -24,8 +23,21 @@ struct SQL_SS_TIME2_STRUCT
     SQLUINTEGER fraction;
 };
 #endif
-#ifndef SQL_SS_TIMESTAMP2
-#define SQL_SS_TIMESTAMP2 (-153)
+#ifndef SQL_SS_TIMESTAMPOFFSET_STRUCT
+// SQL Server 专用 DATETIMEOFFSET 结构（sqltypes.h 不含）；fraction 单位纳秒，
+// timezone_hour/timezone_minute 为偏移量。用 SQL_C_BINARY 读取可保留原始墙上时钟与偏移。
+struct SQL_SS_TIMESTAMPOFFSET_STRUCT
+{
+    SQLSMALLINT year;
+    SQLUSMALLINT month;
+    SQLUSMALLINT day;
+    SQLUSMALLINT hour;
+    SQLUSMALLINT minute;
+    SQLUSMALLINT second;
+    SQLUINTEGER fraction;
+    SQLSMALLINT timezone_hour;
+    SQLSMALLINT timezone_minute;
+};
 #endif
 #include <charconv>
 #include <cstdio>
@@ -249,7 +261,7 @@ namespace httplib::db::detail
                         b.ind = static_cast<SQLLEN>(sizeof(t));
                         b.data = t;
                     }
-                    else if constexpr (std::is_same_v<T, std::chrono::system_clock::time_point>)
+                    else if constexpr (std::is_same_v<T, timestamp>)
                     {
                         // time_point（UTC）按墙上时钟存文本，语义与 SQLite 后端一致。
                         auto dt = datetime::from_time_point(v);
@@ -306,8 +318,6 @@ namespace httplib::db::detail
                 case SQL_TYPE_DATE:
                     return db::column_type::date;
                 case SQL_TYPE_TIMESTAMP:
-                case SQL_TYPE_UTCDATETIME:
-                case SQL_SS_TIMESTAMP2:
                 case SQL_SS_TIMESTAMPOFFSET:
                     return db::column_type::datetime;
                 case SQL_TYPE_TIME:
@@ -592,6 +602,30 @@ namespace httplib::db::detail
                 }
                 case db::column_type::datetime:
                 {
+                    if (sqltype == SQL_SS_TIMESTAMPOFFSET)
+                    {
+                        // DATETIMEOFFSET 用 SQL_C_BINARY 取 SQL_SS_TIMESTAMPOFFSET_STRUCT，
+                        // 保留原始墙上时钟；若用 SQL_C_TYPE_TIMESTAMP 读取，驱动会按会话时区
+                        // 换算并丢弃偏移，墙上时钟往返失真。
+                        SQL_SS_TIMESTAMPOFFSET_STRUCT t {};
+                        rc = co_await odbc_async(stmt,
+                                                 SQL_HANDLE_STMT,
+                                                 obj,
+                                                 [&]
+                                                 { return SQLGetData(stmt, col, SQL_C_BINARY, &t, sizeof(t), &ind); });
+                        check_ok(rc, stmt, SQL_HANDLE_STMT, "odbc read datetimeoffset");
+                        if (ind == SQL_NULL_DATA)
+                        {
+                            co_return std::monostate {};
+                        }
+                        co_return datetime { static_cast<unsigned>(t.year),
+                                             static_cast<unsigned>(t.month),
+                                             static_cast<unsigned>(t.day),
+                                             static_cast<unsigned>(t.hour),
+                                             static_cast<unsigned>(t.minute),
+                                             static_cast<unsigned>(t.second),
+                                             static_cast<unsigned long>(t.fraction / 1000) };
+                    }
                     SQL_TIMESTAMP_STRUCT t {};
                     rc = co_await odbc_async(
                         stmt,
@@ -958,7 +992,26 @@ namespace httplib::db::detail
                                         &dec,
                                         &nullable);
                     check_ok(rc, s.stmt, SQL_HANDLE_STMT, "odbc describe col");
-                    rs.names.emplace_back(reinterpret_cast<char*>(name), static_cast<size_t>(name_len));
+                    // 列名超出固定缓冲：name_len 是完整长度（截断时驱动报 SQL_SUCCESS_WITH_INFO），
+                    // 动态分配后重取，避免 std::string(name, name_len) 越界读或元数据丢失。
+                    std::vector<SQLCHAR> big;
+                    SQLCHAR* name_ptr = name;
+                    if (name_len >= static_cast<SQLSMALLINT>(sizeof(name)))
+                    {
+                        big.resize(static_cast<size_t>(name_len) + 1);
+                        name_ptr = big.data();
+                        rc = SQLDescribeCol(s.stmt,
+                                            i,
+                                            name_ptr,
+                                            static_cast<SQLSMALLINT>(big.size()),
+                                            &name_len,
+                                            &sqltype,
+                                            &colsize,
+                                            &dec,
+                                            &nullable);
+                        check_ok(rc, s.stmt, SQL_HANDLE_STMT, "odbc describe col (long name)");
+                    }
+                    rs.names.emplace_back(reinterpret_cast<char*>(name_ptr), static_cast<size_t>(name_len));
                     rs.types.push_back(map_sql_type(sqltype));
                     sqltypes.push_back(sqltype);
                 }
@@ -993,7 +1046,7 @@ namespace httplib::db::detail
             }
             check_ok(rc, s.stmt, SQL_HANDLE_STMT, "odbc more results");
         }
-        co_return result(std::move(sets), std::chrono::seconds { 0 });
+        co_return result(std::move(sets));
     }
 
     net::awaitable<statement_handle>
@@ -1015,7 +1068,13 @@ namespace httplib::db::detail
                                                                      static_cast<SQLINTEGER>(sql_str.size()));
                                                });
             check_ok(rc, s->stmt, SQL_HANDLE_STMT, "odbc prepare");
-            co_return statement_handle { s.release() };
+            co_return statement_handle { std::shared_ptr<odbc_stmt>(
+                s.release(),
+                [](odbc_stmt* p)
+                {
+                    odbc_backend::free_stmt(*p);
+                    delete p;
+                }) };
         }
         catch (...)
         {
@@ -1027,7 +1086,7 @@ namespace httplib::db::detail
     net::awaitable<result>
     odbc_backend::execute_statement(statement_handle h, std::vector<param> const& params)
     {
-        auto* s = static_cast<odbc_stmt*>(h.state);
+        auto* s = static_cast<odbc_stmt*>(h.state.get());
         if (!s || !s->stmt)
         {
             throw db_exception(boost::system::error_code {}, "db: odbc statement not prepared");
@@ -1065,11 +1124,7 @@ namespace httplib::db::detail
     net::awaitable<void>
     odbc_backend::close_statement(statement_handle h) noexcept
     {
-        if (auto* s = static_cast<odbc_stmt*>(h.state))
-        {
-            free_stmt(*s);
-            delete s;
-        }
+        h.state.reset(); // 自定义 deleter：free_stmt + delete
         co_return;
     }
 

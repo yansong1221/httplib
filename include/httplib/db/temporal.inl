@@ -292,7 +292,7 @@ namespace httplib::db
         return date::is_valid() && time::is_valid() && !negative && hour < 24;
     }
 
-    constexpr std::chrono::system_clock::time_point
+    constexpr timestamp
     datetime::to_time_point() const
     {
         if (!is_valid())
@@ -304,7 +304,7 @@ namespace httplib::db
     }
 
     constexpr datetime
-    datetime::from_time_point(std::chrono::system_clock::time_point tp) noexcept
+    datetime::from_time_point(timestamp tp) noexcept
     {
         auto days = std::chrono::floor<std::chrono::days>(tp);
         auto tod = tp - days;

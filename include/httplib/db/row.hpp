@@ -67,15 +67,15 @@ namespace httplib::db
         std::optional<time> as_time(size_t col) const;
         std::optional<time> as_time(std::string_view name) const;
 
-        std::optional<std::chrono::system_clock::time_point> as_timestamp(size_t col) const;
-        std::optional<std::chrono::system_clock::time_point> as_timestamp(std::string_view name) const;
+        std::optional<timestamp> as_timestamp(size_t col) const;
+        std::optional<timestamp> as_timestamp(std::string_view name) const;
 
         /**
          * \brief 按模板参数类型读取列值。
          * \details
          * 支持 int64_t / uint64_t / int / unsigned / short / unsigned short / double / float / bool /
          * std::string / std::string_view / std::span<const std::byte> / date / datetime / time /
-         * system_clock::time_point / boost::json::value。
+         * timestamp / boost::json::value。
          * \param col 列下标。
          * \returns 列值；NULL 返回 nullopt。
          */

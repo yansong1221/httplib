@@ -130,16 +130,14 @@ namespace httplib::db
         iterator end() const;
 
         /// 由后端填充的构造入口。
-        explicit result(std::vector<resultset> sets, std::chrono::seconds utc_offset = {});
+        explicit result(std::vector<resultset> sets);
 
       private:
         resultset const& cur() const;
         field const& at(size_t row, size_t col) const;
-        std::chrono::seconds utc_offset() const;
 
         std::vector<resultset> sets_;
         size_t idx_ = 0;
-        std::chrono::seconds utc_offset_ { 0 };
 
         friend class row;
     };

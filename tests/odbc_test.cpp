@@ -370,14 +370,9 @@ TEST_CASE("db(odbc): datetimeoffset / time2 type mapping", "[db][odbc]")
                                 "(CAST('2024-03-05 10:20:30.123456' AS DATETIME2), "
                                 "CAST('10:20:30.123' AS TIME(3)), "
                                 "CAST('2024-03-05 10:20:30.1234567' AS DATETIME2(7)))");
-            // DATETIMEOFFSET 列按客户端本地时区还原，故先取会话时区偏移（分钟）来算期望值；
-            // 无偏移的 datetime2 字面量按服务器本地时区写入 DATETIMEOFFSET 列。
-            auto offq = co_await sess.query("SELECT DATEDIFF(MINUTE, GETUTCDATE(), GETDATE()) AS offset_min");
-            int64_t off_min = *offq[0].as_int64("offset_min");
-            int64_t total = 10 * 60 + 20 + off_min;
-            db::datetime o_expected {
-                2024, 3, 5, static_cast<unsigned>((total / 60) % 24), static_cast<unsigned>(total % 60), 30, 123456
-            };
+            // DATETIMEOFFSET 列读回保留原始墙上时钟（偏移不参与换算）：
+            // datetime2 → datetimeoffset 的隐式转换偏移固定为 +00:00，墙上时钟即原值。
+            db::datetime o_expected { 2024, 3, 5, 10, 20, 30, 123456 };
             auto r = co_await sess.query("SELECT TOP 1 o, t, ts FROM httplib_odbc_map ORDER BY id DESC");
             REQUIRE(r.row_count() == 1);
             // DATETIMEOFFSET → SQL_SS_TIMESTAMPOFFSET → datetime

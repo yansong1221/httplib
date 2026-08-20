@@ -43,7 +43,7 @@ namespace httplib::db
               || std::is_same_v<T, unsigned> || std::is_same_v<T, short> || std::is_same_v<T, unsigned short>
               || std::is_same_v<T, double> || std::is_same_v<T, float> || std::is_same_v<T, bool>
               || std::is_same_v<T, std::string> || std::is_same_v<T, date> || std::is_same_v<T, datetime>
-              || std::is_same_v<T, time> || std::is_same_v<T, std::chrono::system_clock::time_point>
+              || std::is_same_v<T, time> || std::is_same_v<T, timestamp>
               || std::is_same_v<T, boost::json::value>;
 
         template <typename T>

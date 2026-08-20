@@ -11,6 +11,9 @@
 namespace httplib::db
 {
 
+    /// UTC 时间点（TIMESTAMP 等时区敏感列专用，与 \ref datetime 无时区墙上时钟区分）。
+    using timestamp = std::chrono::system_clock::time_point;
+
     /**
      * \brief 日期（年/月/日）。
      */
@@ -81,10 +84,10 @@ namespace httplib::db
     {
         /// 是否为合法日期时间。
         constexpr bool is_valid() const noexcept;
-        /// 转为 std::chrono::system_clock::time_point。
-        constexpr std::chrono::system_clock::time_point to_time_point() const;
-        /// 由 time_point 构造。
-        static constexpr datetime from_time_point(std::chrono::system_clock::time_point tp) noexcept;
+        /// 转为 UTC 时间点（\ref timestamp）。
+        constexpr timestamp to_time_point() const;
+        /// 由 UTC 时间点构造。
+        static constexpr datetime from_time_point(timestamp tp) noexcept;
         /// 格式化为 YYYY-MM-DD HH:MM:SS[.ffffff]。
         std::string to_string() const;
         /// 解析 YYYY-MM-DD HH:MM:SS[.ffffff]，非法返回 nullopt。

@@ -9,9 +9,8 @@ namespace httplib::db
     result& result::operator=(result&&) noexcept = default;
     result::~result() = default;
 
-    result::result(std::vector<resultset> sets, std::chrono::seconds utc_offset)
+    result::result(std::vector<resultset> sets)
         : sets_(std::move(sets))
-        , utc_offset_(utc_offset)
     {
     }
 
@@ -35,12 +34,6 @@ namespace httplib::db
             throw std::out_of_range("db: column index out of range");
         }
         return rs.rows[row][col];
-    }
-
-    std::chrono::seconds
-    result::utc_offset() const
-    {
-        return utc_offset_;
     }
 
     bool

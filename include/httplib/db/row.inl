@@ -107,7 +107,7 @@ namespace httplib::db
         {
             return as_time(col);
         }
-        else if constexpr (std::is_same_v<T, std::chrono::system_clock::time_point>)
+        else if constexpr (std::is_same_v<T, timestamp>)
         {
             return as_timestamp(col);
         }

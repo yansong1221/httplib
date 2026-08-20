@@ -5,11 +5,15 @@
 #include "httplib/db/exception.hpp"
 #include "httplib/db/extractor.hpp"
 #include "httplib/db/session.hpp"
+#include <atomic>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
 #include <filesystem>
 #include <string>
+#include <system_error>
+#include <thread>
 
 namespace db = httplib::db;
 namespace net = httplib::net;
@@ -76,7 +80,9 @@ TEST_CASE("db(sqlite): basic round-trip", "[db][sqlite]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            auto sess = co_await db::session::connect(ioc.get_executor(), "sqlite", db::sqlite_config { ":memory:" }.to_connection_string());
+            auto sess = co_await db::session::connect(ioc.get_executor(),
+                                                      "sqlite",
+                                                      db::sqlite_config { ":memory:" }.to_connection_string());
 
             co_await sess.query("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT, n INTEGER)");
 
@@ -151,7 +157,9 @@ TEST_CASE("db(sqlite): multi-row fetch accuracy", "[db][sqlite]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            auto sess = co_await db::session::connect(ioc.get_executor(), "sqlite", db::sqlite_config { ":memory:" }.to_connection_string());
+            auto sess = co_await db::session::connect(ioc.get_executor(),
+                                                      "sqlite",
+                                                      db::sqlite_config { ":memory:" }.to_connection_string());
             co_await sess.query("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT, n INTEGER, d REAL, note TEXT)");
             co_await sess.query(
                 "INSERT INTO t VALUES (1,'alpha',10,1.5,'x'),(2,'beta',20,2.5,NULL),(3,'gamma',30,3.5,'z')");
@@ -204,7 +212,9 @@ TEST_CASE("db(sqlite): prepared statement bind types", "[db][sqlite]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            auto sess = co_await db::session::connect(ioc.get_executor(), "sqlite", db::sqlite_config { ":memory:" }.to_connection_string());
+            auto sess = co_await db::session::connect(ioc.get_executor(),
+                                                      "sqlite",
+                                                      db::sqlite_config { ":memory:" }.to_connection_string());
             co_await sess.query("CREATE TABLE t (u INTEGER, d REAL, b BLOB, dt TEXT, tm TEXT)");
 
             auto stmt = sess.stmt("INSERT INTO t VALUES (:u, :d, :b, :dt, :tm)");
@@ -971,5 +981,125 @@ TEST_CASE("db: render_query placeholder comes from backend", "[db]")
     auto r13 = detail::render_query("INSERT INTO t (s, n) VALUES ('values', :n)", { db::bind("n", 3) }, def);
     REQUIRE(r13.sql == "INSERT INTO t (s, n) VALUES ('values', ?)");
     REQUIRE(r13.params.size() == 1);
+}
+
+TEST_CASE("db(sqlite): busy_timeout config round-trips", "[db][sqlite]")
+{
+    db::sqlite_config cfg;
+    cfg.busy_timeout = std::chrono::milliseconds(1500);
+    auto s = cfg.to_connection_string();
+    REQUIRE(s.find("busy_timeout=1500") != std::string::npos);
+    auto parsed = db::options::parse(s);
+    REQUIRE(parsed.as_int("busy_timeout").value_or(-1) == 1500);
+}
+
+TEST_CASE("db(sqlite): error message carries sqlite rc and expanded sql", "[db][sqlite]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            auto s = co_await db::session::connect(ioc.get_executor(), "sqlite", "db=:memory:");
+            // 唯一约束冲突在 step 阶段报 SQLITE_CONSTRAINT（prepare 成功），错误消息应携带 rc 与展开参数后的 SQL
+            co_await s.query("CREATE TABLE t (id INTEGER PRIMARY KEY, u TEXT UNIQUE)");
+            co_await s.query("INSERT INTO t VALUES (1, 'x')");
+            bool caught = false;
+            try
+            {
+                co_await s.query("INSERT INTO t VALUES (:a, :u)", db::bind("a", 2), db::bind("u", std::string("x")));
+            }
+            catch (db::db_exception const& ex)
+            {
+                caught = true;
+                auto what = std::string(ex.what());
+                REQUIRE(what.find("[sqlite rc=") != std::string::npos);
+                REQUIRE(what.find("expanded:") != std::string::npos);
+                REQUIRE(what.find("'x'") != std::string::npos);
+            }
+            REQUIRE(caught);
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
+TEST_CASE("db(sqlite): busy_timeout waits for a held write lock", "[db][sqlite]")
+{
+    auto path = (std::filesystem::temp_directory_path() / "httplib_busy.db").string();
+    {
+        std::error_code ec;
+        std::filesystem::remove(path, ec);
+    }
+
+    std::atomic<bool> locked { false };
+    std::atomic<bool> started { false };
+    std::exception_ptr errA;
+    std::exception_ptr errB;
+
+    // 会话 A（独立线程 + 独立 io_context）：BEGIN EXCLUSIVE 立即持有最高级写锁，
+    // 等主线程开始写入后稍候再 COMMIT。EXCLUSIVE 下 A 的 COMMIT 无需升级锁（直接释放），
+    // 不会被 B 的 SHARED 锁阻塞（回滚模式下 B 的 SHARED 锁会挡住 deferred 事务的 COMMIT 升级）。
+    std::thread th(
+        [&]
+        {
+            net::io_context ioc2;
+            net::co_spawn(
+                ioc2,
+                [&]() -> net::awaitable<void>
+                {
+                    auto a = co_await db::session::connect(ioc2.get_executor(), "sqlite", "db=" + path);
+                    co_await a.query("CREATE TABLE t (id INTEGER PRIMARY KEY)");
+                    co_await a.query("BEGIN EXCLUSIVE");
+                    co_await a.query("INSERT INTO t VALUES (1)");
+                    locked = true;
+                    while (!started.load())
+                    {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    }
+                    // 确保主线程的 INSERT 已进入忙等待后再释放锁
+                    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+                    co_await a.query("COMMIT");
+                },
+                [&](std::exception_ptr e) { errA = e; });
+            ioc2.run();
+        });
+
+    // 主线程：带 busy_timeout 连接，持锁期间写入应阻塞等待而非立即 SQLITE_BUSY
+    net::io_context ioc1;
+    net::co_spawn(
+        ioc1,
+        [&]() -> net::awaitable<void>
+        {
+            auto b = co_await db::session::connect(ioc1.get_executor(), "sqlite", "db=" + path + " busy_timeout=3000");
+            while (!locked.load())
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+            started = true;
+            co_await b.query("INSERT INTO t VALUES (2)"); // 忙等待至会话 A 提交后成功
+            auto r = co_await b.query("SELECT COUNT(*) AS n FROM t");
+            REQUIRE(*r[0].as_int64("n") == 2);
+        },
+        [&](std::exception_ptr e) { errB = e; });
+    ioc1.run();
+    th.join();
+
+    {
+        std::error_code ec;
+        std::filesystem::remove(path, ec);
+    }
+    if (errA)
+    {
+        std::rethrow_exception(errA);
+    }
+    if (errB)
+    {
+        std::rethrow_exception(errB);
+    }
 }
 #endif

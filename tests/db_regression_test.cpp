@@ -172,7 +172,7 @@ namespace
         prepare(std::string_view) override
         {
             ++ctrl->prepare_calls;
-            co_return detail::statement_handle { new int };
+            co_return detail::statement_handle { std::make_shared<int>(0) };
         }
         net::awaitable<db::result>
         execute_statement(detail::statement_handle, std::vector<db::param> const&) override
@@ -182,7 +182,7 @@ namespace
         net::awaitable<void>
         close_statement(detail::statement_handle h) noexcept override
         {
-            delete static_cast<int*>(h.state);
+            h.state.reset();
             co_return;
         }
         net::awaitable<void>
