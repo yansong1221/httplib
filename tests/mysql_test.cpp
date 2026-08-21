@@ -270,7 +270,7 @@ TEST_CASE("db options: to_connection_string round-trip", "[db]")
     REQUIRE(db::options::parse("").to_connection_string().empty());
 }
 
-TEST_CASE("db: connect via connection string", "[db][integration]")
+TEST_CASE("db(mysql): connect via connection string", "[db][mysql]")
 {
     net::io_context ioc;
     std::exception_ptr err;
@@ -292,7 +292,7 @@ TEST_CASE("db: connect via connection string", "[db][integration]")
     }
 }
 
-TEST_CASE("db: string connect aliases and defaults", "[db][integration]")
+TEST_CASE("db(mysql): string connect aliases and defaults", "[db][mysql]")
 {
     net::io_context ioc;
     std::exception_ptr err;
@@ -336,7 +336,7 @@ TEST_CASE("db: string connect aliases and defaults", "[db][integration]")
     }
 }
 
-TEST_CASE("db: string connect time_zone and charset", "[db][integration]")
+TEST_CASE("db(mysql): string connect time_zone and charset", "[db][mysql]")
 {
     net::io_context ioc;
     std::exception_ptr err;
@@ -396,7 +396,7 @@ TEST_CASE("db: unknown backend throws", "[db]")
     }
 }
 
-TEST_CASE("db: query bind time/datetime/null round-trip", "[db][integration]")
+TEST_CASE("db(mysql): query bind time/datetime/null round-trip", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -427,7 +427,7 @@ TEST_CASE("db: query bind time/datetime/null round-trip", "[db][integration]")
 // Connection pool
 // ===========================================================================
 
-TEST_CASE("db: connection_pool basics", "[db][integration]")
+TEST_CASE("db(mysql): connection_pool basics", "[db][mysql]")
 {
     run_pool(
         [](db::connection_pool& pool) -> net::awaitable<void>
@@ -438,7 +438,7 @@ TEST_CASE("db: connection_pool basics", "[db][integration]")
         });
 }
 
-TEST_CASE("db: connection_pool concurrent acquire", "[db][integration]")
+TEST_CASE("db(mysql): connection_pool concurrent acquire", "[db][mysql]")
 {
     auto cfg = make_cfg();
     cfg.min_connections = 2;
@@ -466,7 +466,7 @@ TEST_CASE("db: connection_pool concurrent acquire", "[db][integration]")
     }
 }
 
-TEST_CASE("db: pool honors max_connections over min_connections", "[db][integration]")
+TEST_CASE("db(mysql): pool honors max_connections over min_connections", "[db][mysql]")
 {
     // min_connections 不应突破 max_connections 上限
     auto cfg = make_cfg();
@@ -502,7 +502,7 @@ TEST_CASE("db: pool honors max_connections over min_connections", "[db][integrat
     }
 }
 
-TEST_CASE("db: idle connections are reaped by idle_timeout", "[db][integration]")
+TEST_CASE("db(mysql): idle connections are reaped by idle_timeout", "[db][mysql]")
 {
     // 即使 health_check 周期比 idle_timeout 短，空闲连接也应被 idle_timeout 回收
     auto cfg = make_cfg();
@@ -550,7 +550,7 @@ TEST_CASE("db: idle connections are reaped by idle_timeout", "[db][integration]"
     }
 }
 
-TEST_CASE("db: pool survives unreachable server", "[db][integration]")
+TEST_CASE("db(mysql): pool survives unreachable server", "[db][mysql]")
 {
     // 连接失败应被维护协程捕获并记录日志，而不是冒泡到 completion handler 导致崩溃
     auto mc = make_mysql_cfg();
@@ -589,7 +589,7 @@ TEST_CASE("db: pool survives unreachable server", "[db][integration]")
 // Basic query + result
 // ===========================================================================
 
-TEST_CASE("db: simple query", "[db][integration]")
+TEST_CASE("db(mysql): simple query", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -603,7 +603,7 @@ TEST_CASE("db: simple query", "[db][integration]")
         });
 }
 
-TEST_CASE("db: touch updates last_active on query", "[db][integration]")
+TEST_CASE("db(mysql): touch updates last_active on query", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -615,7 +615,7 @@ TEST_CASE("db: touch updates last_active on query", "[db][integration]")
         });
 }
 
-TEST_CASE("db: empty result", "[db][integration]")
+TEST_CASE("db(mysql): empty result", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -629,7 +629,7 @@ TEST_CASE("db: empty result", "[db][integration]")
         });
 }
 
-TEST_CASE("db: affected_rows", "[db][integration]")
+TEST_CASE("db(mysql): affected_rows", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -644,7 +644,7 @@ TEST_CASE("db: affected_rows", "[db][integration]")
         });
 }
 
-TEST_CASE("db: DML metadata (affected_rows / last_insert_id)", "[db][integration]")
+TEST_CASE("db(mysql): DML metadata (affected_rows / last_insert_id)", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -666,7 +666,7 @@ TEST_CASE("db: DML metadata (affected_rows / last_insert_id)", "[db][integration
         });
 }
 
-TEST_CASE("db: result iterator", "[db][integration]")
+TEST_CASE("db(mysql): result iterator", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -689,7 +689,7 @@ TEST_CASE("db: result iterator", "[db][integration]")
 // Multi-statement / multi-resultset
 // ===========================================================================
 
-TEST_CASE("db: multi-statement query", "[db][integration]")
+TEST_CASE("db(mysql): multi-statement query", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -723,7 +723,7 @@ TEST_CASE("db: multi-statement query", "[db][integration]")
 // All types + row access
 // ===========================================================================
 
-TEST_CASE("db: all types roundtrip", "[db][integration]")
+TEST_CASE("db(mysql): all types roundtrip", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -767,6 +767,13 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
             REQUIRE(*row0.as_bool("i64") == true);
             REQUIRE(row0.as_blob("bin")->size() == 5);
 
+            // --- text / blob value access（拥有/借用一体） ---
+            auto tx = *row0.as_text("str");
+            REQUIRE(tx.data() == "hello");
+            auto bv = *row0.as_blob_value("bin");
+            REQUIRE(bv.size() == 5);
+            REQUIRE(std::string_view(reinterpret_cast<char const*>(bv.data().data()), bv.size()) == "world");
+
             auto d = *row0.as_date("dt_date");
             REQUIRE(d.year == 2024);
             auto dt = *row0.as_datetime("dt_dt");
@@ -780,11 +787,15 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
             REQUIRE(*row0.get<int64_t>("i64") == 42);
             REQUIRE(*row0.get<std::string>("str") == "hello");
             REQUIRE(row0.get<db::date>("dt_date")->year == 2024);
+            REQUIRE(row0.get<db::text>("str")->data() == "hello");
+            REQUIRE(row0.get<db::blob>("bin")->size() == 5);
 
             // --- NULL handling ---
             REQUIRE(row1.is_null("i64"));
             REQUIRE(!row1.as_int64("i64").has_value());
             REQUIRE(!row1.as_string("str").has_value());
+            REQUIRE(!row1.as_text("str").has_value());
+            REQUIRE(!row1.as_blob_value("bin").has_value());
             REQUIRE(row1.as_int64("i64").value_or(-1) == -1);
             REQUIRE(row1.as_string("str").value_or("n/a") == "n/a");
             REQUIRE(row1.get<int64_t>("i64").value_or(-1) == -1);
@@ -792,6 +803,8 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
             // --- type mismatch throws ---
             REQUIRE_THROWS_AS(row0.as_int64("str"), std::runtime_error);
             REQUIRE_THROWS_AS(row0.as_date("i64"), std::runtime_error);
+            REQUIRE_THROWS_AS(row0.as_text("i64"), std::runtime_error);
+            REQUIRE_THROWS_AS(row0.as_blob_value("str"), std::runtime_error);
 
             // --- column not found ---
             REQUIRE_THROWS_AS(r.column_index("no_such_col"), std::runtime_error);
@@ -804,6 +817,17 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
             }
             REQUIRE(strs == std::vector<std::string> { "hello", "(null)" });
 
+            // --- into() text / blob 目标类型 ---
+            std::optional<db::text> otx;
+            co_await sess.query("SELECT str FROM __httplib_types WHERE i64 IS NOT NULL", db::into(otx, 0));
+            REQUIRE(otx.has_value());
+            REQUIRE(otx->data() == "hello");
+
+            std::optional<db::blob> obv;
+            co_await sess.query("SELECT bin FROM __httplib_types WHERE i64 IS NOT NULL", db::into(obv, 0));
+            REQUIRE(obv.has_value());
+            REQUIRE(obv->size() == 5);
+
             co_await sess.query("DROP TABLE IF EXISTS __httplib_types");
         });
 }
@@ -812,7 +836,7 @@ TEST_CASE("db: all types roundtrip", "[db][integration]")
 // Prepared statements
 // ===========================================================================
 
-TEST_CASE("db: prepared statement positional bind", "[db][integration]")
+TEST_CASE("db(mysql): prepared statement positional bind", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -830,7 +854,7 @@ TEST_CASE("db: prepared statement positional bind", "[db][integration]")
         });
 }
 
-TEST_CASE("db: prepared statement named params", "[db][integration]")
+TEST_CASE("db(mysql): prepared statement named params", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -849,7 +873,7 @@ TEST_CASE("db: prepared statement named params", "[db][integration]")
         });
 }
 
-TEST_CASE("db: prepared statement into() extraction", "[db][integration]")
+TEST_CASE("db(mysql): prepared statement into() extraction", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -869,7 +893,7 @@ TEST_CASE("db: prepared statement into() extraction", "[db][integration]")
         });
 }
 
-TEST_CASE("db: query into() extraction", "[db][integration]")
+TEST_CASE("db(mysql): query into() extraction", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -890,7 +914,7 @@ TEST_CASE("db: query into() extraction", "[db][integration]")
         });
 }
 
-TEST_CASE("db: query bind positional", "[db][integration]")
+TEST_CASE("db(mysql): query bind positional", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -907,7 +931,7 @@ TEST_CASE("db: query bind positional", "[db][integration]")
         });
 }
 
-TEST_CASE("db: query bind named + escaping", "[db][integration]")
+TEST_CASE("db(mysql): query bind named + escaping", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -934,7 +958,7 @@ TEST_CASE("db: query bind named + escaping", "[db][integration]")
         });
 }
 
-TEST_CASE("db: query bind null and blob", "[db][integration]")
+TEST_CASE("db(mysql): query bind null and blob", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -958,7 +982,7 @@ TEST_CASE("db: query bind null and blob", "[db][integration]")
         });
 }
 
-TEST_CASE("db: query bind scalar types round-trip", "[db][integration]")
+TEST_CASE("db(mysql): query bind scalar types round-trip", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -1002,7 +1026,7 @@ TEST_CASE("db: query bind scalar types round-trip", "[db][integration]")
         });
 }
 
-TEST_CASE("db: stmt bind scalar types round-trip", "[db][integration]")
+TEST_CASE("db(mysql): stmt bind scalar types round-trip", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -1051,7 +1075,7 @@ TEST_CASE("db: stmt bind scalar types round-trip", "[db][integration]")
         });
 }
 
-TEST_CASE("db: into() supports small integer types", "[db][integration]")
+TEST_CASE("db(mysql): into() supports small integer types", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -1082,7 +1106,7 @@ TEST_CASE("db: into() supports small integer types", "[db][integration]")
         });
 }
 
-TEST_CASE("db: statement reuse (caching)", "[db][integration]")
+TEST_CASE("db(mysql): statement reuse (caching)", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -1108,7 +1132,7 @@ TEST_CASE("db: statement reuse (caching)", "[db][integration]")
 // Statement cache eviction
 // ===========================================================================
 
-TEST_CASE("db: statement cache eviction", "[db][integration]")
+TEST_CASE("db(mysql): statement cache eviction", "[db][mysql]")
 {
     net::io_context ioc;
     std::exception_ptr err;
@@ -1152,7 +1176,7 @@ TEST_CASE("db: statement cache eviction", "[db][integration]")
 // Risk-item regressions
 // ===========================================================================
 
-TEST_CASE("db: named params bound out of SQL order", "[db][integration]")
+TEST_CASE("db(mysql): named params bound out of SQL order", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -1174,7 +1198,7 @@ TEST_CASE("db: named params bound out of SQL order", "[db][integration]")
         });
 }
 
-TEST_CASE("db: named params reuse across cache", "[db][integration]")
+TEST_CASE("db(mysql): named params reuse across cache", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -1200,7 +1224,7 @@ TEST_CASE("db: named params reuse across cache", "[db][integration]")
 
 // Regression: releasing a session with an open transaction used to crash
 // ~session() (use-after-move of conn). It must roll back and leave the pool usable.
-TEST_CASE("db: release with open transaction does not crash", "[db][integration]")
+TEST_CASE("db(mysql): release with open transaction does not crash", "[db][mysql]")
 {
     run_pool(
         [](db::connection_pool& pool) -> net::awaitable<void>
@@ -1217,7 +1241,7 @@ TEST_CASE("db: release with open transaction does not crash", "[db][integration]
         });
 }
 
-TEST_CASE("db: pooled session reconnect keeps params", "[db][integration]")
+TEST_CASE("db(mysql): pooled session reconnect keeps params", "[db][mysql]")
 {
     run_pool(
         [](db::connection_pool& pool) -> net::awaitable<void>
@@ -1229,7 +1253,7 @@ TEST_CASE("db: pooled session reconnect keeps params", "[db][integration]")
         });
 }
 
-TEST_CASE("db: charset applied on connect", "[db][integration]")
+TEST_CASE("db(mysql): charset applied on connect", "[db][mysql]")
 {
     net::io_context ioc;
     std::exception_ptr err;
@@ -1253,7 +1277,7 @@ TEST_CASE("db: charset applied on connect", "[db][integration]")
     }
 }
 
-TEST_CASE("db: async_acquire honors wait_timeout", "[db][integration]")
+TEST_CASE("db(mysql): async_acquire honors wait_timeout", "[db][mysql]")
 {
     auto cfg = make_cfg();
     cfg.min_connections = 0;
@@ -1283,7 +1307,7 @@ TEST_CASE("db: async_acquire honors wait_timeout", "[db][integration]")
     }
 }
 
-TEST_CASE("db: async_acquire zero wait_timeout fails fast", "[db][integration]")
+TEST_CASE("db(mysql): async_acquire zero wait_timeout fails fast", "[db][mysql]")
 {
     auto cfg = make_cfg();
     cfg.min_connections = 0;
@@ -1313,7 +1337,7 @@ TEST_CASE("db: async_acquire zero wait_timeout fails fast", "[db][integration]")
     }
 }
 
-TEST_CASE("db: transport error marks connection dead", "[db][integration]")
+TEST_CASE("db(mysql): transport error marks connection dead", "[db][mysql]")
 {
     auto cfg = make_cfg();
     cfg.min_connections = 0;
@@ -1355,7 +1379,7 @@ TEST_CASE("db: transport error marks connection dead", "[db][integration]")
     }
 }
 
-TEST_CASE("db: borrow ping drops stale connection", "[db][integration]")
+TEST_CASE("db(mysql): borrow ping drops stale connection", "[db][mysql]")
 {
     auto cfg = make_cfg();
     cfg.min_connections = 0;
@@ -1399,7 +1423,7 @@ TEST_CASE("db: borrow ping drops stale connection", "[db][integration]")
 
 // Regression: binding two owned-storage values (json) used to share a single
 // data_str buffer, so the first field_view dangled / was overwritten.
-TEST_CASE("db: prepared statement multiple json binds", "[db][integration]")
+TEST_CASE("db(mysql): prepared statement multiple json binds", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -1424,7 +1448,7 @@ TEST_CASE("db: prepared statement multiple json binds", "[db][integration]")
         });
 }
 
-TEST_CASE("db: numeric conversion range checks", "[db][integration]")
+TEST_CASE("db(mysql): numeric conversion range checks", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -1447,7 +1471,7 @@ TEST_CASE("db: numeric conversion range checks", "[db][integration]")
         });
 }
 
-TEST_CASE("db: double to int range check", "[db][integration]")
+TEST_CASE("db(mysql): double to int range check", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -1464,7 +1488,7 @@ TEST_CASE("db: double to int range check", "[db][integration]")
         });
 }
 
-TEST_CASE("db: negative TIME parsed", "[db][integration]")
+TEST_CASE("db(mysql): negative TIME parsed", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -1482,7 +1506,7 @@ TEST_CASE("db: negative TIME parsed", "[db][integration]")
         });
 }
 
-TEST_CASE("db: timestamp timezone conversion", "[db][integration]")
+TEST_CASE("db(mysql): timestamp timezone conversion", "[db][mysql]")
 {
     net::io_context ioc;
     std::exception_ptr err;
@@ -1519,7 +1543,7 @@ TEST_CASE("db: timestamp timezone conversion", "[db][integration]")
     }
 }
 
-TEST_CASE("db: timestamp utc explicit +00:00", "[db][integration]")
+TEST_CASE("db(mysql): timestamp utc explicit +00:00", "[db][mysql]")
 {
     net::io_context ioc;
     std::exception_ptr err;
@@ -1555,7 +1579,7 @@ TEST_CASE("db: timestamp utc explicit +00:00", "[db][integration]")
     }
 }
 
-TEST_CASE("db: timestamp bind roundtrip utc", "[db][integration]")
+TEST_CASE("db(mysql): timestamp bind roundtrip utc", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -1574,7 +1598,7 @@ TEST_CASE("db: timestamp bind roundtrip utc", "[db][integration]")
         });
 }
 
-TEST_CASE("db: timestamp bind roundtrip offset", "[db][integration]")
+TEST_CASE("db(mysql): timestamp bind roundtrip offset", "[db][mysql]")
 {
     net::io_context ioc;
     std::exception_ptr err;
@@ -1609,7 +1633,7 @@ TEST_CASE("db: timestamp bind roundtrip offset", "[db][integration]")
     }
 }
 
-TEST_CASE("db: datetime date time unaffected by timezone", "[db][integration]")
+TEST_CASE("db(mysql): datetime date time unaffected by timezone", "[db][mysql]")
 {
     net::io_context ioc;
     std::exception_ptr err;
@@ -1652,7 +1676,7 @@ TEST_CASE("db: datetime date time unaffected by timezone", "[db][integration]")
     }
 }
 
-TEST_CASE("db: mysql bit columns read as uint64", "[db][integration]")
+TEST_CASE("db(mysql): bit columns read as uint64", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -1679,7 +1703,7 @@ TEST_CASE("db: mysql bit columns read as uint64", "[db][integration]")
         });
 }
 
-TEST_CASE("db: cancelled query does not mark connection dead", "[db][integration]")
+TEST_CASE("db(mysql): cancelled query does not mark connection dead", "[db][mysql]")
 {
     net::io_context ioc;
     std::exception_ptr err;
@@ -1741,7 +1765,7 @@ TEST_CASE("db: cancelled query does not mark connection dead", "[db][integration
     }
 }
 
-TEST_CASE("db: into replaced across executes", "[db][integration]")
+TEST_CASE("db(mysql): into replaced across executes", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -1764,7 +1788,7 @@ TEST_CASE("db: into replaced across executes", "[db][integration]")
         });
 }
 
-TEST_CASE("db: into re-declared per execute", "[db][integration]")
+TEST_CASE("db(mysql): into re-declared per execute", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -1785,7 +1809,7 @@ TEST_CASE("db: into re-declared per execute", "[db][integration]")
         });
 }
 
-TEST_CASE("db: into vector", "[db][integration]")
+TEST_CASE("db(mysql): into vector", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -1814,7 +1838,7 @@ TEST_CASE("db: into vector", "[db][integration]")
         });
 }
 
-TEST_CASE("db: into positional column", "[db][integration]")
+TEST_CASE("db(mysql): into positional column", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -1852,7 +1876,7 @@ TEST_CASE("db: into positional column", "[db][integration]")
         });
 }
 
-TEST_CASE("db: bind arity mismatch throws", "[db][integration]")
+TEST_CASE("db(mysql): bind arity mismatch throws", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -1873,7 +1897,7 @@ TEST_CASE("db: bind arity mismatch throws", "[db][integration]")
         });
 }
 
-TEST_CASE("db: error message includes params", "[db][integration]")
+TEST_CASE("db(mysql): error message includes params", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -1896,7 +1920,7 @@ TEST_CASE("db: error message includes params", "[db][integration]")
         });
 }
 
-TEST_CASE("db: error message includes named params", "[db][integration]")
+TEST_CASE("db(mysql): error message includes named params", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -1920,7 +1944,7 @@ TEST_CASE("db: error message includes named params", "[db][integration]")
         });
 }
 
-TEST_CASE("db: bind null and empty string", "[db][integration]")
+TEST_CASE("db(mysql): bind null and empty string", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -1940,7 +1964,7 @@ TEST_CASE("db: bind null and empty string", "[db][integration]")
         });
 }
 
-TEST_CASE("db: bind prevents SQL injection", "[db][integration]")
+TEST_CASE("db(mysql): bind prevents SQL injection", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -1957,7 +1981,7 @@ TEST_CASE("db: bind prevents SQL injection", "[db][integration]")
         });
 }
 
-TEST_CASE("db: bind blob binary data", "[db][integration]")
+TEST_CASE("db(mysql): bind blob binary data", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -1981,7 +2005,7 @@ TEST_CASE("db: bind blob binary data", "[db][integration]")
         });
 }
 
-TEST_CASE("db: bind named blob binary data", "[db][integration]")
+TEST_CASE("db(mysql): bind named blob binary data", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2005,7 +2029,7 @@ TEST_CASE("db: bind named blob binary data", "[db][integration]")
         });
 }
 
-TEST_CASE("db: unbound named param throws", "[db][integration]")
+TEST_CASE("db(mysql): unbound named param throws", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2022,7 +2046,7 @@ TEST_CASE("db: unbound named param throws", "[db][integration]")
         });
 }
 
-TEST_CASE("db: named param reused multiple times", "[db][integration]")
+TEST_CASE("db(mysql): named param reused multiple times", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2041,7 +2065,7 @@ TEST_CASE("db: named param reused multiple times", "[db][integration]")
         });
 }
 
-TEST_CASE("db: named param cross reuse", "[db][integration]")
+TEST_CASE("db(mysql): named param cross reuse", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2102,7 +2126,7 @@ TEST_CASE("db: named param cross reuse", "[db][integration]")
         });
 }
 
-TEST_CASE("db: bind unknown name throws", "[db][integration]")
+TEST_CASE("db(mysql): bind unknown name throws", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2120,7 +2144,7 @@ TEST_CASE("db: bind unknown name throws", "[db][integration]")
         });
 }
 
-TEST_CASE("db: named placeholder bound positionally", "[db][integration]")
+TEST_CASE("db(mysql): named placeholder bound positionally", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2131,7 +2155,7 @@ TEST_CASE("db: named placeholder bound positionally", "[db][integration]")
         });
 }
 
-TEST_CASE("db: named param ignores # comment", "[db][integration]")
+TEST_CASE("db(mysql): named param ignores # comment", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2142,7 +2166,7 @@ TEST_CASE("db: named param ignores # comment", "[db][integration]")
         });
 }
 
-TEST_CASE("db: bind once execute multiple times", "[db][integration]")
+TEST_CASE("db(mysql): bind once execute multiple times", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2180,7 +2204,7 @@ TEST_CASE("db: bind once execute multiple times", "[db][integration]")
         });
 }
 
-TEST_CASE("db: into edge cases", "[db][integration]")
+TEST_CASE("db(mysql): into edge cases", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2225,7 +2249,7 @@ TEST_CASE("db: into edge cases", "[db][integration]")
         });
 }
 
-TEST_CASE("db: with_transaction keeps original error", "[db][integration]")
+TEST_CASE("db(mysql): with_transaction keeps original error", "[db][mysql]")
 {
     net::io_context ioc;
     std::exception_ptr err;
@@ -2268,7 +2292,7 @@ TEST_CASE("db: with_transaction keeps original error", "[db][integration]")
     }
 }
 
-TEST_CASE("db: dead connection release wakes waiter", "[db][integration]")
+TEST_CASE("db(mysql): dead connection release wakes waiter", "[db][mysql]")
 {
     auto cfg = make_cfg();
     cfg.min_connections = 0;
@@ -2337,7 +2361,7 @@ TEST_CASE("db: dead connection release wakes waiter", "[db][integration]")
 // JSON column
 // ===========================================================================
 
-TEST_CASE("db: json column", "[db][integration]")
+TEST_CASE("db(mysql): json column", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2357,7 +2381,7 @@ TEST_CASE("db: json column", "[db][integration]")
 // Transactions
 // ===========================================================================
 
-TEST_CASE("db: transaction commit", "[db][integration]")
+TEST_CASE("db(mysql): transaction commit", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2377,7 +2401,7 @@ TEST_CASE("db: transaction commit", "[db][integration]")
         });
 }
 
-TEST_CASE("db: transaction rollback", "[db][integration]")
+TEST_CASE("db(mysql): transaction rollback", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2396,7 +2420,7 @@ TEST_CASE("db: transaction rollback", "[db][integration]")
         });
 }
 
-TEST_CASE("db: with_transaction commit path", "[db][integration]")
+TEST_CASE("db(mysql): with_transaction commit path", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2418,7 +2442,7 @@ TEST_CASE("db: with_transaction commit path", "[db][integration]")
         });
 }
 
-TEST_CASE("db: with_transaction rollback on exception", "[db][integration]")
+TEST_CASE("db(mysql): with_transaction rollback on exception", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2450,7 +2474,7 @@ TEST_CASE("db: with_transaction rollback on exception", "[db][integration]")
 // Ping / query_logger / reconnect
 // ===========================================================================
 
-TEST_CASE("db: ping", "[db][integration]")
+TEST_CASE("db(mysql): ping", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2460,7 +2484,7 @@ TEST_CASE("db: ping", "[db][integration]")
         });
 }
 
-TEST_CASE("db: query_logger", "[db][integration]")
+TEST_CASE("db(mysql): query_logger", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2479,7 +2503,7 @@ TEST_CASE("db: query_logger", "[db][integration]")
         });
 }
 
-TEST_CASE("db: standalone connect and query", "[db][integration]")
+TEST_CASE("db(mysql): standalone connect and query", "[db][mysql]")
 {
     net::io_context ioc;
     std::exception_ptr err;
@@ -2502,7 +2526,7 @@ TEST_CASE("db: standalone connect and query", "[db][integration]")
     }
 }
 
-TEST_CASE("db: standalone reconnect", "[db][integration]")
+TEST_CASE("db(mysql): standalone reconnect", "[db][mysql]")
 {
     net::io_context ioc;
     std::exception_ptr err;
@@ -2528,7 +2552,7 @@ TEST_CASE("db: standalone reconnect", "[db][integration]")
     }
 }
 
-TEST_CASE("db: reconnect resets transaction state", "[db][integration]")
+TEST_CASE("db(mysql): reconnect resets transaction state", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2544,13 +2568,13 @@ TEST_CASE("db: reconnect resets transaction state", "[db][integration]")
 // Error / exception paths
 // ===========================================================================
 
-TEST_CASE("db: invalid SQL throws", "[db][integration]")
+TEST_CASE("db(mysql): invalid SQL throws", "[db][mysql]")
 {
     run([](db::session& sess) -> net::awaitable<void>
         { REQUIRE_THROWS_AS(co_await sess.query("BOGUS SYNTAX ERROR"), db::db_exception); });
 }
 
-TEST_CASE("db: error paths", "[db][integration]")
+TEST_CASE("db(mysql): error paths", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2618,7 +2642,7 @@ TEST_CASE("db: error paths", "[db][integration]")
         });
 }
 
-TEST_CASE("db: row out of bounds", "[db][integration]")
+TEST_CASE("db(mysql): row out of bounds", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2629,7 +2653,7 @@ TEST_CASE("db: row out of bounds", "[db][integration]")
         });
 }
 
-TEST_CASE("db: next_resultset on single resultset", "[db][integration]")
+TEST_CASE("db(mysql): next_resultset on single resultset", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2641,7 +2665,7 @@ TEST_CASE("db: next_resultset on single resultset", "[db][integration]")
         });
 }
 
-TEST_CASE("db: column access on empty resultset", "[db][integration]")
+TEST_CASE("db(mysql): column access on empty resultset", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2857,7 +2881,7 @@ TEST_CASE("db: temporal & narrow error handling", "[db][unit]")
     REQUIRE(db::detail::narrow_uint<unsigned>(std::optional<uint64_t> { 4000000000ull }) == 4000000000u);
 }
 
-TEST_CASE("db: aggregate sum accuracy", "[db][integration]")
+TEST_CASE("db(mysql): aggregate sum accuracy", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2893,7 +2917,7 @@ TEST_CASE("db: aggregate sum accuracy", "[db][integration]")
         });
 }
 
-TEST_CASE("db: sum small values", "[db][integration]")
+TEST_CASE("db(mysql): sum small values", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2925,7 +2949,7 @@ TEST_CASE("db: sum small values", "[db][integration]")
         });
 }
 
-TEST_CASE("db: multi-row fetch accuracy", "[db][integration]")
+TEST_CASE("db(mysql): multi-row fetch accuracy", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>
@@ -2982,7 +3006,7 @@ TEST_CASE("db: multi-row fetch accuracy", "[db][integration]")
         });
 }
 
-TEST_CASE("db: multi-row fetch 1000 rows", "[db][integration]")
+TEST_CASE("db(mysql): multi-row fetch 1000 rows", "[db][mysql]")
 {
     run(
         [](db::session& sess) -> net::awaitable<void>

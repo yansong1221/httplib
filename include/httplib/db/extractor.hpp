@@ -43,13 +43,14 @@ namespace httplib::db
             = std::is_same_v<T, int64_t> || std::is_same_v<T, uint64_t> || std::is_same_v<T, int>
               || std::is_same_v<T, unsigned> || std::is_same_v<T, short> || std::is_same_v<T, unsigned short>
               || std::is_same_v<T, double> || std::is_same_v<T, float> || std::is_same_v<T, bool>
-              || std::is_same_v<T, std::string> || std::is_same_v<T, date> || std::is_same_v<T, datetime>
-              || std::is_same_v<T, time> || std::is_same_v<T, timestamp>
-              || std::is_same_v<T, boost::json::value>;
+              || std::is_same_v<T, std::string> || std::is_same_v<T, text> || std::is_same_v<T, blob>
+              || std::is_same_v<T, date> || std::is_same_v<T, datetime> || std::is_same_v<T, time>
+              || std::is_same_v<T, timestamp> || std::is_same_v<T, boost::json::value>;
 
         template <typename T>
         inline constexpr bool is_optional_into_type_v
-            = is_vector_into_type_v<T> || std::is_same_v<T, std::span<std::byte const>>;
+            = is_vector_into_type_v<T> || std::is_same_v<T, std::span<std::byte const>>
+              || std::is_same_v<T, std::string_view>;
 
         template <typename T>
         inline constexpr bool is_scalar_into_type_v = is_optional_into_type_v<T>;

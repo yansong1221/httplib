@@ -114,18 +114,40 @@ namespace httplib::db
         {
             return std::nullopt;
         }
-        auto* v = std::get_if<std::string>(&f);
+        auto* v = std::get_if<text>(&f);
         if (!v)
         {
             throw db_exception(boost::system::error_code {}, "db: cannot convert to string");
         }
-        return std::string_view(*v);
+        return v->data();
     }
 
     std::optional<std::string_view>
     row::as_string(std::string_view name) const
     {
         return as_string(column(name));
+    }
+
+    std::optional<text>
+    row::as_text(size_t col) const
+    {
+        auto& f = parent_->at(idx_, col);
+        if (std::holds_alternative<std::monostate>(f))
+        {
+            return std::nullopt;
+        }
+        auto* v = std::get_if<text>(&f);
+        if (!v)
+        {
+            throw db_exception(boost::system::error_code {}, "db: cannot convert to text");
+        }
+        return *v;
+    }
+
+    std::optional<text>
+    row::as_text(std::string_view name) const
+    {
+        return as_text(column(name));
     }
 
     std::optional<int64_t>
@@ -229,18 +251,40 @@ namespace httplib::db
         {
             return std::nullopt;
         }
-        auto* v = std::get_if<std::vector<std::byte>>(&f);
+        auto* v = std::get_if<blob>(&f);
         if (!v)
         {
             throw db_exception(boost::system::error_code {}, "db: cannot convert to blob");
         }
-        return std::span<std::byte const>(v->data(), v->size());
+        return v->data();
     }
 
     std::optional<std::span<std::byte const>>
     row::as_blob(std::string_view name) const
     {
         return as_blob(column(name));
+    }
+
+    std::optional<blob>
+    row::as_blob_value(size_t col) const
+    {
+        auto& f = parent_->at(idx_, col);
+        if (std::holds_alternative<std::monostate>(f))
+        {
+            return std::nullopt;
+        }
+        auto* v = std::get_if<blob>(&f);
+        if (!v)
+        {
+            throw db_exception(boost::system::error_code {}, "db: cannot convert to blob");
+        }
+        return *v;
+    }
+
+    std::optional<blob>
+    row::as_blob_value(std::string_view name) const
+    {
+        return as_blob_value(column(name));
     }
 
     std::optional<boost::json::value>

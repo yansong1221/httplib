@@ -36,14 +36,14 @@ namespace httplib::db::detail
                     {
                         return boost::mysql::field_view(v);
                     }
-                    else if constexpr (std::is_same_v<T, std::string>)
+                    else if constexpr (std::is_same_v<T, text>)
                     {
-                        return boost::mysql::field_view(v);
+                        return boost::mysql::field_view(v.data());
                     }
-                    else if constexpr (std::is_same_v<T, std::span<std::byte const>>)
+                    else if constexpr (std::is_same_v<T, blob>)
                     {
-                        return boost::mysql::field_view(
-                            boost::mysql::blob_view(reinterpret_cast<unsigned char const*>(v.data()), v.size()));
+                        return boost::mysql::field_view(boost::mysql::blob_view(
+                            reinterpret_cast<unsigned char const*>(v.data().data()), v.data().size()));
                     }
                     else if constexpr (std::is_same_v<T, date>)
                     {
@@ -118,11 +118,15 @@ namespace httplib::db::detail
             }
         }
 
-        // Boost.MySQL 字段视图 → 拥有型 db::field。
+        // Boost.MySQL 字段视图 → db::field。
         // 注意：MySQL DECIMAL（如 SUM()/AVG() 的返回）以字符串传回，
         // 按列类型还原为数值，避免聚合结果无法用 as_int64/as_double 读取。
+        // 文本/blob 借用 results 内部 buffer（anchor 保活），避免深拷贝。
         field
-        to_field(boost::mysql::field_view const& f, db::column_type ct, std::chrono::seconds utc_offset)
+        to_field(boost::mysql::field_view const& f,
+                 db::column_type ct,
+                 std::chrono::seconds utc_offset,
+                 std::shared_ptr<void> const& anchor)
         {
             if (f.is_null())
             {
@@ -175,13 +179,14 @@ namespace httplib::db::detail
                     }
                     throw db_exception(boost::system::error_code {}, "db: cannot parse DECIMAL value: " + std::string(sv));
                 }
-                return std::string(sv);
+                return text(sv, anchor);
             }
             if (f.is_blob())
             {
                 auto b = f.as_blob();
-                return std::vector<std::byte>(reinterpret_cast<std::byte const*>(b.data()),
-                                              reinterpret_cast<std::byte const*>(b.data()) + b.size());
+                return blob(
+                    std::span<std::byte const>(reinterpret_cast<std::byte const*>(b.data()), b.size()),
+                    anchor);
             }
             if (f.is_date())
             {
@@ -211,12 +216,18 @@ namespace httplib::db::detail
         result
         build_result(boost::mysql::results&& data, std::chrono::seconds utc_offset)
         {
+            // 先 move 进保活锚点再取视图：results 内部是 vector<unsigned char>，
+            // move 不搬移堆指针，借用的 blob 在 result 存活期内始终有效。
+            auto holder = std::make_shared<boost::mysql::results>(std::move(data));
+            std::shared_ptr<void> anchor(holder, nullptr);
+            boost::mysql::results& d = *holder;
+
             std::vector<result::resultset> sets;
-            if (data.has_value())
+            if (d.has_value())
             {
-                for (size_t rs_idx = 0; rs_idx < data.size(); ++rs_idx)
+                for (size_t rs_idx = 0; rs_idx < d.size(); ++rs_idx)
                 {
-                    auto rs = data[rs_idx];
+                    auto rs = d[rs_idx];
                     result::resultset s;
                     s.affected = rs.affected_rows();
                     s.last_insert_id = rs.last_insert_id();
@@ -241,7 +252,7 @@ namespace httplib::db::detail
                             values.reserve(rv.size());
                             for (size_t ci = 0; ci < rv.size(); ++ci)
                             {
-                                values.push_back(to_field(rv[ci], s.types[ci], utc_offset));
+                                values.push_back(to_field(rv[ci], s.types[ci], utc_offset, anchor));
                             }
                             s.rows.push_back(std::move(values));
                         }

@@ -202,24 +202,25 @@ namespace httplib::db::detail
                         b.ind = sizeof(double);
                         b.data = v;
                     }
-                    else if constexpr (std::is_same_v<T, std::string>)
+                    else if constexpr (std::is_same_v<T, text>)
                     {
+                        auto sv = v.data();
                         b.ctype = SQL_C_CHAR;
-                        b.sqltype = v.size() > 8000 ? SQL_LONGVARCHAR : SQL_VARCHAR;
-                        b.colsize = static_cast<SQLULEN>(v.size());
-                        b.len = static_cast<SQLLEN>(v.size()) + 1;
-                        b.ind = static_cast<SQLLEN>(v.size());
-                        b.data = v;
+                        b.sqltype = sv.size() > 8000 ? SQL_LONGVARCHAR : SQL_VARCHAR;
+                        b.colsize = static_cast<SQLULEN>(sv.size());
+                        b.len = static_cast<SQLLEN>(sv.size()) + 1;
+                        b.ind = static_cast<SQLLEN>(sv.size());
+                        b.data = std::string(sv);
                     }
-                    else if constexpr (std::is_same_v<T, std::span<std::byte const>>)
+                    else if constexpr (std::is_same_v<T, blob>)
                     {
-                        std::vector<std::byte> blob(v.begin(), v.end());
+                        std::vector<std::byte> data(v.data().begin(), v.data().end());
                         b.ctype = SQL_C_BINARY;
-                        b.sqltype = blob.size() > 8000 ? SQL_LONGVARBINARY : SQL_VARBINARY;
-                        b.colsize = static_cast<SQLULEN>(blob.size());
-                        b.len = static_cast<SQLLEN>(blob.size());
-                        b.ind = static_cast<SQLLEN>(blob.size());
-                        b.data = std::move(blob);
+                        b.sqltype = data.size() > 8000 ? SQL_LONGVARBINARY : SQL_VARBINARY;
+                        b.colsize = static_cast<SQLULEN>(data.size());
+                        b.len = static_cast<SQLLEN>(data.size());
+                        b.ind = static_cast<SQLLEN>(data.size());
+                        b.data = std::move(data);
                     }
                     else if constexpr (std::is_same_v<T, date>)
                     {
@@ -555,7 +556,7 @@ namespace httplib::db::detail
                               g.Data4[5],
                               g.Data4[6],
                               g.Data4[7]);
-                co_return std::string(buf);
+                co_return text(std::string(buf));
             }
             switch (ct)
             {
@@ -605,7 +606,7 @@ namespace httplib::db::detail
                     {
                         co_return std::monostate {};
                     }
-                    co_return b;
+                    co_return blob(std::move(b));
                 }
                 case db::column_type::date:
                 {
@@ -716,7 +717,7 @@ namespace httplib::db::detail
                     {
                         co_return std::monostate {};
                     }
-                    co_return std::string(std::move(sv));
+                    co_return text(std::move(sv));
                 }
             }
         }

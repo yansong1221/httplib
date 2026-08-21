@@ -20,8 +20,9 @@ namespace httplib::db
      * \details
      * 通过 \ref result::operator[] 或 \ref result::iterator 获取。
      * \n
-     * 行内列值均为拥有型（存于 result 内部），不持有后端 buffer 的引用；
-     * 但行本身是 result 的视图，result 销毁后行即失效。
+     * 标量/日期列值为拥有型；文本/二进制列值可为拥有或借用（借用时指向后端 buffer，由
+     * \ref text / \ref blob 内部锚点保活），均随 result 存活；行本身是 result 的视图，
+     * result 销毁后行即失效。
      */
     class HTTPLIB_API row
     {
@@ -36,6 +37,10 @@ namespace httplib::db
 
         std::optional<std::string_view> as_string(size_t col) const;
         std::optional<std::string_view> as_string(std::string_view name) const;
+
+        /// 按 text（拥有/借用一体）取值，返回存储值的拷贝（共享底层锚点）。
+        std::optional<text> as_text(size_t col) const;
+        std::optional<text> as_text(std::string_view name) const;
 
         std::optional<int64_t> as_int64(size_t col) const;
         std::optional<int64_t> as_int64(std::string_view name) const;
@@ -54,6 +59,10 @@ namespace httplib::db
 
         std::optional<std::span<std::byte const>> as_blob(size_t col) const;
         std::optional<std::span<std::byte const>> as_blob(std::string_view name) const;
+
+        /// 按 blob（拥有/借用一体）取值，返回存储值的拷贝（共享底层锚点）。
+        std::optional<blob> as_blob_value(size_t col) const;
+        std::optional<blob> as_blob_value(std::string_view name) const;
 
         std::optional<boost::json::value> as_json(size_t col) const;
         std::optional<boost::json::value> as_json(std::string_view name) const;
@@ -74,8 +83,8 @@ namespace httplib::db
          * \brief 按模板参数类型读取列值。
          * \details
          * 支持 int64_t / uint64_t / int / unsigned / short / unsigned short / double / float / bool /
-         * std::string / std::string_view / std::span<const std::byte> / date / datetime / time /
-         * timestamp / boost::json::value。
+         * std::string / std::string_view / std::span<const std::byte> / text / blob / date / datetime /
+         * time / timestamp / boost::json::value。
          * \param col 列下标。
          * \returns 列值；NULL 返回 nullopt。
          */

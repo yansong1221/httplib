@@ -1,5 +1,6 @@
 #pragma once
 
+#include "field.hpp"
 #include "httplib/config.hpp"
 #include "temporal.hpp"
 #include <boost/json/serialize.hpp>
@@ -32,18 +33,9 @@ namespace httplib::db
 
     namespace detail
     {
-        /// 参数值：monostate 表示 NULL；std::string 为拥有型字符串/JSON 序列化结果；std::span 为 blob 视图；
+        /// 参数值：与 \ref field 同一类型；monostate 表示 NULL，text/blob 为拥有或借用，
         /// timestamp 延迟到渲染时做时区换算。
-        using param = std::variant<std::monostate,
-                                   int64_t,
-                                   uint64_t,
-                                   double,
-                                   std::string,
-                                   std::span<std::byte const>,
-                                   date,
-                                   datetime,
-                                   time,
-                                   timestamp>;
+        using param = field;
 
         /// 参数绑定声明：name 为空表示位置绑定，否则为命名绑定。
         struct binder
@@ -56,17 +48,17 @@ namespace httplib::db
         inline param
         to_param(std::string_view v)
         {
-            return std::string(v);
+            return text(std::string(v));
         }
         inline param
         to_param(std::string const& v)
         {
-            return v;
+            return text(v);
         }
         inline param
         to_param(char const* v)
         {
-            return std::string(v);
+            return text(std::string(v));
         }
         inline param
         to_param(int64_t v)
@@ -136,12 +128,12 @@ namespace httplib::db
         inline param
         to_param(std::span<std::byte const> v)
         {
-            return v;
+            return blob(v);
         }
         inline param
         to_param(boost::json::value const& v)
         {
-            return boost::json::serialize(v);
+            return text(boost::json::serialize(v));
         }
         inline param
         to_param(timestamp tp)

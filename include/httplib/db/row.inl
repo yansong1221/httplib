@@ -96,6 +96,14 @@ namespace httplib::db
         {
             return as_blob(col);
         }
+        else if constexpr (std::is_same_v<T, text>)
+        {
+            return as_text(col);
+        }
+        else if constexpr (std::is_same_v<T, blob>)
+        {
+            return as_blob_value(col);
+        }
         else if constexpr (std::is_same_v<T, date>)
         {
             return as_date(col);

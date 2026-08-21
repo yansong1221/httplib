@@ -63,17 +63,17 @@ namespace httplib::db::detail
                 {
                     return std::to_string(x);
                 }
-                else if constexpr (std::is_same_v<T, std::string>)
+                else if constexpr (std::is_same_v<T, text>)
                 {
-                    return quote_string(x);
+                    return quote_string(x.data());
                 }
-                else if constexpr (std::is_same_v<T, std::span<std::byte const>>)
+                else if constexpr (std::is_same_v<T, blob>)
                 {
                     static char const* digits = "0123456789ABCDEF";
                     std::string out;
                     out.reserve(x.size() * 2 + 3);
                     out += "X'";
-                    for (std::byte b : x)
+                    for (std::byte b : x.data())
                     {
                         auto u = static_cast<unsigned char>(b);
                         out += digits[(u >> 4) & 0xF];

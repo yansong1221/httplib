@@ -91,13 +91,21 @@ namespace httplib::db::detail
                         {
                             rc = sqlite3_bind_double(stmt, idx, v);
                         }
-                        else if constexpr (std::is_same_v<T, std::string>)
+                        else if constexpr (std::is_same_v<T, text>)
                         {
-                            rc = sqlite3_bind_text(stmt, idx, v.data(), static_cast<int>(v.size()), SQLITE_TRANSIENT);
+                            rc = sqlite3_bind_text(stmt,
+                                                   idx,
+                                                   v.data().data(),
+                                                   static_cast<int>(v.data().size()),
+                                                   SQLITE_TRANSIENT);
                         }
-                        else if constexpr (std::is_same_v<T, std::span<std::byte const>>)
+                        else if constexpr (std::is_same_v<T, blob>)
                         {
-                            rc = sqlite3_bind_blob(stmt, idx, v.data(), static_cast<int>(v.size()), SQLITE_TRANSIENT);
+                            rc = sqlite3_bind_blob(stmt,
+                                                   idx,
+                                                   v.data().data(),
+                                                   static_cast<int>(v.data().size()),
+                                                   SQLITE_TRANSIENT);
                         }
                         else if constexpr (std::is_same_v<T, date>)
                         {
@@ -180,7 +188,7 @@ namespace httplib::db::detail
                 {
                     auto const* p = static_cast<std::byte const*>(sqlite3_column_blob(stmt, col));
                     int n = sqlite3_column_bytes(stmt, col);
-                    return std::vector<std::byte>(p, p + n);
+                    return blob(std::vector<std::byte>(p, p + n));
                 }
                 case SQLITE_TEXT:
                 {
@@ -210,7 +218,7 @@ namespace httplib::db::detail
                         default:
                             break;
                     }
-                    return std::string(sv);
+                    return text(std::string(sv));
                 }
                 default:
                     return std::monostate {};

@@ -19,7 +19,8 @@ namespace httplib::db
      * \details
      * 由 \ref session::query 或 \ref prepared_statement::execute 返回。
      * \n
-     * 所有行数据均为拥有型（存于本对象内部），不持有后端 buffer 的引用。
+     * 标量/日期列值为拥有型；文本/二进制列值可为拥有或借用（借用时指向后端 buffer，由
+     * \ref text / \ref blob 内部锚点保活），均存于本对象内部并随其存活。
      * \n
      * 多语句查询（MySQL multi_queries）会包含多个结果集，可通过 \ref resultset_count /
      * \ref next_resultset 遍历。
