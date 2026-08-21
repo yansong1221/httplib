@@ -42,6 +42,7 @@ struct SQL_SS_TIMESTAMPOFFSET_STRUCT
 #include <charconv>
 #include <cstdio>
 #include <cstring>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -152,7 +153,7 @@ namespace httplib::db::detail
         };
 
         static odbc_bind
-        make_bind(param const& p)
+        make_bind(param const& p, bool is_sql_server)
         {
             odbc_bind b;
             std::visit(
@@ -179,6 +180,12 @@ namespace httplib::db::detail
                     }
                     else if constexpr (std::is_same_v<T, uint64_t>)
                     {
+                        // SQL_BIGINT 为有符号：超出 INT64_MAX 的 uint64 无法无损存储，显式报错（与 SQLite 后端一致）。
+                        if (v > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+                        {
+                            throw db_exception(boost::system::error_code {},
+                                               "db: odbc bind uint64 out of range (SQL BIGINT is signed)");
+                        }
                         b.ctype = SQL_C_UBIGINT;
                         b.sqltype = SQL_BIGINT;
                         b.colsize = 20;
@@ -246,20 +253,37 @@ namespace httplib::db::detail
                     }
                     else if constexpr (std::is_same_v<T, time>)
                     {
-                        // SQL_SS_TIME2 + SQL_C_BINARY 才能携带小数秒；
-                        // 旧实现用 SQL_C_TYPE_TIME/SQL_TIME_STRUCT，fraction 恒为 0。
-                        SQL_SS_TIME2_STRUCT t {};
-                        t.hour = static_cast<SQLUSMALLINT>(v.hour);
-                        t.minute = static_cast<SQLUSMALLINT>(v.minute);
-                        t.second = static_cast<SQLUSMALLINT>(v.second);
-                        t.fraction = static_cast<SQLUINTEGER>(v.microsecond * 1000); ///< 纳秒
-                        b.ctype = SQL_C_BINARY;
-                        b.sqltype = SQL_SS_TIME2;
-                        b.colsize = 16;
-                        b.dec = 7;
-                        b.len = static_cast<SQLLEN>(sizeof(t));
-                        b.ind = static_cast<SQLLEN>(sizeof(t));
-                        b.data = t;
+                        if (is_sql_server)
+                        {
+                            // SQL Server：SQL_SS_TIME2 + SQL_C_BINARY 才能携带小数秒；
+                            // 旧实现用 SQL_C_TYPE_TIME/SQL_TIME_STRUCT，fraction 恒为 0。
+                            SQL_SS_TIME2_STRUCT t {};
+                            t.hour = static_cast<SQLUSMALLINT>(v.hour);
+                            t.minute = static_cast<SQLUSMALLINT>(v.minute);
+                            t.second = static_cast<SQLUSMALLINT>(v.second);
+                            t.fraction = static_cast<SQLUINTEGER>(v.microsecond * 1000); ///< 纳秒
+                            b.ctype = SQL_C_BINARY;
+                            b.sqltype = SQL_SS_TIME2;
+                            b.colsize = 16;
+                            b.dec = 7;
+                            b.len = static_cast<SQLLEN>(sizeof(t));
+                            b.ind = static_cast<SQLLEN>(sizeof(t));
+                            b.data = t;
+                        }
+                        else
+                        {
+                            // 通用驱动：SQL_TYPE_TIME 仅秒级，小数秒截断（与读取侧非 SQL Server 的回退对称）。
+                            SQL_TIME_STRUCT t {};
+                            t.hour = static_cast<SQLUSMALLINT>(v.hour);
+                            t.minute = static_cast<SQLUSMALLINT>(v.minute);
+                            t.second = static_cast<SQLUSMALLINT>(v.second);
+                            b.ctype = SQL_C_TYPE_TIME;
+                            b.sqltype = SQL_TYPE_TIME;
+                            b.colsize = 8;
+                            b.len = static_cast<SQLLEN>(sizeof(t));
+                            b.ind = static_cast<SQLLEN>(sizeof(t));
+                            b.data = t;
+                        }
                     }
                     else if constexpr (std::is_same_v<T, timestamp>)
                     {
@@ -489,7 +513,7 @@ namespace httplib::db::detail
             {
                 return d;
             }
-            throw std::runtime_error("db: cannot parse DECIMAL value: " + sv);
+            throw db_exception(boost::system::error_code {}, "db: cannot parse DECIMAL value: " + sv);
         }
 
         // 读单个字段。
@@ -879,6 +903,15 @@ namespace httplib::db::detail
                 });
             check_ok(rc, dbc_, SQL_HANDLE_DBC, "odbc connect (dsn)");
         }
+        // 检测目标 DBMS：决定 TIME 绑定用 SQL Server 专有的 SQL_SS_TIME2 还是通用 SQL_TYPE_TIME。
+        SQLCHAR dbms[64] = {};
+        SQLSMALLINT dbms_len = 0;
+        rc = SQLGetInfo(dbc_, SQL_DBMS_NAME, dbms, static_cast<SQLSMALLINT>(sizeof(dbms)), &dbms_len);
+        if (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO)
+        {
+            std::string name(reinterpret_cast<char*>(dbms), static_cast<size_t>(dbms_len));
+            is_sql_server_ = name.find("SQL Server") != std::string::npos;
+        }
         live_ = true;
     }
 
@@ -1100,7 +1133,7 @@ namespace httplib::db::detail
         binds.reserve(params.size());
         for (auto const& p : params)
         {
-            binds.push_back(make_bind(p));
+            binds.push_back(make_bind(p, is_sql_server_));
         }
         for (size_t i = 0; i < binds.size(); ++i)
         {

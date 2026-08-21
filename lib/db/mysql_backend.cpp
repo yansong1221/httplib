@@ -173,7 +173,7 @@ namespace httplib::db::detail
                     {
                         return d;
                     }
-                    throw std::runtime_error("db: cannot parse DECIMAL value: " + std::string(sv));
+                    throw db_exception(boost::system::error_code {}, "db: cannot parse DECIMAL value: " + std::string(sv));
                 }
                 return std::string(sv);
             }
@@ -490,12 +490,10 @@ namespace httplib::db::detail
             }
             catch (...)
             {
-                close_ec = boost::mysql::client_errc::server_unsupported;
+                // 语句关闭不支持（老服务器）等本地错误：不影响连接可用性。
             }
-            if (close_ec)
-            {
-                live_ = false;
-            }
+            // close 失败不标记连接失效：重连前 / 失效后的清理路径 close 必然失败，属预期；
+            // 连接健康由 ping/execute 等真实操作判定，避免因良性 close 错误误杀正常连接。
         }
         h.state.reset();
     }

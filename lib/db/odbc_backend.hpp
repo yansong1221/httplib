@@ -76,6 +76,7 @@ namespace httplib::db::detail
         void* env_ = nullptr; ///< SQLHENV
         void* dbc_ = nullptr; ///< SQLHDBC
         bool live_ = true;    ///< 连接是否存活（连接异常错误时置 false）
+        bool is_sql_server_ = false; ///< 目标是否为 SQL Server（决定 TIME 绑定用 SQL_SS_TIME2 还是通用 SQL_TYPE_TIME）
     };
 
 } // namespace httplib::db::detail

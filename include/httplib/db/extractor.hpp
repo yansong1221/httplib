@@ -1,5 +1,6 @@
 #pragma once
 
+#include "exception.hpp"
 #include "httplib/config.hpp"
 #include "result.hpp"
 #include <boost/json/value.hpp>
@@ -191,7 +192,7 @@ namespace httplib::db
                      auto val = r.get<T>(c);
                      if (!val)
                      {
-                         throw std::runtime_error("db: NULL value when extracting into vector");
+                          throw db_exception(boost::system::error_code {}, "db: NULL value when extracting into vector");
                      }
                      v.push_back(std::move(*val));
                  },
@@ -216,7 +217,7 @@ namespace httplib::db
                      auto val = r.get<T>(n);
                      if (!val)
                      {
-                         throw std::runtime_error("db: NULL value when extracting into vector");
+                          throw db_exception(boost::system::error_code {}, "db: NULL value when extracting into vector");
                      }
                      v.push_back(std::move(*val));
                  },
@@ -241,7 +242,7 @@ namespace httplib::db
                      auto val = r.get<T>(c);
                      if (!val)
                      {
-                         throw std::runtime_error("db: NULL value when extracting into vector");
+                          throw db_exception(boost::system::error_code {}, "db: NULL value when extracting into vector");
                      }
                      v.push_back(std::move(*val));
                  },
@@ -263,7 +264,7 @@ namespace httplib::db
                          auto val = r.get<T>(c);
                          if (!val)
                          {
-                             throw std::runtime_error("db: NULL value when extracting into scalar");
+                              throw db_exception(boost::system::error_code {}, "db: NULL value when extracting into scalar");
                          }
                          v = std::move(*val);
                          first = false;
@@ -285,7 +286,7 @@ namespace httplib::db
                          auto val = r.get<T>(n);
                          if (!val)
                          {
-                             throw std::runtime_error("db: NULL value when extracting into scalar");
+                              throw db_exception(boost::system::error_code {}, "db: NULL value when extracting into scalar");
                          }
                          v = std::move(*val);
                          first = false;
@@ -307,7 +308,7 @@ namespace httplib::db
                          auto val = r.get<T>(c);
                          if (!val)
                          {
-                             throw std::runtime_error("db: NULL value when extracting into scalar");
+                              throw db_exception(boost::system::error_code {}, "db: NULL value when extracting into scalar");
                          }
                          v = std::move(*val);
                          first = false;

@@ -1,4 +1,5 @@
 #include "httplib/db/row.hpp"
+#include "httplib/db/exception.hpp"
 #include "httplib/db/result.hpp"
 #include <boost/json.hpp>
 #include <limits>
@@ -18,7 +19,7 @@ namespace httplib::db
             {
                 if (*v > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
                 {
-                    throw std::runtime_error("db: value out of range for int64");
+                    throw db_exception(boost::system::error_code {}, "db: value out of range for int64");
                 }
                 return static_cast<int64_t>(*v);
             }
@@ -27,11 +28,11 @@ namespace httplib::db
                 if (*v < static_cast<double>(std::numeric_limits<int64_t>::min())
                     || *v >= static_cast<double>(std::numeric_limits<int64_t>::max()))
                 {
-                    throw std::runtime_error("db: value out of range for int64");
+                    throw db_exception(boost::system::error_code {}, "db: value out of range for int64");
                 }
                 return static_cast<int64_t>(*v);
             }
-            throw std::runtime_error("db: cannot convert to int64");
+            throw db_exception(boost::system::error_code {}, "db: cannot convert to int64");
         }
 
         static std::optional<uint64_t>
@@ -45,7 +46,7 @@ namespace httplib::db
             {
                 if (*v < 0)
                 {
-                    throw std::runtime_error("db: value out of range for uint64");
+                    throw db_exception(boost::system::error_code {}, "db: value out of range for uint64");
                 }
                 return static_cast<uint64_t>(*v);
             }
@@ -53,11 +54,11 @@ namespace httplib::db
             {
                 if (*v < 0.0 || *v >= static_cast<double>(std::numeric_limits<uint64_t>::max()))
                 {
-                    throw std::runtime_error("db: value out of range for uint64");
+                    throw db_exception(boost::system::error_code {}, "db: value out of range for uint64");
                 }
                 return static_cast<uint64_t>(*v);
             }
-            throw std::runtime_error("db: cannot convert to uint64");
+            throw db_exception(boost::system::error_code {}, "db: cannot convert to uint64");
         }
 
         static std::optional<double>
@@ -75,7 +76,7 @@ namespace httplib::db
             {
                 return static_cast<double>(*v);
             }
-            throw std::runtime_error("db: cannot convert to double");
+            throw db_exception(boost::system::error_code {}, "db: cannot convert to double");
         }
     } // namespace detail
 
@@ -116,7 +117,7 @@ namespace httplib::db
         auto* v = std::get_if<std::string>(&f);
         if (!v)
         {
-            throw std::runtime_error("db: cannot convert to string");
+            throw db_exception(boost::system::error_code {}, "db: cannot convert to string");
         }
         return std::string_view(*v);
     }
@@ -211,7 +212,7 @@ namespace httplib::db
         {
             return *v != 0.0;
         }
-        throw std::runtime_error("db: cannot convert to bool");
+        throw db_exception(boost::system::error_code {}, "db: cannot convert to bool");
     }
 
     std::optional<bool>
@@ -231,7 +232,7 @@ namespace httplib::db
         auto* v = std::get_if<std::vector<std::byte>>(&f);
         if (!v)
         {
-            throw std::runtime_error("db: cannot convert to blob");
+            throw db_exception(boost::system::error_code {}, "db: cannot convert to blob");
         }
         return std::span<std::byte const>(v->data(), v->size());
     }
@@ -254,7 +255,7 @@ namespace httplib::db
         boost::json::value jv = boost::json::parse(*sv, ec);
         if (ec)
         {
-            throw std::runtime_error("db: json parse error: " + ec.message());
+            throw db_exception(boost::system::error_code {}, "db: json parse error: " + ec.message());
         }
         return jv;
     }
@@ -277,7 +278,7 @@ namespace httplib::db
         {
             return *v;
         }
-        throw std::runtime_error("db: cannot convert to date");
+        throw db_exception(boost::system::error_code {}, "db: cannot convert to date");
     }
 
     std::optional<date>
@@ -302,7 +303,7 @@ namespace httplib::db
         {
             return datetime::from_time_point(*v);
         }
-        throw std::runtime_error("db: cannot convert to datetime");
+        throw db_exception(boost::system::error_code {}, "db: cannot convert to datetime");
     }
 
     std::optional<datetime>
@@ -323,7 +324,7 @@ namespace httplib::db
         {
             return *v;
         }
-        throw std::runtime_error("db: cannot convert to time");
+        throw db_exception(boost::system::error_code {}, "db: cannot convert to time");
     }
 
     std::optional<time>
@@ -349,7 +350,7 @@ namespace httplib::db
             // DATETIME 列读回的是无时区墙上时钟，直接视为 UTC 时间点。
             return v->to_time_point();
         }
-        throw std::runtime_error("db: cannot convert to timestamp");
+        throw db_exception(boost::system::error_code {}, "db: cannot convert to timestamp");
     }
 
     std::optional<timestamp>

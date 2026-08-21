@@ -585,4 +585,37 @@ TEST_CASE("db: negative max_cached_statements disables statement cache", "[db][r
             REQUIRE(ctrl->prepare_calls.load() == 2);
         });
 }
+
+// ---- 异常统一：渲染/访问层错误统一抛 db_exception（此前部分为 std::runtime_error，绕过 session 错误管道） ----
+
+TEST_CASE("db: render errors are typed db_exception", "[db][regression]")
+{
+    stub_backend def;
+
+    // SQL 有 :a 占位符但未提供任何绑定 → 未绑定命名参数
+    REQUIRE_THROWS_AS(detail::render_query("SELECT :a AS x", {}, def), db::db_exception);
+
+    // 位置绑定与命名绑定混用 → 禁止
+    REQUIRE_THROWS_AS(detail::render_query("SELECT :a AS x", { db::bind(1), db::bind("a", 2) }, def),
+                      db::db_exception);
+}
+
+TEST_CASE("db: row/result access errors are typed db_exception, bounds keep std::out_of_range",
+          "[db][regression]")
+{
+    db::result r({
+        db::result::resultset { { { db::field { std::string("hello") } } }, { "v" }, { db::column_type::string } }
+    });
+
+    // 类型不匹配 → db_exception（此前为 std::runtime_error）
+    REQUIRE_THROWS_AS(r[0].as_int64(0), db::db_exception);
+    REQUIRE_THROWS_AS(r[0].as_blob(0), db::db_exception);
+
+    // 列名不存在 → db_exception（此前为 std::runtime_error）
+    REQUIRE_THROWS_AS(r.column_index("nope"), db::db_exception);
+
+    // 下标越界 → 保留标准容器语义 std::out_of_range
+    REQUIRE_THROWS_AS(r[1].as_int64(0), std::out_of_range);
+    REQUIRE_THROWS_AS(r[0].as_int64(999), std::out_of_range);
+}
 #endif

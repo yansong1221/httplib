@@ -1,4 +1,5 @@
 #pragma once
+#include "exception.hpp"
 #include <charconv>
 #include <cstdio>
 #include <functional>
@@ -41,7 +42,7 @@ namespace httplib::db
     {
         if (!is_valid())
         {
-            throw std::runtime_error("db: invalid date value");
+            throw db_exception(boost::system::error_code {}, "db: invalid date value");
         }
         return std::chrono::sys_days { std::chrono::year { static_cast<int>(year) } / std::chrono::month { month }
                                        / std::chrono::day { day } };
@@ -297,7 +298,7 @@ namespace httplib::db
     {
         if (!is_valid())
         {
-            throw std::runtime_error("db: invalid datetime value");
+            throw db_exception(boost::system::error_code {}, "db: invalid datetime value");
         }
         return date::to_sys_days() + std::chrono::hours { hour } + std::chrono::minutes { minute }
                + std::chrono::seconds { second } + std::chrono::microseconds { microsecond };

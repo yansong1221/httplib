@@ -9,6 +9,7 @@
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -222,6 +223,35 @@ TEST_CASE("db(sqlite/bug): ping reports a corrupted database file as dead", "[db
     rethrow_or_skip(err, "");
 }
 
+TEST_CASE("db(sqlite/bug): parameterized multi-statement SQL is rejected", "[db][sqlite][bug]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            auto sess = co_await db::session::connect(ioc.get_executor(), "sqlite", "db=:memory:");
+            co_await sess.query("CREATE TABLE m (x INTEGER)");
+
+            // 带参数的多语句：prepare 只准备第一条，后续语句会被静默丢弃；
+            // 修复后应显式报错而非丢数据。
+            REQUIRE_THROWS_AS(co_await sess.stmt("INSERT INTO m VALUES (:a); INSERT INTO m VALUES (:b)")
+                                  .bind("a", 1)
+                                  .bind("b", 2)
+                                  .execute(),
+                              db::db_exception);
+
+            // 纯文本多语句仍完整执行（不受参数化检测影响）
+            co_await sess.query("INSERT INTO m VALUES (3); INSERT INTO m VALUES (4)");
+            auto r = co_await sess.query("SELECT COUNT(*) AS n FROM m");
+            REQUIRE(*r[0].as_int64("n") == 2);
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    rethrow_or_skip(err, "");
+}
+
 // ---------------------------------------------------------------------------
 // ODBC (SQL Server)
 // ---------------------------------------------------------------------------
@@ -268,6 +298,28 @@ TEST_CASE("db(odbc/bug): DATETIMEOFFSET column round-trips wall-clock value", "[
             REQUIRE(*got1 == db::datetime { 2024, 6, 1, 12, 34, 56, 789000 });
 
             co_await sess.query("DROP TABLE httplib_odbc_bug_dto");
+        },
+        [&](std::exception_ptr e) { err = e; });
+    ioc.run();
+    rethrow_or_skip(err, "odbc connect");
+}
+
+TEST_CASE("db(odbc/bug): uint64 binding above INT64_MAX fails explicitly",
+          "[db][odbc][bug][integration]")
+{
+    net::io_context ioc;
+    std::exception_ptr err;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            auto sess = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_bug_config().to_connection_string());
+
+            // SQL Server BIGINT 有符号：绑定 > INT64_MAX 的 uint64 应显式报错（与 SQLite 后端一致），
+            // 而非静默交给驱动报 22003。
+            auto const max_u64 = std::numeric_limits<uint64_t>::max();
+            REQUIRE_THROWS_WITH(co_await sess.stmt("SELECT CAST(:a AS BIGINT) AS x").bind("a", max_u64).execute(),
+                                Catch::Matchers::ContainsSubstring("out of range"));
         },
         [&](std::exception_ptr e) { err = e; });
     ioc.run();

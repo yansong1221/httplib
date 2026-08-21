@@ -273,10 +273,36 @@ namespace httplib::db::detail
                 case SQLITE_CANTOPEN:
                 case SQLITE_IOERR:
                 case SQLITE_NOLFS:
+                case SQLITE_READONLY:
                     return true;
                 default:
                     return false;
             }
+        }
+
+        // 检测 tail 之后是否还有可执行的语句（跳过空白/注释/空语句）。
+        // 供 prepare 检测参数化多语句：execute_statement 只执行第一条，静默截断会丢数据。
+        static bool
+        has_trailing_statement(sqlite3* db, char const* tail)
+        {
+            while (tail && *tail)
+            {
+                sqlite3_stmt* s = nullptr;
+                char const* next = nullptr;
+                int rc = sqlite3_prepare_v2(db, tail, -1, &s, &next);
+                if (rc != SQLITE_OK)
+                {
+                    return false; // 尾随内容无法解析，保守不视为多语句
+                }
+                if (!s)
+                {
+                    tail = next; // 空语句（分号）或纯注释：继续跳过
+                    continue;
+                }
+                sqlite3_finalize(s);
+                return true;
+            }
+            return false;
         }
 
         // 执行并收集一条已 prepare/绑定语句的全部行（finalize 前调用）。
@@ -468,11 +494,20 @@ namespace httplib::db::detail
         {
             throw db_exception(boost::system::error_code {}, "db: sqlite not connected");
         }
+        std::string sql_str(sql);
         sqlite3_stmt* stmt = nullptr;
-        int rc = sqlite3_prepare_v2(db_.get(), std::string(sql).c_str(), -1, &stmt, nullptr);
+        char const* tail = nullptr;
+        int rc = sqlite3_prepare_v2(db_.get(), sql_str.c_str(), -1, &stmt, &tail);
         if (rc != SQLITE_OK)
         {
             throw db_exception(boost::system::error_code {}, sqlite_error_msg(db_.get(), rc, "sqlite prepare failed"));
+        }
+        if (has_trailing_statement(db_.get(), tail))
+        {
+            // 参数化语句只执行第一条，后续语句会被静默丢弃；显式报错避免丢数据。
+            sqlite3_finalize(stmt);
+            throw db_exception(boost::system::error_code {},
+                               "db: sqlite parameterized multi-statement SQL is not supported");
         }
         co_return statement_handle { own_stmt(stmt) };
     }
