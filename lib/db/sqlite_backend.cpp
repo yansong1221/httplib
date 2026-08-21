@@ -280,31 +280,6 @@ namespace httplib::db::detail
             }
         }
 
-        // 检测 tail 之后是否还有可执行的语句（跳过空白/注释/空语句）。
-        // 供 prepare 检测参数化多语句：execute_statement 只执行第一条，静默截断会丢数据。
-        static bool
-        has_trailing_statement(sqlite3* db, char const* tail)
-        {
-            while (tail && *tail)
-            {
-                sqlite3_stmt* s = nullptr;
-                char const* next = nullptr;
-                int rc = sqlite3_prepare_v2(db, tail, -1, &s, &next);
-                if (rc != SQLITE_OK)
-                {
-                    return false; // 尾随内容无法解析，保守不视为多语句
-                }
-                if (!s)
-                {
-                    tail = next; // 空语句（分号）或纯注释：继续跳过
-                    continue;
-                }
-                sqlite3_finalize(s);
-                return true;
-            }
-            return false;
-        }
-
         // 执行并收集一条已 prepare/绑定语句的全部行（finalize 前调用）。
         // 只读语句（SELECT 等）的 affected / last_insert_id 置 0：
         // sqlite3_changes / sqlite3_last_insert_rowid 是连接级状态，DML 的计数 / rowid 会泄漏给
@@ -409,7 +384,7 @@ namespace httplib::db::detail
         {
             // 执行真实 SQL 探测：文件被删/损坏/只读等故障时 report false，
             // 供连接池 validate_on_borrow / 健康检查剔除（仅判 db_ 指针会漏报）。
-            co_return exec_all("SELECT 1", {}).row_count() == 1;
+            co_return exec_all("SELECT 1").row_count() == 1;
         }
         catch (...)
         {
@@ -431,17 +406,17 @@ namespace httplib::db::detail
     }
 
     result
-    sqlite_backend::exec(std::string_view sql, std::vector<param> const& params)
+    sqlite_backend::exec(std::string_view sql)
     {
         if (!db_)
         {
             throw db_exception(boost::system::error_code {}, "db: sqlite not connected");
         }
-        return exec_all(std::string(sql), params);
+        return exec_all(std::string(sql));
     }
 
     result
-    sqlite_backend::exec_all(std::string const& sql, std::vector<param> const& params)
+    sqlite_backend::exec_all(std::string const& sql)
     {
         std::vector<result::resultset> sets;
         std::vector<std::shared_ptr<sqlite3_stmt>> live;
@@ -468,7 +443,6 @@ namespace httplib::db::detail
             }
             auto owner = own_stmt(raw); // RAII：异常路径由 live 析构统一 finalize
             live.push_back(owner);
-            bind_params(db_.get(), raw, params);
             result::resultset s;
             int rc2 = collect_statement(db_.get(), raw, s);
             if (rc2 != 0)
@@ -484,7 +458,7 @@ namespace httplib::db::detail
     net::awaitable<result>
     sqlite_backend::execute(std::string_view sql)
     {
-        co_return exec(sql, {});
+        co_return exec(sql);
     }
 
     net::awaitable<statement_handle>
@@ -496,18 +470,10 @@ namespace httplib::db::detail
         }
         std::string sql_str(sql);
         sqlite3_stmt* stmt = nullptr;
-        char const* tail = nullptr;
-        int rc = sqlite3_prepare_v2(db_.get(), sql_str.c_str(), -1, &stmt, &tail);
+        int rc = sqlite3_prepare_v2(db_.get(), sql_str.c_str(), -1, &stmt, nullptr);
         if (rc != SQLITE_OK)
         {
             throw db_exception(boost::system::error_code {}, sqlite_error_msg(db_.get(), rc, "sqlite prepare failed"));
-        }
-        if (has_trailing_statement(db_.get(), tail))
-        {
-            // 参数化语句只执行第一条，后续语句会被静默丢弃；显式报错避免丢数据。
-            sqlite3_finalize(stmt);
-            throw db_exception(boost::system::error_code {},
-                               "db: sqlite parameterized multi-statement SQL is not supported");
         }
         co_return statement_handle { own_stmt(stmt) };
     }

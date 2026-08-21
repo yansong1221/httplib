@@ -246,6 +246,15 @@ namespace httplib::db
     {
         auto start = std::chrono::steady_clock::now();
 
+        // 参数化语句是单语句：多语句（语句级分号）语义不明确，且后端 prepare 只执行第一条，
+        // 会静默截断。统一在入口拒绝，避免后端行为不一致（此前仅 SQLite 后端检测）。
+        if (!params.empty() && detail::split_statements(sql).size() > 1)
+        {
+            throw db_exception(boost::system::error_code {},
+                               "db: parameterized multi-statement SQL is not supported; "
+                               "split the statements");
+        }
+
         result res;
         std::optional<db_exception> failure;
         try

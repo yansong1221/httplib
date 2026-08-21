@@ -144,11 +144,19 @@ namespace httplib::db::detail
         out += quote;
         while (++i < sql.size())
         {
-            out += sql[i];
-            if (sql[i] == quote && (i + 1 >= sql.size() || sql[i + 1] != quote))
+            if (sql[i] == quote)
             {
-                break;
+                if (i + 1 < sql.size() && sql[i + 1] == quote)
+                {
+                    out += quote; // '' 转义：成对引号原样输出
+                    out += quote;
+                    ++i; // 跳到第二个引号，循环 ++i 越过
+                    continue;
+                }
+                out += quote;
+                break; // 闭合引号
             }
+            out += sql[i];
             if (sql[i] == '\\' && i + 1 < sql.size())
             {
                 out += sql[++i];
@@ -391,6 +399,105 @@ namespace httplib::db::detail
             throw db_exception(boost::system::error_code {}, "db: too many parameters for placeholders");
         }
         return { std::move(out), std::move(params) };
+    }
+
+    /// 按语句级分号拆分 SQL（跳过字符串/引号/注释内的分号，跳过空语句）。
+    /// 供 execute_rendered 检测参数化多语句（含绑定参数的语句不允许多语句）。
+    inline std::vector<std::string_view>
+    split_statements(std::string_view sql)
+    {
+        std::vector<std::string_view> out;
+        size_t const n = sql.size();
+        size_t i = 0;
+        while (i < n)
+        {
+            while (i < n && std::isspace(static_cast<unsigned char>(sql[i])))
+            {
+                ++i;
+            }
+            if (i >= n)
+            {
+                break;
+            }
+            size_t start = i;
+            while (i < n)
+            {
+                char c = sql[i];
+                if (c == '\'' || c == '"' || c == '`')
+                {
+                    char quote = c;
+                    ++i;
+                    while (i < n)
+                    {
+                        if (sql[i] == quote)
+                        {
+                            if (i + 1 < n && sql[i + 1] == quote)
+                            {
+                                i += 2; // '' 转义：跳过成对引号
+                                continue;
+                            }
+                            ++i;
+                            break; // 闭合引号
+                        }
+                        if (sql[i] == '\\' && i + 1 < n)
+                        {
+                            i += 2;
+                        }
+                        else
+                        {
+                            ++i;
+                        }
+                    }
+                    continue;
+                }
+                if (c == '#')
+                {
+                    while (i < n && sql[i] != '\n')
+                    {
+                        ++i;
+                    }
+                    continue;
+                }
+                if (c == '-' && i + 1 < n && sql[i + 1] == '-'
+                    && (i + 2 >= n || std::isspace(static_cast<unsigned char>(sql[i + 2]))))
+                {
+                    while (i < n && sql[i] != '\n')
+                    {
+                        ++i;
+                    }
+                    continue;
+                }
+                if (c == '/' && i + 1 < n && sql[i + 1] == '*')
+                {
+                    i += 2;
+                    while (i + 1 < n && !(sql[i] == '*' && sql[i + 1] == '/'))
+                    {
+                        ++i;
+                    }
+                    i += 2; // 越过 */
+                    continue;
+                }
+                if (c == ';')
+                {
+                    break;
+                }
+                ++i;
+            }
+            size_t end = i;
+            while (end > start && std::isspace(static_cast<unsigned char>(sql[end - 1])))
+            {
+                --end;
+            }
+            if (end > start)
+            {
+                out.push_back(sql.substr(start, end - start));
+            }
+            if (i < n && sql[i] == ';')
+            {
+                ++i;
+            }
+        }
+        return out;
     }
 
 } // namespace httplib::db::detail

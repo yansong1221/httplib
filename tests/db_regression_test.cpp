@@ -618,4 +618,107 @@ TEST_CASE("db: row/result access errors are typed db_exception, bounds keep std:
     REQUIRE_THROWS_AS(r[1].as_int64(0), std::out_of_range);
     REQUIRE_THROWS_AS(r[0].as_int64(999), std::out_of_range);
 }
+
+// ---- 多语句：参数化语句统一在 session 层拒绝（此前仅 SQLite 后端检测，ODBC 有静默截断风险） ----
+
+TEST_CASE("db: split_statements splits on statement-level semicolons", "[db][regression]")
+{
+    using detail::split_statements;
+
+    // 单语句（无分号）
+    {
+        auto v = split_statements("SELECT 1");
+        REQUIRE(v.size() == 1);
+        REQUIRE(v[0] == "SELECT 1");
+    }
+    // 末尾分号不产生空语句
+    {
+        auto v = split_statements("SELECT 1;");
+        REQUIRE(v.size() == 1);
+        REQUIRE(v[0] == "SELECT 1");
+    }
+    // 多语句按顺序拆分
+    {
+        auto v = split_statements("SELECT 1; SELECT 2; SELECT 3");
+        REQUIRE(v.size() == 3);
+        REQUIRE(v[0] == "SELECT 1");
+        REQUIRE(v[1] == "SELECT 2");
+        REQUIRE(v[2] == "SELECT 3");
+    }
+    // 字符串内的分号不拆
+    {
+        auto v = split_statements("SELECT 'a;b' AS x");
+        REQUIRE(v.size() == 1);
+        REQUIRE(v[0] == "SELECT 'a;b' AS x");
+    }
+    // 双引号引用内的分号不拆
+    {
+        auto v = split_statements("SELECT \"a;b\" AS x");
+        REQUIRE(v.size() == 1);
+        REQUIRE(v[0] == "SELECT \"a;b\" AS x");
+    }
+    // 反引号引用（MySQL 标识符）内的分号不拆
+    {
+        auto v = split_statements("SELECT `a;b` FROM t");
+        REQUIRE(v.size() == 1);
+        REQUIRE(v[0] == "SELECT `a;b` FROM t");
+    }
+    // 引号内转义的双引号（'' 表示单引号字面量）
+    {
+        auto v = split_statements("SELECT 'it''s;fine'");
+        REQUIRE(v.size() == 1);
+    }
+    // 行注释内的分号不拆
+    {
+        auto v = split_statements("SELECT 1 -- ; still comment\n; SELECT 2");
+        REQUIRE(v.size() == 2);
+        REQUIRE(v[0] == "SELECT 1 -- ; still comment");
+        REQUIRE(v[1] == "SELECT 2");
+    }
+    // 块注释内的分号不拆
+    {
+        auto v = split_statements("SELECT 1 /* ; ; */ ; SELECT 2");
+        REQUIRE(v.size() == 2);
+    }
+    // 空语句（连续/首尾分号）跳过
+    {
+        auto v = split_statements(";; SELECT 1 ;;");
+        REQUIRE(v.size() == 1);
+        REQUIRE(v[0] == "SELECT 1");
+    }
+}
+
+TEST_CASE("db: render keeps ''-escaped strings intact", "[db][regression]")
+{
+    stub_backend def;
+    // 字符串内（'' 转义后）的 :name 是字面量，不应被当作占位符
+    auto r = detail::render_query("SELECT 'it''s:name' AS x", {}, def);
+    REQUIRE(r.sql == "SELECT 'it''s:name' AS x");
+    REQUIRE(r.params.empty());
+}
+
+TEST_CASE("db: parameterized multi-statement is rejected at session layer", "[db][regression]")
+{
+    auto ctrl = std::make_shared<fake_ctrl>();
+    constexpr char const* backend_name = "fake_multi_stmt";
+    REQUIRE(register_fake(backend_name, ctrl));
+
+    run_on_io_context(
+        [ctrl, backend_name](net::any_io_executor ex) -> net::awaitable<void>
+        {
+            auto sess = co_await db::session::connect(ex, backend_name, "");
+
+            // fake 后端不解析 SQL，纯靠 session 层统一检测拒绝参数化多语句
+            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x; SELECT :b AS y")
+                                  .bind("a", 1)
+                                  .bind("b", 2)
+                                  .execute(),
+                              db::db_exception);
+
+            // 单语句参数化正常（prepare 只调一次）
+            ctrl->prepare_calls.store(0);
+            co_await sess.stmt("SELECT :a AS x").bind("a", 1).execute();
+            REQUIRE(ctrl->prepare_calls.load() == 1);
+        });
+}
 #endif

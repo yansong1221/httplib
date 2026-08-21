@@ -45,9 +45,9 @@ namespace httplib::db::detail
         net::awaitable<void> rollback() override;
 
       private:
-        result exec(std::string_view sql, std::vector<param> const& params);
-        /// 逐条 prepare → 绑定 → 执行，收集全部结果集（多语句 SQL 与 MySQL multi_queries 对齐）。
-        result exec_all(std::string const& sql, std::vector<param> const& params);
+        result exec(std::string_view sql);
+        /// 逐条 prepare → 执行，收集全部结果集（多语句 SQL 与 MySQL multi_queries 对齐）。
+        result exec_all(std::string const& sql);
         /// 抛 db_exception；数据库级故障（文件损坏等）时 reset db_ 标记失效。
         /// \p stmt 非空时错误消息附带展开绑定参数后的 SQL。
         void fail(std::string_view what, int rc, sqlite3_stmt* stmt = nullptr);
