@@ -122,11 +122,15 @@ namespace httplib::db::detail
                             auto s = v.to_string();
                             rc = sqlite3_bind_text(stmt, idx, s.data(), static_cast<int>(s.size()), SQLITE_TRANSIENT);
                         }
-                        else
+                        else if constexpr (std::is_same_v<T, timestamp>)
                         {
                             // time_point：SQLite 无时区，按 UTC 存文本
                             auto s = datetime::from_time_point(v).to_string();
                             rc = sqlite3_bind_text(stmt, idx, s.data(), static_cast<int>(s.size()), SQLITE_TRANSIENT);
+                        }
+                        else
+                        {
+                            static_assert(std::is_same_v<T, timestamp>, "db: unhandled field type in bind_params");
                         }
                         if (rc != SQLITE_OK)
                         {

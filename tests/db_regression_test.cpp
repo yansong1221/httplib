@@ -611,6 +611,9 @@ TEST_CASE("db: row/result access errors are typed db_exception, bounds keep std:
     REQUIRE_THROWS_AS(r[0].as_int64(0), db::db_exception);
     REQUIRE_THROWS_AS(r[0].as_blob(0), db::db_exception);
 
+    // field{std::string} 走 text 拥有型构造（非借用无锚点），值可读且不悬垂
+    REQUIRE(r[0].as_string(0) == "hello");
+
     // 列名不存在 → db_exception（此前为 std::runtime_error）
     REQUIRE_THROWS_AS(r.column_index("nope"), db::db_exception);
 

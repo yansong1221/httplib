@@ -254,6 +254,13 @@ namespace httplib::db::detail
                     }
                     else if constexpr (std::is_same_v<T, time>)
                     {
+                        if (v.negative)
+                        {
+                            // SQL Server / ODBC 无负 TIME 语义，静默翻正会损坏数据，显式报错
+                            // （与 uint64 超出 INT64_MAX 的显式报错一致）。
+                            throw db_exception(boost::system::error_code {},
+                                               "db: odbc bind negative time is not supported");
+                        }
                         if (is_sql_server)
                         {
                             // SQL Server：SQL_SS_TIME2 + SQL_C_BINARY 才能携带小数秒；
@@ -306,13 +313,17 @@ namespace httplib::db::detail
                         b.ind = static_cast<SQLLEN>(sizeof(t));
                         b.data = t;
                     }
+                    else
+                    {
+                        static_assert(std::is_same_v<T, timestamp>, "db: unhandled field type in make_bind");
+                    }
                 },
                 p);
             return b;
         }
 
         static db::column_type
-        map_sql_type(SQLSMALLINT t)
+        map_sql_type(SQLSMALLINT t, bool u)
         {
             switch (t)
             {
@@ -320,6 +331,8 @@ namespace httplib::db::detail
                 case SQL_SMALLINT:
                 case SQL_INTEGER:
                 case SQL_BIGINT:
+                    // SQL 整数类型无 unsigned 区分，由列描述符 SQL_DESC_UNSIGNED 判定。
+                    return u ? db::column_type::uint64 : db::column_type::int64;
                 case SQL_BIT:
                     return db::column_type::int64;
                 case SQL_REAL:
@@ -1046,7 +1059,23 @@ namespace httplib::db::detail
                         check_ok(rc, s.stmt, SQL_HANDLE_STMT, "odbc describe col (long name)");
                     }
                     rs.names.emplace_back(reinterpret_cast<char*>(name_ptr), static_cast<size_t>(name_len));
-                    rs.types.push_back(map_sql_type(sqltype));
+
+                    // 无符号整数列：SQL 整数类型无 unsigned 区分，查列描述符 SQL_DESC_UNSIGNED 判定。
+                    SQLLEN unsigned_attr = 0;
+                    bool is_unsigned = false;
+                    if (sqltype == SQL_TINYINT || sqltype == SQL_SMALLINT || sqltype == SQL_INTEGER
+                        || sqltype == SQL_BIGINT)
+                    {
+                        rc = SQLColAttribute(s.stmt,
+                                             i,
+                                             SQL_DESC_UNSIGNED,
+                                             nullptr,
+                                             0,
+                                             nullptr,
+                                             &unsigned_attr);
+                        is_unsigned = (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) && unsigned_attr == SQL_TRUE;
+                    }
+                    rs.types.push_back(map_sql_type(sqltype, is_unsigned));
                     sqltypes.push_back(sqltype);
                 }
 

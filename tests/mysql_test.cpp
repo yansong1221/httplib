@@ -785,8 +785,21 @@ TEST_CASE("db(mysql): all types roundtrip", "[db][mysql]")
 
             // --- row::get<T> ---
             REQUIRE(*row0.get<int64_t>("i64") == 42);
+            REQUIRE(*row0.get<uint64_t>("u64") == 99);
+            REQUIRE(*row0.get<int>("i64") == 42);
+            REQUIRE(*row0.get<unsigned>("u64") == 99);
+            REQUIRE(*row0.get<short>("i64") == 42);
+            REQUIRE(*row0.get<unsigned short>("i64") == 42);
+            REQUIRE(*row0.get<double>("f64") == 3.14);
+            REQUIRE(*row0.get<float>("f64") == 3.14f);
+            REQUIRE(*row0.get<bool>("i64") == true);
+            REQUIRE(*row0.get<std::string_view>("str") == "hello");
             REQUIRE(*row0.get<std::string>("str") == "hello");
+            REQUIRE(row0.get<std::span<std::byte const>>("bin")->size() == 5);
             REQUIRE(row0.get<db::date>("dt_date")->year == 2024);
+            REQUIRE(row0.get<db::datetime>("dt_dt")->hour == 18);
+            REQUIRE(row0.get<db::time>("dt_t")->hour == 12);
+            REQUIRE(row0.get<db::timestamp>("dt_dt") > std::chrono::system_clock::from_time_t(0));
             REQUIRE(row0.get<db::text>("str")->data() == "hello");
             REQUIRE(row0.get<db::blob>("bin")->size() == 5);
 
@@ -827,6 +840,16 @@ TEST_CASE("db(mysql): all types roundtrip", "[db][mysql]")
             co_await sess.query("SELECT bin FROM __httplib_types WHERE i64 IS NOT NULL", db::into(obv, 0));
             REQUIRE(obv.has_value());
             REQUIRE(obv->size() == 5);
+
+            std::vector<db::text> vtx;
+            co_await sess.query("SELECT str FROM __httplib_types WHERE i64 IS NOT NULL", db::into(vtx, 0));
+            REQUIRE(vtx.size() == 1);
+            REQUIRE(vtx[0] == "hello");
+
+            std::vector<db::blob> vbl;
+            co_await sess.query("SELECT bin FROM __httplib_types WHERE i64 IS NOT NULL", db::into(vbl, 0));
+            REQUIRE(vbl.size() == 1);
+            REQUIRE(vbl[0].size() == 5);
 
             co_await sess.query("DROP TABLE IF EXISTS __httplib_types");
         });

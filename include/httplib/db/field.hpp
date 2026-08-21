@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <span>
 #include <string>
@@ -36,6 +37,41 @@ namespace httplib::db
         unknown    ///< 未知类型。
     };
 
+    namespace detail
+    {
+        /// blob/text 的共同骨架：数据视图 + 保活锚点（拥有或借用一体）。
+        template <typename View>
+        class borrowed_value
+        {
+          protected:
+            View data_ {};
+            std::shared_ptr<void> owner_;
+
+            borrowed_value() = default;
+            borrowed_value(View view, std::shared_ptr<void> anchor = {})
+                : data_(view), owner_(std::move(anchor))
+            {
+            }
+
+            /// 拥有型：接管一个拥有容器（vector/string），data_ 指向其存储。
+            template <typename Owned>
+            void
+            own(Owned o)
+            {
+                auto p = std::make_shared<Owned>(std::move(o));
+                data_ = View(p->data(), p->size());
+                owner_ = std::move(p);
+            }
+
+          public:
+            View data() const noexcept { return data_; }
+            size_t size() const noexcept { return data_.size(); }
+            bool empty() const noexcept { return data_.empty(); }
+            /// 是否持有保活锚点（拥有型或带锚点借用均为 true；仅无锚点借用为 false）。
+            bool owned() const noexcept { return owner_ != nullptr; }
+        };
+    } // namespace detail
+
     /**
      * \brief 拥有型或借用型的二进制数据。
      * \details
@@ -45,31 +81,33 @@ namespace httplib::db
      * \n
      * 无论哪种形态，blob 对象存活期内 data() 均有效。
      */
-    class blob
+    class blob : public detail::borrowed_value<std::span<std::byte const>>
     {
+        using base = detail::borrowed_value<std::span<std::byte const>>;
+
       public:
         /// 拥有型：接管 vector。
-        blob(std::vector<std::byte> v)
-        {
-            auto p = std::make_shared<std::vector<std::byte>>(std::move(v));
-            data_ = std::span<std::byte const>(p->data(), p->size());
-            owner_ = std::move(p);
-        }
+        blob(std::vector<std::byte> v) { this->own(std::move(v)); }
 
         /// 借用型：外部 buffer + 保活锚点（可为空）。
         blob(std::span<std::byte const> view, std::shared_ptr<void> anchor = {})
-            : data_(view), owner_(std::move(anchor))
+            : base(view, std::move(anchor))
         {
         }
 
-        std::span<std::byte const> data() const noexcept { return data_; }
-        size_t size() const noexcept { return data_.size(); }
-        bool empty() const noexcept { return data_.empty(); }
-        bool owned() const noexcept { return owner_ != nullptr; }
-
-      private:
-        std::span<std::byte const> data_;
-        std::shared_ptr<void> owner_;
+        bool operator==(blob const& o) const noexcept
+        {
+            return this->size() == o.size()
+                   && (this->data().data() == o.data().data()
+                       || std::memcmp(this->data().data(), o.data().data(), this->size()) == 0);
+        }
+        bool operator!=(blob const& o) const noexcept { return !(*this == o); }
+        bool operator==(std::span<std::byte const> o) const noexcept
+        {
+            return this->size() == o.size()
+                   && (this->data().data() == o.data() || std::memcmp(this->data().data(), o.data(), this->size()) == 0);
+        }
+        bool operator!=(std::span<std::byte const> o) const noexcept { return !(*this == o); }
     };
 
     /**
@@ -81,31 +119,24 @@ namespace httplib::db
      * \n
      * 无论哪种形态，text 对象存活期内 data() 均有效。
      */
-    class text
+    class text : public detail::borrowed_value<std::string_view>
     {
+        using base = detail::borrowed_value<std::string_view>;
+
       public:
         /// 拥有型：接管 string。
-        text(std::string s)
-        {
-            auto p = std::make_shared<std::string>(std::move(s));
-            data_ = std::string_view(p->data(), p->size());
-            owner_ = std::move(p);
-        }
+        text(std::string s) { this->own(std::move(s)); }
 
         /// 借用型：外部 buffer + 保活锚点（可为空）。
         text(std::string_view view, std::shared_ptr<void> anchor = {})
-            : data_(view), owner_(std::move(anchor))
+            : base(view, std::move(anchor))
         {
         }
 
-        std::string_view data() const noexcept { return data_; }
-        size_t size() const noexcept { return data_.size(); }
-        bool empty() const noexcept { return data_.empty(); }
-        bool owned() const noexcept { return owner_ != nullptr; }
-
-      private:
-        std::string_view data_;
-        std::shared_ptr<void> owner_;
+        bool operator==(text const& o) const noexcept { return this->data() == o.data(); }
+        bool operator!=(text const& o) const noexcept { return !(*this == o); }
+        bool operator==(std::string_view o) const noexcept { return this->data() == o; }
+        bool operator!=(std::string_view o) const noexcept { return !(*this == o); }
     };
 
     /**

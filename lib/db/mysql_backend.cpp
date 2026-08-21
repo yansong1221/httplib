@@ -58,7 +58,7 @@ namespace httplib::db::detail
                     {
                         return boost::mysql::field_view(v.to_duration());
                     }
-                    else
+                    else if constexpr (std::is_same_v<T, timestamp>)
                     {
                         // time_point（UTC）：TIMESTAMP 列语义，存会话时区墙上时钟（+offset），
                         // 服务器会按会话时区换算回 UTC；读回时由 to_field 还原成 UTC time_point。
@@ -70,6 +70,11 @@ namespace httplib::db::detail
                                                                                dt.minute,
                                                                                dt.second,
                                                                                dt.microsecond));
+                    }
+                    else
+                    {
+                        static_assert(std::is_same_v<T, timestamp>, "db: unhandled field type in to_field_view");
+                        return {};
                     }
                 },
                 p);

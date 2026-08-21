@@ -38,7 +38,8 @@ namespace httplib::db
         std::optional<std::string_view> as_string(size_t col) const;
         std::optional<std::string_view> as_string(std::string_view name) const;
 
-        /// 按 text（拥有/借用一体）取值，返回存储值的拷贝（共享底层锚点）。
+        /// 按 text（拥有/借用一体）取值，返回存储值的拷贝（共享底层锚点）；
+        /// 返回的 text 自带锚点，其 data() 在 text 存活期内有效（不随 result 销毁失效）。
         std::optional<text> as_text(size_t col) const;
         std::optional<text> as_text(std::string_view name) const;
 
@@ -60,7 +61,8 @@ namespace httplib::db
         std::optional<std::span<std::byte const>> as_blob(size_t col) const;
         std::optional<std::span<std::byte const>> as_blob(std::string_view name) const;
 
-        /// 按 blob（拥有/借用一体）取值，返回存储值的拷贝（共享底层锚点）。
+        /// 按 blob（拥有/借用一体）取值，返回存储值的拷贝（共享底层锚点）；
+        /// 返回的 blob 自带锚点，其 data() 在 blob 存活期内有效（不随 result 销毁失效）。
         std::optional<blob> as_blob_value(size_t col) const;
         std::optional<blob> as_blob_value(std::string_view name) const;
 

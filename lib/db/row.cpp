@@ -8,9 +8,30 @@ namespace httplib::db
 {
     namespace detail
     {
+        /// 单类型字段直取：NULL → nullopt，类型不匹配 → 抛异常。
+        template <typename T>
+        std::optional<T>
+        extract(field const& f, std::string_view what)
+        {
+            if (std::holds_alternative<std::monostate>(f))
+            {
+                return std::nullopt;
+            }
+            auto* v = std::get_if<T>(&f);
+            if (!v)
+            {
+                throw db_exception(boost::system::error_code {}, "db: cannot convert to " + std::string(what));
+            }
+            return *v;
+        }
+
         static std::optional<int64_t>
         as_int64(field const& f)
         {
+            if (std::holds_alternative<std::monostate>(f))
+            {
+                return std::nullopt;
+            }
             if (auto* v = std::get_if<int64_t>(&f))
             {
                 return *v;
@@ -38,6 +59,10 @@ namespace httplib::db
         static std::optional<uint64_t>
         as_uint64(field const& f)
         {
+            if (std::holds_alternative<std::monostate>(f))
+            {
+                return std::nullopt;
+            }
             if (auto* v = std::get_if<uint64_t>(&f))
             {
                 return *v;
@@ -64,6 +89,10 @@ namespace httplib::db
         static std::optional<double>
         as_double(field const& f)
         {
+            if (std::holds_alternative<std::monostate>(f))
+            {
+                return std::nullopt;
+            }
             if (auto* v = std::get_if<double>(&f))
             {
                 return *v;
@@ -77,6 +106,28 @@ namespace httplib::db
                 return static_cast<double>(*v);
             }
             throw db_exception(boost::system::error_code {}, "db: cannot convert to double");
+        }
+
+        static std::optional<bool>
+        as_bool(field const& f)
+        {
+            if (std::holds_alternative<std::monostate>(f))
+            {
+                return std::nullopt;
+            }
+            if (auto* v = std::get_if<int64_t>(&f))
+            {
+                return *v != 0;
+            }
+            if (auto* v = std::get_if<uint64_t>(&f))
+            {
+                return *v != 0;
+            }
+            if (auto* v = std::get_if<double>(&f))
+            {
+                return *v != 0.0;
+            }
+            throw db_exception(boost::system::error_code {}, "db: cannot convert to bool");
         }
     } // namespace detail
 
@@ -109,17 +160,8 @@ namespace httplib::db
     std::optional<std::string_view>
     row::as_string(size_t col) const
     {
-        auto& f = parent_->at(idx_, col);
-        if (std::holds_alternative<std::monostate>(f))
-        {
-            return std::nullopt;
-        }
-        auto* v = std::get_if<text>(&f);
-        if (!v)
-        {
-            throw db_exception(boost::system::error_code {}, "db: cannot convert to string");
-        }
-        return v->data();
+        auto t = as_text(col);
+        return t ? std::optional<std::string_view>(t->data()) : std::nullopt;
     }
 
     std::optional<std::string_view>
@@ -131,17 +173,7 @@ namespace httplib::db
     std::optional<text>
     row::as_text(size_t col) const
     {
-        auto& f = parent_->at(idx_, col);
-        if (std::holds_alternative<std::monostate>(f))
-        {
-            return std::nullopt;
-        }
-        auto* v = std::get_if<text>(&f);
-        if (!v)
-        {
-            throw db_exception(boost::system::error_code {}, "db: cannot convert to text");
-        }
-        return *v;
+        return detail::extract<text>(parent_->at(idx_, col), "text");
     }
 
     std::optional<text>
@@ -153,12 +185,7 @@ namespace httplib::db
     std::optional<int64_t>
     row::as_int64(size_t col) const
     {
-        auto& f = parent_->at(idx_, col);
-        if (std::holds_alternative<std::monostate>(f))
-        {
-            return std::nullopt;
-        }
-        return detail::as_int64(f);
+        return detail::as_int64(parent_->at(idx_, col));
     }
 
     std::optional<int64_t>
@@ -170,12 +197,7 @@ namespace httplib::db
     std::optional<uint64_t>
     row::as_uint64(size_t col) const
     {
-        auto& f = parent_->at(idx_, col);
-        if (std::holds_alternative<std::monostate>(f))
-        {
-            return std::nullopt;
-        }
-        return detail::as_uint64(f);
+        return detail::as_uint64(parent_->at(idx_, col));
     }
 
     std::optional<uint64_t>
@@ -187,12 +209,7 @@ namespace httplib::db
     std::optional<double>
     row::as_double(size_t col) const
     {
-        auto& f = parent_->at(idx_, col);
-        if (std::holds_alternative<std::monostate>(f))
-        {
-            return std::nullopt;
-        }
-        return detail::as_double(f);
+        return detail::as_double(parent_->at(idx_, col));
     }
 
     std::optional<double>
@@ -217,24 +234,7 @@ namespace httplib::db
     std::optional<bool>
     row::as_bool(size_t col) const
     {
-        auto& f = parent_->at(idx_, col);
-        if (std::holds_alternative<std::monostate>(f))
-        {
-            return std::nullopt;
-        }
-        if (auto* v = std::get_if<int64_t>(&f))
-        {
-            return *v != 0;
-        }
-        if (auto* v = std::get_if<uint64_t>(&f))
-        {
-            return *v != 0;
-        }
-        if (auto* v = std::get_if<double>(&f))
-        {
-            return *v != 0.0;
-        }
-        throw db_exception(boost::system::error_code {}, "db: cannot convert to bool");
+        return detail::as_bool(parent_->at(idx_, col));
     }
 
     std::optional<bool>
@@ -246,17 +246,8 @@ namespace httplib::db
     std::optional<std::span<std::byte const>>
     row::as_blob(size_t col) const
     {
-        auto& f = parent_->at(idx_, col);
-        if (std::holds_alternative<std::monostate>(f))
-        {
-            return std::nullopt;
-        }
-        auto* v = std::get_if<blob>(&f);
-        if (!v)
-        {
-            throw db_exception(boost::system::error_code {}, "db: cannot convert to blob");
-        }
-        return v->data();
+        auto b = as_blob_value(col);
+        return b ? std::optional<std::span<std::byte const>>(b->data()) : std::nullopt;
     }
 
     std::optional<std::span<std::byte const>>
@@ -268,17 +259,7 @@ namespace httplib::db
     std::optional<blob>
     row::as_blob_value(size_t col) const
     {
-        auto& f = parent_->at(idx_, col);
-        if (std::holds_alternative<std::monostate>(f))
-        {
-            return std::nullopt;
-        }
-        auto* v = std::get_if<blob>(&f);
-        if (!v)
-        {
-            throw db_exception(boost::system::error_code {}, "db: cannot convert to blob");
-        }
-        return *v;
+        return detail::extract<blob>(parent_->at(idx_, col), "blob");
     }
 
     std::optional<blob>
@@ -313,16 +294,7 @@ namespace httplib::db
     std::optional<date>
     row::as_date(size_t col) const
     {
-        auto& f = parent_->at(idx_, col);
-        if (std::holds_alternative<std::monostate>(f))
-        {
-            return std::nullopt;
-        }
-        if (auto* v = std::get_if<date>(&f))
-        {
-            return *v;
-        }
-        throw db_exception(boost::system::error_code {}, "db: cannot convert to date");
+        return detail::extract<date>(parent_->at(idx_, col), "date");
     }
 
     std::optional<date>
@@ -359,16 +331,7 @@ namespace httplib::db
     std::optional<time>
     row::as_time(size_t col) const
     {
-        auto& f = parent_->at(idx_, col);
-        if (std::holds_alternative<std::monostate>(f))
-        {
-            return std::nullopt;
-        }
-        if (auto* v = std::get_if<time>(&f))
-        {
-            return *v;
-        }
-        throw db_exception(boost::system::error_code {}, "db: cannot convert to time");
+        return detail::extract<time>(parent_->at(idx_, col), "time");
     }
 
     std::optional<time>

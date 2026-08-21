@@ -100,7 +100,8 @@ namespace httplib::db::detail
                 }
                 else
                 {
-                    return "?";
+                    static_assert(std::is_same_v<T, timestamp>, "db: unhandled field type in format_param");
+                    return {};
                 }
             },
             v);
