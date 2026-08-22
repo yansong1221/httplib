@@ -60,6 +60,11 @@ namespace httplib::db::detail
         std::unique_ptr<odbc_stmt> new_stmt();
         /// 释放语句资源（object_handle、事件、句柄），不抛异常。
         static void free_stmt(odbc_stmt& s) noexcept;
+        /// 启用/关闭连接级异步通知（无 SQLCompleteAsync 导出时 no-op，保持同步执行）。
+        void enable_dbc_async();
+        void disable_dbc_async() noexcept;
+        /// 启用语句级异步通知（无 SQLCompleteAsync 导出时 no-op）。
+        void enable_stmt_async(odbc_stmt& s);
         /// 异步调用 statement 函数（fn 首次调用；SQL_STILL_EXECUTING 时等事件并 SQLCompleteAsync）。
         net::awaitable<SQLRETURN> stmt_async(odbc_stmt& s, std::function<SQLRETURN()> fn);
         /// 异步调用 connection 函数（同 stmt_async，但用连接级事件）。

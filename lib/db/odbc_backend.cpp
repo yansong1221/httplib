@@ -86,6 +86,25 @@ namespace httplib::db::detail
             }
         }
 
+        // SQLCompleteAsync 是 ODBC 3.8（Windows 8+）才导出，Win7 的 odbc32.dll（ODBC 3.52）没有该符号；
+        // 静态链接会在导入表引用它，导致 DLL/EXE 在 Win7 上加载失败（"找不到入口点"）。
+        // 改为运行时动态解析：缺失时返回 SQL_ERROR，调用方按指针是否存在决定是否走异步路径。
+        using SQLCompleteAsync_fn = SQLRETURN(SQL_API*)(SQLSMALLINT, SQLHANDLE, SQLRETURN*);
+        static SQLCompleteAsync_fn
+        load_SQLCompleteAsync()
+        {
+            static SQLCompleteAsync_fn fn = reinterpret_cast<SQLCompleteAsync_fn>(
+                GetProcAddress(GetModuleHandleW(L"odbc32"), "SQLCompleteAsync"));
+            return fn;
+        }
+
+        static SQLRETURN
+        call_SQLCompleteAsync(SQLSMALLINT handle_type, SQLHANDLE handle, SQLRETURN* ret)
+        {
+            auto fn = load_SQLCompleteAsync();
+            return fn ? fn(handle_type, handle, ret) : SQL_ERROR;
+        }
+
         /// 调用一个 ODBC 函数；若返回 SQL_STILL_EXECUTING 则等待关联事件并 SQLCompleteAsync，
         /// 直到取到最终返回码。fn 只调用一次。
         template <typename F>
@@ -97,7 +116,7 @@ namespace httplib::db::detail
             {
                 co_await obj.async_wait(net::use_awaitable);
                 SQLRETURN r = SQL_SUCCESS;
-                SQLCompleteAsync(handle_type, handle, &r);
+                call_SQLCompleteAsync(handle_type, handle, &r);
                 rc = r;
             }
             co_return rc;
@@ -797,10 +816,7 @@ namespace httplib::db::detail
         if (dbc_)
         {
             // 关闭连接级异步，使 SQLDisconnect 同步完成（析构/重连路径无法 co_await）。
-            SQLSetConnectAttr(dbc_,
-                              SQL_ATTR_ASYNC_DBC_FUNCTIONS_ENABLE,
-                              reinterpret_cast<SQLPOINTER>(SQL_ASYNC_ENABLE_OFF),
-                              SQL_IS_INTEGER);
+            disable_dbc_async();
             SQLDisconnect(static_cast<SQLHDBC>(dbc_));
             SQLFreeHandle(SQL_HANDLE_DBC, dbc_);
             dbc_ = nullptr;
@@ -810,6 +826,51 @@ namespace httplib::db::detail
             SQLFreeHandle(SQL_HANDLE_ENV, env_);
             env_ = nullptr;
         }
+    }
+
+    void
+    odbc_backend::enable_dbc_async()
+    {
+        if (!load_SQLCompleteAsync())
+        {
+            return;
+        }
+        SQLRETURN rc = SQLSetConnectAttr(dbc_,
+                                         SQL_ATTR_ASYNC_DBC_FUNCTIONS_ENABLE,
+                                         reinterpret_cast<SQLPOINTER>(SQL_ASYNC_ENABLE_ON),
+                                         SQL_IS_INTEGER);
+        check_ok(rc, dbc_, SQL_HANDLE_DBC, "odbc enable dbc async");
+        rc = SQLSetConnectAttr(dbc_, SQL_ATTR_ASYNC_DBC_EVENT, conn_obj_->native_handle(), SQL_IS_POINTER);
+        check_ok(rc, dbc_, SQL_HANDLE_DBC, "odbc set dbc event");
+    }
+
+    void
+    odbc_backend::disable_dbc_async() noexcept
+    {
+        if (!load_SQLCompleteAsync())
+        {
+            return;
+        }
+        SQLSetConnectAttr(dbc_,
+                          SQL_ATTR_ASYNC_DBC_FUNCTIONS_ENABLE,
+                          reinterpret_cast<SQLPOINTER>(SQL_ASYNC_ENABLE_OFF),
+                          SQL_IS_INTEGER);
+    }
+
+    void
+    odbc_backend::enable_stmt_async(odbc_stmt& s)
+    {
+        if (!load_SQLCompleteAsync())
+        {
+            return;
+        }
+        SQLRETURN rc = SQLSetStmtAttr(s.stmt,
+                                      SQL_ATTR_ASYNC_ENABLE,
+                                      reinterpret_cast<SQLPOINTER>(SQL_ASYNC_ENABLE_ON),
+                                      SQL_IS_INTEGER);
+        check_ok(rc, s.stmt, SQL_HANDLE_STMT, "odbc enable stmt async");
+        rc = SQLSetStmtAttr(s.stmt, SQL_ATTR_ASYNC_STMT_EVENT, s.event, SQL_IS_POINTER);
+        check_ok(rc, s.stmt, SQL_HANDLE_STMT, "odbc set stmt event");
     }
 
     void
@@ -829,6 +890,10 @@ namespace httplib::db::detail
     {
         auto s = std::make_unique<odbc_stmt>();
         s->stmt = alloc_statement(static_cast<SQLHDBC>(dbc_));
+
+        // 事件/object_handle 始终创建：read_all/read_field 会无条件解引用 *s.obj。
+        // 但仅 ODBC 3.8+ 才把异步属性（SQL_ATTR_ASYNC_ENABLE / SQL_ATTR_ASYNC_STMT_EVENT）挂上去；
+        // 非 3.8（Win7）保持同步，SQLFetch/SQLExecute 直接阻塞返回，stmt_async 的 while 不会触发。
         s->event = CreateEvent(nullptr, FALSE, FALSE, nullptr); // auto-reset, 初始非信号态
         if (!s->event)
         {
@@ -837,13 +902,8 @@ namespace httplib::db::detail
         }
         s->obj = std::make_unique<net::windows::object_handle>(ex_, static_cast<HANDLE>(s->event));
 
-        SQLRETURN rc = SQLSetStmtAttr(s->stmt,
-                                      SQL_ATTR_ASYNC_ENABLE,
-                                      reinterpret_cast<SQLPOINTER>(SQL_ASYNC_ENABLE_ON),
-                                      SQL_IS_INTEGER);
-        check_ok(rc, s->stmt, SQL_HANDLE_STMT, "odbc enable stmt async");
-        rc = SQLSetStmtAttr(s->stmt, SQL_ATTR_ASYNC_STMT_EVENT, s->event, SQL_IS_POINTER);
-        check_ok(rc, s->stmt, SQL_HANDLE_STMT, "odbc set stmt event");
+        enable_stmt_async(*s);
+
         return s;
     }
 
@@ -855,7 +915,7 @@ namespace httplib::db::detail
         {
             co_await s.obj->async_wait(net::use_awaitable);
             SQLRETURN r = SQL_SUCCESS;
-            SQLCompleteAsync(SQL_HANDLE_STMT, s.stmt, &r);
+            call_SQLCompleteAsync(SQL_HANDLE_STMT, s.stmt, &r);
             rc = r;
         }
         co_return rc;
@@ -869,7 +929,7 @@ namespace httplib::db::detail
         {
             co_await conn_obj_->async_wait(net::use_awaitable);
             SQLRETURN r = SQL_SUCCESS;
-            SQLCompleteAsync(SQL_HANDLE_DBC, static_cast<SQLHDBC>(dbc_), &r);
+            call_SQLCompleteAsync(SQL_HANDLE_DBC, static_cast<SQLHDBC>(dbc_), &r);
             rc = r;
         }
         co_return rc;
@@ -880,20 +940,21 @@ namespace httplib::db::detail
     {
         SQLRETURN rc = SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &env_);
         check_ok(rc, env_, SQL_HANDLE_ENV, "odbc alloc env");
-        rc = SQLSetEnvAttr(env_, SQL_ATTR_ODBC_VERSION, reinterpret_cast<SQLPOINTER>(SQL_OV_ODBC3_80), 0);
+
+        // Win7 的 odbc32.dll 是 ODBC 3.52：没有 SQLCompleteAsync 导出，也不认识 SQL_OV_ODBC3_80。
+        // 据此判定能否走 3.8 异步通知：能 → 3.80 + 异步；不能 → 回退 3.52 同步执行（对齐 SOCI）。
+        rc = SQLSetEnvAttr(env_,
+                           SQL_ATTR_ODBC_VERSION,
+                           reinterpret_cast<SQLPOINTER>(static_cast<SQLULEN>(
+                               load_SQLCompleteAsync() ? SQL_OV_ODBC3_80 : SQL_OV_ODBC3)),
+                           0);
         check_ok(rc, env_, SQL_HANDLE_ENV, "odbc set version");
 
         rc = SQLAllocHandle(SQL_HANDLE_DBC, env_, &dbc_);
         check_ok(rc, dbc_, SQL_HANDLE_DBC, "odbc alloc dbc");
 
-        // 连接级异步通知：函数执行置 ON，事件关联连接。
-        rc = SQLSetConnectAttr(dbc_,
-                               SQL_ATTR_ASYNC_DBC_FUNCTIONS_ENABLE,
-                               reinterpret_cast<SQLPOINTER>(SQL_ASYNC_ENABLE_ON),
-                               SQL_IS_INTEGER);
-        check_ok(rc, dbc_, SQL_HANDLE_DBC, "odbc enable dbc async");
-        rc = SQLSetConnectAttr(dbc_, SQL_ATTR_ASYNC_DBC_EVENT, conn_obj_->native_handle(), SQL_IS_POINTER);
-        check_ok(rc, dbc_, SQL_HANDLE_DBC, "odbc set dbc event");
+        // 连接级异步通知：函数执行置 ON，事件关联连接（仅 ODBC 3.8+ 支持，否则 no-op）。
+        enable_dbc_async();
 
         if (!cfg_.connection_string.empty())
         {
