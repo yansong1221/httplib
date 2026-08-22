@@ -124,9 +124,10 @@ namespace httplib::db::detail
                         }
                         else if constexpr (std::is_same_v<T, timestamp>)
                         {
-                            // time_point：SQLite 无时区，按 UTC 存文本
-                            auto s = datetime::from_time_point(v).to_string();
-                            rc = sqlite3_bind_text(stmt, idx, s.data(), static_cast<int>(s.size()), SQLITE_TRANSIENT);
+                            // SQLite 无时区语义，无法无损保存绝对时间点，显式报错；
+                            // 需要存取时间点时改用 datetime（墙上时钟）并自行决定时区解释。
+                            throw db_exception(boost::system::error_code {},
+                                               "db: sqlite bind timestamp is not supported (no timezone); use datetime");
                         }
                         else
                         {

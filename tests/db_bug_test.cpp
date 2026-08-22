@@ -268,7 +268,7 @@ namespace
     }
 } // namespace
 
-TEST_CASE("db(odbc/bug): DATETIMEOFFSET column round-trips wall-clock value", "[db][odbc][bug][integration]")
+TEST_CASE("db(odbc/bug): DATETIMEOFFSET column maps to absolute timestamp", "[db][odbc][bug][integration]")
 {
     net::io_context ioc;
     std::exception_ptr err;
@@ -279,23 +279,32 @@ TEST_CASE("db(odbc/bug): DATETIMEOFFSET column round-trips wall-clock value", "[
             auto sess = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_bug_config().to_connection_string());
             co_await sess.query("IF OBJECT_ID('httplib_odbc_bug_dto', 'U') IS NOT NULL DROP TABLE httplib_odbc_bug_dto");
             co_await sess.query("CREATE TABLE httplib_odbc_bug_dto (v DATETIMEOFFSET(6) NOT NULL)");
-            co_await sess.query("INSERT INTO httplib_odbc_bug_dto VALUES (:v)",
-                                db::bind("v", db::datetime { 2024, 6, 1, 12, 34, 56, 789000 }));
+
+            // 绑定绝对时间点（UTC）→ 存 DATETIMEOFFSET +00:00 → 读回绝对时间点（固定，不随会话时区漂移）
+            auto tp = std::chrono::sys_days(std::chrono::year(2024) / std::chrono::month(6) / std::chrono::day(1))
+                      + std::chrono::hours(12) + std::chrono::minutes(34) + std::chrono::seconds(56)
+                      + std::chrono::milliseconds(789);
+            co_await sess.query("INSERT INTO httplib_odbc_bug_dto VALUES (:v)", db::bind("v", tp));
+
+            // 字面量带偏移 +05:30 → 读回换算成 UTC 时间点 07:04:56.789
             co_await sess.query(
                 "INSERT INTO httplib_odbc_bug_dto VALUES ('2024-06-01 12:34:56.789000 +05:30')");
 
-            // DATETIMEOFFSET 列当前被映射为普通 datetime（SQL_SS_TIMESTAMPOFFSET → datetime）并以
-            // SQL_C_TYPE_TIMESTAMP 读取：驱动按会话时区做换算、偏移信息被丢弃，墙上时钟往返失真。
-            // 最低要求：读回应保留存储的墙上时钟值（+08:00 机器上实测：绑定值漂 2.5h、
-            // 字面值 '12:34:56.789 +05:30' 漂 8h 读成 20:34:56.789）。
             auto r = co_await sess.query("SELECT TOP 2 v FROM httplib_odbc_bug_dto ORDER BY v");
             REQUIRE(r.column_count() == 1);
-            auto got0 = r[0].as_datetime("v");
+            REQUIRE(r.column_type(0) == db::column_type::timestamp);
+
+            // 顺序：字面量（UTC 07:04:56.789）< 绑定 tp（UTC 12:34:56.789）
+            auto got0 = r[0].as_timestamp("v");
             REQUIRE(got0.has_value());
-            REQUIRE(*got0 == db::datetime { 2024, 6, 1, 12, 34, 56, 789000 });
-            auto got1 = r[1].as_datetime("v");
+            auto expected_lit
+                = std::chrono::sys_days(std::chrono::year(2024) / std::chrono::month(6) / std::chrono::day(1))
+                  + std::chrono::hours(7) + std::chrono::minutes(4) + std::chrono::seconds(56)
+                  + std::chrono::milliseconds(789);
+            REQUIRE(*got0 == expected_lit);
+            auto got1 = r[1].as_timestamp("v");
             REQUIRE(got1.has_value());
-            REQUIRE(*got1 == db::datetime { 2024, 6, 1, 12, 34, 56, 789000 });
+            REQUIRE(*got1 == tp);
 
             co_await sess.query("DROP TABLE httplib_odbc_bug_dto");
         },

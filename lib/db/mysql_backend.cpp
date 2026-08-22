@@ -62,7 +62,7 @@ namespace httplib::db::detail
                     {
                         // time_point（UTC）：TIMESTAMP 列语义，存会话时区墙上时钟（+offset），
                         // 服务器会按会话时区换算回 UTC；读回时由 to_field 还原成 UTC time_point。
-                        auto dt = datetime::from_time_point(v + utc_offset);
+                        auto dt = datetime::from_utc_time_point(v + utc_offset);
                         return boost::mysql::field_view(boost::mysql::datetime(dt.year,
                                                                                dt.month,
                                                                                dt.day,
@@ -206,7 +206,7 @@ namespace httplib::db::detail
                 {
                     // TIMESTAMP 列：服务器存取时做会话时区换算，读回的是会话时区墙上时钟，
                     // 减偏移还原成 UTC 时间点；与 DATETIME 列（datetime 墙上时钟）区分，不混用。
-                    return dt.to_time_point() - utc_offset;
+                    return dt.to_utc_time_point() - utc_offset;
                 }
                 return dt;
             }

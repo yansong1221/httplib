@@ -121,7 +121,8 @@ namespace httplib::db::detail
                          SQL_DATE_STRUCT,
                          SQL_TIME_STRUCT,
                          SQL_TIMESTAMP_STRUCT,
-                         SQL_SS_TIME2_STRUCT>
+                         SQL_SS_TIME2_STRUCT,
+                         SQL_SS_TIMESTAMPOFFSET_STRUCT>
                 data;
 
             void*
@@ -295,20 +296,29 @@ namespace httplib::db::detail
                     }
                     else if constexpr (std::is_same_v<T, timestamp>)
                     {
-                        // time_point（UTC）按墙上时钟存文本，语义与 SQLite 后端一致。
-                        auto dt = datetime::from_time_point(v);
-                        SQL_TIMESTAMP_STRUCT t {};
+                        if (!is_sql_server)
+                        {
+                            // 非 SQL Server：无 DATETIMEOFFSET，无法无损保存绝对时间点，显式报错。
+                            throw db_exception(
+                                boost::system::error_code {},
+                                "db: odbc bind timestamp requires SQL Server DATETIMEOFFSET; use datetime");
+                        }
+                        // SQL Server：DATETIMEOFFSET 存 UTC（+00:00），读回按偏移还原绝对时间点。
+                        auto dt = datetime::from_utc_time_point(v);
+                        SQL_SS_TIMESTAMPOFFSET_STRUCT t {};
                         t.year = static_cast<SQLSMALLINT>(dt.year);
                         t.month = static_cast<SQLUSMALLINT>(dt.month);
                         t.day = static_cast<SQLUSMALLINT>(dt.day);
                         t.hour = static_cast<SQLUSMALLINT>(dt.hour);
                         t.minute = static_cast<SQLUSMALLINT>(dt.minute);
                         t.second = static_cast<SQLUSMALLINT>(dt.second);
-                        t.fraction = static_cast<SQLUINTEGER>(dt.microsecond * 1000);
-                        b.ctype = SQL_C_TYPE_TIMESTAMP;
-                        b.sqltype = SQL_TYPE_TIMESTAMP;
-                        b.colsize = 19;
-                        b.dec = 6;
+                        t.fraction = static_cast<SQLUINTEGER>(dt.microsecond * 1000); ///< 纳秒
+                        t.timezone_hour = 0;
+                        t.timezone_minute = 0;
+                        b.ctype = SQL_C_BINARY;
+                        b.sqltype = SQL_SS_TIMESTAMPOFFSET;
+                        b.colsize = static_cast<SQLULEN>(sizeof(t));
+                        b.dec = 7;
                         b.len = static_cast<SQLLEN>(sizeof(t));
                         b.ind = static_cast<SQLLEN>(sizeof(t));
                         b.data = t;
@@ -356,8 +366,9 @@ namespace httplib::db::detail
                 case SQL_TYPE_DATE:
                     return db::column_type::date;
                 case SQL_TYPE_TIMESTAMP:
-                case SQL_SS_TIMESTAMPOFFSET:
                     return db::column_type::datetime;
+                case SQL_SS_TIMESTAMPOFFSET:
+                    return db::column_type::timestamp;
                 case SQL_TYPE_TIME:
                 case SQL_SS_TIME2:
                     return db::column_type::time;
@@ -640,30 +651,6 @@ namespace httplib::db::detail
                 }
                 case db::column_type::datetime:
                 {
-                    if (sqltype == SQL_SS_TIMESTAMPOFFSET)
-                    {
-                        // DATETIMEOFFSET 用 SQL_C_BINARY 取 SQL_SS_TIMESTAMPOFFSET_STRUCT，
-                        // 保留原始墙上时钟；若用 SQL_C_TYPE_TIMESTAMP 读取，驱动会按会话时区
-                        // 换算并丢弃偏移，墙上时钟往返失真。
-                        SQL_SS_TIMESTAMPOFFSET_STRUCT t {};
-                        rc = co_await odbc_async(stmt,
-                                                 SQL_HANDLE_STMT,
-                                                 obj,
-                                                 [&]
-                                                 { return SQLGetData(stmt, col, SQL_C_BINARY, &t, sizeof(t), &ind); });
-                        check_ok(rc, stmt, SQL_HANDLE_STMT, "odbc read datetimeoffset");
-                        if (ind == SQL_NULL_DATA)
-                        {
-                            co_return std::monostate {};
-                        }
-                        co_return datetime { static_cast<unsigned>(t.year),
-                                             static_cast<unsigned>(t.month),
-                                             static_cast<unsigned>(t.day),
-                                             static_cast<unsigned>(t.hour),
-                                             static_cast<unsigned>(t.minute),
-                                             static_cast<unsigned>(t.second),
-                                             static_cast<unsigned long>(t.fraction / 1000) };
-                    }
                     SQL_TIMESTAMP_STRUCT t {};
                     rc = co_await odbc_async(
                         stmt,
@@ -682,6 +669,34 @@ namespace httplib::db::detail
                                          static_cast<unsigned>(t.minute),
                                          static_cast<unsigned>(t.second),
                                          static_cast<unsigned long>(t.fraction / 1000) };
+                }
+                case db::column_type::timestamp:
+                {
+                    // SQL Server DATETIMEOFFSET：用 SQL_C_BINARY 取 SQL_SS_TIMESTAMPOFFSET_STRUCT，
+                    // 保留墙上时钟 + 偏移；换算成 UTC 时间点（绝对时间点，与 MySQL TIMESTAMP 对齐）。
+                    // 若用 SQL_C_TYPE_TIMESTAMP 读取，驱动会按会话时区换算并丢弃偏移，导致失真。
+                    SQL_SS_TIMESTAMPOFFSET_STRUCT t {};
+                    rc = co_await odbc_async(stmt,
+                                             SQL_HANDLE_STMT,
+                                             obj,
+                                             [&]
+                                             { return SQLGetData(stmt, col, SQL_C_BINARY, &t, sizeof(t), &ind); });
+                    check_ok(rc, stmt, SQL_HANDLE_STMT, "odbc read datetimeoffset");
+                    if (ind == SQL_NULL_DATA)
+                    {
+                        co_return std::monostate {};
+                    }
+                    datetime dt { static_cast<unsigned>(t.year),
+                                  static_cast<unsigned>(t.month),
+                                  static_cast<unsigned>(t.day),
+                                  static_cast<unsigned>(t.hour),
+                                  static_cast<unsigned>(t.minute),
+                                  static_cast<unsigned>(t.second),
+                                  static_cast<unsigned long>(t.fraction / 1000) };
+                    // 墙上时钟 = UTC + 偏移，故 UTC = 墙上时钟 - 偏移。
+                    auto offset = std::chrono::minutes { static_cast<int>(t.timezone_hour) * 60
+                                                         + static_cast<int>(t.timezone_minute) };
+                    co_return dt.to_utc_time_point() - offset;
                 }
                 case db::column_type::time:
                 {

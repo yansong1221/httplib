@@ -2816,8 +2816,13 @@ TEST_CASE("db: date/time/datetime utilities", "[db][unit]")
 
     db::datetime dt { 2024, 1, 15, 12, 34, 56, 123456 };
     REQUIRE(dt.is_valid());
-    auto tp = dt.to_time_point();
-    REQUIRE(db::datetime::from_time_point(tp) == dt);
+    auto tp = dt.to_utc_time_point();
+    REQUIRE(db::datetime::from_utc_time_point(tp) == dt);
+
+    // 本地时区往返：to_local_time_point ↔ from_local_time_point 还原相同墙上时钟
+    auto lt = dt.to_local_time_point();
+    REQUIRE(db::datetime::from_local_time_point(lt) == dt);
+
     REQUIRE(dt.to_string() == "2024-01-15 12:34:56.123456");
     auto dt2 = db::datetime::from_string("2024-01-15 12:34:56.123456");
     REQUIRE(dt2.has_value());
@@ -2875,14 +2880,14 @@ TEST_CASE("db: temporal & narrow error handling", "[db][unit]")
     REQUIRE_FALSE(db::time::from_string("-").has_value());
     REQUIRE_FALSE(db::time::from_string("--01:02:03").has_value());
 
-    // datetime 非法 → is_valid / to_time_point
+    // datetime 非法 → is_valid / to_utc_time_point
     REQUIRE_FALSE(db::datetime { 2024, 2, 30, 12, 0, 0 }.is_valid());
     REQUIRE_FALSE(db::datetime { 2024, 1, 1, 24, 0, 0 }.is_valid());
     REQUIRE_FALSE(db::datetime { 2024, 1, 1, 12, 60, 0 }.is_valid());
     REQUIRE_FALSE(db::datetime { 2024, 1, 1, 12, 0, 0, 1000000 }.is_valid());
-    REQUIRE_THROWS_AS((db::datetime { 2024, 2, 30, 12, 0, 0 }).to_time_point(), std::runtime_error);
-    REQUIRE_THROWS_AS((db::datetime { 2024, 1, 1, 12, 60, 0 }).to_time_point(), std::runtime_error);
-    REQUIRE_THROWS_AS((db::datetime { 2024, 1, 1, 12, 0, 60 }).to_time_point(), std::runtime_error);
+    REQUIRE_THROWS_AS((db::datetime { 2024, 2, 30, 12, 0, 0 }).to_utc_time_point(), std::runtime_error);
+    REQUIRE_THROWS_AS((db::datetime { 2024, 1, 1, 12, 60, 0 }).to_utc_time_point(), std::runtime_error);
+    REQUIRE_THROWS_AS((db::datetime { 2024, 1, 1, 12, 0, 60 }).to_utc_time_point(), std::runtime_error);
 
     // datetime::from_string 各种非法
     REQUIRE_FALSE(db::datetime::from_string("").has_value());

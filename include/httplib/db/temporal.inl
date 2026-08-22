@@ -294,7 +294,7 @@ namespace httplib::db
     }
 
     constexpr timestamp
-    datetime::to_time_point() const
+    datetime::to_utc_time_point() const
     {
         if (!is_valid())
         {
@@ -305,11 +305,39 @@ namespace httplib::db
     }
 
     constexpr datetime
-    datetime::from_time_point(timestamp tp) noexcept
+    datetime::from_utc_time_point(timestamp tp) noexcept
     {
         auto days = std::chrono::floor<std::chrono::days>(tp);
         auto tod = tp - days;
         date d = date::from_sys_days(days);
+        time t = time::from_duration(std::chrono::duration_cast<std::chrono::microseconds>(tod));
+        return datetime { d.year, d.month, d.day, t.hour, t.minute, t.second, t.microsecond };
+    }
+
+    inline timestamp
+    datetime::to_local_time_point() const
+    {
+        if (!is_valid())
+        {
+            throw db_exception(boost::system::error_code {}, "db: invalid datetime value");
+        }
+        using std::chrono::current_zone;
+        using std::chrono::local_days;
+        auto local = local_days { std::chrono::year { static_cast<int>(year) } / std::chrono::month { month }
+                                  / std::chrono::day { day } }
+                     + std::chrono::hours { hour } + std::chrono::minutes { minute }
+                     + std::chrono::seconds { second } + std::chrono::microseconds { microsecond };
+        return current_zone()->to_sys(local);
+    }
+
+    inline datetime
+    datetime::from_local_time_point(timestamp tp) noexcept
+    {
+        using std::chrono::current_zone;
+        auto local = current_zone()->to_local(tp);
+        auto dp = std::chrono::floor<std::chrono::days>(local);
+        auto tod = local - dp;
+        date d = date::from_sys_days(std::chrono::sys_days { dp.time_since_epoch() });
         time t = time::from_duration(std::chrono::duration_cast<std::chrono::microseconds>(tod));
         return datetime { d.year, d.month, d.day, t.hour, t.minute, t.second, t.microsecond };
     }
@@ -353,7 +381,7 @@ namespace httplib::db
     constexpr std::chrono::microseconds
     operator-(datetime const& a, datetime const& b)
     {
-        return std::chrono::duration_cast<std::chrono::microseconds>(a.to_time_point() - b.to_time_point());
+        return std::chrono::duration_cast<std::chrono::microseconds>(a.to_utc_time_point() - b.to_utc_time_point());
     }
 
 } // namespace httplib::db

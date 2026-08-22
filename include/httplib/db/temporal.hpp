@@ -84,10 +84,14 @@ namespace httplib::db
     {
         /// 是否为合法日期时间。
         constexpr bool is_valid() const noexcept;
-        /// 转为 UTC 时间点（\ref timestamp）。
-        constexpr timestamp to_time_point() const;
-        /// 由 UTC 时间点构造。
-        static constexpr datetime from_time_point(timestamp tp) noexcept;
+        /// 把墙上时钟当作 UTC 时间点（无时区换算）。
+        constexpr timestamp to_utc_time_point() const;
+        /// 由 UTC 时间点构造（无时区换算）。
+        static constexpr datetime from_utc_time_point(timestamp tp) noexcept;
+        /// 把本地时区墙上时钟转成 UTC 时间点（运行时按本地时区换算）。
+        timestamp to_local_time_point() const;
+        /// 把 UTC 时间点转成本地时区墙上时钟（运行时按本地时区换算）。
+        static datetime from_local_time_point(timestamp tp) noexcept;
         /// 格式化为 YYYY-MM-DD HH:MM:SS[.ffffff]。
         std::string to_string() const;
         /// 解析 YYYY-MM-DD HH:MM:SS[.ffffff]，非法返回 nullopt。

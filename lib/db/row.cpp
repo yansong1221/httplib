@@ -317,7 +317,7 @@ namespace httplib::db
         }
         if (auto* v = std::get_if<timestamp>(&f))
         {
-            return datetime::from_time_point(*v);
+            return datetime::from_local_time_point(*v);
         }
         throw db_exception(boost::system::error_code {}, "db: cannot convert to datetime");
     }
@@ -354,8 +354,8 @@ namespace httplib::db
         }
         if (auto* v = std::get_if<datetime>(&f))
         {
-            // DATETIME 列读回的是无时区墙上时钟，直接视为 UTC 时间点。
-            return v->to_time_point();
+            // DATETIME 列读回的是无时区墙上时钟，按本地时区解释为 UTC 时间点。
+            return v->to_local_time_point();
         }
         throw db_exception(boost::system::error_code {}, "db: cannot convert to timestamp");
     }

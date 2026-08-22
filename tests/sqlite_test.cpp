@@ -346,9 +346,7 @@ TEST_CASE("db(sqlite): temporal types round-trip", "[db][sqlite]")
                 db::bind("d", db::date { 2024, 6, 1 }),
                 db::bind("dt", db::datetime { 2024, 6, 1, 12, 30, 45, 123456 }),
                 db::bind("tm", db::time::from_duration(std::chrono::microseconds { 3723000000LL })),
-                db::bind("ts",
-                         std::chrono::sys_days(std::chrono::year(2024) / std::chrono::month(6) / std::chrono::day(1))
-                             + std::chrono::hours(12)));
+                db::bind("ts", db::datetime { 2024, 6, 1, 12, 0, 0 }));
 
             auto r = co_await sess.query("SELECT d, dt, tm, ts FROM t");
             REQUIRE(r.column_count() == 4);
@@ -374,12 +372,14 @@ TEST_CASE("db(sqlite): temporal types round-trip", "[db][sqlite]")
             auto tm = *r[0].as_time("tm");
             REQUIRE(tm.to_duration() == std::chrono::microseconds { 3723000000LL });
 
-            // time_point：SQLite 无时区，按 UTC 存文本，往返一致
+            // TIMESTAMP 声明映射为 datetime；as_timestamp 把 datetime 按本地时区解释为时间点
             auto ts = *r[0].as_timestamp("ts");
-            std::chrono::system_clock::time_point expected
-                = std::chrono::sys_days(std::chrono::year(2024) / std::chrono::month(6) / std::chrono::day(1))
-                  + std::chrono::hours(12);
-            REQUIRE(ts == expected);
+            REQUIRE(ts == db::datetime { 2024, 6, 1, 12, 0, 0 }.to_local_time_point());
+
+            // timestamp（绝对时间点）绑定：SQLite 无时区语义 → 显式报错
+            REQUIRE_THROWS_AS(co_await sess.query("INSERT INTO t (ts) VALUES (:ts)",
+                                                  db::bind("ts", std::chrono::system_clock::time_point {})),
+                              db::db_exception);
         },
         [&](std::exception_ptr e) { err = e; });
     ioc.run();

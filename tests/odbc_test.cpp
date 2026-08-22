@@ -61,7 +61,8 @@ namespace
         co_await sess.query("IF OBJECT_ID('httplib_odbc_t', 'U') IS NOT NULL DROP TABLE httplib_odbc_t");
         co_await sess.query(
             "CREATE TABLE httplib_odbc_t (id INT IDENTITY(1,1) PRIMARY KEY, a BIGINT NULL, b VARCHAR(200) NULL, "
-            "c DECIMAL(18,4) NULL, d VARBINARY(64) NULL, e DATE NULL, f DATETIME2(6) NULL, g TIME(6) NULL)");
+            "c DECIMAL(18,4) NULL, d VARBINARY(64) NULL, e DATE NULL, f DATETIME2(6) NULL, g TIME(6) NULL, "
+            "h DATETIMEOFFSET(6) NULL)");
         co_await sess.query("IF OBJECT_ID('httplib_odbc_i', 'U') IS NOT NULL DROP TABLE httplib_odbc_i");
         co_await sess.query("CREATE TABLE httplib_odbc_i (id INT IDENTITY(1,1) PRIMARY KEY, v INT NOT NULL)");
     }
@@ -149,14 +150,23 @@ TEST_CASE("db(odbc): query and bindings", "[db][odbc]")
             REQUIRE(got->size() == big.size());
             REQUIRE(std::equal(big.begin(), big.end(), got->begin(), got->end()));
 
-            // time_point 绑定（UTC 墙上时钟）
-            auto tp = std::chrono::system_clock::time_point { std::chrono::milliseconds { 1709629230000 } };
-            co_await sess.query("INSERT INTO httplib_odbc_t (f) VALUES (:f)", db::bind("f", tp));
+            // datetime（墙上时钟）绑定：往返一致
+            co_await sess.query("INSERT INTO httplib_odbc_t (f) VALUES (:f)",
+                                db::bind("f", db::datetime { 2024, 3, 5, 10, 20, 30, 600000 }));
             auto r5 = co_await sess.query(
                 "SELECT f FROM httplib_odbc_t WHERE f >= '2000-01-01' AND f IS NOT NULL ORDER BY id DESC");
-            auto expected = db::datetime::from_time_point(tp);
             REQUIRE(r5.row_count() >= 1);
-            REQUIRE(*r5[0].as_datetime("f") == expected);
+            REQUIRE(*r5[0].as_datetime("f") == db::datetime { 2024, 3, 5, 10, 20, 30, 600000 });
+
+            // timestamp（绝对时间点）绑定：SQL Server DATETIMEOFFSET 按 UTC 存，读回还原绝对时间点
+            auto tp = std::chrono::system_clock::time_point { std::chrono::milliseconds { 1709629230000 } };
+            co_await sess.query("INSERT INTO httplib_odbc_t (h) VALUES (:h)", db::bind("h", tp));
+            auto r6 = co_await sess.query("SELECT TOP 1 h FROM httplib_odbc_t WHERE h IS NOT NULL ORDER BY id DESC");
+            REQUIRE(r6.row_count() == 1);
+            REQUIRE(r6.column_type(0) == db::column_type::timestamp);
+            REQUIRE(*r6[0].as_timestamp("h") == tp);
+            // as_datetime 读 timestamp 字段走 from_local_time_point（本地墙上时钟），再转回时间点应还原
+            REQUIRE(r6[0].as_datetime("h")->to_local_time_point() == tp);
 
             // prepared_statement：命名 + 位置 + into
             co_await sess.stmt("INSERT INTO httplib_odbc_i (v) VALUES (:v)").execute(db::bind("v", 7));
@@ -370,14 +380,14 @@ TEST_CASE("db(odbc): datetimeoffset / time2 type mapping", "[db][odbc]")
                                 "(CAST('2024-03-05 10:20:30.123456' AS DATETIME2), "
                                 "CAST('10:20:30.123' AS TIME(3)), "
                                 "CAST('2024-03-05 10:20:30.1234567' AS DATETIME2(7)))");
-            // DATETIMEOFFSET 列读回保留原始墙上时钟（偏移不参与换算）：
-            // datetime2 → datetimeoffset 的隐式转换偏移固定为 +00:00，墙上时钟即原值。
-            db::datetime o_expected { 2024, 3, 5, 10, 20, 30, 123456 };
+            // DATETIMEOFFSET 列读回换算成绝对时间点（UTC）：
+            // datetime2 → datetimeoffset 的隐式转换偏移固定为 +00:00，即 UTC 时间点。
+            db::timestamp o_expected = db::datetime { 2024, 3, 5, 10, 20, 30, 123456 }.to_utc_time_point();
             auto r = co_await sess.query("SELECT TOP 1 o, t, ts FROM httplib_odbc_map ORDER BY id DESC");
             REQUIRE(r.row_count() == 1);
-            // DATETIMEOFFSET → SQL_SS_TIMESTAMPOFFSET → datetime
-            REQUIRE(r.column_type(0) == db::column_type::datetime);
-            REQUIRE(*r[0].as_datetime("o") == o_expected);
+            // DATETIMEOFFSET → SQL_SS_TIMESTAMPOFFSET → timestamp
+            REQUIRE(r.column_type(0) == db::column_type::timestamp);
+            REQUIRE(*r[0].as_timestamp("o") == o_expected);
             // TIME(3) → SQL_SS_TIME2 → time（小数秒须保留，修复前恒为 0）
             REQUIRE(r.column_type(1) == db::column_type::time);
             REQUIRE(*r[0].as_time("t") == db::time { 10, 20, 30, 123000 });
