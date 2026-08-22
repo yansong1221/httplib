@@ -10,6 +10,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <string>
 #include <vector>
@@ -23,12 +24,20 @@ namespace net = httplib::net;
 namespace
 {
     // 本地 SQL Server（通过 ODBC Driver 17）测试库；连接失败时用例 SKIP。
+    // 可用环境变量 ODBC_TEST_CONNSTR 覆盖连接串（Linux 需 SQL 认证，Windows 默认集成认证）。
     db::odbc_config
     odbc_test_config()
     {
         db::odbc_config cfg;
-        cfg.connection_string
-            = "Driver={ODBC Driver 17 for SQL Server};Server=localhost;Database=master;Trusted_Connection=yes;";
+        if (char const* cs = std::getenv("ODBC_TEST_CONNSTR"); cs && *cs)
+        {
+            cfg.connection_string = cs;
+        }
+        else
+        {
+            cfg.connection_string
+                = "Driver={ODBC Driver 17 for SQL Server};Server=localhost;Database=master;Trusted_Connection=yes;";
+        }
         return cfg;
     }
 

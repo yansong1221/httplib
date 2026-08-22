@@ -11,6 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -262,8 +263,15 @@ namespace
     odbc_bug_config()
     {
         db::odbc_config cfg;
-        cfg.connection_string
-            = "Driver={ODBC Driver 17 for SQL Server};Server=localhost;Database=master;Trusted_Connection=yes;";
+        if (char const* cs = std::getenv("ODBC_TEST_CONNSTR"); cs && *cs)
+        {
+            cfg.connection_string = cs;
+        }
+        else
+        {
+            cfg.connection_string
+                = "Driver={ODBC Driver 17 for SQL Server};Server=localhost;Database=master;Trusted_Connection=yes;";
+        }
         return cfg;
     }
 } // namespace
