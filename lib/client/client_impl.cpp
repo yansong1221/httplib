@@ -119,6 +119,14 @@ namespace httplib::client
     net::awaitable<http_client::response_result>
     http_client::impl::async_send_request(http_client::request& req, body_setup_fn const& body_setup) noexcept
     {
+        co_return co_await async_send_request_impl(req, body_setup, true);
+    }
+
+    net::awaitable<http_client::response_result>
+    http_client::impl::async_send_request_impl(http_client::request& req,
+                                               body_setup_fn const& body_setup,
+                                               bool allow_retry) noexcept
+    {
         http::request_serializer<body::any_body> serializer(req);
         auto ec = co_await async_write(serializer, false);
         if (ec)
@@ -140,6 +148,10 @@ namespace httplib::client
         {
             if (ec = co_await async_read(parser, true); ec)
             {
+                if (allow_retry && is_retryable(ec))
+                {
+                    co_return co_await async_send_request_impl(req, body_setup, false);
+                }
                 co_return ec;
             }
             if (!parser.is_done())
@@ -150,6 +162,10 @@ namespace httplib::client
 
         if (ec = co_await async_read(parser, false); ec)
         {
+            if (allow_retry && is_retryable(ec))
+            {
+                co_return co_await async_send_request_impl(req, body_setup, false);
+            }
             co_return ec;
         }
         co_return parser.release();

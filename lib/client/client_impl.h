@@ -66,6 +66,10 @@ namespace httplib::client
       private:
         net::awaitable<boost::system::error_code> co_connect();
 
+        net::awaitable<http_client::response_result> async_send_request_impl(http_client::request& req,
+                                                                             body_setup_fn const& body_setup,
+                                                                             bool allow_retry) noexcept;
+
         void begin_io();
         void end_io();
         void finish_io();
