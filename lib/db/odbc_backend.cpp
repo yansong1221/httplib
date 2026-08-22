@@ -4,7 +4,11 @@
 #include "registry.hpp"
 #include <sql.h>
 #include <sqlext.h>
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <dlfcn.h>
+#endif
 // SQL Server 专用类型（msodbcsql.h 里的 -150 ~ -199 保留段；此处只 include 了 sql.h/sqlext.h，
 // 故手动声明与驱动一致的常量值）。注意 DATETIMEOFFSET 是 -155，不是 -140。
 #ifndef SQL_SS_TIMESTAMPOFFSET
@@ -86,15 +90,20 @@ namespace httplib::db::detail
             }
         }
 
-        // SQLCompleteAsync 是 ODBC 3.8（Windows 8+）才导出，Win7 的 odbc32.dll（ODBC 3.52）没有该符号；
-        // 静态链接会在导入表引用它，导致 DLL/EXE 在 Win7 上加载失败（"找不到入口点"）。
-        // 改为运行时动态解析：缺失时返回 SQL_ERROR，调用方按指针是否存在决定是否走异步路径。
+        // SQLCompleteAsync 是 ODBC 3.8（Windows 8+）才导出；Win7 的 odbc32.dll（ODBC 3.52）、
+        // unixODBC/iODBC 都没有该符号。静态链接会在导入表引用它，导致 DLL/EXE 加载失败
+        // （"找不到入口点"）。改为运行时动态解析：缺失时返回 nullptr，调用方按指针是否存在决定是否走异步路径。
         using SQLCompleteAsync_fn = SQLRETURN(SQL_API*)(SQLSMALLINT, SQLHANDLE, SQLRETURN*);
         static SQLCompleteAsync_fn
         load_SQLCompleteAsync()
         {
             static SQLCompleteAsync_fn fn = reinterpret_cast<SQLCompleteAsync_fn>(
-                GetProcAddress(GetModuleHandleW(L"odbc32"), "SQLCompleteAsync"));
+#ifdef _WIN32
+                GetProcAddress(GetModuleHandleW(L"odbc32"), "SQLCompleteAsync")
+#else
+                dlsym(RTLD_DEFAULT, "SQLCompleteAsync")
+#endif
+            );
             return fn;
         }
 
@@ -109,12 +118,12 @@ namespace httplib::db::detail
         /// 直到取到最终返回码。fn 只调用一次。
         template <typename F>
         net::awaitable<SQLRETURN>
-        odbc_async(SQLHANDLE handle, SQLSMALLINT handle_type, net::windows::object_handle& obj, F&& fn)
+        odbc_async(SQLHANDLE handle, SQLSMALLINT handle_type, async_waiter& obj, F&& fn)
         {
             SQLRETURN rc = fn();
             while (rc == SQL_STILL_EXECUTING)
             {
-                co_await obj.async_wait(net::use_awaitable);
+                co_await obj.wait();
                 SQLRETURN r = SQL_SUCCESS;
                 call_SQLCompleteAsync(handle_type, handle, &r);
                 rc = r;
@@ -398,7 +407,7 @@ namespace httplib::db::detail
 
         // 读可变长文本（SQL_C_CHAR）；先取长度再分块取数据。
         static net::awaitable<std::string>
-        read_text(SQLHSTMT stmt, net::windows::object_handle& obj, SQLSMALLINT col, bool& is_null)
+        read_text(SQLHSTMT stmt, async_waiter& obj, SQLSMALLINT col, bool& is_null)
         {
             // 用真实小缓冲探测：NULL 列在本驱动下以 SQL_NULL_DATA 报告（nullptr/0 探测会 SQL_ERROR）。
             SQLLEN ind = 0;
@@ -467,7 +476,7 @@ namespace httplib::db::detail
 
         // 读可变长二进制（SQL_C_BINARY）。
         static net::awaitable<std::vector<std::byte>>
-        read_blob(SQLHSTMT stmt, net::windows::object_handle& obj, SQLSMALLINT col, bool& is_null)
+        read_blob(SQLHSTMT stmt, async_waiter& obj, SQLSMALLINT col, bool& is_null)
         {
             // 用真实小缓冲探测：NULL 列在本驱动下以 SQL_NULL_DATA 报告（nullptr/0 探测会 SQL_ERROR）。
             SQLLEN ind = 0;
@@ -563,7 +572,7 @@ namespace httplib::db::detail
         // 读单个字段。
         net::awaitable<field>
         read_field(SQLHSTMT stmt,
-                   net::windows::object_handle& obj,
+                   async_waiter& obj,
                    SQLSMALLINT col,
                    db::column_type ct,
                    SQLSMALLINT sqltype)
@@ -796,17 +805,12 @@ namespace httplib::db::detail
 
     odbc_backend::odbc_backend(net::any_io_executor ex, odbc_config cfg) : ex_(std::move(ex)), cfg_(std::move(cfg))
     {
-        auto conn_event = CreateEvent(nullptr, FALSE, FALSE, nullptr); // auto-reset, 初始非信号态
-        if (!conn_event)
-        {
-            throw db_exception(boost::system::error_code {}, "db: odbc create connection event failed");
-        }
-        conn_obj_ = std::make_unique<net::windows::object_handle>(ex_, static_cast<HANDLE>(conn_event));
+        conn_waiter_.open(ex_);
     }
 
     odbc_backend::~odbc_backend()
     {
-        conn_obj_.reset();
+        conn_waiter_.close();
         disconnect();
     }
 
@@ -831,6 +835,7 @@ namespace httplib::db::detail
     void
     odbc_backend::enable_dbc_async()
     {
+#ifdef _WIN32
         if (!load_SQLCompleteAsync())
         {
             return;
@@ -840,13 +845,15 @@ namespace httplib::db::detail
                                          reinterpret_cast<SQLPOINTER>(SQL_ASYNC_ENABLE_ON),
                                          SQL_IS_INTEGER);
         check_ok(rc, dbc_, SQL_HANDLE_DBC, "odbc enable dbc async");
-        rc = SQLSetConnectAttr(dbc_, SQL_ATTR_ASYNC_DBC_EVENT, conn_obj_->native_handle(), SQL_IS_POINTER);
+        rc = SQLSetConnectAttr(dbc_, SQL_ATTR_ASYNC_DBC_EVENT, conn_waiter_.native_event(), SQL_IS_POINTER);
         check_ok(rc, dbc_, SQL_HANDLE_DBC, "odbc set dbc event");
+#endif
     }
 
     void
     odbc_backend::disable_dbc_async() noexcept
     {
+#ifdef _WIN32
         if (!load_SQLCompleteAsync())
         {
             return;
@@ -855,11 +862,13 @@ namespace httplib::db::detail
                           SQL_ATTR_ASYNC_DBC_FUNCTIONS_ENABLE,
                           reinterpret_cast<SQLPOINTER>(SQL_ASYNC_ENABLE_OFF),
                           SQL_IS_INTEGER);
+#endif
     }
 
     void
     odbc_backend::enable_stmt_async(odbc_stmt& s)
     {
+#ifdef _WIN32
         if (!load_SQLCompleteAsync())
         {
             return;
@@ -869,15 +878,17 @@ namespace httplib::db::detail
                                       reinterpret_cast<SQLPOINTER>(SQL_ASYNC_ENABLE_ON),
                                       SQL_IS_INTEGER);
         check_ok(rc, s.stmt, SQL_HANDLE_STMT, "odbc enable stmt async");
-        rc = SQLSetStmtAttr(s.stmt, SQL_ATTR_ASYNC_STMT_EVENT, s.event, SQL_IS_POINTER);
+        rc = SQLSetStmtAttr(s.stmt, SQL_ATTR_ASYNC_STMT_EVENT, s.waiter.native_event(), SQL_IS_POINTER);
         check_ok(rc, s.stmt, SQL_HANDLE_STMT, "odbc set stmt event");
+#else
+        (void)s;
+#endif
     }
 
     void
     odbc_backend::free_stmt(odbc_stmt& s) noexcept
     {
-        s.obj.reset();     // destroys windows::object_handle, which closes the HANDLE
-        s.event = nullptr; // prevent double-close (obj already closed the handle)
+        s.waiter.close();
         if (s.stmt)
         {
             SQLFreeHandle(SQL_HANDLE_STMT, s.stmt);
@@ -891,16 +902,18 @@ namespace httplib::db::detail
         auto s = std::make_unique<odbc_stmt>();
         s->stmt = alloc_statement(static_cast<SQLHDBC>(dbc_));
 
-        // 事件/object_handle 始终创建：read_all/read_field 会无条件解引用 *s.obj。
+        // 等待器始终创建：read_all/read_field 会无条件解引用 s.waiter。
         // 但仅 ODBC 3.8+ 才把异步属性（SQL_ATTR_ASYNC_ENABLE / SQL_ATTR_ASYNC_STMT_EVENT）挂上去；
-        // 非 3.8（Win7）保持同步，SQLFetch/SQLExecute 直接阻塞返回，stmt_async 的 while 不会触发。
-        s->event = CreateEvent(nullptr, FALSE, FALSE, nullptr); // auto-reset, 初始非信号态
-        if (!s->event)
+        // 无 SQLCompleteAsync（Win7 / Unix）保持同步，SQLFetch/SQLExecute 直接阻塞返回，stmt_async 的 while 不会触发。
+        try
+        {
+            s->waiter.open(ex_);
+        }
+        catch (...)
         {
             SQLFreeHandle(SQL_HANDLE_STMT, s->stmt);
-            throw db_exception(boost::system::error_code {}, "db: odbc create statement event failed");
+            throw;
         }
-        s->obj = std::make_unique<net::windows::object_handle>(ex_, static_cast<HANDLE>(s->event));
 
         enable_stmt_async(*s);
 
@@ -913,7 +926,7 @@ namespace httplib::db::detail
         SQLRETURN rc = fn();
         while (rc == SQL_STILL_EXECUTING)
         {
-            co_await s.obj->async_wait(net::use_awaitable);
+            co_await s.waiter.wait();
             SQLRETURN r = SQL_SUCCESS;
             call_SQLCompleteAsync(SQL_HANDLE_STMT, s.stmt, &r);
             rc = r;
@@ -927,7 +940,7 @@ namespace httplib::db::detail
         SQLRETURN rc = fn();
         while (rc == SQL_STILL_EXECUTING)
         {
-            co_await conn_obj_->async_wait(net::use_awaitable);
+            co_await conn_waiter_.wait();
             SQLRETURN r = SQL_SUCCESS;
             call_SQLCompleteAsync(SQL_HANDLE_DBC, static_cast<SQLHDBC>(dbc_), &r);
             rc = r;
@@ -1168,7 +1181,7 @@ namespace httplib::db::detail
                     for (SQLSMALLINT i = 1; i <= ncols; ++i)
                     {
                         values.push_back(co_await read_field(s.stmt,
-                                                             *s.obj,
+                                                             s.waiter,
                                                              i,
                                                              rs.types[static_cast<size_t>(i - 1)],
                                                              sqltypes[static_cast<size_t>(i - 1)]));

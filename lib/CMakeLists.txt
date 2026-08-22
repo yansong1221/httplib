@@ -78,7 +78,7 @@ if(HTTPLIB_ENABLED_DATABASE)
         target_link_libraries(${MODULE} PRIVATE odbc32)
     else()
         find_library(ODBC_LIB odbc REQUIRED)
-        target_link_libraries(${MODULE} PRIVATE ${ODBC_LIB})
+        target_link_libraries(${MODULE} PRIVATE ${ODBC_LIB} ${CMAKE_DL_LIBS})
     endif()
 endif()
 

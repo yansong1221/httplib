@@ -3,24 +3,81 @@
 
 #include "backend.hpp"
 #include "httplib/db/config.hpp"
+#include "httplib/db/exception.hpp"
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
+#ifdef _WIN32
 #include <boost/asio/windows/object_handle.hpp>
+#include <windows.h>
+#endif
 #include <functional>
 #include <memory>
 #include <sql.h>
 #include <sqlext.h>
 #include <string>
-#include <windows.h>
 
 namespace httplib::db::detail
 {
+    /// 异步通知等待器。
+    /// Windows：Win32 auto-reset 事件 + asio \c windows::object_handle，驱动信号事件后恢复协程；
+    /// 其它平台：ODBC 3.8 异步通知基本无驱动实现（unixODBC/iODBC 缺 SQLCompleteAsync），
+    /// 走同步回退，\c wait() 永不 await（同步 ODBC 调用直接返回，不会出现 SQL_STILL_EXECUTING）。
+    struct async_waiter
+    {
+#ifdef _WIN32
+        void* event = nullptr; ///< HANDLE
+        std::unique_ptr<net::windows::object_handle> obj;
+
+        void
+        open(net::any_io_executor const& ex)
+        {
+            event = CreateEvent(nullptr, FALSE, FALSE, nullptr); // auto-reset, 初始非信号态
+            if (!event)
+            {
+                throw db_exception(boost::system::error_code {}, "db: odbc create event failed");
+            }
+            obj = std::make_unique<net::windows::object_handle>(ex, static_cast<HANDLE>(event));
+        }
+        void
+        close() noexcept
+        {
+            obj.reset(); // destroys object_handle, closes the HANDLE
+            event = nullptr;
+        }
+        HANDLE
+        native_event() const noexcept
+        {
+            return static_cast<HANDLE>(event);
+        }
+        net::awaitable<void>
+        wait()
+        {
+            co_await obj->async_wait(net::use_awaitable);
+        }
+#else
+        void
+        open(net::any_io_executor const&)
+        {
+        }
+        void
+        close() noexcept
+        {
+        }
+        net::awaitable<void>
+        wait()
+        {
+            co_return;
+        }
+#endif
+    };
+
     /// ODBC 后端：异步接口（同 MySQL/SQLite 的协程签名）。
     /// \details
-    /// 使用 ODBC 3.8 原生异步通知（Asynchronous Execution - Notification Method），不额外开线程：
+    /// Windows 上使用 ODBC 3.8 原生异步通知（Asynchronous Execution - Notification Method），不额外开线程：
     /// 连接/语句启用异步后，ODBC 函数可能返回 SQL_STILL_EXECUTING，完成时会信号关联的 Win32 事件；
     /// 本后端把事件交给 asio \c windows::object_handle 挂在 io 线程上等待，事件触发后调用
     /// SQLCompleteAsync 取最终返回码，全程不阻塞事件循环。
+    /// 其它平台（unixODBC/iODBC）无 3.8 异步驱动，走同步执行回退。
     /// \n
     /// 占位符固定为 `?`（SQL 标准），事务用 SQL_ATTR_AUTOCOMMIT 开关 + SQLEndTran 控制。
     class odbc_backend : public backend
@@ -48,17 +105,16 @@ namespace httplib::db::detail
         net::awaitable<void> rollback() override;
 
       private:
-        /// 已 prepare 的语句 + 关联的异步通知事件（Win32 auto-reset event）。
+        /// 已 prepare 的语句 + 关联的异步通知等待器。
         struct odbc_stmt
         {
             SQLHSTMT stmt = nullptr;
-            void* event = nullptr; ///< HANDLE
-            std::unique_ptr<net::windows::object_handle> obj;
+            async_waiter waiter;
         };
 
         /// 分配语句句柄并启用语句级异步通知。
         std::unique_ptr<odbc_stmt> new_stmt();
-        /// 释放语句资源（object_handle、事件、句柄），不抛异常。
+        /// 释放语句资源（等待器、语句句柄），不抛异常。
         static void free_stmt(odbc_stmt& s) noexcept;
         /// 启用/关闭连接级异步通知（无 SQLCompleteAsync 导出时 no-op，保持同步执行）。
         void enable_dbc_async();
@@ -76,7 +132,7 @@ namespace httplib::db::detail
         void check_ok(SQLRETURN rc, SQLHANDLE handle, SQLSMALLINT handle_type, std::string_view what);
 
         net::any_io_executor ex_;
-        std::unique_ptr<net::windows::object_handle> conn_obj_;
+        async_waiter conn_waiter_;
         odbc_config cfg_;
         void* env_ = nullptr; ///< SQLHENV
         void* dbc_ = nullptr; ///< SQLHDBC
