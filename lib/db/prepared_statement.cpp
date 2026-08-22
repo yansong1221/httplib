@@ -10,7 +10,7 @@ namespace httplib::db
 {
     struct prepared_statement::impl
     {
-        session* session = nullptr;
+        session* owner = nullptr;
         std::string original_sql;            ///< 原始 `:name` SQL（日志与渲染用）
         std::vector<detail::binder> binders; ///< 统一参数存储：位置绑定 name 为空串，命名绑定同名去重
         bool need_params_reset = false;      ///< execute 后置位，下次位置 bind 时清空位置项再重建
@@ -18,7 +18,7 @@ namespace httplib::db
 
     prepared_statement::prepared_statement(session& sess, std::string sql) : impl_(std::make_unique<impl>())
     {
-        impl_->session = &sess;
+        impl_->owner = &sess;
         impl_->original_sql = sql;
     }
 
@@ -62,7 +62,7 @@ namespace httplib::db
     prepared_statement::execute()
     {
 
-        auto res = co_await impl_->session->execute_query(impl_->original_sql, impl_->binders, true);
+        auto res = co_await impl_->owner->execute_query(impl_->original_sql, impl_->binders, true);
 
         // 位置绑定是消费式的：execute 后置位，下次位置 bind 时清空重建（命名绑定同名替换、可保留重绑）。
         impl_->need_params_reset = true;

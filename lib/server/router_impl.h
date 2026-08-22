@@ -39,6 +39,24 @@ namespace httplib::server
             websocket_conn::coro_close_handler_type close_handler;
             websocket_conn::coro_message_handler_type message_handler;
         };
+
+        struct Node
+        {
+            std::string key;
+            std::string param_name;
+            std::regex regex;
+
+            std::unordered_map<http::verb, coro_http_handler_type> handlers;
+            std::unordered_map<http::verb, coro_http_handler_type> chunked_handlers;
+            std::optional<ws_handler_entry> ws_handler;
+            std::optional<coro_http_handler_type> connect_handler;
+
+            util::string_map<std::unique_ptr<Node>> static_children;
+            std::vector<std::unique_ptr<Node>> param_children;
+            std::vector<std::unique_ptr<Node>> regex_children;
+            std::unique_ptr<Node> wildcard_children;
+        };
+
         std::optional<ws_handler_entry> query_ws_handler(request& req) const;
 
         std::optional<coro_http_handler_type> query_connect_handler(request& req) const;
@@ -64,23 +82,6 @@ namespace httplib::server
 
       private:
         static void collect_allows(std::set<std::string>& allows, Node const* node);
-
-        struct Node
-        {
-            std::string key;
-            std::string param_name;
-            std::regex regex;
-
-            std::unordered_map<http::verb, coro_http_handler_type> handlers;
-            std::unordered_map<http::verb, coro_http_handler_type> chunked_handlers;
-            std::optional<ws_handler_entry> ws_handler;
-            std::optional<coro_http_handler_type> connect_handler;
-
-            util::string_map<std::unique_ptr<Node>> static_children;
-            std::vector<std::unique_ptr<Node>> param_children;
-            std::vector<std::unique_ptr<Node>> regex_children;
-            std::unique_ptr<Node> wildcard_children;
-        };
 
         std::unique_ptr<Node> root_;
         mutable std::shared_mutex mutex_;
