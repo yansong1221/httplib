@@ -3,9 +3,9 @@
 #include "httplib/util/misc.hpp"
 #include <charconv>
 #include <concepts>
+#include <map>
 #include <stdexcept>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace httplib::html
@@ -13,7 +13,8 @@ namespace httplib::html
     class HTTPLIB_API query_params
     {
       public:
-        using container_type = std::unordered_multimap<std::string, std::string>;
+        /// 有序 multimap：同 key 的多值按插入顺序（equal_range 遍历顺序稳定，跨平台一致）。
+        using container_type = std::multimap<std::string, std::string>;
 
         template <typename T = std::string_view>
             requires std::integral<T> || std::floating_point<T> || std::same_as<T, bool> || std::same_as<T, std::string>
