@@ -219,9 +219,7 @@ namespace httplib::client
             }
 
             auto lwt = fs::last_write_time(body_path, ec);
-            auto ft = lwt.time_since_epoch();
-            auto tp = std::chrono::system_clock::time_point(
-                std::chrono::duration_cast<std::chrono::system_clock::duration>(ft));
+            auto tp = std::chrono::clock_cast<std::chrono::system_clock>(lwt);
 
             if (max_age_.count() > 0)
             {
@@ -299,9 +297,7 @@ namespace httplib::client
             auto lwt = fs::last_write_time(body_path, ec);
             if (!ec)
             {
-                auto ft = lwt.time_since_epoch();
-                auto tp = std::chrono::system_clock::time_point(
-                    std::chrono::duration_cast<std::chrono::system_clock::duration>(ft));
+                auto tp = std::chrono::clock_cast<std::chrono::system_clock>(lwt);
                 auto age = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now() - tp);
                 if (age > max_age_)
                 {
