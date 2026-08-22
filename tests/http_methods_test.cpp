@@ -879,6 +879,12 @@ TEST_CASE("Multipart upload strips absolute path filename to basename", "[http-m
     auto upload_dir = std::filesystem::temp_directory_path() / "httplib_uploads_abs";
     std::filesystem::create_directories(upload_dir);
 
+#ifdef _WIN32
+    std::string evil_path = "C:\\Windows\\System32\\evil.dll";
+#else
+    std::string evil_path = "/etc/evil.dll";
+#endif
+
     run(
         [&](auto& server)
         {
@@ -903,11 +909,12 @@ TEST_CASE("Multipart upload strips absolute path filename to basename", "[http-m
             std::string boundary = "----AbsPath";
             std::string body = std::format("--{}\r\n"
                                            "Content-Disposition: form-data; name=\"file\"; "
-                                           "filename=\"C:\\\\Windows\\\\System32\\\\evil.dll\"\r\n"
+                                           "filename=\"{}\"\r\n"
                                            "\r\n"
                                            "payload\r\n"
                                            "--{}--\r\n",
                                            boundary,
+                                           evil_path,
                                            boundary);
 
             auto hdrs = httplib::http::fields();
