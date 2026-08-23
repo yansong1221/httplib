@@ -54,8 +54,7 @@ namespace httplib::db
                                                std::string_view conn_string);
 
         net::any_io_executor get_executor() const;
-        
-        
+
         /// 执行一条 SQL 语句。
         net::awaitable<result> query(std::string_view sql);
 
@@ -85,17 +84,16 @@ namespace httplib::db
         with_transaction(F&& f)
         {
             co_await begin_transaction();
-            std::exception_ptr e;
+
             try
             {
                 co_await std::invoke(std::forward<F>(f), *this);
+                co_await commit();
             }
             catch (...)
             {
-                e = std::current_exception();
-            }
-            if (e)
-            {
+                auto e = std::current_exception();
+
                 try
                 {
                     co_await rollback();
@@ -103,9 +101,9 @@ namespace httplib::db
                 catch (...)
                 {
                 }
+
                 std::rethrow_exception(e);
             }
-            co_await commit();
         }
 
         /// 探测连接是否存活。

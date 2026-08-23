@@ -61,12 +61,9 @@ namespace httplib::db
     net::awaitable<result>
     prepared_statement::execute()
     {
-
-        auto res = co_await impl_->owner->execute_query(impl_->original_sql, impl_->binders, true);
-
         // 位置绑定是消费式的：execute 后置位，下次位置 bind 时清空重建（命名绑定同名替换、可保留重绑）。
         impl_->need_params_reset = true;
-        co_return res;
+        co_return co_await impl_->owner->execute_query(impl_->original_sql, impl_->binders, true);
     }
 
 } // namespace httplib::db
