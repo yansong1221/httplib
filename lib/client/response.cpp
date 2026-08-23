@@ -170,6 +170,19 @@ namespace httplib::client
     net::awaitable<boost::system::error_code>
     response::read_to_file(fs::path const& save_path)
     {
+        body::file_body::value_type fb;
+        fb.open(save_path, std::ios::out | std::ios::binary | std::ios::trunc);
+        if (!fb.is_open())
+        {
+            co_return boost::system::errc::make_error_code(boost::system::errc::permission_denied);
+        }
+
+        auto result = co_await impl_->read_body(
+            [&](http_client::response& resp) { resp.body() = std::move(fb); });
+        if (result.has_error())
+        {
+            co_return result.error();
+        }
         co_return boost::system::error_code {};
     }
 
