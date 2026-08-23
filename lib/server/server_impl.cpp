@@ -1,4 +1,6 @@
 ﻿#include "server_impl.h"
+#include "client/client_impl.h"
+#include "client/read_session_impl.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/read_session.hpp"
@@ -568,7 +570,7 @@ namespace httplib::server
                 }
 
                 auto writer = client->create_writer();
-                auto reader = client->create_reader();
+                auto reader = std::make_shared<httplib::client::read_session_impl>(get_impl(*client));
 
                 if (auto rel_ec = co_await writer->write_header(req.method(), upstream_target, upstream_headers);
                     rel_ec)

@@ -38,11 +38,9 @@ TEST_CASE("NDJSON: server sends single line", "[ndjson]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto ndjson = client.create_ndjson_reader();
-
-            co_await client.async_get("/ndjson");
-            auto ec = co_await ndjson->read_header();
-            REQUIRE(!ec);
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(http::verb::get, "/ndjson"));
+            REQUIRE(resp.result() == http::status::ok);
+            auto ndjson = resp.create_ndjson_reader();
 
             std::vector<boost::json::value> items;
             co_await collect_ndjson_lines(*ndjson, items);
@@ -86,11 +84,9 @@ TEST_CASE("NDJSON: server sends multiple lines", "[ndjson]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto ndjson = client.create_ndjson_reader();
-
-            co_await client.async_get("/ndjson");
-            auto ec = co_await ndjson->read_header();
-            REQUIRE(!ec);
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(http::verb::get, "/ndjson"));
+            REQUIRE(resp.result() == http::status::ok);
+            auto ndjson = resp.create_ndjson_reader();
 
             std::vector<boost::json::value> items;
             co_await collect_ndjson_lines(*ndjson, items);
@@ -125,13 +121,11 @@ TEST_CASE("NDJSON: Content-Type is application/x-ndjson", "[ndjson]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto ndjson = client.create_ndjson_reader();
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(http::verb::get, "/ndjson"));
+            REQUIRE(resp.result() == http::status::ok);
+            auto ndjson = resp.create_ndjson_reader();
 
-            co_await client.async_get("/ndjson");
-            auto ec = co_await ndjson->read_header();
-            REQUIRE(!ec);
-
-            REQUIRE(ndjson->headers()[http::field::content_type] == "application/x-ndjson");
+            REQUIRE(resp[http::field::content_type] == "application/x-ndjson");
 
             co_return;
         });
@@ -168,11 +162,9 @@ TEST_CASE("NDJSON: reader stops early", "[ndjson]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto ndjson = client.create_ndjson_reader();
-
-            co_await client.async_get("/ndjson");
-            auto ec = co_await ndjson->read_header();
-            REQUIRE(!ec);
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(http::verb::get, "/ndjson"));
+            REQUIRE(resp.result() == http::status::ok);
+            auto ndjson = resp.create_ndjson_reader();
 
             std::vector<boost::json::value> items;
             for (int i = 0; i < 2; ++i)
@@ -220,10 +212,9 @@ TEST_CASE("NDJSON: single line split across chunks", "[ndjson]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto ndjson = client.create_ndjson_reader();
-            co_await client.async_get("/ndjson");
-            auto ec = co_await ndjson->read_header();
-            REQUIRE(!ec);
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(http::verb::get, "/ndjson"));
+            REQUIRE(resp.result() == http::status::ok);
+            auto ndjson = resp.create_ndjson_reader();
 
             std::vector<boost::json::value> items;
             co_await collect_ndjson_lines(*ndjson, items);
@@ -253,10 +244,9 @@ TEST_CASE("NDJSON: multiple lines in one chunk", "[ndjson]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto ndjson = client.create_ndjson_reader();
-            co_await client.async_get("/ndjson");
-            auto ec = co_await ndjson->read_header();
-            REQUIRE(!ec);
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(http::verb::get, "/ndjson"));
+            REQUIRE(resp.result() == http::status::ok);
+            auto ndjson = resp.create_ndjson_reader();
 
             std::vector<boost::json::value> items;
             co_await collect_ndjson_lines(*ndjson, items);
@@ -288,10 +278,9 @@ TEST_CASE("NDJSON: partial line split across chunks", "[ndjson]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto ndjson = client.create_ndjson_reader();
-            co_await client.async_get("/ndjson");
-            auto ec = co_await ndjson->read_header();
-            REQUIRE(!ec);
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(http::verb::get, "/ndjson"));
+            REQUIRE(resp.result() == http::status::ok);
+            auto ndjson = resp.create_ndjson_reader();
 
             std::vector<boost::json::value> items;
             co_await collect_ndjson_lines(*ndjson, items);

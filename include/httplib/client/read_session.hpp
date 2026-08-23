@@ -1,24 +1,17 @@
 #pragma once
 #include "httplib/config.hpp"
 #include <boost/asio/awaitable.hpp>
+#include <boost/json/value.hpp>
 #include <boost/system/error_code.hpp>
 #include <boost/system/result.hpp>
+#include <chrono>
 #include <memory>
+#include <string>
 #include <string_view>
 
 namespace httplib::client
 {
-    class HTTPLIB_API header_read_session
-    {
-      public:
-        virtual ~header_read_session() = default;
-        virtual bool is_header_done() const = 0;
-        virtual net::awaitable<boost::system::error_code> read_header() = 0;
-        virtual http::fields const& headers() const = 0;
-        virtual http::status result() const = 0;
-    };
-
-    class HTTPLIB_API read_session : public header_read_session
+    class HTTPLIB_API read_session
     {
       public:
         virtual ~read_session() = default;
@@ -26,7 +19,7 @@ namespace httplib::client
         virtual bool is_body_done() const = 0;
     };
 
-    class HTTPLIB_API sse_reader : public header_read_session
+    class HTTPLIB_API sse_reader
     {
       public:
         struct sse_event
@@ -42,7 +35,7 @@ namespace httplib::client
         virtual bool is_done() const = 0;
     };
 
-    class HTTPLIB_API ndjson_reader : public header_read_session
+    class HTTPLIB_API ndjson_reader
     {
       public:
         virtual ~ndjson_reader() = default;

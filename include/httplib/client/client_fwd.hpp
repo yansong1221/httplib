@@ -10,7 +10,6 @@ namespace httplib::client
     class downloader;
     class cache;
     class disk_cache;
-    class header_read_session;
     class read_session;
     class write_session;
     class sse_reader;

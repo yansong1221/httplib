@@ -238,6 +238,22 @@ namespace httplib::body
             {
                 create_reader<body::file_body>();
             }
+            else if (std::holds_alternative<body::string_body::value_type>(body_))
+            {
+                create_reader<body::string_body>();
+            }
+            else if (std::holds_alternative<body::json_body::value_type>(body_))
+            {
+                create_reader<body::json_body>();
+            }
+            else if (std::holds_alternative<body::form_data_body::value_type>(body_))
+            {
+                create_reader<body::form_data_body>();
+            }
+            else if (std::holds_alternative<body::query_params_body::value_type>(body_))
+            {
+                create_reader<body::query_params_body>();
+            }
             else if (content_type.starts_with("multipart/form-data"))
             {
                 create_reader<form_data_body>();

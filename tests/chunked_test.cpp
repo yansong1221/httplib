@@ -1,4 +1,6 @@
 #include "common.hpp"
+#include "client/client_impl.h"
+#include "client/read_session_impl.hpp"
 #include "httplib/body/string_body.hpp"
 #include "httplib/client/write_session.hpp"
 #include "httplib/server/chunk_reader.hpp"
@@ -24,7 +26,7 @@ namespace
     send_chunked(Client& client, http::verb method, std::string_view path, std::vector<std::string> chunks)
     {
         auto writer = client.create_writer();
-        auto reader = client.create_reader();
+        auto reader = std::make_shared<httplib::client::read_session_impl>(get_impl(client));
 
         co_await writer->write_header(method, path, {}, false);
         for (size_t i = 0; i < chunks.size(); ++i)

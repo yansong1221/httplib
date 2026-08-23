@@ -1,4 +1,6 @@
 #include "common.hpp"
+#include "client/client_impl.h"
+#include "client/read_session_impl.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/write_session.hpp"
 #include "httplib/server/chunk_writer.hpp"
@@ -801,13 +803,13 @@ TEST_CASE("client_pool: reader survives handle destruction", "[client_pool]")
             auto host = ep.address().to_string();
             auto port = ep.port();
 
-            std::shared_ptr<httplib::client::read_session> reader;
+            std::shared_ptr<httplib::client::read_session_impl> reader;
             std::string streamed;
             {
                 auto h = co_await p.async_acquire(host, port, false);
                 REQUIRE(h);
                 auto writer = h->create_writer();
-                reader = h->create_reader();
+                reader = std::make_shared<httplib::client::read_session_impl>(get_impl(*h));
 
                 co_await writer->write_header(http::verb::get, "/stream", {});
                 co_await writer->write_body(net::buffer("", 0), false);
@@ -908,7 +910,7 @@ TEST_CASE("client_pool: idle eviction wakes a waiting acquire", "[client_pool]")
 
             REQUIRE(result->completed);
             CHECK(result->success);
-            CHECK(result->elapsed < std::chrono::milliseconds(1500)); // 被驱逐唤醒，而不是睡满 2s
+            CHECK(result->elapsed < std::chrono::milliseconds(1500)); // 被驱逐唤醒，而不是睡�?2s
             b.release();
             p.stop();
         });
@@ -939,7 +941,7 @@ TEST_CASE("client_pool: stop/start isolates old handles from new pool counts", "
             CHECK(p.stats(host, port, false).active == 2);
             CHECK(p.total_count() == 2);
 
-            // 旧 epoch 的 handle 不能再递减新池计数，也不能把旧连接塞回新池。
+            // �?epoch �?handle 不能再递减新池计数，也不能把旧连接塞回新池�?
             old.release();
             CHECK(p.stats(host, port, false).active == 2);
             CHECK(p.total_count() == 2);
@@ -972,14 +974,14 @@ TEST_CASE("client_pool: idle_check_interval decouples eviction tick from idle_ti
             }
             CHECK(p.stats(host, port, false).idle == 1);
 
-            // idle_timeout 已到，但检查周期尚未到：不应回收。
+            // idle_timeout 已到，但检查周期尚未到：不应回收�?
             net::steady_timer t1(ioc.get_executor());
             t1.expires_after(std::chrono::milliseconds(200));
             boost::system::error_code ec;
             co_await t1.async_wait(httplib::util::net_awaitable[ec]);
             CHECK(p.stats(host, port, false).idle == 1);
 
-            // 检查周期到达后，按 idle_timeout 回收。
+            // 检查周期到达后，按 idle_timeout 回收�?
             net::steady_timer t2(ioc.get_executor());
             t2.expires_after(std::chrono::milliseconds(600));
             co_await t2.async_wait(httplib::util::net_awaitable[ec]);

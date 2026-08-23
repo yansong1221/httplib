@@ -2,7 +2,8 @@
 #include "compress/compressor.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
-#include "read_session_impl.hpp"
+#include "response_impl.h"
+#include "util/logging.hpp"
 #include "write_session_impl.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
@@ -20,7 +21,6 @@
 #include <fmt/format.h>
 #include <limits>
 #include <optional>
-#include "util/logging.hpp"
 #include <spdlog/spdlog.h>
 
 namespace httplib::client
@@ -139,36 +139,63 @@ namespace httplib::client
             co_return http_client::response {};
         }
 
-        http::response_parser<body::any_body> parser;
-        parser.skip(req.method() == http::verb::head);
-        parser.header_limit(std::numeric_limits<std::uint32_t>::max());
-        parser.body_limit(std::numeric_limits<std::uint64_t>::max());
+        http::response_parser<http::empty_body> header_parser;
+        header_parser.skip(req.method() == http::verb::head);
+        header_parser.header_limit(std::numeric_limits<std::uint32_t>::max());
+        header_parser.body_limit(std::numeric_limits<std::uint64_t>::max());
 
-        if (body_setup)
+        ec = co_await async_read(header_parser, true);
+        if (allow_retry && is_retryable(ec))
         {
-            if (ec = co_await async_read(parser, true); ec)
-            {
-                if (allow_retry && is_retryable(ec))
-                {
-                    co_return co_await async_send_request_impl(req, body_setup, false);
-                }
-                co_return ec;
-            }
-            if (!parser.is_done())
-            {
-                body_setup(parser.get());
-            }
+            co_return co_await async_send_request_impl(req, body_setup, false);
         }
-
-        if (ec = co_await async_read(parser, false); ec)
+        else if (ec)
         {
-            if (allow_retry && is_retryable(ec))
-            {
-                co_return co_await async_send_request_impl(req, body_setup, false);
-            }
             co_return ec;
         }
-        co_return parser.release();
+
+        http::response_parser<body::any_body> body_parser(std::move(header_parser));
+        if (body_setup)
+        {
+            if (!body_parser.is_done())
+            {
+                body_setup(body_parser.get());
+            }
+        }
+
+        if (ec = co_await async_read(body_parser, false); ec)
+        {
+            co_return ec;
+        }
+        co_return body_parser.release();
+    }
+
+    net::awaitable<http_client::lazy_response_result>
+    http_client::impl::async_send_request_lazy(http_client::request& req)
+    {
+        if (!read_impl_.expired())
+        {
+            co_return boost::system::errc::make_error_code(boost::system::errc::device_or_resource_busy);
+        }
+
+        http::request_serializer<body::any_body> serializer(req);
+        if (auto ec = co_await async_write(serializer, false); ec)
+        {
+            co_return ec;
+        }
+
+        auto header_parser = std::make_unique<http::response_parser<http::empty_body>>();
+        header_parser->skip(req.method() == http::verb::head);
+        header_parser->header_limit(std::numeric_limits<std::uint32_t>::max());
+        header_parser->body_limit(std::numeric_limits<std::uint64_t>::max());
+
+        auto ec = co_await async_read(*header_parser, true);
+        if (ec)
+        {
+            co_return ec;
+        }
+
+        co_return co_await client::response::impl::create(std::move(header_parser), shared_from_this());
     }
 
     net::awaitable<http_client::response_result>
@@ -367,18 +394,6 @@ namespace httplib::client
         {
             sp = std::make_shared<write_session_impl>(shared_from_this());
             write_impl_ = sp;
-        }
-        return sp;
-    }
-
-    std::shared_ptr<read_session>
-    http_client::impl::create_reader()
-    {
-        auto sp = read_impl_.lock();
-        if (!sp)
-        {
-            sp = std::make_shared<read_session_impl>(shared_from_this());
-            read_impl_ = sp;
         }
         return sp;
     }

@@ -1,4 +1,6 @@
 #include "common.hpp"
+#include "client/client_impl.h"
+#include "client/read_session_impl.hpp"
 #include "httplib/body/form_data_body.hpp"
 #include "httplib/body/json_body.hpp"
 #include "httplib/body/query_params_body.hpp"
@@ -640,7 +642,7 @@ TEST_CASE("client: chunked transfer via sessions", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             auto writer = client.create_writer();
-            auto reader = client.create_reader();
+            auto reader = std::make_shared<httplib::client::read_session_impl>(get_impl(client));
             co_await writer->write_header(http::verb::get, "/chunked", {});
             co_await writer->write_body(net::buffer("", 0), false);
             co_await reader->read_header();
@@ -988,6 +990,128 @@ TEST_CASE("client: async_send_file upload", "[client]")
             REQUIRE(resp.result() == http::status::ok);
         });
     std::filesystem::remove(up);
+}
+
+// ===========================================================================
+// async_send_request_lazy
+// ===========================================================================
+
+TEST_CASE("client: lazy read text", "[client]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/lazy-text",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("lazy-hello"sv, "text/plain"); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(http::verb::get, "/lazy-text"));
+            REQUIRE(resp.result() == http::status::ok);
+            auto text = co_await resp.read_text();
+            REQUIRE(text == "lazy-hello");
+        });
+}
+
+TEST_CASE("client: lazy read json", "[client]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/lazy-json",
+                [](httplib::server::request&, httplib::server::response& resp)
+                {
+                    boost::json::value v { { "key", "value" }, { "num", 7 } };
+                    resp.set_json_content(std::move(v));
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(http::verb::get, "/lazy-json"));
+            REQUIRE(resp.result() == http::status::ok);
+            auto val = co_await resp.read_json();
+            REQUIRE(val.at("key") == "value");
+            REQUIRE(val.at("num") == 7);
+        });
+}
+
+TEST_CASE("client: lazy read body typed", "[client]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/lazy-body",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("lazy-body"sv, "text/plain"); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(http::verb::get, "/lazy-body"));
+            auto body = co_await resp.read_body();
+            REQUIRE(body.template as<body::string_body>() == "lazy-body");
+        });
+}
+
+TEST_CASE("client: lazy read multipart body", "[client]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/lazy-form",
+                [](httplib::server::request&, httplib::server::response& resp)
+                {
+                    std::vector<html::form_data::field> fields;
+                    auto& a = fields.emplace_back();
+                    a.name = "a";
+                    a.content = std::string(9000, 'x');
+                    auto& b = fields.emplace_back();
+                    b.name = "b";
+                    b.content = "2";
+                    resp.set_form_data_content(std::move(fields));
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(http::verb::get, "/lazy-form"));
+            auto body = co_await resp.read_body();
+            auto& fd = body.template as<body::form_data_body>();
+            REQUIRE(fd.fields.size() == 2);
+            REQUIRE(fd.fields[0].name == "a");
+            REQUIRE(fd.fields[0].content == std::string(9000, 'x'));
+            REQUIRE(fd.fields[1].name == "b");
+            REQUIRE(fd.fields[1].content == "2");
+        });
+}
+
+TEST_CASE("client: lazy read to file", "[client]")
+{
+    auto save = std::filesystem::temp_directory_path() / "httplib_lazy_download.bin";
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/lazy-file",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("lazy-file-content"sv, "text/plain"); });
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(http::verb::get, "/lazy-file"));
+            auto ec = co_await resp.read_to_file(save);
+            REQUIRE(!ec);
+        });
+    std::string content;
+    {
+        std::ifstream f(save, std::ios::binary);
+        content.assign(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+    }
+    REQUIRE(content == "lazy-file-content");
+    std::filesystem::remove(save);
 }
 
 // ===========================================================================

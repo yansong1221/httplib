@@ -521,29 +521,21 @@ namespace httplib::client
             handle->set_max_redirects(0);
             handle->set_verify_ssl(config_.verify_ssl);
 
-            auto writer = handle->create_writer();
-            auto ec = co_await writer->write_header(method, t, merged);
-            if (ec)
+            auto resp_result = co_await handle->async_send_request_lazy(method, t, merged);
+            if (!resp_result.has_value())
             {
                 co_return request_result {};
             }
-            writer.reset();
+            auto resp = std::move(resp_result).value();
 
-            auto reader = handle->create_reader();
-            ec = co_await reader->read_header();
-            if (ec)
-            {
-                co_return request_result {};
-            }
-
-            auto status = reader->result();
+            auto status = resp.result();
 
             if ((status == http::status::moved_permanently || status == http::status::found
                  || status == http::status::see_other || status == http::status::temporary_redirect
                  || status == http::status::permanent_redirect)
                 && redir < config_.max_redirects)
             {
-                auto rt = parse_redirect(reader->headers());
+                auto rt = parse_redirect(resp.headers());
                 if (rt.has_value() && rt->valid)
                 {
                     h = rt->host.empty() ? h : rt->host;
@@ -556,8 +548,8 @@ namespace httplib::client
 
             request_result rr;
             rr.handle = std::move(handle);
-            rr.reader = std::move(reader);
-            rr.headers = rr.reader->headers();
+            rr.response = std::move(resp);
+            rr.headers = rr.response.headers();
             rr.status = status;
             co_return rr;
         }
@@ -658,17 +650,17 @@ namespace httplib::client
                 co_return boost::system::errc::make_error_code(boost::system::errc::permission_denied);
             }
 
-            auto reader = result.reader;
+            auto& resp = result.response;
             std::vector<char> buf(kReadBufSize);
 
-            while (!reader->is_body_done())
+            while (!resp.is_body_done())
             {
                 if (cancelled_.load(std::memory_order_relaxed))
                 {
                     co_return boost::asio::error::operation_aborted;
                 }
 
-                auto r = co_await reader->read_body(net::buffer(buf));
+                auto r = co_await resp.read_some(net::buffer(buf));
                 if (r.has_error())
                 {
                     co_return r.error();
@@ -794,17 +786,17 @@ namespace httplib::client
                 co_return boost::system::errc::make_error_code(boost::system::errc::permission_denied);
             }
 
-            auto reader = result.reader;
+            auto& resp = result.response;
             std::vector<char> buf(kReadBufSize);
 
-            while (!reader->is_body_done())
+            while (!resp.is_body_done())
             {
                 if (cancelled_.load(std::memory_order_relaxed))
                 {
                     co_return boost::asio::error::operation_aborted;
                 }
 
-                auto r = co_await reader->read_body(net::buffer(buf));
+                auto r = co_await resp.read_some(net::buffer(buf));
                 if (r.has_error())
                 {
                     co_return r.error();

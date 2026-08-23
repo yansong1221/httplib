@@ -7,7 +7,7 @@
 
 namespace httplib::client
 {
-    class http_client::impl::read_session_impl
+    class read_session_impl
         : public read_session
         , public std::enable_shared_from_this<read_session_impl>
     {
@@ -15,7 +15,7 @@ namespace httplib::client
         explicit read_session_impl(std::shared_ptr<http_client::impl> parent) : parent_(std::move(parent)) {}
 
         net::awaitable<boost::system::error_code>
-        read_header() override
+        read_header()
         {
             resp_parser_ = std::make_unique<http::response_parser<http::buffer_body>>();
             resp_parser_->body_limit((std::numeric_limits<std::uint64_t>::max)());
@@ -25,19 +25,19 @@ namespace httplib::client
         }
 
         http::status
-        result() const override
+        result() const
         {
             return resp_parser_->get().result();
         }
 
         http::fields const&
-        headers() const override
+        headers() const
         {
             return resp_parser_->get();
         }
 
         bool
-        is_header_done() const override
+        is_header_done() const
         {
             return resp_parser_ && resp_parser_->is_header_done();
         }

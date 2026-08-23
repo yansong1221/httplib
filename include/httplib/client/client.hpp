@@ -1,6 +1,7 @@
 #pragma once
 #include "httplib/body/any_body.hpp"
 #include "httplib/client/client_fwd.hpp"
+#include "httplib/client/response.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <filesystem>
 #include <memory>
@@ -21,6 +22,9 @@ namespace httplib::client
         using response = http::response<body::any_body>;
         using request = http::request<body::any_body>;
         using response_result = boost::system::result<response>;
+
+        using lazy_response = client::response;
+        using lazy_response_result = boost::system::result<lazy_response>;
 
       public:
         explicit http_client(net::io_context& ex, std::string_view host, uint16_t port, bool ssl = false);
@@ -170,11 +174,62 @@ namespace httplib::client
                                                         fs::path const& file_path,
                                                         http::fields const& headers = http::fields());
 
-        std::shared_ptr<write_session> create_writer();
-        std::shared_ptr<read_session> create_reader();
+        // ---- async_send_request_lazy (returns a streaming response, body unread) ----
 
-        std::unique_ptr<sse_reader> create_sse_reader();
-        std::unique_ptr<ndjson_reader> create_ndjson_reader();
+        net::awaitable<lazy_response_result> async_send_request_lazy(http::verb method,
+                                                                     std::string_view path,
+                                                                     http::fields const& headers = http::fields());
+
+        net::awaitable<lazy_response_result> async_send_request_lazy(http::verb method,
+                                                                     std::string_view path,
+                                                                     std::string_view body,
+                                                                     http::fields const& headers = http::fields());
+
+        net::awaitable<lazy_response_result> async_send_request_lazy(http::verb method,
+                                                                     std::string_view path,
+                                                                     boost::json::value&& body,
+                                                                     http::fields const& headers = http::fields());
+
+        net::awaitable<lazy_response_result> async_send_request_lazy(http::verb method,
+                                                                     std::string_view path,
+                                                                     html::form_data&& body,
+                                                                     http::fields const& headers = http::fields());
+
+        net::awaitable<lazy_response_result> async_send_request_lazy(http::verb method,
+                                                                     std::string_view path,
+                                                                     html::query_params&& body,
+                                                                     http::fields const& headers = http::fields());
+
+        net::awaitable<lazy_response_result> async_send_request_lazy(http::verb method,
+                                                                     std::string_view path,
+                                                                     html::query_params const& params,
+                                                                     http::fields const& headers = http::fields());
+
+        net::awaitable<lazy_response_result> async_send_request_lazy(http::verb method,
+                                                                     std::string_view path,
+                                                                     html::query_params const& params,
+                                                                     std::string_view body,
+                                                                     http::fields const& headers = http::fields());
+
+        net::awaitable<lazy_response_result> async_send_request_lazy(http::verb method,
+                                                                     std::string_view path,
+                                                                     html::query_params const& params,
+                                                                     boost::json::value&& body,
+                                                                     http::fields const& headers = http::fields());
+
+        net::awaitable<lazy_response_result> async_send_request_lazy(http::verb method,
+                                                                     std::string_view path,
+                                                                     html::query_params const& params,
+                                                                     html::form_data&& body,
+                                                                     http::fields const& headers = http::fields());
+
+        net::awaitable<lazy_response_result> async_send_request_lazy(http::verb method,
+                                                                     std::string_view path,
+                                                                     html::query_params const& params,
+                                                                     html::query_params&& body,
+                                                                     http::fields const& headers = http::fields());
+
+        std::shared_ptr<write_session> create_writer();
 
         // ---- Download ----
 
@@ -194,5 +249,19 @@ namespace httplib::client
 
         class impl;
         std::shared_ptr<impl> impl_;
+
+        friend class ::httplib::client::response::impl;
+        friend class read_session_impl;
+
+        friend std::shared_ptr<impl>&
+        get_impl(http_client& self)
+        {
+            return self.impl_;
+        }
+        friend std::shared_ptr<impl> const&
+        get_impl(http_client const& self)
+        {
+            return self.impl_;
+        }
     };
 } // namespace httplib::client

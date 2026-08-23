@@ -1,4 +1,6 @@
 #include "common.hpp"
+#include "client/client_impl.h"
+#include "client/read_session_impl.hpp"
 #include "httplib/body/file_body.hpp"
 #include "httplib/body/form_data_body.hpp"
 #include "httplib/body/json_body.hpp"
@@ -116,7 +118,7 @@ TEST_CASE("Response: set_chunked_write_handler with multiple chunks", "[response
         [](auto& client) -> net::awaitable<void>
         {
             auto writer = client.create_writer();
-            auto reader = client.create_reader();
+            auto reader = std::make_shared<httplib::client::read_session_impl>(get_impl(client));
             std::string streamed;
             co_await writer->write_header(http::verb::get, "/stream", {});
             co_await writer->write_body(net::buffer("", 0), false);

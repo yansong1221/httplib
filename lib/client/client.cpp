@@ -1,7 +1,5 @@
 #include "httplib/client/client.hpp"
 #include "client_impl.h"
-#include "ndjson_reader_impl.hpp"
-#include "sse_reader_impl.hpp"
 #include <boost/url.hpp>
 #include <stdexcept>
 #include <utility>
@@ -236,28 +234,121 @@ namespace httplib::client
         co_return co_await async_send_file(method, detail::make_target(path, params), file_path, headers);
     }
 
+    // =============================================================================
+    // async_send_request_lazy (streaming response, body unread)
+    // =============================================================================
+
+    net::awaitable<http_client::lazy_response_result>
+    http_client::async_send_request_lazy(http::verb method, std::string_view path, http::fields const& headers)
+    {
+        auto request = impl_->make_http_request(method, path, headers);
+        co_return co_await impl_->async_send_request_lazy(request);
+    }
+
+    net::awaitable<http_client::lazy_response_result>
+    http_client::async_send_request_lazy(http::verb method,
+                                         std::string_view path,
+                                         std::string_view body,
+                                         http::fields const& headers)
+    {
+        auto request = impl_->make_http_request(method, path, headers);
+        request.body() = std::string(body);
+        request.content_length(body.size());
+        co_return co_await impl_->async_send_request_lazy(request);
+    }
+
+    net::awaitable<http_client::lazy_response_result>
+    http_client::async_send_request_lazy(http::verb method,
+                                         std::string_view path,
+                                         boost::json::value&& body,
+                                         http::fields const& headers)
+    {
+        auto request = impl_->make_http_request(method, path, headers);
+        request.set(http::field::content_type, "application/json");
+        request.body() = std::move(body);
+        request.prepare_payload();
+        co_return co_await impl_->async_send_request_lazy(request);
+    }
+
+    net::awaitable<http_client::lazy_response_result>
+    http_client::async_send_request_lazy(http::verb method,
+                                         std::string_view path,
+                                         html::form_data&& body,
+                                         http::fields const& headers)
+    {
+        auto request = impl_->make_http_request(method, path, headers);
+        request.set(http::field::content_type, fmt::format("multipart/form-data; boundary={}", body.boundary));
+        request.body() = std::move(body);
+        request.prepare_payload();
+        co_return co_await impl_->async_send_request_lazy(request);
+    }
+
+    net::awaitable<http_client::lazy_response_result>
+    http_client::async_send_request_lazy(http::verb method,
+                                         std::string_view path,
+                                         html::query_params&& body,
+                                         http::fields const& headers)
+    {
+        auto request = impl_->make_http_request(method, path, headers);
+        request.set(http::field::content_type, "application/x-www-form-urlencoded");
+        request.body() = std::move(body);
+        request.prepare_payload();
+        co_return co_await impl_->async_send_request_lazy(request);
+    }
+
+    net::awaitable<http_client::lazy_response_result>
+    http_client::async_send_request_lazy(http::verb method,
+                                         std::string_view path,
+                                         html::query_params const& params,
+                                         http::fields const& headers)
+    {
+        co_return co_await async_send_request_lazy(method, detail::make_target(path, params), headers);
+    }
+
+    net::awaitable<http_client::lazy_response_result>
+    http_client::async_send_request_lazy(http::verb method,
+                                         std::string_view path,
+                                         html::query_params const& params,
+                                         std::string_view body,
+                                         http::fields const& headers)
+    {
+        co_return co_await async_send_request_lazy(method, detail::make_target(path, params), body, headers);
+    }
+
+    net::awaitable<http_client::lazy_response_result>
+    http_client::async_send_request_lazy(http::verb method,
+                                         std::string_view path,
+                                         html::query_params const& params,
+                                         boost::json::value&& body,
+                                         http::fields const& headers)
+    {
+        co_return co_await async_send_request_lazy(method, detail::make_target(path, params), std::move(body), headers);
+    }
+
+    net::awaitable<http_client::lazy_response_result>
+    http_client::async_send_request_lazy(http::verb method,
+                                         std::string_view path,
+                                         html::query_params const& params,
+                                         html::form_data&& body,
+                                         http::fields const& headers)
+    {
+        co_return co_await async_send_request_lazy(method, detail::make_target(path, params), std::move(body), headers);
+    }
+
+    net::awaitable<http_client::lazy_response_result>
+    http_client::async_send_request_lazy(http::verb method,
+                                         std::string_view path,
+                                         html::query_params const& params,
+                                         html::query_params&& body,
+                                         http::fields const& headers)
+    {
+        co_return co_await async_send_request_lazy(method, detail::make_target(path, params), std::move(body), headers);
+    }
+
     std::shared_ptr<write_session>
     http_client::create_writer()
     {
         return impl_->create_writer();
-    }
-
-    std::shared_ptr<read_session>
-    http_client::create_reader()
-    {
-        return impl_->create_reader();
-    }
-
-    std::unique_ptr<sse_reader>
-    http_client::create_sse_reader()
-    {
-        return std::make_unique<sse_reader_impl>(create_reader());
-    }
-
-    std::unique_ptr<ndjson_reader>
-    http_client::create_ndjson_reader()
-    {
-        return std::make_unique<ndjson_reader_impl>(create_reader());
     }
 
     // =============================================================================

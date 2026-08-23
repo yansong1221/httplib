@@ -13,7 +13,6 @@ namespace httplib::client
     class http_client::impl : public std::enable_shared_from_this<http_client::impl>
     {
       public:
-        class read_session_impl;
         class write_session_impl;
 
         using body_setup_fn = std::function<void(http_client::response&)>;
@@ -57,13 +56,17 @@ namespace httplib::client
         net::awaitable<http_client::response_result> async_send_request_with_redirect(http_client::request& req,
                                                                                       body_setup_fn const& body_setup);
 
+        net::awaitable<http_client::lazy_response_result> async_send_request_lazy(http_client::request& req);
+
         net::awaitable<http_client::response_result> async_download(http_client::request& req,
                                                                     fs::path const& save_path);
 
         std::shared_ptr<write_session> create_writer();
-        std::shared_ptr<read_session> create_reader();
 
       private:
+        friend class ::httplib::client::response::impl;
+        friend class read_session_impl;
+
         net::awaitable<boost::system::error_code> co_connect();
 
         net::awaitable<http_client::response_result> async_send_request_impl(http_client::request& req,
@@ -165,7 +168,7 @@ namespace httplib::client
         mutable std::recursive_mutex stream_mutex_;
         beast::flat_buffer buffer_;
         std::weak_ptr<write_session_impl> write_impl_;
-        std::weak_ptr<read_session_impl> read_impl_;
+        std::weak_ptr<void> read_impl_;
 
         int max_redirects_ = 0;
 

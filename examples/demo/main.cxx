@@ -497,36 +497,29 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 
     // Stream with chunk handler
     {
-        auto writer = client.create_writer();
-        auto reader = client.create_reader();
-
-        co_await writer->write_header(http::verb::get, "/api/stream", {});
-        co_await writer->write_body(net::buffer("", 0), false);
-        auto ec = co_await reader->read_header();
-        if (!ec)
+        auto resp = co_await client.async_send_request_lazy(http::verb::get, "/api/stream");
+        if (resp)
         {
             while (true)
             {
                 std::array<char, 4096> buf;
-                auto result = co_await reader->read_body(net::buffer(buf));
+                auto result = co_await resp->read_some(net::buffer(buf));
                 if (result.has_error() || result.value() == 0)
                 {
                     break;
                 }
                 spdlog::info("  chunk: {}", std::string_view(buf.data(), result.value()).substr(0, result.value() - 1));
             }
-            spdlog::info("GET /api/stream -> {}", static_cast<unsigned>(reader->result()));
+            spdlog::info("GET /api/stream -> {}", static_cast<unsigned>(resp->result()));
         }
     }
 
     // SSE (Server-Sent Events)
     {
-        auto sse = client.create_sse_reader();
-
-        co_await client.async_get("/api/sse");
-        auto ec = co_await sse->read_header();
-        if (!ec)
+        auto resp = co_await client.async_send_request_lazy(http::verb::get, "/api/sse");
+        if (resp)
         {
+            auto sse = resp->create_sse_reader();
             while (!sse->is_done())
             {
                 auto result = co_await sse->read_event();
@@ -547,12 +540,10 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 
     // NDJSON (Newline Delimited JSON)
     {
-        auto ndjson = client.create_ndjson_reader();
-
-        co_await client.async_get("/api/ndjson");
-        auto ec = co_await ndjson->read_header();
-        if (!ec)
+        auto resp = co_await client.async_send_request_lazy(http::verb::get, "/api/ndjson");
+        if (resp)
         {
+            auto ndjson = resp->create_ndjson_reader();
             while (!ndjson->is_done())
             {
                 auto result = co_await ndjson->read();
