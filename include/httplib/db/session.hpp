@@ -83,6 +83,7 @@ namespace httplib::db
         net::awaitable<void>
         with_transaction(F&& f)
         {
+            std::exception_ptr e;
             co_await begin_transaction();
 
             try
@@ -92,8 +93,10 @@ namespace httplib::db
             }
             catch (...)
             {
-                auto e = std::current_exception();
-
+                e = std::current_exception();
+            }
+            if (e)
+            {
                 try
                 {
                     co_await rollback();
@@ -101,7 +104,6 @@ namespace httplib::db
                 catch (...)
                 {
                 }
-
                 std::rethrow_exception(e);
             }
         }
