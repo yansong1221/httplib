@@ -4,7 +4,7 @@
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/read_session.hpp"
-#include "httplib/client/write_session.hpp"
+#include "httplib/client/lazy_request.hpp"
 #include "httplib/client/ws_client.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
@@ -569,7 +569,7 @@ namespace httplib::server
                     co_return;
                 }
 
-                auto writer = client->create_writer();
+                auto writer = client->create_lazy_request();
                 auto reader = std::make_shared<httplib::client::read_session_impl>(get_impl(*client));
 
                 if (auto rel_ec = co_await writer->write_header(req.method(), upstream_target, upstream_headers);

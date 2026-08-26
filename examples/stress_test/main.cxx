@@ -393,14 +393,12 @@ main(int argc, char** argv)
                     auto t0 = std::chrono::steady_clock::now();
 
                     httplib::client::http_client::response_result result;
-                    if (cfg.body.empty())
+                    auto req = httplib::client::request(cfg.verb, cfg.path, req_headers);
+                    if (!cfg.body.empty())
                     {
-                        result = co_await client.async_send_request(cfg.verb, cfg.path, req_headers);
+                        req.set_body(cfg.body);
                     }
-                    else
-                    {
-                        result = co_await client.async_send_request(cfg.verb, cfg.path, cfg.body, req_headers);
-                    }
+                    result = co_await client.async_send_request(std::move(req));
 
                     auto t1 = std::chrono::steady_clock::now();
                     double lat_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();

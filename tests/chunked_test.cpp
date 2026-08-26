@@ -1,8 +1,6 @@
 #include "common.hpp"
-#include "client/client_impl.h"
-#include "client/read_session_impl.hpp"
 #include "httplib/body/string_body.hpp"
-#include "httplib/client/write_session.hpp"
+#include "httplib/client/lazy_request.hpp"
 #include "httplib/server/chunk_reader.hpp"
 #include "httplib/server/middleware/cors.hpp"
 #include "httplib/server/request.hpp"
@@ -25,8 +23,7 @@ namespace
     net::awaitable<std::string>
     send_chunked(Client& client, http::verb method, std::string_view path, std::vector<std::string> chunks)
     {
-        auto writer = client.create_writer();
-        auto reader = std::make_shared<httplib::client::read_session_impl>(get_impl(client));
+        auto writer = client.create_lazy_request();
 
         co_await writer->write_header(method, path, {}, false);
         for (size_t i = 0; i < chunks.size(); ++i)
@@ -39,8 +36,8 @@ namespace
             co_await writer->write_body(net::buffer("", 0), false);
         }
 
-        auto header_ec = co_await reader->read_header();
-        if (header_ec)
+        auto resp = co_await writer->read_response();
+        if (resp.has_error())
         {
             co_return std::string{};
         }
@@ -49,7 +46,7 @@ namespace
         std::array<char, 4096> buf;
         for (;;)
         {
-            auto result = co_await reader->read_body(net::buffer(buf));
+            auto result = co_await resp->read_some(net::buffer(buf));
             if (result.has_error() || result.value() == 0)
             {
                 break;
@@ -299,7 +296,8 @@ TEST_CASE("Chunked: middleware is wrapped via set_chunked_http_handler", "[chunk
             auto hdrs = httplib::http::fields();
             hdrs.set(http::field::origin, "https://example.com");
             auto get_resp = UNWRAP(
-                co_await client.async_send_request(http::verb::get, "/chunked/cors_middleware", hdrs));
+                co_await client.async_send_request(
+                    httplib::client::request(http::verb::get, "/chunked/cors_middleware", hdrs)));
             REQUIRE(get_resp.result() == http::status::ok);
             REQUIRE(as_string(get_resp) == "cors_middleware-get");
             REQUIRE(get_resp[http::field::access_control_allow_origin] == "https://example.com");

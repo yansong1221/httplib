@@ -2,7 +2,7 @@
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/read_session.hpp"
-#include "httplib/client/write_session.hpp"
+#include "httplib/client/lazy_request.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/when_all.hpp"
 #include <boost/url.hpp>
@@ -521,7 +521,8 @@ namespace httplib::client
             handle->set_max_redirects(0);
             handle->set_verify_ssl(config_.verify_ssl);
 
-            auto resp_result = co_await handle->async_send_request_lazy(method, t, merged);
+            auto req = httplib::client::request(method, t, merged);
+            auto resp_result = co_await handle->async_send_request_lazy(std::move(req));
             if (!resp_result.has_value())
             {
                 co_return request_result {};

@@ -5,7 +5,7 @@
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/read_session.hpp"
-#include "httplib/client/write_session.hpp"
+#include "httplib/client/lazy_request.hpp"
 #include "httplib/client/ws_client.hpp"
 #include "httplib/server/chunk_reader.hpp"
 #include "httplib/server/chunk_writer.hpp"
@@ -497,7 +497,7 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 
     // Stream with chunk handler
     {
-        auto resp = co_await client.async_send_request_lazy(http::verb::get, "/api/stream");
+        auto resp = co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/api/stream"));
         if (resp)
         {
             while (true)
@@ -516,7 +516,7 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 
     // SSE (Server-Sent Events)
     {
-        auto resp = co_await client.async_send_request_lazy(http::verb::get, "/api/sse");
+        auto resp = co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/api/sse"));
         if (resp)
         {
             auto sse = resp->create_sse_reader();
@@ -540,7 +540,7 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 
     // NDJSON (Newline Delimited JSON)
     {
-        auto resp = co_await client.async_send_request_lazy(http::verb::get, "/api/ndjson");
+        auto resp = co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/api/ndjson"));
         if (resp)
         {
             auto ndjson = resp->create_ndjson_reader();
@@ -575,7 +575,7 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
     {
         auto hdrs = httplib::http::fields();
         hdrs.set(http::field::authorization, "Basic YWRtaW46c2VjcmV0");
-        auto r = co_await client.async_send_request(http::verb::get, "/api/admin", hdrs);
+        auto r = co_await client.async_send_request(httplib::client::request(http::verb::get, "/api/admin", hdrs));
         if (r)
         {
             spdlog::info("GET /api/admin (with auth) -> {}", r.value().result_int());

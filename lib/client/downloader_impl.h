@@ -59,7 +59,7 @@ namespace httplib::client
         struct request_result
         {
             http_client_pool::client_handle handle;
-            client::response response;
+            client::lazy_response response;
             http::fields headers;
             http::status status = http::status::unknown;
         };

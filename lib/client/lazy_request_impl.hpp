@@ -1,21 +1,25 @@
 #pragma once
 
 #include "client_impl.h"
-#include "httplib/client/write_session.hpp"
+#include "httplib/client/lazy_request.hpp"
+#include "lazy_response_impl.h"
 #include <boost/beast/http/buffer_body.hpp>
+#include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/serializer.hpp>
+#include <limits>
 
 namespace httplib::client
 {
-    class http_client::impl::write_session_impl final : public write_session
+    class http_client::impl::lazy_request_impl final : public lazy_request
     {
       public:
-        explicit write_session_impl(std::shared_ptr<http_client::impl> parent) : parent_(std::move(parent)) {}
+        explicit lazy_request_impl(std::shared_ptr<http_client::impl> parent) : parent_(std::move(parent)) {}
 
         net::awaitable<boost::system::error_code>
         write_header(http::verb method, std::string_view target, http::fields const& headers, bool relay) override
         {
+            method_ = method;
             req_msg_ = std::make_unique<http::request<http::buffer_body>>(method, target, 11);
             req_sr_ = std::make_unique<http::request_serializer<http::buffer_body>>(*req_msg_);
             req_msg_->set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
@@ -54,7 +58,24 @@ namespace httplib::client
             co_return ec;
         }
 
+        net::awaitable<boost::system::result<client::lazy_response>>
+        read_response() override
+        {
+            auto header_parser = std::make_unique<http::response_parser<http::empty_body>>();
+            header_parser->skip(method_ == http::verb::head);
+            header_parser->header_limit((std::numeric_limits<std::uint32_t>::max)());
+            header_parser->body_limit((std::numeric_limits<std::uint64_t>::max)());
+
+            if (auto ec = co_await parent_->async_read(*header_parser, true); ec)
+            {
+                co_return ec;
+            }
+
+            co_return co_await client::lazy_response::impl::create(std::move(header_parser), parent_);
+        }
+
         std::shared_ptr<http_client::impl> parent_;
+        http::verb method_ = http::verb::unknown;
         std::unique_ptr<http::request<http::buffer_body>> req_msg_;
         std::unique_ptr<http::request_serializer<http::buffer_body>> req_sr_;
     };

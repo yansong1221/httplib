@@ -1,8 +1,6 @@
 #include "common.hpp"
-#include "client/client_impl.h"
-#include "client/read_session_impl.hpp"
 #include "httplib/client/client_pool.hpp"
-#include "httplib/client/write_session.hpp"
+#include "httplib/client/lazy_request.hpp"
 #include "httplib/server/chunk_writer.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
@@ -803,30 +801,30 @@ TEST_CASE("client_pool: reader survives handle destruction", "[client_pool]")
             auto host = ep.address().to_string();
             auto port = ep.port();
 
-            std::shared_ptr<httplib::client::read_session_impl> reader;
+            httplib::client::lazy_response resp;
             std::string streamed;
             {
                 auto h = co_await p.async_acquire(host, port, false);
                 REQUIRE(h);
-                auto writer = h->create_writer();
-                reader = std::make_shared<httplib::client::read_session_impl>(get_impl(*h));
+                auto writer = h->create_lazy_request();
 
                 co_await writer->write_header(http::verb::get, "/stream", {});
                 co_await writer->write_body(net::buffer("", 0), false);
-                co_await reader->read_header();
+
+                resp = UNWRAP(co_await writer->read_response());
 
                 std::array<char, 1> buf;
-                auto r = co_await reader->read_body(net::buffer(buf));
+                auto r = co_await resp.read_some(net::buffer(buf));
                 REQUIRE_FALSE(r.has_error());
                 REQUIRE(r.value() == 1);
                 streamed.append(buf.data(), r.value());
             }
-            // handle (and writer) destroyed above; the reader keeps the impl alive.
+            // handle (and writer) destroyed above; the response keeps the impl alive.
 
             std::array<char, 1> buf;
             for (;;)
             {
-                auto r = co_await reader->read_body(net::buffer(buf));
+                auto r = co_await resp.read_some(net::buffer(buf));
                 if (r.has_error() || r.value() == 0)
                 {
                     break;

@@ -1,6 +1,8 @@
 #pragma once
 #include "httplib/body/any_body.hpp"
 #include "httplib/client/client_fwd.hpp"
+#include "httplib/client/lazy_response.hpp"
+#include "httplib/client/request.hpp"
 #include "httplib/client/response.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <filesystem>
@@ -19,11 +21,11 @@ namespace httplib::client
             never
         };
 
-        using response = http::response<body::any_body>;
-        using request = http::request<body::any_body>;
+        using response = client::response;
+        using request = client::request;
         using response_result = boost::system::result<response>;
 
-        using lazy_response = client::response;
+        using lazy_response = client::lazy_response;
         using lazy_response_result = boost::system::result<lazy_response>;
 
       public:
@@ -51,6 +53,11 @@ namespace httplib::client
         net::any_io_executor get_executor() const;
 
       public:
+        // ---- core send ----
+
+        net::awaitable<response_result> async_send_request(request req);
+        net::awaitable<lazy_response_result> async_send_request_lazy(request req);
+
         // ---- HTTP method shorthands (no body) ----
 
         net::awaitable<response_result> async_get(std::string_view path,
@@ -108,135 +115,14 @@ namespace httplib::client
                                                     html::query_params const& params = {},
                                                     http::fields const& headers = http::fields());
 
-        // ---- async_send_request (core, body-type overloads) ----
-
-        net::awaitable<response_result> async_send_request(http::verb method,
-                                                           std::string_view path,
-                                                           http::fields const& headers = http::fields());
-
-        net::awaitable<response_result> async_send_request(http::verb method,
-                                                           std::string_view path,
-                                                           std::string_view body,
-                                                           http::fields const& headers = http::fields());
-
-        net::awaitable<response_result> async_send_request(http::verb method,
-                                                           std::string_view path,
-                                                           boost::json::value&& body,
-                                                           http::fields const& headers = http::fields());
-
-        net::awaitable<response_result> async_send_request(http::verb method,
-                                                           std::string_view path,
-                                                           html::form_data&& body,
-                                                           http::fields const& headers = http::fields());
-
-        net::awaitable<response_result> async_send_request(http::verb method,
-                                                           std::string_view path,
-                                                           html::query_params&& body,
-                                                           http::fields const& headers = http::fields());
-
-        net::awaitable<response_result> async_send_request(http::verb method,
-                                                           std::string_view path,
-                                                           html::query_params const& params,
-                                                           http::fields const& headers = http::fields());
-
-        net::awaitable<response_result> async_send_request(http::verb method,
-                                                           std::string_view path,
-                                                           html::query_params const& params,
-                                                           std::string_view body,
-                                                           http::fields const& headers = http::fields());
-
-        net::awaitable<response_result> async_send_request(http::verb method,
-                                                           std::string_view path,
-                                                           html::query_params const& params,
-                                                           boost::json::value&& body,
-                                                           http::fields const& headers = http::fields());
-
-        net::awaitable<response_result> async_send_request(http::verb method,
-                                                           std::string_view path,
-                                                           html::query_params const& params,
-                                                           html::form_data&& body,
-                                                           http::fields const& headers = http::fields());
-
-        net::awaitable<response_result> async_send_request(http::verb method,
-                                                           std::string_view path,
-                                                           html::query_params const& params,
-                                                           html::query_params&& body,
-                                                           http::fields const& headers = http::fields());
-
-        net::awaitable<response_result> async_send_file(http::verb method,
-                                                        std::string_view path,
-                                                        fs::path const& file_path,
-                                                        http::fields const& headers = http::fields());
-
-        net::awaitable<response_result> async_send_file(http::verb method,
-                                                        std::string_view path,
-                                                        html::query_params const& params,
-                                                        fs::path const& file_path,
-                                                        http::fields const& headers = http::fields());
-
-        // ---- async_send_request_lazy (returns a streaming response, body unread) ----
-
-        net::awaitable<lazy_response_result> async_send_request_lazy(http::verb method,
-                                                                     std::string_view path,
-                                                                     http::fields const& headers = http::fields());
-
-        net::awaitable<lazy_response_result> async_send_request_lazy(http::verb method,
-                                                                     std::string_view path,
-                                                                     std::string_view body,
-                                                                     http::fields const& headers = http::fields());
-
-        net::awaitable<lazy_response_result> async_send_request_lazy(http::verb method,
-                                                                     std::string_view path,
-                                                                     boost::json::value&& body,
-                                                                     http::fields const& headers = http::fields());
-
-        net::awaitable<lazy_response_result> async_send_request_lazy(http::verb method,
-                                                                     std::string_view path,
-                                                                     html::form_data&& body,
-                                                                     http::fields const& headers = http::fields());
-
-        net::awaitable<lazy_response_result> async_send_request_lazy(http::verb method,
-                                                                     std::string_view path,
-                                                                     html::query_params&& body,
-                                                                     http::fields const& headers = http::fields());
-
-        net::awaitable<lazy_response_result> async_send_request_lazy(http::verb method,
-                                                                     std::string_view path,
-                                                                     html::query_params const& params,
-                                                                     http::fields const& headers = http::fields());
-
-        net::awaitable<lazy_response_result> async_send_request_lazy(http::verb method,
-                                                                     std::string_view path,
-                                                                     html::query_params const& params,
-                                                                     std::string_view body,
-                                                                     http::fields const& headers = http::fields());
-
-        net::awaitable<lazy_response_result> async_send_request_lazy(http::verb method,
-                                                                     std::string_view path,
-                                                                     html::query_params const& params,
-                                                                     boost::json::value&& body,
-                                                                     http::fields const& headers = http::fields());
-
-        net::awaitable<lazy_response_result> async_send_request_lazy(http::verb method,
-                                                                     std::string_view path,
-                                                                     html::query_params const& params,
-                                                                     html::form_data&& body,
-                                                                     http::fields const& headers = http::fields());
-
-        net::awaitable<lazy_response_result> async_send_request_lazy(http::verb method,
-                                                                     std::string_view path,
-                                                                     html::query_params const& params,
-                                                                     html::query_params&& body,
-                                                                     http::fields const& headers = http::fields());
-
-        std::shared_ptr<write_session> create_writer();
-
-        // ---- Download ----
+        // ---- download ----
 
         net::awaitable<response_result> async_download(http::verb method,
                                                        std::string_view path,
                                                        fs::path const& save_path,
                                                        http::fields const& headers = http::fields());
+
+        std::shared_ptr<lazy_request> create_lazy_request();
 
         void close();
         bool is_open() const;
@@ -250,7 +136,7 @@ namespace httplib::client
         class impl;
         std::shared_ptr<impl> impl_;
 
-        friend class ::httplib::client::response::impl;
+        friend class ::httplib::client::lazy_response::impl;
         friend class read_session_impl;
 
         friend std::shared_ptr<impl>&

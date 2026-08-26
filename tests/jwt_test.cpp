@@ -264,7 +264,7 @@ TEST_CASE("JWT: middleware auth via Bearer token", "[jwt]")
         {
             auto hdrs = httplib::http::fields();
             hdrs.set(http::field::authorization, "Bearer " + token);
-            auto resp = UNWRAP(co_await client.async_send_request(http::verb::get, "/protected", hdrs));
+            auto resp = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/protected", hdrs)));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(test_common::as_string(resp) == "alice");
             co_return;
@@ -288,7 +288,7 @@ TEST_CASE("JWT: middleware rejects invalid token", "[jwt]")
         {
             auto hdrs = httplib::http::fields();
             hdrs.set(http::field::authorization, "Bearer invalid.token.here");
-            auto resp = UNWRAP(co_await client.async_send_request(http::verb::get, "/protected", hdrs));
+            auto resp = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/protected", hdrs)));
             REQUIRE(resp.result() == http::status::unauthorized);
             co_return;
         });

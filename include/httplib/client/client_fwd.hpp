@@ -11,7 +11,10 @@ namespace httplib::client
     class cache;
     class disk_cache;
     class read_session;
-    class write_session;
+    class lazy_request;
+    class request;
+    class response;
+    class lazy_response;
     class sse_reader;
     class ndjson_reader;
 

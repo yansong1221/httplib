@@ -1,11 +1,9 @@
 #include "common.hpp"
-#include "client/client_impl.h"
-#include "client/read_session_impl.hpp"
 #include "httplib/body/file_body.hpp"
 #include "httplib/body/form_data_body.hpp"
 #include "httplib/body/json_body.hpp"
 #include "httplib/body/string_body.hpp"
-#include "httplib/client/write_session.hpp"
+#include "httplib/client/lazy_request.hpp"
 #include "httplib/server/chunk_writer.hpp"
 #include "httplib/server/mount_point_entry.hpp"
 #include "httplib/server/request.hpp"
@@ -117,23 +115,22 @@ TEST_CASE("Response: set_chunked_write_handler with multiple chunks", "[response
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto writer = client.create_writer();
-            auto reader = std::make_shared<httplib::client::read_session_impl>(get_impl(client));
+            auto writer = client.create_lazy_request();
             std::string streamed;
             co_await writer->write_header(http::verb::get, "/stream", {});
             co_await writer->write_body(net::buffer("", 0), false);
-            co_await reader->read_header();
 
+            auto resp = UNWRAP(co_await writer->read_response());
             std::array<char, 4096> buf;
             while (true)
             {
-                auto result = co_await reader->read_body(net::buffer(buf));
+                auto result = co_await resp.read_some(net::buffer(buf));
                 if (result.has_error() || result.value() == 0)
                     break;
                 streamed.append(buf.data(), result.value());
             }
 
-            REQUIRE(reader->result() == http::status::ok);
+            REQUIRE(resp.result() == http::status::ok);
             REQUIRE(streamed == "ABC");
             co_return;
         });
@@ -253,8 +250,7 @@ TEST_CASE("Response: set_file_content with Range request", "[response]")
                 auto range_headers = httplib::http::fields();
                 range_headers.set(http::field::range, "bytes=0-4");
 
-                auto resp = UNWRAP(co_await client.async_send_request(
-                    http::verb::get, "/file-range", range_headers));
+                auto resp = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/file-range", range_headers)));
                 REQUIRE(resp.result() == http::status::partial_content);
                 REQUIRE(resp.body().template as<body::string_body>() == "01234");
                 co_return;
@@ -286,8 +282,7 @@ TEST_CASE("Response: Range request open-ended (bytes=N-)", "[response]")
                 auto range_headers = httplib::http::fields();
                 range_headers.set(http::field::range, "bytes=7-");
 
-                auto resp = UNWRAP(co_await client.async_send_request(
-                    http::verb::get, "/file-range-open", range_headers));
+                auto resp = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/file-range-open", range_headers)));
                 REQUIRE(resp.result() == http::status::partial_content);
                 REQUIRE(resp.body().template as<body::string_body>() == "789");
                 co_return;
@@ -319,8 +314,7 @@ TEST_CASE("Response: Range request suffix (bytes=-N)", "[response]")
                 auto range_headers = httplib::http::fields();
                 range_headers.set(http::field::range, "bytes=-4");
 
-                auto resp = UNWRAP(co_await client.async_send_request(
-                    http::verb::get, "/file-range-suffix", range_headers));
+                auto resp = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/file-range-suffix", range_headers)));
                 REQUIRE(resp.result() == http::status::partial_content);
                 REQUIRE(resp.body().template as<body::string_body>() == "6789");
                 co_return;
@@ -352,8 +346,7 @@ TEST_CASE("Response: Range request Content-Range header", "[response]")
                 auto range_headers = httplib::http::fields();
                 range_headers.set(http::field::range, "bytes=2-5");
 
-                auto resp = UNWRAP(co_await client.async_send_request(
-                    http::verb::get, "/file-cr", range_headers));
+                auto resp = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/file-cr", range_headers)));
                 REQUIRE(resp.result() == http::status::partial_content);
                 REQUIRE(resp.body().template as<body::string_body>() == "cdef");
                 REQUIRE(resp.base().find(http::field::content_range) != resp.base().end());
@@ -387,8 +380,7 @@ TEST_CASE("Response: Range request out of bounds returns 416", "[response]")
                 auto range_headers = httplib::http::fields();
                 range_headers.set(http::field::range, "bytes=10-20");
 
-                auto resp = UNWRAP(co_await client.async_send_request(
-                    http::verb::get, "/file-range-oob", range_headers));
+                auto resp = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/file-range-oob", range_headers)));
                 REQUIRE(resp.result() == http::status::range_not_satisfiable);
                 REQUIRE(resp.base().find(http::field::content_range) != resp.base().end());
                 co_return;
@@ -426,7 +418,7 @@ TEST_CASE("Response: If-None-Match returns 304 for matching ETag", "[response]")
                 auto hdrs = httplib::http::fields();
                 hdrs.set(http::field::if_none_match, etag);
                 auto resp2 = UNWRAP(
-                    co_await client.async_send_request(http::verb::get, "/file-etag", hdrs));
+                    co_await client.async_send_request(httplib::client::request(http::verb::get, "/file-etag", hdrs)));
                 REQUIRE(resp2.result() == http::status::not_modified);
                 co_return;
             });
@@ -463,7 +455,7 @@ TEST_CASE("Response: If-Modified-Since returns 304 for unmodified", "[response]"
                 auto hdrs = httplib::http::fields();
                 hdrs.set(http::field::if_modified_since, last_mod);
                 auto resp2 = UNWRAP(
-                    co_await client.async_send_request(http::verb::get, "/file-ims", hdrs));
+                    co_await client.async_send_request(httplib::client::request(http::verb::get, "/file-ims", hdrs)));
                 REQUIRE(resp2.result() == http::status::not_modified);
                 co_return;
             });
@@ -524,8 +516,7 @@ TEST_CASE("Response: Multi-range request returns multipart/byteranges", "[respon
                 auto range_headers = httplib::http::fields();
                 range_headers.set(http::field::range, "bytes=0-2,5-7");
 
-                auto resp = UNWRAP(co_await client.async_send_request(
-                    http::verb::get, "/file-multi-range", range_headers));
+                auto resp = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/file-multi-range", range_headers)));
                 REQUIRE(resp.result() == http::status::partial_content);
                 auto ct = std::string(resp[http::field::content_type]);
                 REQUIRE(ct.starts_with("multipart/byteranges"));

@@ -2,9 +2,11 @@
 #include "compress/compressor.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
+#include "lazy_response_impl.h"
+#include "request_impl.h"
 #include "response_impl.h"
 #include "util/logging.hpp"
-#include "write_session_impl.hpp"
+#include "lazy_request_impl.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/write.hpp>
@@ -37,28 +39,6 @@ namespace httplib::client
         default_logger_ = httplib::detail::make_console_logger("httplib.client");
 
         buffer_.reserve(io_buffer_size);
-    }
-
-    http_client::request
-    http_client::impl::make_http_request(http::verb method, std::string_view target, http::fields const& headers) const
-    {
-        http_client::request req(method, target, 11);
-        req.set(http::field::host, host_value_);
-        req.set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
-        req.set(http::field::accept, "*/*");
-
-        auto const& encoding = compress::compressor_factory::instance().supported_encoding();
-        if (!encoding.empty())
-        {
-            req.set(http::field::accept_encoding, boost::join(encoding, ","));
-        }
-
-        for (auto const& field : headers)
-        {
-            req.set(field.name_string(), field.value());
-        }
-        req.keep_alive(true);
-        return std::move(req);
     }
 
     void
@@ -125,9 +105,13 @@ namespace httplib::client
     net::awaitable<http_client::response_result>
     http_client::impl::async_send_request_impl(http_client::request& req,
                                                body_setup_fn const& body_setup,
-                                               bool allow_retry) noexcept
+                                                bool allow_retry) noexcept
     {
-        http::request_serializer<body::any_body> serializer(req);
+        if (!req.has(http::field::host))
+        {
+            get_impl(req).set(http::field::host, host_value_);
+        }
+        http::request_serializer<body::any_body> serializer(get_impl(req));
         auto ec = co_await async_write(serializer, false);
         if (ec)
         {
@@ -136,7 +120,7 @@ namespace httplib::client
 
         if (!read_impl_.expired())
         {
-            co_return http_client::response {};
+            co_return client::response {};
         }
 
         http::response_parser<http::empty_body> header_parser;
@@ -167,7 +151,7 @@ namespace httplib::client
         {
             co_return ec;
         }
-        co_return body_parser.release();
+        co_return client::response::impl::make(body_parser.release());
     }
 
     net::awaitable<http_client::lazy_response_result>
@@ -178,7 +162,11 @@ namespace httplib::client
             co_return boost::system::errc::make_error_code(boost::system::errc::device_or_resource_busy);
         }
 
-        http::request_serializer<body::any_body> serializer(req);
+        if (!req.has(http::field::host))
+        {
+            get_impl(req).set(http::field::host, host_value_);
+        }
+        http::request_serializer<body::any_body> serializer(get_impl(req));
         if (auto ec = co_await async_write(serializer, false); ec)
         {
             co_return ec;
@@ -195,7 +183,7 @@ namespace httplib::client
             co_return ec;
         }
 
-        co_return co_await client::response::impl::create(std::move(header_parser), shared_from_this());
+        co_return co_await client::lazy_response::impl::create(std::move(header_parser), shared_from_this());
     }
 
     net::awaitable<http_client::response_result>
@@ -238,7 +226,6 @@ namespace httplib::client
                     auto new_target = u.encoded_path().empty() ? std::string("/") : u.encoded_path();
 
                     req.target(std::move(new_target));
-                    req.set(http::field::host, new_host);
 
                     auto new_impl = std::make_unique<impl>(executor_, std::move(new_host), new_port, new_ssl);
                     new_impl->timeout_policy_ = timeout_policy_;
@@ -258,11 +245,10 @@ namespace httplib::client
                     req.body() = body::empty_body::value_type {};
                     req.erase(http::field::content_type);
                     req.erase(http::field::content_length);
-                    req.prepare_payload();
+                    get_impl(req).prepare_payload();
                 }
 
                 req.target(std::string(loc));
-                req.set(http::field::host, host_);
                 continue;
             }
 
@@ -374,7 +360,7 @@ namespace httplib::client
             co_return boost::system::errc::make_error_code(boost::system::errc::permission_denied);
         }
 
-        auto setup = [fb_ptr](response& resp) { resp.body() = std::move(*fb_ptr); };
+        auto setup = [fb_ptr](http::response<body::any_body>& resp) { resp.body() = std::move(*fb_ptr); };
         auto result = co_await async_send_request_with_redirect(req, setup);
 
         if (!result.has_value() || result->result() == http::status::no_content
@@ -386,13 +372,13 @@ namespace httplib::client
         co_return result;
     }
 
-    std::shared_ptr<write_session>
-    http_client::impl::create_writer()
+    std::shared_ptr<lazy_request>
+    http_client::impl::create_lazy_request()
     {
         auto sp = write_impl_.lock();
         if (!sp)
         {
-            sp = std::make_shared<write_session_impl>(shared_from_this());
+            sp = std::make_shared<lazy_request_impl>(shared_from_this());
             write_impl_ = sp;
         }
         return sp;

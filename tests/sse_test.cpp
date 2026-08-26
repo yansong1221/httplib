@@ -30,7 +30,7 @@ TEST_CASE("SSE: server sends single event", "[sse]")
         {
             std::vector<httplib::client::sse_reader::sse_event> events;
 
-            auto resp = UNWRAP(co_await client.async_send_request_lazy(http::verb::get, "/events"));
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/events")));
             REQUIRE(resp.result() == http::status::ok);
             auto sse = resp.create_sse_reader();
 
@@ -62,7 +62,7 @@ TEST_CASE("SSE: server sends multiple events", "[sse]")
         {
             std::vector<httplib::client::sse_reader::sse_event> events;
 
-            auto resp = UNWRAP(co_await client.async_send_request_lazy(http::verb::get, "/events"));
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/events")));
             REQUIRE(resp.result() == http::status::ok);
             auto sse = resp.create_sse_reader();
 
@@ -94,7 +94,7 @@ TEST_CASE("SSE: event with id and type", "[sse]")
         {
             std::vector<httplib::client::sse_reader::sse_event> events;
 
-            auto resp = UNWRAP(co_await client.async_send_request_lazy(http::verb::get, "/events"));
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/events")));
             REQUIRE(resp.result() == http::status::ok);
             auto sse = resp.create_sse_reader();
 
@@ -126,7 +126,7 @@ TEST_CASE("SSE: retry interval", "[sse]")
         {
             std::vector<httplib::client::sse_reader::sse_event> events;
 
-            auto resp = UNWRAP(co_await client.async_send_request_lazy(http::verb::get, "/events"));
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/events")));
             REQUIRE(resp.result() == http::status::ok);
             auto sse = resp.create_sse_reader();
 
@@ -158,7 +158,7 @@ TEST_CASE("SSE: comment is ignored", "[sse]")
         {
             std::vector<httplib::client::sse_reader::sse_event> events;
 
-            auto resp = UNWRAP(co_await client.async_send_request_lazy(http::verb::get, "/events"));
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/events")));
             REQUIRE(resp.result() == http::status::ok);
             auto sse = resp.create_sse_reader();
 
@@ -190,7 +190,7 @@ TEST_CASE("SSE: Content-Type is text/event-stream", "[sse]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_send_request_lazy(http::verb::get, "/events"));
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/events")));
             REQUIRE(resp.result() == http::status::ok);
             auto sse = resp.create_sse_reader();
 
@@ -224,7 +224,7 @@ TEST_CASE("SSE: client can stop receiving by returning false", "[sse]")
         {
             std::vector<httplib::client::sse_reader::sse_event> events;
 
-            auto resp = UNWRAP(co_await client.async_send_request_lazy(http::verb::get, "/events"));
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/events")));
             REQUIRE(resp.result() == http::status::ok);
             auto sse = resp.create_sse_reader();
 
@@ -273,7 +273,7 @@ TEST_CASE("SSE: multi-line data", "[sse]")
         {
             std::vector<httplib::client::sse_reader::sse_event> events;
 
-            auto resp = UNWRAP(co_await client.async_send_request_lazy(http::verb::get, "/events"));
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/events")));
             REQUIRE(resp.result() == http::status::ok);
             auto sse = resp.create_sse_reader();
 
@@ -307,7 +307,7 @@ TEST_CASE("SSE: lazy response reader", "[sse]")
         {
             std::vector<httplib::client::sse_reader::sse_event> events;
 
-            auto resp = UNWRAP(co_await client.async_send_request_lazy(http::verb::get, "/events"));
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/events")));
             REQUIRE(resp.result() == http::status::ok);
 
             auto sse = resp.create_sse_reader();

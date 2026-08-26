@@ -560,7 +560,7 @@ TEST_CASE("proxy: rewrites Cookie header", "[proxy]")
             auto hdrs = http::fields();
             hdrs.set(http::field::cookie, "token=abc; Domain=upstream.com; Path=/api");
             auto resp = UNWRAP(
-                co_await c.async_send_request(http::verb::get, "/api/check-cookie", hdrs));
+                co_await c.async_send_request(httplib::client::request(http::verb::get, "/api/check-cookie", hdrs)));
             REQUIRE(resp.result() == http::status::ok);
             auto body = as_string(resp);
             REQUIRE(body.find("token=abc") != std::string::npos);
@@ -616,7 +616,7 @@ TEST_CASE("proxy: rewrites Referer to upstream", "[proxy]")
             hdrs.set(http::field::referer,
                       std::format("http://127.0.0.1:{}/api/some-page?a=1&b=2#sec", p_port));
             auto resp = UNWRAP(
-                co_await c.async_send_request(http::verb::get, "/api/echo-referer", hdrs));
+                co_await c.async_send_request(httplib::client::request(http::verb::get, "/api/echo-referer", hdrs)));
             REQUIRE(resp.result() == http::status::ok);
             auto body = as_string(resp);
             REQUIRE(body.find(u_host) != std::string::npos);
@@ -1186,7 +1186,7 @@ TEST_CASE("CONNECT: rejected by default", "[proxy]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_send_request(http::verb::connect, "example.com:80"));
+            auto resp = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::connect, "example.com:80")));
             REQUIRE(resp.result() == http::status::method_not_allowed);
             co_return;
         });
@@ -1213,7 +1213,7 @@ TEST_CASE("CONNECT: route handler can approve", "[proxy]")
         },
         [&](auto& client) -> net::awaitable<void>
         {
-            co_await client.async_send_request(http::verb::connect, "example.com:80");
+            co_await client.async_send_request(httplib::client::request(http::verb::connect, "example.com:80"));
             REQUIRE(handler_called);
             co_return;
         });
@@ -1237,7 +1237,7 @@ TEST_CASE("CONNECT: route handler can reject", "[proxy]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_send_request(http::verb::connect, "example.com:80"));
+            auto resp = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::connect, "example.com:80")));
             REQUIRE(resp.result() == http::status::forbidden);
             co_return;
         });
@@ -1263,7 +1263,7 @@ TEST_CASE("CONNECT: wildcard handler matches any target", "[proxy]")
         },
         [&](auto& client) -> net::awaitable<void>
         {
-            co_await client.async_send_request(http::verb::connect, "any.host:443");
+            co_await client.async_send_request(httplib::client::request(http::verb::connect, "any.host:443"));
             REQUIRE(handler_called);
             co_return;
         });
@@ -1284,7 +1284,7 @@ TEST_CASE("CONNECT: path-specific handlers don't interfere", "[proxy]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_send_request(http::verb::connect, "other.host:80"));
+            auto resp = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::connect, "other.host:80")));
             REQUIRE(resp.result() == http::status::method_not_allowed);
             co_return;
         });

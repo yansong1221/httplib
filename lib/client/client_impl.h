@@ -13,9 +13,9 @@ namespace httplib::client
     class http_client::impl : public std::enable_shared_from_this<http_client::impl>
     {
       public:
-        class write_session_impl;
+        class lazy_request_impl;
 
-        using body_setup_fn = std::function<void(http_client::response&)>;
+        using body_setup_fn = std::function<void(http::response<body::any_body>&)>;
 
         impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl);
 
@@ -30,10 +30,6 @@ namespace httplib::client
         {
             timeout_ = duration;
         }
-
-        http_client::request make_http_request(http::verb method,
-                                               std::string_view target,
-                                               http::fields const& headers) const;
 
         void
         set_max_redirects(int n)
@@ -61,10 +57,10 @@ namespace httplib::client
         net::awaitable<http_client::response_result> async_download(http_client::request& req,
                                                                     fs::path const& save_path);
 
-        std::shared_ptr<write_session> create_writer();
+        std::shared_ptr<lazy_request> create_lazy_request();
 
       private:
-        friend class ::httplib::client::response::impl;
+        friend class ::httplib::client::lazy_response::impl;
         friend class read_session_impl;
 
         net::awaitable<boost::system::error_code> co_connect();
@@ -167,7 +163,7 @@ namespace httplib::client
         std::unique_ptr<http_stream> stream_;
         mutable std::recursive_mutex stream_mutex_;
         beast::flat_buffer buffer_;
-        std::weak_ptr<write_session_impl> write_impl_;
+        std::weak_ptr<lazy_request_impl> write_impl_;
         std::weak_ptr<void> read_impl_;
 
         int max_redirects_ = 0;

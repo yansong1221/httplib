@@ -6,23 +6,6 @@
 
 namespace httplib::client
 {
-    namespace detail
-    {
-
-        std::string
-        make_target(std::string_view path, html::query_params const& params)
-        {
-            std::string target(path);
-            if (!params.empty())
-            {
-                target += target.find('?') == std::string::npos ? "?" : "&";
-                target += params.encoded();
-            }
-            return target;
-        }
-
-    } // namespace detail
-
     http_client::http_client(net::io_context& ex, std::string_view host, uint16_t port, bool ssl)
         : http_client(ex.get_executor(), host, port, ssl)
     {
@@ -96,259 +79,29 @@ namespace httplib::client
     }
 
     // =============================================================================
-    // async_send overloads (core)
+    // core send
     // =============================================================================
 
     net::awaitable<http_client::response_result>
-    http_client::async_send_request(http::verb method, std::string_view path, http::fields const& headers)
+    http_client::async_send_request(http_client::request req)
     {
-        auto request = impl_->make_http_request(method, path, headers);
-        co_return co_await impl_->async_send_request_with_redirect(request, nullptr);
+        co_return co_await impl_->async_send_request_with_redirect(req, nullptr);
     }
 
-    net::awaitable<http_client::response_result>
-    http_client::async_send_request(http::verb method,
-                                    std::string_view path,
-                                    std::string_view body,
-                                    http::fields const& headers)
+    net::awaitable<http_client::lazy_response_result>
+    http_client::async_send_request_lazy(http_client::request req)
     {
-        auto request = impl_->make_http_request(method, path, headers);
-        request.body() = std::string(body);
-        request.content_length(body.size());
-        co_return co_await impl_->async_send_request_with_redirect(request, nullptr);
-    }
-
-    net::awaitable<http_client::response_result>
-    http_client::async_send_request(http::verb method,
-                                    std::string_view path,
-                                    boost::json::value&& body,
-                                    http::fields const& headers)
-    {
-        auto request = impl_->make_http_request(method, path, headers);
-        request.set(http::field::content_type, "application/json");
-        request.body() = std::move(body);
-        request.prepare_payload();
-        co_return co_await impl_->async_send_request_with_redirect(request, nullptr);
-    }
-
-    net::awaitable<http_client::response_result>
-    http_client::async_send_request(http::verb method,
-                                    std::string_view path,
-                                    html::form_data&& body,
-                                    http::fields const& headers)
-    {
-        auto request = impl_->make_http_request(method, path, headers);
-        request.set(http::field::content_type, fmt::format("multipart/form-data; boundary={}", body.boundary));
-        request.body() = std::move(body);
-        request.prepare_payload();
-        co_return co_await impl_->async_send_request_with_redirect(request, nullptr);
-    }
-
-    net::awaitable<http_client::response_result>
-    http_client::async_send_request(http::verb method,
-                                    std::string_view path,
-                                    html::query_params&& body,
-                                    http::fields const& headers)
-    {
-        auto request = impl_->make_http_request(method, path, headers);
-        request.set(http::field::content_type, "application/x-www-form-urlencoded");
-        request.body() = std::move(body);
-        request.prepare_payload();
-        co_return co_await impl_->async_send_request_with_redirect(request, nullptr);
-    }
-
-    net::awaitable<http_client::response_result>
-    http_client::async_send_file(http::verb method,
-                                 std::string_view path,
-                                 fs::path const& file_path,
-                                 http::fields const& headers)
-    {
-        auto request = impl_->make_http_request(method, path, headers);
-        body::file_body::value_type file_body;
-        file_body.open(file_path, std::ios::in | std::ios::binary);
-        request.body() = std::move(file_body);
-        request.prepare_payload();
-        co_return co_await impl_->async_send_request_with_redirect(request, nullptr);
+        co_return co_await impl_->async_send_request_lazy(req);
     }
 
     // =============================================================================
-    // async_send_request with query params
+    // lazy request
     // =============================================================================
 
-    net::awaitable<http_client::response_result>
-    http_client::async_send_request(http::verb method,
-                                    std::string_view path,
-                                    html::query_params const& params,
-                                    http::fields const& headers)
+    std::shared_ptr<lazy_request>
+    http_client::create_lazy_request()
     {
-        co_return co_await async_send_request(method, detail::make_target(path, params), headers);
-    }
-
-    net::awaitable<http_client::response_result>
-    http_client::async_send_request(http::verb method,
-                                    std::string_view path,
-                                    html::query_params const& params,
-                                    std::string_view body,
-                                    http::fields const& headers)
-    {
-        co_return co_await async_send_request(method, detail::make_target(path, params), body, headers);
-    }
-
-    net::awaitable<http_client::response_result>
-    http_client::async_send_request(http::verb method,
-                                    std::string_view path,
-                                    html::query_params const& params,
-                                    boost::json::value&& body,
-                                    http::fields const& headers)
-    {
-        co_return co_await async_send_request(method, detail::make_target(path, params), std::move(body), headers);
-    }
-
-    net::awaitable<http_client::response_result>
-    http_client::async_send_request(http::verb method,
-                                    std::string_view path,
-                                    html::query_params const& params,
-                                    html::form_data&& body,
-                                    http::fields const& headers)
-    {
-        co_return co_await async_send_request(method, detail::make_target(path, params), std::move(body), headers);
-    }
-
-    net::awaitable<http_client::response_result>
-    http_client::async_send_request(http::verb method,
-                                    std::string_view path,
-                                    html::query_params const& params,
-                                    html::query_params&& body,
-                                    http::fields const& headers)
-    {
-        co_return co_await async_send_request(method, detail::make_target(path, params), std::move(body), headers);
-    }
-
-    net::awaitable<http_client::response_result>
-    http_client::async_send_file(http::verb method,
-                                 std::string_view path,
-                                 html::query_params const& params,
-                                 fs::path const& file_path,
-                                 http::fields const& headers)
-    {
-        co_return co_await async_send_file(method, detail::make_target(path, params), file_path, headers);
-    }
-
-    // =============================================================================
-    // async_send_request_lazy (streaming response, body unread)
-    // =============================================================================
-
-    net::awaitable<http_client::lazy_response_result>
-    http_client::async_send_request_lazy(http::verb method, std::string_view path, http::fields const& headers)
-    {
-        auto request = impl_->make_http_request(method, path, headers);
-        co_return co_await impl_->async_send_request_lazy(request);
-    }
-
-    net::awaitable<http_client::lazy_response_result>
-    http_client::async_send_request_lazy(http::verb method,
-                                         std::string_view path,
-                                         std::string_view body,
-                                         http::fields const& headers)
-    {
-        auto request = impl_->make_http_request(method, path, headers);
-        request.body() = std::string(body);
-        request.content_length(body.size());
-        co_return co_await impl_->async_send_request_lazy(request);
-    }
-
-    net::awaitable<http_client::lazy_response_result>
-    http_client::async_send_request_lazy(http::verb method,
-                                         std::string_view path,
-                                         boost::json::value&& body,
-                                         http::fields const& headers)
-    {
-        auto request = impl_->make_http_request(method, path, headers);
-        request.set(http::field::content_type, "application/json");
-        request.body() = std::move(body);
-        request.prepare_payload();
-        co_return co_await impl_->async_send_request_lazy(request);
-    }
-
-    net::awaitable<http_client::lazy_response_result>
-    http_client::async_send_request_lazy(http::verb method,
-                                         std::string_view path,
-                                         html::form_data&& body,
-                                         http::fields const& headers)
-    {
-        auto request = impl_->make_http_request(method, path, headers);
-        request.set(http::field::content_type, fmt::format("multipart/form-data; boundary={}", body.boundary));
-        request.body() = std::move(body);
-        request.prepare_payload();
-        co_return co_await impl_->async_send_request_lazy(request);
-    }
-
-    net::awaitable<http_client::lazy_response_result>
-    http_client::async_send_request_lazy(http::verb method,
-                                         std::string_view path,
-                                         html::query_params&& body,
-                                         http::fields const& headers)
-    {
-        auto request = impl_->make_http_request(method, path, headers);
-        request.set(http::field::content_type, "application/x-www-form-urlencoded");
-        request.body() = std::move(body);
-        request.prepare_payload();
-        co_return co_await impl_->async_send_request_lazy(request);
-    }
-
-    net::awaitable<http_client::lazy_response_result>
-    http_client::async_send_request_lazy(http::verb method,
-                                         std::string_view path,
-                                         html::query_params const& params,
-                                         http::fields const& headers)
-    {
-        co_return co_await async_send_request_lazy(method, detail::make_target(path, params), headers);
-    }
-
-    net::awaitable<http_client::lazy_response_result>
-    http_client::async_send_request_lazy(http::verb method,
-                                         std::string_view path,
-                                         html::query_params const& params,
-                                         std::string_view body,
-                                         http::fields const& headers)
-    {
-        co_return co_await async_send_request_lazy(method, detail::make_target(path, params), body, headers);
-    }
-
-    net::awaitable<http_client::lazy_response_result>
-    http_client::async_send_request_lazy(http::verb method,
-                                         std::string_view path,
-                                         html::query_params const& params,
-                                         boost::json::value&& body,
-                                         http::fields const& headers)
-    {
-        co_return co_await async_send_request_lazy(method, detail::make_target(path, params), std::move(body), headers);
-    }
-
-    net::awaitable<http_client::lazy_response_result>
-    http_client::async_send_request_lazy(http::verb method,
-                                         std::string_view path,
-                                         html::query_params const& params,
-                                         html::form_data&& body,
-                                         http::fields const& headers)
-    {
-        co_return co_await async_send_request_lazy(method, detail::make_target(path, params), std::move(body), headers);
-    }
-
-    net::awaitable<http_client::lazy_response_result>
-    http_client::async_send_request_lazy(http::verb method,
-                                         std::string_view path,
-                                         html::query_params const& params,
-                                         html::query_params&& body,
-                                         http::fields const& headers)
-    {
-        co_return co_await async_send_request_lazy(method, detail::make_target(path, params), std::move(body), headers);
-    }
-
-    std::shared_ptr<write_session>
-    http_client::create_writer()
-    {
-        return impl_->create_writer();
+        return impl_->create_lazy_request();
     }
 
     // =============================================================================
@@ -358,55 +111,58 @@ namespace httplib::client
     net::awaitable<http_client::response_result>
     http_client::async_get(std::string_view path, html::query_params const& params, http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::get, detail::make_target(path, params), headers);
+        co_return co_await async_send_request(request(http::verb::get, path, params, headers));
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_head(std::string_view path, html::query_params const& params, http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::head, detail::make_target(path, params), headers);
+        co_return co_await async_send_request(request(http::verb::head, path, params, headers));
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_post(std::string_view path, html::query_params const& params, http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::post, detail::make_target(path, params), headers);
+        co_return co_await async_send_request(request(http::verb::post, path, params, headers));
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_put(std::string_view path, html::query_params const& params, http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::put, detail::make_target(path, params), headers);
+        co_return co_await async_send_request(request(http::verb::put, path, params, headers));
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_patch(std::string_view path, html::query_params const& params, http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::patch, detail::make_target(path, params), headers);
+        co_return co_await async_send_request(request(http::verb::patch, path, params, headers));
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_del(std::string_view path, html::query_params const& params, http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::delete_, detail::make_target(path, params), headers);
+        co_return co_await async_send_request(
+            request(http::verb::delete_, path, params, headers));
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_options(std::string_view path, html::query_params const& params, http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::options, detail::make_target(path, params), headers);
+        co_return co_await async_send_request(
+            request(http::verb::options, path, params, headers));
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_connect(std::string_view path, html::query_params const& params, http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::connect, detail::make_target(path, params), headers);
+        co_return co_await async_send_request(
+            request(http::verb::connect, path, params, headers));
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_trace(std::string_view path, html::query_params const& params, http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::trace, detail::make_target(path, params), headers);
+        co_return co_await async_send_request(request(http::verb::trace, path, params, headers));
     }
 
     // =============================================================================
@@ -419,7 +175,9 @@ namespace httplib::client
                             html::query_params const& params,
                             http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::post, detail::make_target(path, params), body, headers);
+        auto req = request(http::verb::post, path, params, headers);
+        req.set_body(body);
+        co_return co_await async_send_request(std::move(req));
     }
 
     net::awaitable<http_client::response_result>
@@ -428,10 +186,9 @@ namespace httplib::client
                             html::query_params const& params,
                             http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::post,
-                                              detail::make_target(path, params),
-                                              std::move(body),
-                                              headers);
+        auto req = request(http::verb::post, path, params, headers);
+        req.set_body(std::move(body));
+        co_return co_await async_send_request(std::move(req));
     }
 
     net::awaitable<http_client::response_result>
@@ -440,7 +197,9 @@ namespace httplib::client
                            html::query_params const& params,
                            http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::put, detail::make_target(path, params), body, headers);
+        auto req = request(http::verb::put, path, params, headers);
+        req.set_body(body);
+        co_return co_await async_send_request(std::move(req));
     }
 
     net::awaitable<http_client::response_result>
@@ -449,10 +208,9 @@ namespace httplib::client
                            html::query_params const& params,
                            http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::put,
-                                              detail::make_target(path, params),
-                                              std::move(body),
-                                              headers);
+        auto req = request(http::verb::put, path, params, headers);
+        req.set_body(std::move(body));
+        co_return co_await async_send_request(std::move(req));
     }
 
     net::awaitable<http_client::response_result>
@@ -461,7 +219,9 @@ namespace httplib::client
                              html::query_params const& params,
                              http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::patch, detail::make_target(path, params), body, headers);
+        auto req = request(http::verb::patch, path, params, headers);
+        req.set_body(body);
+        co_return co_await async_send_request(std::move(req));
     }
 
     net::awaitable<http_client::response_result>
@@ -470,10 +230,9 @@ namespace httplib::client
                              html::query_params const& params,
                              http::fields const& headers)
     {
-        co_return co_await async_send_request(http::verb::patch,
-                                              detail::make_target(path, params),
-                                              std::move(body),
-                                              headers);
+        auto req = request(http::verb::patch, path, params, headers);
+        req.set_body(std::move(body));
+        co_return co_await async_send_request(std::move(req));
     }
 
     // =============================================================================
@@ -486,8 +245,8 @@ namespace httplib::client
                                 fs::path const& save_path,
                                 http::fields const& headers)
     {
-        auto request = impl_->make_http_request(method, path, headers);
-        co_return co_await impl_->async_download(request, save_path);
+        auto req = http_client::request(method, path, headers);
+        co_return co_await impl_->async_download(req, save_path);
     }
 
     void
