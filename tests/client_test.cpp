@@ -1139,6 +1139,77 @@ TEST_CASE("client: lazy read to file", "[client]")
     std::filesystem::remove(save);
 }
 
+TEST_CASE("client: lazy redirect", "[client]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/lazy-redirect-me",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_redirect("/lazy-target", http::status::found); });
+            server.router().template set_http_handler<http::verb::get>(
+                "/lazy-target",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("lazy-arrived"sv, "text/plain"sv); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            client.set_max_redirects(5);
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-redirect-me")));
+            REQUIRE(resp.result() == http::status::ok);
+            auto text = UNWRAP(co_await resp.as_string());
+            REQUIRE(text == "lazy-arrived");
+        });
+}
+
+TEST_CASE("client: lazy redirect loop limited", "[client]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/lazy-loop",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_redirect("/lazy-loop", http::status::found); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            client.set_max_redirects(3);
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-loop")));
+            REQUIRE(resp.result() == http::status::found);
+        });
+}
+
+TEST_CASE("client: lazy redirect full URL", "[client]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/lazy-ext-redirect",
+                [](httplib::server::request& req, httplib::server::response& resp)
+                {
+                    auto port = req.local_endpoint().port();
+                    resp.set_redirect(
+                        std::format("http://127.0.0.1:{}/lazy-target-page", port),
+                        http::status::found);
+                });
+            server.router().template set_http_handler<http::verb::get>(
+                "/lazy-target-page",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("lazy-target-reached"sv, "text/plain"); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            client.set_max_redirects(1);
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-ext-redirect")));
+            REQUIRE(resp.result() == http::status::ok);
+            auto text = UNWRAP(co_await resp.as_string());
+            REQUIRE(text == "lazy-target-reached");
+        });
+}
+
 // ===========================================================================
 // SSL
 // ===========================================================================

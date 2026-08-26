@@ -2,11 +2,11 @@
 #include "compress/compressor.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
+#include "lazy_request_impl.hpp"
 #include "lazy_response_impl.h"
 #include "request_impl.h"
 #include "response_impl.h"
 #include "util/logging.hpp"
-#include "lazy_request_impl.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/write.hpp>
@@ -105,22 +105,14 @@ namespace httplib::client
     net::awaitable<http_client::response_result>
     http_client::impl::async_send_request_impl(http_client::request& req,
                                                body_setup_fn const& body_setup,
-                                                bool allow_retry) noexcept
+                                               bool allow_retry) noexcept
     {
-        if (!req.has(http::field::host))
-        {
-            get_impl(req).set(http::field::host, host_value_);
-        }
+        prepare_request(req);
         http::request_serializer<body::any_body> serializer(get_impl(req));
         auto ec = co_await async_write(serializer, false);
         if (ec)
         {
             co_return ec;
-        }
-
-        if (!read_impl_.expired())
-        {
-            co_return client::response {};
         }
 
         http::response_parser<http::empty_body> header_parser;
@@ -157,15 +149,7 @@ namespace httplib::client
     net::awaitable<http_client::lazy_response_result>
     http_client::impl::async_send_request_lazy(http_client::request& req)
     {
-        if (!read_impl_.expired())
-        {
-            co_return boost::system::errc::make_error_code(boost::system::errc::device_or_resource_busy);
-        }
-
-        if (!req.has(http::field::host))
-        {
-            get_impl(req).set(http::field::host, host_value_);
-        }
+        prepare_request(req);
         http::request_serializer<body::any_body> serializer(get_impl(req));
         if (auto ec = co_await async_write(serializer, false); ec)
         {
@@ -184,6 +168,96 @@ namespace httplib::client
         }
 
         co_return co_await client::lazy_response::impl::create(std::move(header_parser), shared_from_this());
+    }
+
+    net::awaitable<http_client::lazy_response_result>
+    http_client::impl::async_send_request_lazy_with_redirect(http_client::request& req)
+    {
+        auto self = shared_from_this();
+
+        if (max_redirects_ <= 0)
+        {
+            co_return co_await async_send_request_lazy(req);
+        }
+
+        for (int r = 0; r <= max_redirects_; ++r)
+        {
+            auto result = co_await async_send_request_lazy(req);
+            if (result.has_error())
+            {
+                co_return result;
+            }
+            auto& resp = result.value();
+            auto s = resp.result();
+            if (r < max_redirects_
+                && (s == http::status::moved_permanently || s == http::status::found || s == http::status::see_other
+                    || s == http::status::temporary_redirect || s == http::status::permanent_redirect))
+            {
+                auto loc = resp[http::field::location];
+                if (loc.empty())
+                {
+                    co_return result;
+                }
+
+                logger()->trace("redirect {} -> {}", req.target(), std::string_view(loc));
+
+                // 读完并丢弃 redirect 响应的 body，保证连接可复用
+                if (auto drain_result = co_await resp.as_string(); drain_result.has_error())
+                {
+                    close();
+                }
+
+                // Full URL (cross-domain) create new impl
+                std::string target;
+                if (loc.starts_with("http://") || loc.starts_with("https://"))
+                {
+                    auto u = boost::urls::url(loc);
+                    auto new_host = u.host();
+                    auto new_port
+                        = u.port_number() ? u.port_number() : (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
+                    auto new_ssl = u.scheme_id() == boost::urls::scheme::https;
+
+                    if (new_host != host_ || new_port != port_ || new_ssl != use_ssl_)
+                    {
+                        req.target(u.encoded_target().empty() ? "/" : u.encoded_target());
+
+                        auto new_impl = std::make_shared<impl>(executor_, std::move(new_host), new_port, new_ssl);
+                        new_impl->timeout_policy_ = timeout_policy_;
+                        new_impl->timeout_ = timeout_;
+                        new_impl->verify_ssl_ = verify_ssl_;
+                        new_impl->set_logger(logger());
+                        new_impl->max_redirects_ = max_redirects_ - r - 1;
+
+                        co_return co_await new_impl->async_send_request_lazy_with_redirect(req);
+                    }
+
+                    // 同 host/port/ssl 的完整 URL，仅取 path 作为新 target
+                    target = u.encoded_target().empty() ? "/" : u.encoded_target();
+                }
+                else
+                {
+                    target = loc;
+                }
+
+                if (s == http::status::see_other
+                    || ((s == http::status::moved_permanently || s == http::status::found)
+                        && req.method() != http::verb::head))
+                {
+                    req.method(http::verb::get);
+                    req.body() = body::empty_body::value_type {};
+                    req.erase(http::field::content_type);
+                    req.erase(http::field::content_length);
+                    get_impl(req).prepare_payload();
+                }
+
+                req.target(std::move(target));
+                continue;
+            }
+
+            co_return result;
+        }
+
+        co_return boost::system::errc::make_error_code(boost::system::errc::too_many_symbolic_link_levels);
     }
 
     net::awaitable<http_client::response_result>
@@ -306,7 +380,18 @@ namespace httplib::client
             stream_->expires_never();
         }
     }
-
+    void
+    http_client::impl::prepare_request(http_client::request& req)
+    {
+        if (!req.has(http::field::host))
+        {
+            get_impl(req).set(http::field::host, host_value_);
+        }
+        if (!get_impl(req).has_content_length())
+        {
+            get_impl(req).prepare_payload();
+        }
+    }
     net::awaitable<boost::system::error_code>
     http_client::impl::co_connect()
     {

@@ -54,6 +54,9 @@ namespace httplib::client
 
         net::awaitable<http_client::lazy_response_result> async_send_request_lazy(http_client::request& req);
 
+        net::awaitable<http_client::lazy_response_result> async_send_request_lazy_with_redirect(
+            http_client::request& req);
+
         net::awaitable<http_client::response_result> async_download(http_client::request& req,
                                                                     fs::path const& save_path);
 
@@ -63,6 +66,7 @@ namespace httplib::client
         friend class ::httplib::client::lazy_response::impl;
         friend class read_session_impl;
 
+        void prepare_request(http_client::request& req);
         net::awaitable<boost::system::error_code> co_connect();
 
         net::awaitable<http_client::response_result> async_send_request_impl(http_client::request& req,

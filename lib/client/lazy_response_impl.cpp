@@ -97,10 +97,7 @@ namespace httplib::client
 
         if (body_setup)
         {
-            if (!body_parser.is_done())
-            {
-                body_setup(body_parser.get());
-            }
+            body_setup(body_parser.get());
         }
         auto ec = co_await parent_->async_read(body_parser, false);
         if (ec)

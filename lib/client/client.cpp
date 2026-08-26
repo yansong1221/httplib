@@ -91,7 +91,7 @@ namespace httplib::client
     net::awaitable<http_client::lazy_response_result>
     http_client::async_send_request_lazy(http_client::request req)
     {
-        co_return co_await impl_->async_send_request_lazy(req);
+        co_return co_await impl_->async_send_request_lazy_with_redirect(req);
     }
 
     // =============================================================================
