@@ -15,6 +15,7 @@
 #include <numeric>
 #include <string>
 #include <thread>
+#include <variant>
 #include <vector>
 
 using namespace std::string_view_literals;
@@ -407,10 +408,12 @@ main(int argc, char** argv)
                     {
                         cs.requests++;
                         cs.status_codes[result.value().result_int()]++;
-                        auto& body_val = result.value().body();
-                        if (body_val.template is_body_type<httplib::body::string_body>())
+                        try
                         {
-                            cs.bytes += body_val.as<httplib::body::string_body>().size();
+                            cs.bytes += result.value().as_string().size();
+                        }
+                        catch (std::bad_variant_access const&)
+                        {
                         }
                     }
                     else

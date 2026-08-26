@@ -132,39 +132,52 @@ namespace httplib::client
 
     } // namespace detail
 
-    net::awaitable<body::any_body::value_type>
-    lazy_response::read_body()
-    {
-        auto result = co_await impl_->read_body(nullptr);
-        if (result.has_error())
-        {
-            co_return body::any_body::value_type {};
-        }
-        co_return std::move(result->body());
-    }
-
-    net::awaitable<std::string>
-    lazy_response::read_text()
+    net::awaitable<boost::system::result<std::string>>
+    lazy_response::as_string()
     {
         auto result = co_await impl_->read_body([](http::response<body::any_body>& resp)
                                                 { resp.body() = body::string_body::value_type {}; });
         if (result.has_error())
         {
-            co_return std::string {};
+            co_return result.error();
         }
-        co_return result->body().as<body::string_body>();
+        co_return result->as_string();
     }
 
-    net::awaitable<boost::json::value>
-    lazy_response::read_json()
+    net::awaitable<boost::system::result<boost::json::value>>
+    lazy_response::as_json()
     {
         auto result = co_await impl_->read_body([](http::response<body::any_body>& resp)
                                                 { resp.body() = body::json_body::value_type {}; });
         if (result.has_error())
         {
-            co_return boost::json::value {};
+            co_return result.error();
         }
-        co_return result->body().as<body::json_body>();
+        co_return result->as_json();
+    }
+
+    net::awaitable<boost::system::result<html::form_data>>
+    lazy_response::as_form_data()
+    {
+        auto result = co_await impl_->read_body([](http::response<body::any_body>& resp)
+                                                { resp.body() = body::form_data_body::value_type {}; });
+        if (result.has_error())
+        {
+            co_return result.error();
+        }
+        co_return result->as_form_data();
+    }
+
+    net::awaitable<boost::system::result<html::query_params>>
+    lazy_response::as_query_params()
+    {
+        auto result = co_await impl_->read_body([](http::response<body::any_body>& resp)
+                                                { resp.body() = body::query_params_body::value_type {}; });
+        if (result.has_error())
+        {
+            co_return result.error();
+        }
+        co_return result->as_query_params();
     }
 
     net::awaitable<boost::system::error_code>

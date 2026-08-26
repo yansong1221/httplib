@@ -64,7 +64,7 @@ TEST_CASE("Response: set_error_content", "[response]")
         {
             auto resp = UNWRAP(co_await client.async_get("/error"));
             REQUIRE(resp.result() == http::status::internal_server_error);
-            REQUIRE_FALSE(resp.body().template as<body::string_body>().empty());
+            REQUIRE_FALSE(resp.as_string().empty());
             co_return;
         });
 }
@@ -188,7 +188,7 @@ TEST_CASE("Response: set_form_data_content with file_path", "[response]")
         {
             auto resp = UNWRAP(co_await client.async_get("/form-file"));
             REQUIRE(resp.result() == http::status::ok);
-            auto& fd = resp.body().template as<body::form_data_body>();
+            auto const& fd = resp.as_form_data();
             REQUIRE(fd.fields.size() == 1);
             REQUIRE(fd.fields[0].name == "file");
             REQUIRE(fd.fields[0].filename == "test.bin");
@@ -220,7 +220,7 @@ TEST_CASE("Response: set_file_content serves a file", "[response]")
             {
                 auto resp = UNWRAP(co_await client.async_get("/file"));
                 REQUIRE(resp.result() == http::status::ok);
-                REQUIRE(resp.body().template as<body::string_body>() == "hello from test file\n");
+                REQUIRE(resp.as_string() == "hello from test file\n");
                 co_return;
             });
     }
@@ -252,7 +252,7 @@ TEST_CASE("Response: set_file_content with Range request", "[response]")
 
                 auto resp = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/file-range", range_headers)));
                 REQUIRE(resp.result() == http::status::partial_content);
-                REQUIRE(resp.body().template as<body::string_body>() == "01234");
+                REQUIRE(resp.as_string() == "01234");
                 co_return;
             });
     }
@@ -284,7 +284,7 @@ TEST_CASE("Response: Range request open-ended (bytes=N-)", "[response]")
 
                 auto resp = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/file-range-open", range_headers)));
                 REQUIRE(resp.result() == http::status::partial_content);
-                REQUIRE(resp.body().template as<body::string_body>() == "789");
+                REQUIRE(resp.as_string() == "789");
                 co_return;
             });
     }
@@ -316,7 +316,7 @@ TEST_CASE("Response: Range request suffix (bytes=-N)", "[response]")
 
                 auto resp = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/file-range-suffix", range_headers)));
                 REQUIRE(resp.result() == http::status::partial_content);
-                REQUIRE(resp.body().template as<body::string_body>() == "6789");
+                REQUIRE(resp.as_string() == "6789");
                 co_return;
             });
     }
@@ -348,7 +348,7 @@ TEST_CASE("Response: Range request Content-Range header", "[response]")
 
                 auto resp = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/file-cr", range_headers)));
                 REQUIRE(resp.result() == http::status::partial_content);
-                REQUIRE(resp.body().template as<body::string_body>() == "cdef");
+                REQUIRE(resp.as_string() == "cdef");
                 REQUIRE(resp.base().find(http::field::content_range) != resp.base().end());
                 REQUIRE_FALSE(std::string(resp[http::field::content_range]).empty());
                 co_return;
@@ -626,7 +626,7 @@ TEST_CASE("Response: keep-alive close response", "[response]")
         {
             auto resp = UNWRAP(co_await client.async_get("/close-conn"));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>() == "closing");
+            REQUIRE(resp.as_string() == "closing");
             REQUIRE(resp[http::field::connection] == "close");
             co_return;
         });
@@ -652,7 +652,7 @@ TEST_CASE("Static mount: serves a file", "[response]")
             {
                 auto resp = UNWRAP(co_await client.async_get("/static/test.txt"));
                 REQUIRE(resp.result() == http::status::ok);
-                REQUIRE(resp.body().template as<body::string_body>() == "static content");
+                REQUIRE(resp.as_string() == "static content");
                 co_return;
             });
     }
@@ -719,7 +719,7 @@ TEST_CASE("Static mount: default document index.html", "[response]")
             {
                 auto resp = UNWRAP(co_await client.async_get("/"));
                 REQUIRE(resp.result() == http::status::ok);
-                REQUIRE(resp.body().template as<body::string_body>() == "<h1>hello</h1>");
+                REQUIRE(resp.as_string() == "<h1>hello</h1>");
                 co_return;
             });
     }
@@ -798,7 +798,7 @@ TEST_CASE("Static mount: file in subdirectory", "[response]")
             {
                 auto resp = UNWRAP(co_await client.async_get("/pub/sub/deep.txt"));
                 REQUIRE(resp.result() == http::status::ok);
-                REQUIRE(resp.body().template as<body::string_body>() == "nested");
+                REQUIRE(resp.as_string() == "nested");
                 co_return;
             });
     }

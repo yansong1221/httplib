@@ -257,7 +257,7 @@ TEST_CASE("cors_middleware: allow_origins with multiple origins", "[middleware]"
             auto resp = UNWRAP(
                 co_await client.async_send_request(httplib::client::request(http::verb::get, "/cors_middleware-multi", hdrs)));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>() == "cors_middleware-data");
+            REQUIRE(resp.as_string() == "cors_middleware-data");
             co_return;
         });
 }
@@ -315,7 +315,7 @@ TEST_CASE("Basic Auth: valid credentials pass through", "[middleware]")
             auto resp = UNWRAP(
                 co_await client.async_send_request(httplib::client::request(http::verb::get, "/secret", hdrs)));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>() == "secret-data");
+            REQUIRE(resp.as_string() == "secret-data");
             co_return;
         });
 }
@@ -609,7 +609,7 @@ TEST_CASE("Combined: cors_middleware + Auth", "[middleware]")
             auto resp = UNWRAP(
                 co_await client.async_send_request(httplib::client::request(http::verb::get, "/protected", hdrs)));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>() == "protected-data");
+            REQUIRE(resp.as_string() == "protected-data");
             REQUIRE(resp["Access-Control-Allow-Origin"] == "*");
             co_return;
         });

@@ -447,7 +447,7 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
         {
             spdlog::info("GET  /api/greet/client -> {} [{}]",
                          r.value().result_int(),
-                         r->body().as<httplib::body::string_body>());
+                         r->as_string());
         }
     }
 

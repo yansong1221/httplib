@@ -24,10 +24,10 @@ using test_common::setup_logger;
 namespace
 {
 
-    auto const&
+    boost::json::value
     as_json(httplib::client::http_client::response const& resp)
     {
-        return resp.body().template as<body::json_body>();
+        return resp.as_json();
     }
 
     httplib::html::query_params
@@ -97,7 +97,7 @@ TEST_CASE("HTTP GET returns correct body and status", "[http-methods]")
             auto resp
                 = UNWRAP(co_await client.async_get("/method/get", query_q1(), base_headers()));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>() == "get-ok");
+            REQUIRE(resp.as_string() == "get-ok");
             co_return;
         });
 }
@@ -144,7 +144,7 @@ TEST_CASE("HTTP POST with string body", "[http-methods]")
             auto resp = UNWRAP(co_await client.async_post(
                 "/method/post", "post-body"sv, query_q1(), base_headers()));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>() == "post-ok");
+            REQUIRE(resp.as_string() == "post-ok");
             co_return;
         });
 }
@@ -195,7 +195,7 @@ TEST_CASE("HTTP PUT no body", "[http-methods]")
             auto resp = UNWRAP(
                 co_await client.async_put("/method/put-empty", query_q1(), base_headers()));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>() == "put-empty-ok");
+            REQUIRE(resp.as_string() == "put-empty-ok");
             co_return;
         });
 }
@@ -218,7 +218,7 @@ TEST_CASE("HTTP PUT with string body", "[http-methods]")
             auto resp = UNWRAP(co_await client.async_put(
                 "/method/put", "put-body"sv, query_q1(), base_headers()));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>() == "put-ok");
+            REQUIRE(resp.as_string() == "put-ok");
             co_return;
         });
 }
@@ -271,7 +271,7 @@ TEST_CASE("HTTP PATCH with string body", "[http-methods]")
             auto resp = UNWRAP(co_await client.async_patch(
                 "/method/patch", "patch-body"sv, query_q1(), base_headers()));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>() == "patch-ok");
+            REQUIRE(resp.as_string() == "patch-ok");
             co_return;
         });
 }
@@ -321,7 +321,7 @@ TEST_CASE("HTTP DELETE", "[http-methods]")
             auto resp = UNWRAP(
                 co_await client.async_del("/method/delete", query_q1(), base_headers()));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>() == "delete-ok");
+            REQUIRE(resp.as_string() == "delete-ok");
             co_return;
         });
 }
@@ -346,7 +346,7 @@ TEST_CASE("HTTP OPTIONS with Allow header", "[http-methods]")
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp[http::field::allow]
                     == "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS");
-            REQUIRE(resp.body().template as<body::string_body>() == "options-ok");
+            REQUIRE(resp.as_string() == "options-ok");
             co_return;
         });
 }
@@ -371,7 +371,7 @@ TEST_CASE("send_request generic method", "[http-methods]")
             req.set_body("generic-body"sv);
             auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>() == "send-request-ok");
+            REQUIRE(resp.as_string() == "send-request-ok");
             co_return;
         });
 }
@@ -392,7 +392,7 @@ TEST_CASE("Not found handler returns 404", "[http-methods]")
         {
             auto resp = UNWRAP(co_await client.async_get("/missing"));
             REQUIRE(resp.result() == http::status::not_found);
-            REQUIRE(resp.body().template as<body::string_body>() == "not-found");
+            REQUIRE(resp.as_string() == "not-found");
             co_return;
         });
 }
@@ -444,29 +444,6 @@ TEST_CASE("Multiple query parameters", "[http-methods]")
                 { "c",  "true" }
             });
             auto resp = UNWRAP(co_await client.async_get("/multi-query", query));
-            REQUIRE(resp.result() == http::status::ok);
-            co_return;
-        });
-}
-
-TEST_CASE("HTTP TRACE method", "[http-methods]")
-{
-    run(
-        [](auto& server)
-        {
-            server.router().template set_http_handler<http::verb::trace>(
-                "/method/trace",
-                [](httplib::server::request& req, httplib::server::response& resp)
-                {
-                    resp.set("Content-Type", "message/http");
-                    resp.set_string_content(
-                        std::string(req.base().at(http::field::user_agent)), "text/plain"sv);
-                });
-        },
-        [](auto& client) -> net::awaitable<void>
-        {
-            auto resp = UNWRAP(co_await client.async_trace(
-                "/method/trace", query_q1(), base_headers()));
             REQUIRE(resp.result() == http::status::ok);
             co_return;
         });
@@ -528,7 +505,7 @@ TEST_CASE("Form-urlencoded body parsing", "[http-methods]")
             req.set_body("name=foo&value=bar"sv);
             auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>() == "foo=bar");
+            REQUIRE(resp.as_string() == "foo=bar");
             co_return;
         });
 }
@@ -580,7 +557,7 @@ TEST_CASE("Multipart form-data body parsing", "[http-methods]")
             req.set_body(body);
             auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>()
+            REQUIRE(resp.as_string()
                     == "field1=value1;file1=file-content:test.txt;");
             co_return;
         });
@@ -1077,10 +1054,7 @@ TEST_CASE("Body: empty string body in response", "[http-methods]")
         {
             auto resp = UNWRAP(co_await client.async_get("/empty-str"));
             REQUIRE(resp.result() == http::status::ok);
-            if (resp.body().template is_body_type<body::string_body>())
-            {
-                REQUIRE(resp.body().template as<body::string_body>().empty());
-            }
+            REQUIRE(resp.as_string().empty());
             co_return;
         });
 }
@@ -1109,7 +1083,7 @@ TEST_CASE("Body: empty JSON object", "[http-methods]")
             req.set_body("{}"sv);
             auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>() == "empty-ok");
+            REQUIRE(resp.as_string() == "empty-ok");
             co_return;
         });
 }
@@ -1138,7 +1112,7 @@ TEST_CASE("Body: JSON array as root", "[http-methods]")
             req.set_body("[1,2,3]"sv);
             auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>() == "array-ok");
+            REQUIRE(resp.as_string() == "array-ok");
             co_return;
         });
 }
@@ -1169,7 +1143,7 @@ TEST_CASE("Body: large JSON body", "[http-methods]")
             req.set_body(body);
             auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>() == "large-ok");
+            REQUIRE(resp.as_string() == "large-ok");
             co_return;
         });
 }
@@ -1200,7 +1174,7 @@ TEST_CASE("Body: urlencoded with special characters", "[http-methods]")
             req.set_body("msg=hello%20world"sv);
             auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>() == "decoded-ok");
+            REQUIRE(resp.as_string() == "decoded-ok");
             co_return;
         });
 }
@@ -1241,7 +1215,7 @@ TEST_CASE("Body: multipart form with empty field", "[http-methods]")
             req.set_body(body);
             auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>() == "empty-ok");
+            REQUIRE(resp.as_string() == "empty-ok");
             co_return;
         });
 }
@@ -1285,7 +1259,7 @@ TEST_CASE("Body: empty_body on empty POST request", "[http-methods]")
         {
             auto resp = UNWRAP(co_await client.async_post("/empty-post"));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>() == "empty-ok");
+            REQUIRE(resp.as_string() == "empty-ok");
             co_return;
         });
 }

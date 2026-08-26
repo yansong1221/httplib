@@ -18,7 +18,14 @@ namespace
 {
 
     std::string
-    as_string(auto& msg)
+    as_string(httplib::client::response& resp)
+    {
+        return resp.as_string();
+    }
+
+    template <typename M>
+    std::string
+    as_string(M& msg)
     {
         if (msg.body().template is_body_type<body::empty_body>())
             return {};

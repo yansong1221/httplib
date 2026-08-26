@@ -198,7 +198,7 @@ TEST_CASE("client: pool acquire and use", "[client]")
             REQUIRE(handle);
             auto resp = UNWRAP(co_await handle->async_get("/echo", make_params()));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>() == "hello");
+            REQUIRE(resp.as_string() == "hello");
         });
 }
 
@@ -385,7 +385,7 @@ TEST_CASE("client: GET with query params", "[client]")
         {
             auto resp = UNWRAP(co_await client.async_get("/echo", make_params()));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>() == "hello");
+            REQUIRE(resp.as_string() == "hello");
         });
 }
 
@@ -446,7 +446,7 @@ TEST_CASE("client: POST JSON body", "[client]")
             boost::json::value body { { "key", "value" }, { "num", 42 } };
             auto resp = UNWRAP(co_await client.async_post("/json-echo", std::move(body)));
             REQUIRE(resp.result() == http::status::ok);
-            auto val = resp.body().template as<body::json_body>();
+            auto val = resp.as_json();
             REQUIRE(val.at("key") == "value");
             REQUIRE(val.at("num") == 42);
         });
@@ -679,7 +679,7 @@ TEST_CASE("client: lazy request reads full response", "[client]")
 
             auto resp = UNWRAP(co_await writer->read_full_response());
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>() == "echo:hello");
+            REQUIRE(resp.as_string() == "echo:hello");
         });
 }
 
@@ -834,7 +834,7 @@ TEST_CASE("client: follows 302 redirect", "[client]")
             client.set_max_redirects(5);
             auto resp = UNWRAP(co_await client.async_get("/redirect-me"));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.body().template as<body::string_body>() == "arrived");
+            REQUIRE(resp.as_string() == "arrived");
         });
 }
 
@@ -1036,7 +1036,7 @@ TEST_CASE("client: lazy read text", "[client]")
         {
             auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-text")));
             REQUIRE(resp.result() == http::status::ok);
-            auto text = co_await resp.read_text();
+            auto text = UNWRAP(co_await resp.as_string());
             REQUIRE(text == "lazy-hello");
         });
 }
@@ -1058,7 +1058,7 @@ TEST_CASE("client: lazy read json", "[client]")
         {
             auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-json")));
             REQUIRE(resp.result() == http::status::ok);
-            auto val = co_await resp.read_json();
+            auto val = UNWRAP(co_await resp.as_json());
             REQUIRE(val.at("key") == "value");
             REQUIRE(val.at("num") == 7);
         });
@@ -1077,8 +1077,8 @@ TEST_CASE("client: lazy read body typed", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-body")));
-            auto body = co_await resp.read_body();
-            REQUIRE(body.template as<body::string_body>() == "lazy-body");
+            auto text = UNWRAP(co_await resp.as_string());
+            REQUIRE(text == "lazy-body");
         });
 }
 
@@ -1104,8 +1104,7 @@ TEST_CASE("client: lazy read multipart body", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-form")));
-            auto body = co_await resp.read_body();
-            auto& fd = body.template as<body::form_data_body>();
+            auto fd = UNWRAP(co_await resp.as_form_data());
             REQUIRE(fd.fields.size() == 2);
             REQUIRE(fd.fields[0].name == "a");
             REQUIRE(fd.fields[0].content == std::string(9000, 'x') + "\r\ncc\r");

@@ -1,4 +1,5 @@
 #pragma once
+#include "httplib/body/any_body.hpp"
 #include "httplib/client/response.hpp"
 #include <boost/beast/http/message.hpp>
 #include <memory>

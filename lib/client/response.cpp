@@ -1,5 +1,6 @@
 #include "httplib/client/response.hpp"
 #include "response_impl.h"
+#include <variant>
 
 namespace httplib::client
 {
@@ -61,34 +62,28 @@ namespace httplib::client
         return impl_->msg_.base();
     }
 
-    body::any_body::value_type&
-    response::body()
+    std::string const&
+    response::as_string() const
     {
-        return impl_->msg_.body();
+        return std::get<std::string>(impl_->msg_.body());
     }
 
-    body::any_body::value_type const&
-    response::body() const
+    boost::json::value const&
+    response::as_json() const
     {
-        return impl_->msg_.body();
+        return std::get<boost::json::value>(impl_->msg_.body());
     }
 
-    unsigned
-    response::version() const
+    html::form_data const&
+    response::as_form_data() const
     {
-        return impl_->msg_.version();
+        return std::get<html::form_data>(impl_->msg_.body());
     }
 
-    bool
-    response::keep_alive() const
+    html::query_params const&
+    response::as_query_params() const
     {
-        return impl_->msg_.keep_alive();
-    }
-
-    std::string_view
-    response::reason() const
-    {
-        return impl_->msg_.reason();
+        return std::get<html::query_params>(impl_->msg_.body());
     }
 
 } // namespace httplib::client

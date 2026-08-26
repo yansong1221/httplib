@@ -247,7 +247,7 @@ namespace test_common
     std::string
     as_string(R const& resp)
     {
-        return resp.body().template as<httplib::body::string_body>();
+        return resp.as_string();
     }
 
 } // namespace test_common
