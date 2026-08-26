@@ -69,11 +69,15 @@ namespace httplib::body
                 boundary_line,
                 boundary_header,
                 boundary_content,
-                finished,
                 eof
             };
             step step_ = step::boundary_line;
             html::form_data::field field_data_;
+
+            // Bytes received but not yet committed: they may be the split
+            // half of a boundary delimiter ("\r\n--boundary..."), so they are
+            // held back until the next put() can disambiguate them.
+            std::string pending_;
 
             std::ofstream file_stream_;
             fs::path current_file_path_;

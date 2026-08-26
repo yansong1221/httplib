@@ -658,6 +658,31 @@ TEST_CASE("client: chunked transfer via sessions", "[client]")
         });
 }
 
+TEST_CASE("client: lazy request reads full response", "[client]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::post>(
+                "/echo-full",
+                [](httplib::server::request& req, httplib::server::response& resp)
+                {
+                    auto& body = req.body().template as<body::string_body>();
+                    resp.set_string_content("echo:" + body, "text/plain");
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto writer = client.create_lazy_request();
+            co_await writer->write_header(http::verb::post, "/echo-full", {}, false);
+            co_await writer->write_body(net::buffer(std::string_view("hello")), false);
+
+            auto resp = UNWRAP(co_await writer->read_full_response());
+            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.body().template as<body::string_body>() == "echo:hello");
+        });
+}
+
 TEST_CASE("client: has_active_session after request", "[client]")
 {
     run(
@@ -1069,7 +1094,7 @@ TEST_CASE("client: lazy read multipart body", "[client]")
                     std::vector<html::form_data::field> fields;
                     auto& a = fields.emplace_back();
                     a.name = "a";
-                    a.content = std::string(9000, 'x');
+                    a.content = std::string(9000, 'x') + "\r\ncc\r";
                     auto& b = fields.emplace_back();
                     b.name = "b";
                     b.content = "2";
@@ -1083,7 +1108,7 @@ TEST_CASE("client: lazy read multipart body", "[client]")
             auto& fd = body.template as<body::form_data_body>();
             REQUIRE(fd.fields.size() == 2);
             REQUIRE(fd.fields[0].name == "a");
-            REQUIRE(fd.fields[0].content == std::string(9000, 'x'));
+            REQUIRE(fd.fields[0].content == std::string(9000, 'x') + "\r\ncc\r");
             REQUIRE(fd.fields[1].name == "b");
             REQUIRE(fd.fields[1].content == "2");
         });

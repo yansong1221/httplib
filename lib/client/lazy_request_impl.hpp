@@ -3,9 +3,11 @@
 #include "client_impl.h"
 #include "httplib/client/lazy_request.hpp"
 #include "lazy_response_impl.h"
+#include "response_impl.h"
 #include <boost/beast/http/buffer_body.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/message.hpp>
+#include <boost/beast/http/parser.hpp>
 #include <boost/beast/http/serializer.hpp>
 #include <limits>
 
@@ -72,6 +74,28 @@ namespace httplib::client
             }
 
             co_return co_await client::lazy_response::impl::create(std::move(header_parser), parent_);
+        }
+
+        net::awaitable<boost::system::result<client::response>>
+        read_full_response() override
+        {
+            http::response_parser<http::empty_body> header_parser;
+            header_parser.skip(method_ == http::verb::head);
+            header_parser.header_limit((std::numeric_limits<std::uint32_t>::max)());
+            header_parser.body_limit((std::numeric_limits<std::uint64_t>::max)());
+
+            if (auto ec = co_await parent_->async_read(header_parser, true); ec)
+            {
+                co_return ec;
+            }
+
+            http::response_parser<body::any_body> body_parser(std::move(header_parser));
+            if (auto ec = co_await parent_->async_read(body_parser, false); ec)
+            {
+                co_return ec;
+            }
+
+            co_return client::response::impl::make(body_parser.release());
         }
 
         std::shared_ptr<http_client::impl> parent_;

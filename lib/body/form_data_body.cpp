@@ -11,6 +11,29 @@ namespace httplib::body
 
     namespace detail
     {
+        // Returns the length of the longest suffix of `sv` that is a prefix of
+        // `a` or `b`. Used to keep a possible half-split multipart boundary
+        // delimiter in the reader's pending buffer instead of committing it as
+        // part content.
+        static std::size_t
+        longest_suffix_prefix(std::string_view sv, std::string_view a, std::string_view b)
+        {
+            auto const max_len = (std::max)(a.size(), b.size());
+            auto const m = (std::min)(sv.size(), max_len);
+            for (std::size_t k = m; k >= 1; --k)
+            {
+                auto const tail = sv.substr(sv.size() - k);
+                if (a.size() >= k && a.substr(0, k) == tail)
+                {
+                    return k;
+                }
+                if (b.size() >= k && b.substr(0, k) == tail)
+                {
+                    return k;
+                }
+            }
+            return 0;
+        }
         static auto
         parse_content_disposition(std::string_view header)
         {
@@ -265,190 +288,222 @@ namespace httplib::body
     std::size_t
     form_data_body::reader::put(const_buffers_type const& buffers, boost::system::error_code& ec)
     {
-        switch (step_)
+        ec = {};
+        auto incoming = util::buffer_to_string_view(buffers);
+
+        std::string combined;
+        combined.reserve(pending_.size() + incoming.size());
+        combined.append(pending_);
+        combined.append(incoming.data(), incoming.size());
+        pending_.clear();
+
+        std::string_view sv(combined);
+        bool need_more_data = false;
+
+        if (step_ == step::eof)
         {
-            case step::boundary_line:
+            if (!sv.empty())
             {
-                std::string const boundary_line = "--" + boundary_ + "\r\n";
-                std::string const boundary_line_last = "--" + boundary_ + "--";
-
-                if (beast::buffer_bytes(buffers) < std::max(boundary_line.size(), boundary_line_last.size()))
-                {
-                    ec = http::error::need_more;
-                    return 0;
-                }
-                auto data = util::buffer_to_string_view(buffers);
-
-                if (data.starts_with(boundary_line))
-                {
-                    step_ = step::boundary_header;
-                    return boundary_line.size();
-                }
-                else if (data.starts_with(boundary_line_last))
-                {
-                    step_ = step::finished;
-                    return boundary_line_last.size();
-                }
                 ec = http::error::unexpected_body;
-                return 0;
             }
-            break;
-            case step::boundary_header:
+            return incoming.size();
+        }
+
+        for (;;)
+        {
+            if (sv.empty())
             {
-                auto data = util::buffer_to_string_view(buffers);
-                auto pos = data.find("\r\n\r\n");
-                if (pos == std::string_view::npos)
-                {
-                    ec = http::error::need_more;
-                    return 0;
-                }
-                auto header = data.substr(0, pos + 4);
-                auto results = detail::split_header_field_value(header, ec);
-                if (ec)
-                {
-                    return 0;
-                }
-
-                html::form_data::field field_data;
-                for (auto const& item : results)
-                {
-                    if (item.first == "Content-Disposition"sv)
-                    {
-                        auto value = item.second;
-
-                        auto pos = value.find(";");
-                        if (pos == std::string_view::npos)
-                        {
-                            ec = http::error::unexpected_body;
-                            return 0;
-                        }
-                        else if (boost::trim_copy(value.substr(0, pos)) != "form-data")
-                        {
-                            ec = http::error::unexpected_body;
-                            return 0;
-                        }
-                        value.remove_prefix(pos + 1);
-
-                        auto result = detail::parse_content_disposition(value);
-                        for (auto const& pair : result)
-                        {
-                            if (pair.first == "name")
-                            {
-                                field_data.name = pair.second;
-                            }
-                            else if (pair.first == "filename")
-                            {
-                                field_data.filename = pair.second;
-                            }
-                        }
-                    }
-                    else if (item.first == "Content-Type"sv)
-                    {
-                        field_data.content_type = item.second;
-                    }
-                }
-
-                field_data_ = std::move(field_data);
-                step_ = step::boundary_content;
-                return header.length();
+                break;
             }
-            break;
-            case step::boundary_content:
+            switch (step_)
             {
-                auto data = util::buffer_to_string_view(buffers);
-                bool save_to_file = !field_data_.filename.empty() && !body_.save_dir.empty();
-                if (data.starts_with("\r"))
+                case step::boundary_line:
                 {
-                    std::string const eof_boundary_line = "\r\n--" + boundary_;
-
-                    if (beast::buffer_bytes(buffers) < eof_boundary_line.size())
+                    std::string const boundary_line = "--" + boundary_ + "\r\n";
+                    std::string const boundary_line_last = "--" + boundary_ + "--\r\n";
+                    if (sv.size() >= boundary_line.size() && sv.substr(0, boundary_line.size()) == boundary_line)
                     {
-                        ec = http::error::need_more;
-                        return 0;
+                        sv.remove_prefix(boundary_line.size());
+                        step_ = step::boundary_header;
+                        continue;
                     }
-                    if (data.starts_with(eof_boundary_line))
+                    if (sv.size() >= boundary_line_last.size() && sv.substr(0, boundary_line_last.size()) == boundary_line_last)
+                    {
+                        sv.remove_prefix(boundary_line_last.size());
+                        step_ = step::eof;
+                        continue;
+                    }
+                    if (boundary_line.starts_with(sv) || boundary_line_last.starts_with(sv))
+                    {
+                        need_more_data = true;
+                        break;
+                    }
+                    ec = http::error::unexpected_body;
+                }
+                break;
+                case step::boundary_header:
+                {
+                    auto pos = sv.find("\r\n\r\n");
+                    if (pos == std::string_view::npos)
+                    {
+                        need_more_data = true;
+                        break;
+                    }
+                    auto header = sv.substr(0, pos + 4);
+                    auto results = detail::split_header_field_value(header, ec);
+                    if (ec)
+                    {
+                        break;
+                    }
+
+                    html::form_data::field field_data;
+                    for (auto const& item : results)
+                    {
+                        if (item.first == "Content-Disposition"sv)
+                        {
+                            auto value = item.second;
+
+                            auto semi = value.find(";");
+                            if (semi == std::string_view::npos)
+                            {
+                                ec = http::error::unexpected_body;
+                                break;
+                            }
+                            else if (boost::trim_copy(value.substr(0, semi)) != "form-data")
+                            {
+                                ec = http::error::unexpected_body;
+                                break;
+                            }
+                            value.remove_prefix(semi + 1);
+
+                            auto result = detail::parse_content_disposition(value);
+                            for (auto const& pair : result)
+                            {
+                                if (pair.first == "name")
+                                {
+                                    field_data.name = pair.second;
+                                }
+                                else if (pair.first == "filename")
+                                {
+                                    field_data.filename = pair.second;
+                                }
+                            }
+                        }
+                        else if (item.first == "Content-Type"sv)
+                        {
+                            field_data.content_type = item.second;
+                        }
+                    }
+                    if (ec)
+                    {
+                        break;
+                    }
+
+                    field_data_ = std::move(field_data);
+                    sv.remove_prefix(pos + 4);
+                    step_ = step::boundary_content;
+                    continue;
+                }
+                break;
+                case step::boundary_content:
+                {
+                    std::string const delim_field = "\r\n--" + boundary_ + "\r\n";
+                    std::string const delim_final = "\r\n--" + boundary_ + "--\r\n";
+
+                    auto pos_field = sv.find(delim_field);
+                    auto pos_final = sv.find(delim_final);
+                    std::size_t pos = std::string_view::npos;
+                    bool is_final = false;
+                    if (pos_field != std::string_view::npos)
+                    {
+                        if (pos_final == std::string_view::npos || pos_field <= pos_final)
+                        {
+                            pos = pos_field;
+                        }
+                        else
+                        {
+                            pos = pos_final;
+                            is_final = true;
+                        }
+                    }
+                    else if (pos_final != std::string_view::npos)
+                    {
+                        pos = pos_final;
+                        is_final = true;
+                    }
+
+                    bool save_to_file = !field_data_.filename.empty() && !body_.save_dir.empty();
+                    auto commit_content = [&](std::string_view data)
                     {
                         if (save_to_file)
                         {
-                            if (file_stream_.is_open())
+                            write_content(data, ec);
+                        }
+                        else
+                        {
+                            field_data_.content.append(data.data(), data.size());
+                        }
+                    };
+
+                    if (pos != std::string_view::npos)
+                    {
+                        if (pos > 0)
+                        {
+                            commit_content(sv.substr(0, pos));
+                            if (ec)
                             {
-                                file_stream_.close();
+                                break;
                             }
+                        }
+                        if (save_to_file && file_stream_.is_open())
+                        {
+                            file_stream_.close();
                             field_data_.file_path = current_file_path_;
                         }
-                        step_ = step::boundary_line;
+                        auto const delim_size = is_final ? delim_final.size() : delim_field.size();
+                        sv.remove_prefix(pos + delim_size);
                         body_.fields.push_back(std::move(field_data_));
-                        return 2;
+                        step_ = is_final ? step::eof : step::boundary_header;
+                        continue;
                     }
-                    if (save_to_file)
+
+                    auto keep = detail::longest_suffix_prefix(sv, delim_field, delim_final);
+                    auto emit_size = sv.size() - keep;
+                    if (emit_size > 0)
                     {
-                        write_content("\r", ec);
+                        commit_content(sv.substr(0, emit_size));
                         if (ec)
                         {
-                            return 0;
+                            break;
                         }
                     }
-                    else
+                    sv.remove_prefix(emit_size);
+                    if (keep > 0)
                     {
-                        field_data_.content.push_back('\r');
-                    }
-                    return 1;
-                }
-                auto pos = data.find("\r");
-                if (pos == std::string_view::npos)
-                {
-                    if (save_to_file)
-                    {
-                        write_content(data, ec);
-                        if (ec)
-                        {
-                            return 0;
-                        }
-                    }
-                    else
-                    {
-                        field_data_.content.append(data);
-                    }
-                    return data.length();
-                }
-                if (save_to_file)
-                {
-                    write_content(data.substr(0, pos), ec);
-                    if (ec)
-                    {
-                        return 0;
+                        need_more_data = true;
                     }
                 }
-                else
-                {
-                    field_data_.content.append(data.substr(0, pos));
-                }
-                return pos;
-            }
-            break;
-            case step::finished:
-            {
-                if (beast::buffer_bytes(buffers) < 2)
-                {
-                    ec = http::error::need_more;
-                    return 0;
-                }
-                auto data = util::buffer_to_string_view(buffers);
-                if (!data.starts_with("\r\n"))
-                {
-                    ec = http::error::unexpected_body;
-                    return 0;
-                }
-                step_ = step::eof;
-                return 2;
-            }
-            break;
-            default:
                 break;
+                default:
+                    break;
+            }
+            break;
         }
 
-        ec = http::error::unexpected_body;
-        return 0;
+        if (step_ == step::eof && !sv.empty())
+        {
+            ec = http::error::unexpected_body;
+        }
+        if (ec)
+        {
+            return incoming.size();
+        }
+        if (need_more_data)
+        {
+            pending_.assign(sv);
+            ec = http::error::need_more;
+        }
+        return incoming.size();
     }
 
     void
