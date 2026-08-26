@@ -152,19 +152,6 @@ namespace httplib::client
             request(http::verb::options, path, params, headers));
     }
 
-    net::awaitable<http_client::response_result>
-    http_client::async_connect(std::string_view path, html::query_params const& params, http::fields const& headers)
-    {
-        co_return co_await async_send_request(
-            request(http::verb::connect, path, params, headers));
-    }
-
-    net::awaitable<http_client::response_result>
-    http_client::async_trace(std::string_view path, html::query_params const& params, http::fields const& headers)
-    {
-        co_return co_await async_send_request(request(http::verb::trace, path, params, headers));
-    }
-
     // =============================================================================
     // HTTP method shorthands (with body)
     // =============================================================================

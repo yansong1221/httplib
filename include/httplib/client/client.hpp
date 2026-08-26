@@ -81,12 +81,6 @@ namespace httplib::client
         net::awaitable<response_result> async_options(std::string_view path,
                                                       html::query_params const& params = {},
                                                       http::fields const& headers = http::fields());
-        net::awaitable<response_result> async_connect(std::string_view path,
-                                                      html::query_params const& params = {},
-                                                      http::fields const& headers = http::fields());
-        net::awaitable<response_result> async_trace(std::string_view path,
-                                                    html::query_params const& params = {},
-                                                    http::fields const& headers = http::fields());
 
         // ---- HTTP method shorthands (with body) ----
 
