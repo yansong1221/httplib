@@ -52,6 +52,17 @@ namespace httplib::client
       private:
         lazy_response(std::shared_ptr<impl> impl);
         std::shared_ptr<impl> impl_;
+
+        friend impl&
+        get_impl(lazy_response& self)
+        {
+            return *self.impl_;
+        }
+        friend impl const&
+        get_impl(lazy_response const& self)
+        {
+            return *self.impl_;
+        }
     };
 
 } // namespace httplib::client

@@ -96,56 +96,6 @@ namespace httplib::client
         custom_logger_ = std::move(logger);
     }
 
-    net::awaitable<http_client::response_result>
-    http_client::impl::async_send_request(http_client::request& req, body_setup_fn const& body_setup) noexcept
-    {
-        co_return co_await async_send_request_impl(req, body_setup, true);
-    }
-
-    net::awaitable<http_client::response_result>
-    http_client::impl::async_send_request_impl(http_client::request& req,
-                                               body_setup_fn const& body_setup,
-                                               bool allow_retry) noexcept
-    {
-        prepare_request(req);
-        http::request_serializer<body::any_body> serializer(get_impl(req));
-        auto ec = co_await async_write(serializer, false);
-        if (ec)
-        {
-            co_return ec;
-        }
-
-        http::response_parser<http::empty_body> header_parser;
-        header_parser.skip(req.method() == http::verb::head);
-        header_parser.header_limit(std::numeric_limits<std::uint32_t>::max());
-        header_parser.body_limit(std::numeric_limits<std::uint64_t>::max());
-
-        ec = co_await async_read(header_parser, true);
-        if (allow_retry && is_retryable(ec))
-        {
-            co_return co_await async_send_request_impl(req, body_setup, false);
-        }
-        else if (ec)
-        {
-            co_return ec;
-        }
-
-        http::response_parser<body::any_body> body_parser(std::move(header_parser));
-        if (body_setup)
-        {
-            if (!body_parser.is_done())
-            {
-                body_setup(body_parser.get());
-            }
-        }
-
-        if (ec = co_await async_read(body_parser, false); ec)
-        {
-            co_return ec;
-        }
-        co_return client::response::impl::make(body_parser.release());
-    }
-
     net::awaitable<http_client::lazy_response_result>
     http_client::impl::async_send_request_lazy(http_client::request& req)
     {
@@ -260,77 +210,6 @@ namespace httplib::client
         co_return boost::system::errc::make_error_code(boost::system::errc::too_many_symbolic_link_levels);
     }
 
-    net::awaitable<http_client::response_result>
-    http_client::impl::async_send_request_with_redirect(http_client::request& req, body_setup_fn const& body_setup)
-    {
-        if (max_redirects_ <= 0)
-        {
-            co_return co_await async_send_request(req, body_setup);
-        }
-
-        for (int r = 0; r <= max_redirects_; ++r)
-        {
-            auto result = co_await async_send_request(req, body_setup);
-            if (result.has_error())
-            {
-                co_return result;
-            }
-            auto& resp = result.value();
-            auto s = resp.result();
-            if (r < max_redirects_
-                && (s == http::status::moved_permanently || s == http::status::found || s == http::status::see_other
-                    || s == http::status::temporary_redirect || s == http::status::permanent_redirect))
-            {
-                auto loc = resp[http::field::location];
-                if (loc.empty())
-                {
-                    co_return result;
-                }
-
-                logger()->trace("redirect {} -> {}", req.target(), std::string_view(loc));
-
-                // Full URL (cross-domain) create new impl
-                if (loc.starts_with("http://") || loc.starts_with("https://"))
-                {
-                    auto u = boost::urls::url(loc);
-                    auto new_host = u.host();
-                    auto new_port
-                        = u.port_number() ? u.port_number() : (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
-                    auto new_ssl = u.scheme_id() == boost::urls::scheme::https;
-                    auto new_target = u.encoded_path().empty() ? std::string("/") : u.encoded_path();
-
-                    req.target(std::move(new_target));
-
-                    auto new_impl = std::make_unique<impl>(executor_, std::move(new_host), new_port, new_ssl);
-                    new_impl->timeout_policy_ = timeout_policy_;
-                    new_impl->timeout_ = timeout_;
-                    new_impl->verify_ssl_ = verify_ssl_;
-                    new_impl->set_logger(logger());
-                    new_impl->max_redirects_ = max_redirects_ - r - 1;
-
-                    co_return co_await new_impl->async_send_request(req, body_setup);
-                }
-
-                if (s == http::status::see_other
-                    || ((s == http::status::moved_permanently || s == http::status::found)
-                        && req.method() != http::verb::head))
-                {
-                    req.method(http::verb::get);
-                    req.body() = body::empty_body::value_type {};
-                    req.erase(http::field::content_type);
-                    req.erase(http::field::content_length);
-                    get_impl(req).prepare_payload();
-                }
-
-                req.target(std::string(loc));
-                continue;
-            }
-
-            co_return result;
-        }
-
-        co_return boost::system::errc::make_error_code(boost::system::errc::too_many_symbolic_link_levels);
-    }
     void
     http_client::impl::begin_io()
     {
@@ -433,28 +312,6 @@ namespace httplib::client
         }
         end_io();
         co_return boost::system::error_code {};
-    }
-
-    net::awaitable<http_client::response_result>
-    http_client::impl::async_download(http_client::request& req, fs::path const& save_path)
-    {
-        auto fb_ptr = std::make_shared<body::file_body::value_type>();
-        fb_ptr->open(save_path, std::ios::out | std::ios::binary | std::ios::trunc);
-        if (!fb_ptr->is_open())
-        {
-            co_return boost::system::errc::make_error_code(boost::system::errc::permission_denied);
-        }
-
-        auto setup = [fb_ptr](http::response<body::any_body>& resp) { resp.body() = std::move(*fb_ptr); };
-        auto result = co_await async_send_request_with_redirect(req, setup);
-
-        if (!result.has_value() || result->result() == http::status::no_content
-            || result->result() == http::status::not_modified)
-        {
-            std::error_code ec;
-            fs::remove(save_path, ec);
-        }
-        co_return result;
     }
 
     std::shared_ptr<lazy_request>

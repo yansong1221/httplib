@@ -46,19 +46,10 @@ namespace httplib::client
         std::shared_ptr<spdlog::logger> logger() const;
         void set_logger(std::shared_ptr<spdlog::logger> logger);
 
-        net::awaitable<http_client::response_result> async_send_request(http_client::request& req,
-                                                                        body_setup_fn const& body_setup) noexcept;
-
-        net::awaitable<http_client::response_result> async_send_request_with_redirect(http_client::request& req,
-                                                                                      body_setup_fn const& body_setup);
-
         net::awaitable<http_client::lazy_response_result> async_send_request_lazy(http_client::request& req);
 
         net::awaitable<http_client::lazy_response_result> async_send_request_lazy_with_redirect(
             http_client::request& req);
-
-        net::awaitable<http_client::response_result> async_download(http_client::request& req,
-                                                                    fs::path const& save_path);
 
         std::shared_ptr<lazy_request> create_lazy_request();
 
@@ -68,10 +59,6 @@ namespace httplib::client
 
         void prepare_request(http_client::request& req);
         net::awaitable<boost::system::error_code> co_connect();
-
-        net::awaitable<http_client::response_result> async_send_request_impl(http_client::request& req,
-                                                                             body_setup_fn const& body_setup,
-                                                                             bool allow_retry) noexcept;
 
         void begin_io();
         void end_io();
@@ -91,7 +78,7 @@ namespace httplib::client
             boost::system::error_code ec;
             if (ec = co_await co_connect(); ec)
             {
-                
+
                 co_return ec;
             }
 

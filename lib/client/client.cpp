@@ -1,5 +1,6 @@
 #include "httplib/client/client.hpp"
 #include "client_impl.h"
+#include "lazy_response_impl.h"
 #include <boost/url.hpp>
 #include <stdexcept>
 #include <utility>
@@ -85,7 +86,12 @@ namespace httplib::client
     net::awaitable<http_client::response_result>
     http_client::async_send_request(http_client::request req)
     {
-        co_return co_await impl_->async_send_request_with_redirect(req, nullptr);
+        auto result = co_await impl_->async_send_request_lazy_with_redirect(req);
+        if (result.has_error())
+        {
+            co_return result.error();
+        }
+        co_return co_await get_impl(result.value()).read_body(nullptr);
     }
 
     net::awaitable<http_client::lazy_response_result>
@@ -141,15 +147,13 @@ namespace httplib::client
     net::awaitable<http_client::response_result>
     http_client::async_del(std::string_view path, html::query_params const& params, http::fields const& headers)
     {
-        co_return co_await async_send_request(
-            request(http::verb::delete_, path, params, headers));
+        co_return co_await async_send_request(request(http::verb::delete_, path, params, headers));
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_options(std::string_view path, html::query_params const& params, http::fields const& headers)
     {
-        co_return co_await async_send_request(
-            request(http::verb::options, path, params, headers));
+        co_return co_await async_send_request(request(http::verb::options, path, params, headers));
     }
 
     // =============================================================================
@@ -233,7 +237,12 @@ namespace httplib::client
                                 http::fields const& headers)
     {
         auto req = http_client::request(method, path, headers);
-        co_return co_await impl_->async_download(req, save_path);
+        auto result = co_await impl_->async_send_request_lazy_with_redirect(req);
+        if (result.has_error())
+        {
+            co_return result.error();
+        }
+        co_return co_await get_impl(result.value()).read_file(save_path);
     }
 
     void
