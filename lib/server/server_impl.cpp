@@ -11,10 +11,10 @@
 #include "httplib/util/when_all.hpp"
 #include "request_impl.hpp"
 #include "response_impl.hpp"
+#include "util/logging.hpp"
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/asio/use_future.hpp>
 #include <boost/url.hpp>
-#include "util/logging.hpp"
 #include <spdlog/spdlog.h>
 
 #ifdef HTTPLIB_ENABLED_SSL
@@ -181,7 +181,10 @@ namespace httplib::server
     net::awaitable<boost::system::error_code>
     http_server::impl::async_run()
     {
-        running_ = true;
+        if (running_.exchange(true))
+        {
+            co_return boost::asio::error::make_error_code(boost::asio::error::already_started);
+        }
 
         std::vector<net::awaitable<boost::system::error_code>> ops;
         for (int i = 0; i < acceptor_count_; ++i)
