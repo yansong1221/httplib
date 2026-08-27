@@ -661,7 +661,7 @@ namespace httplib::client
                     co_return boost::asio::error::operation_aborted;
                 }
 
-                auto r = co_await resp.read_some(net::buffer(buf));
+                auto r = co_await resp.read_some_raw(net::buffer(buf));
                 if (r.has_error())
                 {
                     co_return r.error();
@@ -797,7 +797,7 @@ namespace httplib::client
                     co_return boost::asio::error::operation_aborted;
                 }
 
-                auto r = co_await resp.read_some(net::buffer(buf));
+                auto r = co_await resp.read_some_raw(net::buffer(buf));
                 if (r.has_error())
                 {
                     co_return r.error();

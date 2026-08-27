@@ -124,7 +124,7 @@ TEST_CASE("Response: set_chunked_write_handler with multiple chunks", "[response
             std::array<char, 4096> buf;
             while (true)
             {
-                auto result = co_await resp.read_some(net::buffer(buf));
+                auto result = co_await resp.read_some_raw(net::buffer(buf));
                 if (result.has_error() || result.value() == 0)
                     break;
                 streamed.append(buf.data(), result.value());
@@ -804,4 +804,146 @@ TEST_CASE("Static mount: file in subdirectory", "[response]")
     }
 
     std::filesystem::remove_all(tmp_dir);
+}
+
+namespace
+{
+    constexpr std::string_view kGzipPayload
+        = "the quick brown fox jumps over the lazy dog and keeps jumping over the lazy hedgehog while the "
+          "streaming decompressor keeps up with the pace of the wire";
+} // namespace
+
+TEST_CASE("Response: read_some_decompressed decodes gzip body", "[response]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/gzip-stream",
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, kGzipPayload); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            httplib::http::fields headers;
+            headers.set(http::field::accept_encoding, "gzip");
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(
+                httplib::client::request(http::verb::get, "/gzip-stream", headers)));
+            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp[http::field::content_encoding] == "gzip");
+
+            std::string decoded;
+            std::array<char, 7> buf;
+            while (true)
+            {
+                auto result = co_await resp.read_some_decompressed(net::buffer(buf));
+                if (result.has_error() || result.value() == 0)
+                {
+                    break;
+                }
+                decoded.append(buf.data(), result.value());
+            }
+            REQUIRE(decoded == kGzipPayload);
+            co_return;
+        });
+}
+
+TEST_CASE("Response: read_some_decompressed with single large buffer", "[response]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/gzip-big",
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, kGzipPayload); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            httplib::http::fields headers;
+            headers.set(http::field::accept_encoding, "gzip");
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(
+                httplib::client::request(http::verb::get, "/gzip-big", headers)));
+            REQUIRE(resp[http::field::content_encoding] == "gzip");
+
+            std::array<char, 4096> buf;
+            auto r1 = co_await resp.read_some_decompressed(net::buffer(buf));
+            REQUIRE_FALSE(r1.has_error());
+            REQUIRE(r1.value() == kGzipPayload.size());
+            std::string decoded(buf.data(), r1.value());
+            auto r2 = co_await resp.read_some_decompressed(net::buffer(buf));
+            REQUIRE_FALSE(r2.has_error());
+            REQUIRE(r2.value() == 0);
+            REQUIRE(decoded == kGzipPayload);
+            co_return;
+        });
+}
+
+TEST_CASE("Response: read_some_decompressed passes through identity body", "[response]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/plain",
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, kGzipPayload); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            httplib::http::fields headers;
+            headers.set(http::field::accept_encoding, "identity");
+            auto resp = UNWRAP(
+                co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/plain", headers)));
+            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE_FALSE(resp[http::field::content_encoding] == "gzip");
+
+            std::string decoded;
+            std::array<char, 16> buf;
+            while (true)
+            {
+                auto result = co_await resp.read_some_decompressed(net::buffer(buf));
+                if (result.has_error() || result.value() == 0)
+                {
+                    break;
+                }
+                decoded.append(buf.data(), result.value());
+            }
+            REQUIRE(decoded == kGzipPayload);
+            co_return;
+        });
+}
+
+TEST_CASE("Response: is_body_done reflects decompressed pending overflow", "[response]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/gzip-done",
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, kGzipPayload); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            httplib::http::fields headers;
+            headers.set(http::field::accept_encoding, "gzip");
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(
+                httplib::client::request(http::verb::get, "/gzip-done", headers)));
+            REQUIRE_FALSE(resp.is_body_done());
+
+            std::array<char, 5> buf;
+            std::size_t total = 0;
+            while (auto r = co_await resp.read_some_decompressed(net::buffer(buf)))
+            {
+                if (r.has_error())
+                {
+                    break;
+                }
+                if (r.value() == 0)
+                {
+                    break;
+                }
+                total += r.value();
+            }
+            REQUIRE(total == kGzipPayload.size());
+            REQUIRE(resp.is_body_done());
+            co_return;
+        });
 }

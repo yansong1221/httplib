@@ -16,7 +16,7 @@ namespace httplib::client
             while (!parser_.has_event() && !impl_->is_body_done())
             {
 
-                auto result = co_await impl_->read_some(net::buffer(read_buf_));
+                auto result = co_await impl_->read_some_decompressed(net::buffer(read_buf_));
                 if (result.has_error())
                 {
                     co_return result.error();

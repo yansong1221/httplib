@@ -46,7 +46,7 @@ namespace
         std::array<char, 4096> buf;
         for (;;)
         {
-            auto result = co_await resp->read_some(net::buffer(buf));
+            auto result = co_await resp->read_some_raw(net::buffer(buf));
             if (result.has_error() || result.value() == 0)
             {
                 break;

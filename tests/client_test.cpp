@@ -648,7 +648,7 @@ TEST_CASE("client: chunked transfer via sessions", "[client]")
             std::array<char, 4096> buf;
             while (true)
             {
-                auto result = co_await resp.read_some(net::buffer(buf));
+                auto result = co_await resp.read_some_raw(net::buffer(buf));
                 if (result.has_error() || result.value() == 0)
                     break;
                 streamed.append(buf.data(), result.value());

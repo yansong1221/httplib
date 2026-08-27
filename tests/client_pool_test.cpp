@@ -814,7 +814,7 @@ TEST_CASE("client_pool: reader survives handle destruction", "[client_pool]")
                 resp = UNWRAP(co_await writer->read_response());
 
                 std::array<char, 1> buf;
-                auto r = co_await resp.read_some(net::buffer(buf));
+                auto r = co_await resp.read_some_raw(net::buffer(buf));
                 REQUIRE_FALSE(r.has_error());
                 REQUIRE(r.value() == 1);
                 streamed.append(buf.data(), r.value());
@@ -824,7 +824,7 @@ TEST_CASE("client_pool: reader survives handle destruction", "[client_pool]")
             std::array<char, 1> buf;
             for (;;)
             {
-                auto r = co_await resp.read_some(net::buffer(buf));
+                auto r = co_await resp.read_some_raw(net::buffer(buf));
                 if (r.has_error() || r.value() == 0)
                 {
                     break;

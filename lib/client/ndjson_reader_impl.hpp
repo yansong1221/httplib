@@ -26,7 +26,7 @@ namespace httplib::client
                         co_return boost::json::value {};
                     }
 
-                    auto result = co_await impl_->read_some(net::buffer(read_buf_));
+                    auto result = co_await impl_->read_some_decompressed(net::buffer(read_buf_));
                     if (result.has_error())
                     {
                         co_return result.error();

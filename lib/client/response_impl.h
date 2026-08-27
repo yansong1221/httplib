@@ -2,8 +2,11 @@
 #include "client_impl.h"
 #include "httplib/body/any_body.hpp"
 #include "httplib/client/response.hpp"
+#include <algorithm>
+#include <boost/asio/post.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/parser.hpp>
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <variant>
@@ -134,16 +137,36 @@ namespace httplib::client
             {
                 return true;
             }
-            return resp_parser_ && resp_parser_->is_done(); 
+            if (resp_parser_)
+            {
+                return resp_parser_->is_done();
+            }
+            if (dec_parser_)
+            {
+                if (!dec_parser_->is_done())
+                {
+                    return false;
+                }
+                // 解析器已读完，但解压溢出数据可能还没取完。
+                if (auto const* buf_body = std::get_if<body::buffer_body::value_type>(&dec_parser_->get().body()))
+                {
+                    return buf_body->pending.empty();
+                }
+                return true;
+            }
+            return false;
         }
 
         net::awaitable<boost::system::result<std::size_t>>
-        read_some(net::mutable_buffer const& buf)
+        read_some_raw(net::mutable_buffer const& buf)
         {
+            // 先跳上 client 的 strand，保证 parser 状态变更与底层读写串行；
+            // 配合 stream 也跑在 strand 上，协程在 socket 等待后仍会回到 strand。
             if (msg_)
             {
                 co_return 0;
             }
+            co_await net::post(parent_->strand_, net::use_awaitable);
             if (!resp_parser_)
             {
                 if (!header_parser_)
@@ -185,6 +208,73 @@ namespace httplib::client
             }
         }
 
+        // 流式读取解压后的 body：把 buffer_body 放进 any_body，复用其 content-encoding 解压逻辑。
+        // 调用方缓冲写不下时溢出到 value_type::pending，下次调用先取 pending，保证不丢数据。
+        net::awaitable<boost::system::result<std::size_t>>
+        read_some_decompressed(net::mutable_buffer const& buf)
+        {
+            // 与 read_some_raw 一致：跳上 client strand 串行执行。
+            if (msg_)
+            {
+                co_return 0;
+            }
+            co_await net::post(parent_->strand_, net::use_awaitable);
+            if (buf.size() == 0)
+            {
+                co_return 0;
+            }
+            if (!dec_parser_)
+            {
+                if (!header_parser_)
+                {
+                    co_return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+                }
+                status_ = header_parser_->get().result();
+                header_ = header_parser_->get().base();
+                dec_parser_ = std::make_unique<http::response_parser<body::any_body>>(std::move(*header_parser_));
+                header_parser_.reset();
+                dec_parser_->get().body() = body::buffer_body::value_type {};
+            }
+
+            for (;;)
+            {
+                auto& buf_body = std::get<body::buffer_body::value_type>(dec_parser_->get().body());
+
+                // 先取上一次没写完的溢出数据。
+                if (!buf_body.pending.empty())
+                {
+                    auto n = std::min(buf.size(), buf_body.pending.size());
+                    std::memcpy(buf.data(), buf_body.pending.data(), n);
+                    buf_body.pending.erase(0, n);
+                    co_return n;
+                }
+
+                buf_body.data = (void*)buf.data();
+                buf_body.size = buf.size();
+
+                auto ec = co_await parent_->async_read(*dec_parser_, false);
+                if (ec == http::error::need_buffer)
+                {
+                    ec = {};
+                }
+                if (ec)
+                {
+                    co_return ec;
+                }
+
+                auto consumed = buf.size() - buf_body.size;
+                if (consumed > 0)
+                {
+                    co_return consumed;
+                }
+
+                if (dec_parser_->is_done())
+                {
+                    co_return 0;
+                }
+            }
+        }
+
         net::awaitable<boost::system::error_code>
         read_body(http_client::impl::body_setup_fn const& body_setup)
         {
@@ -215,7 +305,6 @@ namespace httplib::client
             {
                 parent_->read_impl_.reset();
             }
-            parent_.reset();
             co_return boost::system::error_code {};
         }
 
@@ -227,5 +316,7 @@ namespace httplib::client
         std::optional<http::response<body::any_body>> msg_;
         std::unique_ptr<http::response_parser<http::empty_body>> header_parser_;
         std::unique_ptr<http::response_parser<http::buffer_body>> resp_parser_;
+        // 解压流式读取专用：any_body 解析器，body 持有 buffer_body 值以走解压 reader。
+        std::unique_ptr<http::response_parser<body::any_body>> dec_parser_;
     };
 } // namespace httplib::client

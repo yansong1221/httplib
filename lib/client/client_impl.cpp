@@ -29,6 +29,7 @@ namespace httplib::client
     http_client::impl::impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl)
 
         : executor_(ex)
+        , strand_(net::make_strand(ex))
         , resolver_(ex)
         , host_(host)
         , host_value_(util::make_host_value(host, port, ssl))
@@ -288,7 +289,9 @@ namespace httplib::client
         if (!is_open())
         {
             close();
-            auto stream_result = http_stream::create_stream(executor_, host_, use_ssl_, verify_ssl_, ca_cert_);
+            // 用 strand 作为 executor 创建流：连接上的读写由此串行化，
+            // 避免并发流式读取（read_some_raw / read_some_decompressed）交错。
+            auto stream_result = http_stream::create_stream(strand_, host_, use_ssl_, verify_ssl_, ca_cert_);
             if (!stream_result)
             {
                 co_return stream_result.error();

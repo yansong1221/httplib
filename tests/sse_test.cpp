@@ -317,3 +317,31 @@ TEST_CASE("SSE: lazy response reader", "[sse]")
             REQUIRE(events[0].data == "lazy-event");
         });
 }
+
+TEST_CASE("SSE: reader decodes gzip-compressed event stream", "[sse]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/events-gzip",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("data: hello gzip\n\n"sv, "text/event-stream"sv); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            httplib::http::fields headers;
+            headers.set(http::field::accept_encoding, "gzip");
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(
+                httplib::client::request(http::verb::get, "/events-gzip", headers)));
+            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp[http::field::content_encoding] == "gzip");
+
+            std::vector<httplib::client::sse_reader::sse_event> events;
+            auto sse = resp.create_sse_reader();
+            co_await collect_sse_events(*sse, events);
+            REQUIRE(events.size() == 1);
+            REQUIRE(events[0].data == "hello gzip");
+            co_return;
+        });
+}

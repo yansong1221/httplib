@@ -153,7 +153,12 @@ namespace httplib::client
     net::awaitable<boost::system::result<response>>
     response::read_body()
     {
-        co_return co_await impl_->read_body(nullptr);
+        auto ec = co_await impl_->read_body(nullptr);
+        if (ec)
+        {
+            co_return ec;
+        }
+        co_return std::move(*this);
     }
 
     net::awaitable<boost::system::error_code>
@@ -169,13 +174,23 @@ namespace httplib::client
     }
 
     net::awaitable<boost::system::result<std::size_t>>
-    response::read_some(net::mutable_buffer const& buffer)
+    response::read_some_raw(net::mutable_buffer const& buffer)
     {
         if (!impl_)
         {
             co_return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
         }
-        co_return co_await impl_->read_some(buffer);
+        co_return co_await impl_->read_some_raw(buffer);
+    }
+
+    net::awaitable<boost::system::result<std::size_t>>
+    response::read_some_decompressed(net::mutable_buffer const& buffer)
+    {
+        if (!impl_)
+        {
+            co_return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+        }
+        co_return co_await impl_->read_some_decompressed(buffer);
     }
 
     bool

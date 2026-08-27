@@ -55,8 +55,11 @@ namespace httplib::client
         // 流式读 body 写入文件（含 content-encoding 解压）
         net::awaitable<boost::system::error_code> read_to_file(fs::path const& save_path);
 
-        // 低层流式读（供需要边读边处理的场景）
-        net::awaitable<boost::system::result<std::size_t>> read_some(net::mutable_buffer const& buffer);
+        // 低层流式读（供需要边读边处理的场景）；返回未解压的（原始）body 字节
+        net::awaitable<boost::system::result<std::size_t>> read_some_raw(net::mutable_buffer const& buffer);
+
+        // 低层流式读：返回解压后的（content-encoding 已解码）body 字节
+        net::awaitable<boost::system::result<std::size_t>> read_some_decompressed(net::mutable_buffer const& buffer);
         bool is_body_done() const;
 
         class impl;

@@ -1,4 +1,5 @@
 #pragma once
+#include "httplib/body/buffer_body.hpp"
 #include "httplib/body/empty_body.hpp"
 #include "httplib/body/file_body.hpp"
 #include "httplib/body/form_data_body.hpp"
@@ -39,7 +40,8 @@ namespace httplib::body
             }
         };
 
-        using body_types = std::tuple<empty_body, string_body, json_body, form_data_body, file_body, query_params_body>;
+        using body_types
+            = std::tuple<empty_body, string_body, json_body, form_data_body, file_body, query_params_body, buffer_body>;
 
         template <typename>
         struct value_from_tuple;

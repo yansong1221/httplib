@@ -291,3 +291,34 @@ TEST_CASE("NDJSON: partial line split across chunks", "[ndjson]")
             co_return;
         });
 }
+
+TEST_CASE("NDJSON: reader decodes gzip-compressed stream", "[ndjson]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/ndjson-gzip",
+                [](httplib::server::request&, httplib::server::response& resp)
+                {
+                    resp.set_string_content("{\"msg\":\"hello\",\"n\":42}\n"sv, "application/json"sv);
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            httplib::http::fields headers;
+            headers.set(http::field::accept_encoding, "gzip");
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(
+                httplib::client::request(http::verb::get, "/ndjson-gzip", headers)));
+            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp[http::field::content_encoding] == "gzip");
+
+            auto ndjson = resp.create_ndjson_reader();
+            std::vector<boost::json::value> items;
+            co_await collect_ndjson_lines(*ndjson, items);
+            REQUIRE(items.size() == 1);
+            REQUIRE(items[0].at("msg") == "hello");
+            REQUIRE(items[0].at("n") == 42);
+            co_return;
+        });
+}

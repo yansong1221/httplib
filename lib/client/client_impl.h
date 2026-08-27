@@ -3,6 +3,7 @@
 #include "httplib/client/client.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "stream/http_stream.hpp"
+#include <boost/asio/strand.hpp>
 #include <boost/beast/http/read.hpp>
 #include <functional>
 #include <spdlog/spdlog.h>
@@ -139,6 +140,10 @@ namespace httplib::client
 
       public:
         net::any_io_executor executor_;
+        // 串行化整条连接上的异步 I/O：stream 在此 strand 上创建，
+        // 所有 socket 读写的完成回调都会调度回该 strand，
+        // 保证同一连接上并发操作（含流式读取）不会交错执行。
+        net::strand<net::any_io_executor> strand_;
         tcp::resolver resolver_;
         timeout_policy timeout_policy_ = timeout_policy::overall;
         std::chrono::steady_clock::duration timeout_ = std::chrono::seconds(30);
