@@ -13,8 +13,7 @@ namespace httplib::client
     response::response() : impl_(std::make_shared<impl>()) {}
 
     response::response(response&&) noexcept = default;
-    response&
-    response::operator=(response&&) noexcept = default;
+    response& response::operator=(response&&) noexcept = default;
     response::~response() = default;
 
     response::response(std::shared_ptr<impl> impl) : impl_(std::move(impl)) {}
@@ -106,49 +105,49 @@ namespace httplib::client
     net::awaitable<boost::system::result<std::string>>
     response::read_string()
     {
-        auto result = co_await impl_->read_body(
-            [](http::response<body::any_body>& resp) { resp.body() = body::string_body::value_type {}; });
-        if (result.has_error())
+        auto ec = co_await impl_->read_body([](http::response<body::any_body>& resp)
+                                            { resp.body() = body::string_body::value_type {}; });
+        if (ec)
         {
-            co_return result.error();
+            co_return ec;
         }
-        co_return result->as_string();
+        co_return as_string();
     }
 
     net::awaitable<boost::system::result<boost::json::value>>
     response::read_json()
     {
-        auto result = co_await impl_->read_body(
-            [](http::response<body::any_body>& resp) { resp.body() = body::json_body::value_type {}; });
-        if (result.has_error())
+        auto ec = co_await impl_->read_body([](http::response<body::any_body>& resp)
+                                            { resp.body() = body::json_body::value_type {}; });
+        if (ec)
         {
-            co_return result.error();
+            co_return ec;
         }
-        co_return result->as_json();
+        co_return as_json();
     }
 
     net::awaitable<boost::system::result<html::form_data>>
     response::read_form_data()
     {
-        auto result = co_await impl_->read_body(
-            [](http::response<body::any_body>& resp) { resp.body() = body::form_data_body::value_type {}; });
-        if (result.has_error())
+        auto ec = co_await impl_->read_body([](http::response<body::any_body>& resp)
+                                            { resp.body() = body::form_data_body::value_type {}; });
+        if (ec)
         {
-            co_return result.error();
+            co_return ec;
         }
-        co_return result->as_form_data();
+        co_return as_form_data();
     }
 
     net::awaitable<boost::system::result<html::query_params>>
     response::read_query_params()
     {
-        auto result = co_await impl_->read_body(
-            [](http::response<body::any_body>& resp) { resp.body() = body::query_params_body::value_type {}; });
-        if (result.has_error())
+        auto ec = co_await impl_->read_body([](http::response<body::any_body>& resp)
+                                            { resp.body() = body::query_params_body::value_type {}; });
+        if (ec)
         {
-            co_return result.error();
+            co_return ec;
         }
-        co_return result->as_query_params();
+        co_return as_query_params();
     }
 
     net::awaitable<boost::system::result<response>>
@@ -166,14 +165,7 @@ namespace httplib::client
         {
             co_return boost::system::errc::make_error_code(boost::system::errc::permission_denied);
         }
-
-        auto result = co_await impl_->read_body(
-            [&](http::response<body::any_body>& resp) { resp.body() = std::move(fb); });
-        if (result.has_error())
-        {
-            co_return result.error();
-        }
-        co_return boost::system::error_code {};
+        co_return co_await impl_->read_body([&](http::response<body::any_body>& resp) { resp.body() = std::move(fb); });
     }
 
     net::awaitable<boost::system::result<std::size_t>>

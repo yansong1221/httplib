@@ -90,7 +90,7 @@ namespace httplib::client
         {
             co_return result.error();
         }
-        co_return co_await result.value().read_body();
+        co_return co_await result->read_body();
     }
 
     net::awaitable<http_client::response_result>
@@ -241,12 +241,12 @@ namespace httplib::client
         {
             co_return result.error();
         }
-        auto resp = std::move(result).value();
-        if (auto ec = co_await resp.read_to_file(save_path); ec)
+
+        if (auto ec = co_await result->read_to_file(save_path); ec)
         {
             co_return ec;
         }
-        co_return std::move(resp);
+        co_return result;
     }
 
     void

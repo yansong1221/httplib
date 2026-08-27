@@ -23,7 +23,8 @@ namespace httplib::client
             return response(std::make_shared<impl>(std::move(msg)));
         }
 
-        http::status result() const
+        http::status
+        result() const
         {
             if (msg_)
             {
@@ -133,7 +134,7 @@ namespace httplib::client
             {
                 return true;
             }
-            return resp_parser_ && resp_parser_->is_done();
+            return resp_parser_ && resp_parser_->is_done(); 
         }
 
         net::awaitable<boost::system::result<std::size_t>>
@@ -184,12 +185,12 @@ namespace httplib::client
             }
         }
 
-        net::awaitable<boost::system::result<response>>
+        net::awaitable<boost::system::error_code>
         read_body(http_client::impl::body_setup_fn const& body_setup)
         {
             if (msg_)
             {
-                co_return response(shared_from_this());
+                co_return boost::system::error_code {};
             }
             if (!header_parser_)
             {
@@ -205,8 +206,7 @@ namespace httplib::client
             {
                 body_setup(body_parser.get());
             }
-            auto ec = co_await parent_->async_read(body_parser, false);
-            if (ec)
+            if (auto ec = co_await parent_->async_read(body_parser, false); ec)
             {
                 co_return ec;
             }
@@ -216,7 +216,7 @@ namespace httplib::client
                 parent_->read_impl_.reset();
             }
             parent_.reset();
-            co_return response(shared_from_this());
+            co_return boost::system::error_code {};
         }
 
         std::shared_ptr<http_client::impl> parent_;
