@@ -1,5 +1,5 @@
 #pragma once
-#include "lazy_response_impl.h"
+#include "response_impl.h"
 #include "sse_event_parser.hpp"
 #include <array>
 
@@ -8,7 +8,7 @@ namespace httplib::client
     class sse_reader_impl : public sse_reader
     {
       public:
-        explicit sse_reader_impl(std::shared_ptr<lazy_response::impl> impl) : impl_(std::move(impl)) {}
+        explicit sse_reader_impl(std::shared_ptr<response::impl> impl) : impl_(std::move(impl)) {}
 
         net::awaitable<boost::system::result<sse_event>>
         read_event() override
@@ -41,7 +41,7 @@ namespace httplib::client
         }
 
       private:
-        std::shared_ptr<lazy_response::impl> impl_;
+        std::shared_ptr<response::impl> impl_;
         detail::sse_event_parser parser_;
         std::array<char, 4096> read_buf_;
     };

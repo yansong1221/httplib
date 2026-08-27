@@ -1,6 +1,5 @@
 #include "httplib/client/client.hpp"
 #include "client_impl.h"
-#include "lazy_response_impl.h"
 #include <boost/url.hpp>
 #include <stdexcept>
 #include <utility>
@@ -91,10 +90,10 @@ namespace httplib::client
         {
             co_return result.error();
         }
-        co_return co_await get_impl(result.value()).read_body(nullptr);
+        co_return co_await result.value().read_body();
     }
 
-    net::awaitable<http_client::lazy_response_result>
+    net::awaitable<http_client::response_result>
     http_client::async_send_request_lazy(http_client::request req)
     {
         co_return co_await impl_->async_send_request_lazy_with_redirect(req);
@@ -242,7 +241,12 @@ namespace httplib::client
         {
             co_return result.error();
         }
-        co_return co_await get_impl(result.value()).read_file(save_path);
+        auto resp = std::move(result).value();
+        if (auto ec = co_await resp.read_to_file(save_path); ec)
+        {
+            co_return ec;
+        }
+        co_return std::move(resp);
     }
 
     void

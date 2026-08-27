@@ -1,7 +1,6 @@
 #pragma once
 #include "httplib/body/any_body.hpp"
 #include "httplib/client/client_fwd.hpp"
-#include "httplib/client/lazy_response.hpp"
 #include "httplib/client/request.hpp"
 #include "httplib/client/response.hpp"
 #include <boost/asio/awaitable.hpp>
@@ -24,9 +23,6 @@ namespace httplib::client
         using response = client::response;
         using request = client::request;
         using response_result = boost::system::result<response>;
-
-        using lazy_response = client::lazy_response;
-        using lazy_response_result = boost::system::result<lazy_response>;
 
       public:
         explicit http_client(net::io_context& ex, std::string_view host, uint16_t port, bool ssl = false);
@@ -56,7 +52,7 @@ namespace httplib::client
         // ---- core send ----
 
         net::awaitable<response_result> async_send_request(request req);
-        net::awaitable<lazy_response_result> async_send_request_lazy(request req);
+        net::awaitable<response_result> async_send_request_lazy(request req);
 
         // ---- HTTP method shorthands (no body) ----
 
@@ -130,7 +126,7 @@ namespace httplib::client
         class impl;
         std::shared_ptr<impl> impl_;
 
-        friend class ::httplib::client::lazy_response::impl;
+        friend class ::httplib::client::response::impl;
         friend class read_session_impl;
 
         friend std::shared_ptr<impl>&

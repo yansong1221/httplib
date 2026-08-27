@@ -14,7 +14,6 @@ namespace httplib::client
     class lazy_request;
     class request;
     class response;
-    class lazy_response;
     class sse_reader;
     class ndjson_reader;
 

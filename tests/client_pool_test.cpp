@@ -801,7 +801,7 @@ TEST_CASE("client_pool: reader survives handle destruction", "[client_pool]")
             auto host = ep.address().to_string();
             auto port = ep.port();
 
-            httplib::client::lazy_response resp;
+            httplib::client::response resp;
             std::string streamed;
             {
                 auto h = co_await p.async_acquire(host, port, false);

@@ -46,15 +46,15 @@ namespace httplib::client
         std::shared_ptr<spdlog::logger> logger() const;
         void set_logger(std::shared_ptr<spdlog::logger> logger);
 
-        net::awaitable<http_client::lazy_response_result> async_send_request_lazy(http_client::request& req);
+        net::awaitable<http_client::response_result> async_send_request_lazy(http_client::request& req);
 
-        net::awaitable<http_client::lazy_response_result> async_send_request_lazy_with_redirect(
+        net::awaitable<http_client::response_result> async_send_request_lazy_with_redirect(
             http_client::request& req);
 
         std::shared_ptr<lazy_request> create_lazy_request();
 
       private:
-        friend class ::httplib::client::lazy_response::impl;
+        friend class ::httplib::client::response::impl;
         friend class read_session_impl;
 
         void prepare_request(http_client::request& req);

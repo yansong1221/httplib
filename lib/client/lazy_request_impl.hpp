@@ -2,7 +2,6 @@
 
 #include "client_impl.h"
 #include "httplib/client/lazy_request.hpp"
-#include "lazy_response_impl.h"
 #include "response_impl.h"
 #include <boost/beast/http/buffer_body.hpp>
 #include <boost/beast/http/empty_body.hpp>
@@ -60,7 +59,7 @@ namespace httplib::client
             co_return ec;
         }
 
-        net::awaitable<boost::system::result<client::lazy_response>>
+        net::awaitable<boost::system::result<client::response>>
         read_response() override
         {
             auto header_parser = std::make_unique<http::response_parser<http::empty_body>>();
@@ -73,7 +72,7 @@ namespace httplib::client
                 co_return ec;
             }
 
-            co_return co_await client::lazy_response::impl::create(std::move(header_parser), parent_);
+            co_return client::response::impl::make_lazy(std::move(header_parser), parent_);
         }
 
         net::awaitable<boost::system::result<client::response>>

@@ -1036,7 +1036,7 @@ TEST_CASE("client: lazy read text", "[client]")
         {
             auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-text")));
             REQUIRE(resp.result() == http::status::ok);
-            auto text = UNWRAP(co_await resp.as_string());
+            auto text = UNWRAP(co_await resp.read_string());
             REQUIRE(text == "lazy-hello");
         });
 }
@@ -1058,7 +1058,7 @@ TEST_CASE("client: lazy read json", "[client]")
         {
             auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-json")));
             REQUIRE(resp.result() == http::status::ok);
-            auto val = UNWRAP(co_await resp.as_json());
+            auto val = UNWRAP(co_await resp.read_json());
             REQUIRE(val.at("key") == "value");
             REQUIRE(val.at("num") == 7);
         });
@@ -1077,7 +1077,7 @@ TEST_CASE("client: lazy read body typed", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-body")));
-            auto text = UNWRAP(co_await resp.as_string());
+            auto text = UNWRAP(co_await resp.read_string());
             REQUIRE(text == "lazy-body");
         });
 }
@@ -1104,7 +1104,7 @@ TEST_CASE("client: lazy read multipart body", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-form")));
-            auto fd = UNWRAP(co_await resp.as_form_data());
+            auto fd = UNWRAP(co_await resp.read_form_data());
             REQUIRE(fd.fields.size() == 2);
             REQUIRE(fd.fields[0].name == "a");
             REQUIRE(fd.fields[0].content == std::string(9000, 'x') + "\r\ncc\r");
@@ -1158,7 +1158,7 @@ TEST_CASE("client: lazy redirect", "[client]")
             client.set_max_redirects(5);
             auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-redirect-me")));
             REQUIRE(resp.result() == http::status::ok);
-            auto text = UNWRAP(co_await resp.as_string());
+            auto text = UNWRAP(co_await resp.read_string());
             REQUIRE(text == "lazy-arrived");
         });
 }
@@ -1205,7 +1205,7 @@ TEST_CASE("client: lazy redirect full URL", "[client]")
             client.set_max_redirects(1);
             auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-ext-redirect")));
             REQUIRE(resp.result() == http::status::ok);
-            auto text = UNWRAP(co_await resp.as_string());
+            auto text = UNWRAP(co_await resp.read_string());
             REQUIRE(text == "lazy-target-reached");
         });
 }

@@ -3,7 +3,6 @@
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "lazy_request_impl.hpp"
-#include "lazy_response_impl.h"
 #include "request_impl.h"
 #include "response_impl.h"
 #include "util/logging.hpp"
@@ -96,7 +95,7 @@ namespace httplib::client
         custom_logger_ = std::move(logger);
     }
 
-    net::awaitable<http_client::lazy_response_result>
+    net::awaitable<http_client::response_result>
     http_client::impl::async_send_request_lazy(http_client::request& req)
     {
         prepare_request(req);
@@ -117,10 +116,10 @@ namespace httplib::client
             co_return ec;
         }
 
-        co_return co_await client::lazy_response::impl::create(std::move(header_parser), shared_from_this());
+        co_return client::response::impl::make_lazy(std::move(header_parser), shared_from_this());
     }
 
-    net::awaitable<http_client::lazy_response_result>
+    net::awaitable<http_client::response_result>
     http_client::impl::async_send_request_lazy_with_redirect(http_client::request& req)
     {
         auto self = shared_from_this();
@@ -152,7 +151,7 @@ namespace httplib::client
                 logger()->trace("redirect {} -> {}", req.target(), std::string_view(loc));
 
                 // 读完并丢弃 redirect 响应的 body，保证连接可复用
-                if (auto drain_result = co_await resp.as_string(); drain_result.has_error())
+                if (auto drain_result = co_await resp.read_string(); drain_result.has_error())
                 {
                     close();
                 }
@@ -268,7 +267,16 @@ namespace httplib::client
         }
         if (!get_impl(req).has_content_length())
         {
-            get_impl(req).prepare_payload();
+            // any_body 不是 sized body，prepare_payload() 对空 body 也会设 Transfer-Encoding: chunked，
+            // 导致服务端把空 POST 解析成 chunked body 而非 empty_body。空 body 显式设 Content-Length: 0。
+            if (std::holds_alternative<body::empty_body::value_type>(req.body()))
+            {
+                get_impl(req).content_length(0);
+            }
+            else
+            {
+                get_impl(req).prepare_payload();
+            }
         }
     }
     net::awaitable<boost::system::error_code>

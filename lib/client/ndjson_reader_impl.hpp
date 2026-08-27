@@ -1,5 +1,5 @@
 #pragma once
-#include "lazy_response_impl.h"
+#include "response_impl.h"
 #include <array>
 #include <boost/json/parse.hpp>
 #include <boost/system/result.hpp>
@@ -11,7 +11,7 @@ namespace httplib::client
     class ndjson_reader_impl : public httplib::client::ndjson_reader
     {
       public:
-        explicit ndjson_reader_impl(std::shared_ptr<lazy_response::impl> impl) : impl_(std::move(impl)) {}
+        explicit ndjson_reader_impl(std::shared_ptr<response::impl> impl) : impl_(std::move(impl)) {}
 
         net::awaitable<boost::system::result<boost::json::value>>
         read() override
@@ -61,7 +61,7 @@ namespace httplib::client
         }
 
       private:
-        std::shared_ptr<lazy_response::impl> impl_;
+        std::shared_ptr<response::impl> impl_;
         std::string buf_;
         std::array<char, 4096> read_buf_;
     };
