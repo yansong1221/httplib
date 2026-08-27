@@ -120,7 +120,7 @@ TEST_CASE("Response: set_chunked_write_handler with multiple chunks", "[response
             co_await writer->write_header(http::verb::get, "/stream", {});
             co_await writer->write_body(net::buffer("", 0), false);
 
-            auto resp = UNWRAP(co_await writer->read_response());
+            auto resp = UNWRAP(co_await writer->read_response_lazy());
             std::array<char, 4096> buf;
             while (true)
             {

@@ -1,5 +1,5 @@
 #pragma once
-#include "httplib/client/read_session.hpp"
+#include "httplib/client/stream_reader.hpp"
 #include "httplib/config.hpp"
 #include "httplib/html/form_data.hpp"
 #include "httplib/html/query_params.hpp"

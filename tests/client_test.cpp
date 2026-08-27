@@ -4,7 +4,7 @@
 #include "httplib/body/query_params_body.hpp"
 #include "httplib/body/string_body.hpp"
 #include "httplib/client/client_pool.hpp"
-#include "httplib/client/read_session.hpp"
+#include "httplib/client/stream_reader.hpp"
 #include "httplib/client/lazy_request.hpp"
 #include "httplib/server/chunk_writer.hpp"
 #include "httplib/server/request.hpp"
@@ -643,7 +643,7 @@ TEST_CASE("client: chunked transfer via sessions", "[client]")
             co_await writer->write_header(http::verb::get, "/chunked", {});
             co_await writer->write_body(net::buffer("", 0), false);
 
-            auto resp = UNWRAP(co_await writer->read_response());
+            auto resp = UNWRAP(co_await writer->read_response_lazy());
             std::string streamed;
             std::array<char, 4096> buf;
             while (true)
@@ -677,7 +677,7 @@ TEST_CASE("client: lazy request reads full response", "[client]")
             co_await writer->write_header(http::verb::post, "/echo-full", {}, false);
             co_await writer->write_body(net::buffer(std::string_view("hello")), false);
 
-            auto resp = UNWRAP(co_await writer->read_full_response());
+            auto resp = UNWRAP(co_await writer->read_response());
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp.as_string() == "echo:hello");
         });

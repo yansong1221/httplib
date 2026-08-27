@@ -1,6 +1,6 @@
 #pragma once
 #include "httplib/client/client.hpp"
-#include "httplib/client/read_session.hpp"
+#include "httplib/client/stream_reader.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
 #include <boost/asio/co_spawn.hpp>
@@ -15,6 +15,24 @@
 #include <spdlog/spdlog.h>
 #include <string>
 #include <vector>
+
+#ifdef _DEBUG
+#include <crtdbg.h>
+namespace
+{
+    // Debug CRT 断言（如 Catch2 打印含高位字节的断言展开时）默认弹模态框，
+    // 会阻塞单线程 io_context 导致测试套件假死。改为打印到 stderr 正常失败。
+    struct suppress_crt_assert_dialog
+    {
+        suppress_crt_assert_dialog()
+        {
+            _CrtSetReportMode(_CRT_ASSERT, _CRTDBG_MODE_DEBUG | _CRTDBG_MODE_FILE);
+            _CrtSetReportFile(_CRT_ASSERT, _CRTDBG_FILE_STDERR);
+        }
+    };
+    suppress_crt_assert_dialog g_suppress;
+} // namespace
+#endif
 
 using namespace std::string_view_literals;
 namespace http = httplib::http;

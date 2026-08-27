@@ -4,7 +4,7 @@
 #include "httplib/body/string_body.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
-#include "httplib/client/read_session.hpp"
+#include "httplib/client/stream_reader.hpp"
 #include "httplib/client/lazy_request.hpp"
 #include "httplib/client/ws_client.hpp"
 #include "httplib/server/chunk_reader.hpp"
@@ -503,7 +503,7 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
             while (true)
             {
                 std::array<char, 4096> buf;
-                auto result = co_await resp->read_some(net::buffer(buf));
+                auto result = co_await resp->read_some_raw(net::buffer(buf));
                 if (result.has_error() || result.value() == 0)
                 {
                     break;

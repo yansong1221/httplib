@@ -1,7 +1,6 @@
 #include "downloader_impl.h"
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
-#include "httplib/client/read_session.hpp"
 #include "httplib/client/lazy_request.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/when_all.hpp"

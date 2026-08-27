@@ -36,7 +36,7 @@ namespace
             co_await writer->write_body(net::buffer("", 0), false);
         }
 
-        auto resp = co_await writer->read_response();
+        auto resp = co_await writer->read_response_lazy();
         if (resp.has_error())
         {
             co_return std::string{};

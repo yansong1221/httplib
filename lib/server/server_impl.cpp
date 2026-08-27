@@ -1,9 +1,7 @@
 ﻿#include "server_impl.h"
 #include "client/client_impl.h"
-#include "client/read_session_impl.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
-#include "httplib/client/read_session.hpp"
 #include "httplib/client/lazy_request.hpp"
 #include "httplib/client/ws_client.hpp"
 #include "httplib/util/misc.hpp"
@@ -573,7 +571,6 @@ namespace httplib::server
                 }
 
                 auto writer = client->create_lazy_request();
-                auto reader = std::make_shared<httplib::client::read_session_impl>(get_impl(*client));
 
                 if (auto rel_ec = co_await writer->write_header(req.method(), upstream_target, upstream_headers);
                     rel_ec)
@@ -610,15 +607,20 @@ namespace httplib::server
                     }
                 }
 
-                if (auto rel_ec = co_await reader->read_header(); rel_ec)
+                auto up_result = co_await writer->read_response_lazy();
+                if (up_result.has_error())
                 {
-                    logger()->trace("[proxy] read_header from {}:{} failed: {}", host, port, rel_ec.message());
-                    resp.set_error_content(detail::upstream_error_to_status(rel_ec));
+                    logger()->trace("[proxy] read_header from {}:{} failed: {}",
+                                    host,
+                                    port,
+                                    up_result.error().message());
+                    resp.set_error_content(detail::upstream_error_to_status(up_result.error()));
                     co_return;
                 }
+                auto& up = up_result.value();
 
-                auto const& headers = reader->headers();
-                auto const result = reader->result();
+                auto const& headers = up.headers();
+                auto const result = up.result();
                 logger()->debug("[proxy] {} {} <- {} {}",
                                 req.method_string(),
                                 req.target(),
@@ -655,16 +657,16 @@ namespace httplib::server
                     co_return;
                 }
 
-                while (!reader->is_body_done())
+                while (!up.is_body_done())
                 {
-                    auto bytes_result = co_await reader->read_body(net::buffer(relay_buf));
+                    auto bytes_result = co_await up.read_some_raw(net::buffer(relay_buf));
                     if (bytes_result.has_error())
                     {
                         logger()->trace("[proxy] read response body failed: {}", bytes_result.error().message());
                         co_return;
                     }
                     auto bytes = bytes_result.value();
-                    auto more = !reader->is_body_done();
+                    auto more = !up.is_body_done();
 
                     if (interceptor)
                     {

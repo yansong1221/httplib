@@ -60,7 +60,7 @@ namespace httplib::client
         }
 
         net::awaitable<boost::system::result<client::response>>
-        read_response() override
+        read_response_lazy() override
         {
             auto header_parser = std::make_unique<http::response_parser<http::empty_body>>();
             header_parser->skip(method_ == http::verb::head);
@@ -76,25 +76,14 @@ namespace httplib::client
         }
 
         net::awaitable<boost::system::result<client::response>>
-        read_full_response() override
+        read_response() override
         {
-            http::response_parser<http::empty_body> header_parser;
-            header_parser.skip(method_ == http::verb::head);
-            header_parser.header_limit((std::numeric_limits<std::uint32_t>::max)());
-            header_parser.body_limit((std::numeric_limits<std::uint64_t>::max)());
-
-            if (auto ec = co_await parent_->async_read(header_parser, true); ec)
+            auto result = co_await read_response_lazy();
+            if (result.has_error())
             {
-                co_return ec;
+                co_return result.error();
             }
-
-            http::response_parser<body::any_body> body_parser(std::move(header_parser));
-            if (auto ec = co_await parent_->async_read(body_parser, false); ec)
-            {
-                co_return ec;
-            }
-
-            co_return client::response::impl::make(body_parser.release());
+            co_return co_await result->read_body();
         }
 
         std::shared_ptr<http_client::impl> parent_;

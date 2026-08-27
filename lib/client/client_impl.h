@@ -56,7 +56,6 @@ namespace httplib::client
 
       private:
         friend class ::httplib::client::response::impl;
-        friend class read_session_impl;
 
         void prepare_request(http_client::request& req);
         net::awaitable<boost::system::error_code> co_connect();

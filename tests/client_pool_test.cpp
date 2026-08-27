@@ -811,7 +811,7 @@ TEST_CASE("client_pool: reader survives handle destruction", "[client_pool]")
                 co_await writer->write_header(http::verb::get, "/stream", {});
                 co_await writer->write_body(net::buffer("", 0), false);
 
-                resp = UNWRAP(co_await writer->read_response());
+                resp = UNWRAP(co_await writer->read_response_lazy());
 
                 std::array<char, 1> buf;
                 auto r = co_await resp.read_some_raw(net::buffer(buf));

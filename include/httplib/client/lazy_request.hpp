@@ -22,9 +22,9 @@ namespace httplib::client
         virtual net::awaitable<boost::system::error_code> write_body(net::const_buffer const& data, bool more) = 0;
 
         // 收尾请求并读取响应头，返回惰性响应（body 未读，可流式读取）。
-        virtual net::awaitable<boost::system::result<response>> read_response() = 0;
+        virtual net::awaitable<boost::system::result<response>> read_response_lazy() = 0;
 
         // 收尾请求并读取完整响应（body 已全部读入）。
-        virtual net::awaitable<boost::system::result<response>> read_full_response() = 0;
+        virtual net::awaitable<boost::system::result<response>> read_response() = 0;
     };
 } // namespace httplib::client

@@ -1,5 +1,5 @@
 #pragma once
-#include "httplib/client/read_session.hpp"
+#include "httplib/client/stream_reader.hpp"
 #include <charconv>
 #include <deque>
 #include <string>
