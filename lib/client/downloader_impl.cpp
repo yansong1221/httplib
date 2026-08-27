@@ -933,21 +933,15 @@ namespace httplib::client
             }
         }
 
-        std::vector<net::awaitable<void>> ops;
+        std::vector<net::awaitable<boost::system::error_code>> ops;
         ops.reserve(seg_count);
         std::vector<boost::system::error_code> errors(seg_count);
 
         for (auto& seg : segments_)
         {
-            ops.push_back(
-                [this, &ui, &seg, &errors]() -> net::awaitable<void>
-                {
-                    errors[seg.index] = co_await co_download_segment(ui, seg.start_byte, seg.end_byte, seg.part_path);
-                }());
+            ops.emplace_back(co_download_segment(ui, seg.start_byte, seg.end_byte, seg.part_path));
         }
-
         co_await util::when_all(std::move(ops));
-
         {
             std::lock_guard lk(progress_mutex_);
             active_segments_ = 0;

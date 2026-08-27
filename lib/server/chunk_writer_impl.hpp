@@ -18,6 +18,7 @@ namespace httplib::server
             : resp_(&resp)
             , stream_(&stream)
             , write_timeout_(write_timeout)
+            , strand_(net::make_strand(stream.get_executor()))
         {
         }
 
@@ -30,6 +31,8 @@ namespace httplib::server
         net::awaitable<boost::system::error_code>
         write_header(http::status status, http::fields const& headers, bool relay) override
         {
+            co_await boost::asio::post(strand_);
+
             resp_->result(status);
             for (auto const& f : headers)
             {
@@ -62,6 +65,8 @@ namespace httplib::server
         net::awaitable<boost::system::error_code>
         write_body(net::const_buffer const& data, bool more) override
         {
+            co_await boost::asio::post(strand_);
+
             if (!msg_ || !sr_)
             {
                 throw boost::system::system_error(
@@ -88,6 +93,7 @@ namespace httplib::server
         }
 
       private:
+        net::strand<http_stream::executor_type> strand_;
         response::impl* resp_;
         http_stream* stream_;
         std::chrono::steady_clock::duration write_timeout_;
