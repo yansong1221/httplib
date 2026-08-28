@@ -1,6 +1,7 @@
 #pragma once
 #include "client_impl.h"
 #include "httplib/body/any_body.hpp"
+#include "httplib/body/empty_body.hpp"
 #include "httplib/client/response.hpp"
 #include <algorithm>
 #include <boost/asio/post.hpp>
@@ -19,6 +20,13 @@ namespace httplib::client
         // eager：直接构造已完成读入的响应
         impl() = default;
         explicit impl(http::response<body::any_body>&& msg) : msg_(std::move(msg)) {}
+        ~impl()
+        {
+            if (parent_ && !is_body_done())
+            {
+                parent_->close();
+            }
+        }
 
         static response
         make(http::response<body::any_body>&& msg)
@@ -301,10 +309,7 @@ namespace httplib::client
                 co_return ec;
             }
             msg_ = body_parser.release();
-            if (parent_)
-            {
-                parent_->read_impl_.reset();
-            }
+            parent_->read_impl_.reset();
             co_return boost::system::error_code {};
         }
 
