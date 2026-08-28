@@ -362,6 +362,15 @@ namespace httplib::server
                                                                                        - h_start);
                 }
                 co_await _router.post_routing(req, resp);
+
+                if (req.is_chunked())
+                {
+                    auto reader = req.get_chunk_reader();
+                    if (!reader->is_done())
+                    {
+                        get_impl(resp).keep_alive(false);
+                    }
+                }
             }
             catch (std::exception const& e)
             {
@@ -378,7 +387,7 @@ namespace httplib::server
                 server_impl_->logger()->error("unknown exception in handler for {} {} {}",
                                               req.method_string(),
                                               req_target,
-                                              log_endp_format);
+                                              log_endp_format); 
                 get_impl(resp).keep_alive(false);
                 resp.set_error_content(http::status::internal_server_error);
             }
