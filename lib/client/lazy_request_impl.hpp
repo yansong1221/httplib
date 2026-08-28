@@ -30,7 +30,7 @@ namespace httplib::client
             }
             req_msg_->set(http::field::host, parent_->host_value_);
             req_msg_->keep_alive(true);
-            if (!relay)
+            if (!relay && !req_msg_->has_content_length())
             {
                 req_msg_->chunked(true);
             }
