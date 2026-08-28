@@ -234,29 +234,9 @@ namespace httplib::body
             auto content_type = header_[http::field::content_type];
             auto content_encoding = header_[http::field::content_encoding];
 
-            if (std::holds_alternative<body::buffer_body::value_type>(body_))
+            if (!std::holds_alternative<body::empty_body::value_type>(body_))
             {
-                create_reader<body::buffer_body>();
-            }
-            else if (std::holds_alternative<body::file_body::value_type>(body_))
-            {
-                create_reader<body::file_body>();
-            }
-            else if (std::holds_alternative<body::string_body::value_type>(body_))
-            {
-                create_reader<body::string_body>();
-            }
-            else if (std::holds_alternative<body::json_body::value_type>(body_))
-            {
-                create_reader<body::json_body>();
-            }
-            else if (std::holds_alternative<body::form_data_body::value_type>(body_))
-            {
-                create_reader<body::form_data_body>();
-            }
-            else if (std::holds_alternative<body::query_params_body::value_type>(body_))
-            {
-                create_reader<body::query_params_body>();
+                create_reader(body_);
             }
             else if (content_type.starts_with("multipart/form-data"))
             {
@@ -338,6 +318,22 @@ namespace httplib::body
         }
 
       private:
+        template <typename... Bodies>
+        void
+        create_reader(any_body::variant_value<Bodies...>& body)
+        {
+            std::visit(
+                [this](auto& t)
+                {
+                    using value_type = std::decay_t<decltype(t)>;
+                    using body_type = typename detail::match_body<value_type, Bodies...>::type;
+                    static_assert(!std::is_void_v<body_type>, "No matching Body type found");
+
+                    proxy_.template emplace<body_type>(header_, t);
+                },
+                body);
+        }
+
         template <class Body>
         void
         create_reader()
