@@ -43,9 +43,6 @@ namespace httplib
     namespace websocket = beast::websocket;
     namespace fs = std::filesystem;
 
-    inline constexpr std::size_t io_buffer_size = 64 * 1024;
-    inline constexpr std::size_t file_body_buffer_size = 64 * 1024;
-
 } // namespace httplib
 #ifdef HTTPLIB_SHARED_LIBRARY
 #if defined(_WIN32)

@@ -284,6 +284,15 @@ namespace httplib::body
         {
             ec = http::error::bad_field;
         }
+        else
+        {
+            boundary_line_ = "--" + boundary_ + "\r\n";
+            boundary_line_last_ = "--" + boundary_ + "--\r\n";
+            delim_field_ = "\r\n--" + boundary_ + "\r\n";
+            delim_final_ = "\r\n--" + boundary_ + "--\r\n";
+            pending_.clear();
+            combined_.clear();
+        }
     }
     std::size_t
     form_data_body::reader::put(const_buffers_type const& buffers, boost::system::error_code& ec)
@@ -291,13 +300,21 @@ namespace httplib::body
         ec = {};
         auto incoming = util::buffer_to_string_view(buffers);
 
-        std::string combined;
-        combined.reserve(pending_.size() + incoming.size());
-        combined.append(pending_);
-        combined.append(incoming.data(), incoming.size());
-        pending_.clear();
+        std::string_view sv;
+        if (pending_.empty())
+        {
+            sv = incoming;
+        }
+        else
+        {
+            combined_.clear();
+            combined_.reserve(pending_.size() + incoming.size());
+            combined_.append(pending_);
+            combined_.append(incoming.data(), incoming.size());
+            pending_.clear();
+            sv = combined_;
+        }
 
-        std::string_view sv(combined);
         bool need_more_data = false;
 
         if (step_ == step::eof)
@@ -319,22 +336,20 @@ namespace httplib::body
             {
                 case step::boundary_line:
                 {
-                    std::string const boundary_line = "--" + boundary_ + "\r\n";
-                    std::string const boundary_line_last = "--" + boundary_ + "--\r\n";
-                    if (sv.size() >= boundary_line.size() && sv.substr(0, boundary_line.size()) == boundary_line)
+                    if (sv.size() >= boundary_line_.size() && sv.substr(0, boundary_line_.size()) == boundary_line_)
                     {
-                        sv.remove_prefix(boundary_line.size());
+                        sv.remove_prefix(boundary_line_.size());
                         step_ = step::boundary_header;
                         continue;
                     }
-                    if (sv.size() >= boundary_line_last.size()
-                        && sv.substr(0, boundary_line_last.size()) == boundary_line_last)
+                    if (sv.size() >= boundary_line_last_.size()
+                        && sv.substr(0, boundary_line_last_.size()) == boundary_line_last_)
                     {
-                        sv.remove_prefix(boundary_line_last.size());
+                        sv.remove_prefix(boundary_line_last_.size());
                         step_ = step::eof;
                         continue;
                     }
-                    if (boundary_line.starts_with(sv) || boundary_line_last.starts_with(sv))
+                    if (boundary_line_.starts_with(sv) || boundary_line_last_.starts_with(sv))
                     {
                         need_more_data = true;
                         break;
@@ -408,11 +423,8 @@ namespace httplib::body
                 break;
                 case step::boundary_content:
                 {
-                    std::string const delim_field = "\r\n--" + boundary_ + "\r\n";
-                    std::string const delim_final = "\r\n--" + boundary_ + "--\r\n";
-
-                    auto pos_field = sv.find(delim_field);
-                    auto pos_final = sv.find(delim_final);
+                    auto pos_field = sv.find(delim_field_);
+                    auto pos_final = sv.find(delim_final_);
                     std::size_t pos = std::string_view::npos;
                     bool is_final = false;
                     if (pos_field != std::string_view::npos)
@@ -461,14 +473,14 @@ namespace httplib::body
                             file_stream_.close();
                             field_data_.file_path = current_file_path_;
                         }
-                        auto const delim_size = is_final ? delim_final.size() : delim_field.size();
+                        auto const delim_size = is_final ? delim_final_.size() : delim_field_.size();
                         sv.remove_prefix(pos + delim_size);
                         body_.fields.push_back(std::move(field_data_));
                         step_ = is_final ? step::eof : step::boundary_header;
                         continue;
                     }
 
-                    auto keep = detail::longest_suffix_prefix(sv, delim_field, delim_final);
+                    auto keep = detail::longest_suffix_prefix(sv, delim_field_, delim_final_);
                     auto emit_size = sv.size() - keep;
                     if (emit_size > 0)
                     {

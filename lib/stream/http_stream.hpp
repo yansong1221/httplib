@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <variant>
 #ifdef HTTPLIB_ENABLED_SSL
 #include "ssl_stream.hpp"
@@ -12,6 +13,7 @@
 
 namespace httplib
 {
+    inline constexpr std::size_t io_buffer_size = 16 * 1024;
 
     class http_stream
     {

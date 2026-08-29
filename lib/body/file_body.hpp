@@ -8,6 +8,8 @@
 
 namespace httplib::body
 {
+    inline constexpr std::size_t file_body_buffer_size = 16 * 1024;
+
     struct file_body
     {
         struct value_type

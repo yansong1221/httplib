@@ -64,6 +64,11 @@ namespace httplib::body
             value_type& body_;
             std::string content_type_;
             std::string boundary_;
+
+            std::string boundary_line_;
+            std::string boundary_line_last_;
+            std::string delim_field_;
+            std::string delim_final_;
             enum class step
             {
                 boundary_line,
@@ -78,6 +83,11 @@ namespace httplib::body
             // half of a boundary delimiter ("\r\n--boundary..."), so they are
             // held back until the next put() can disambiguate them.
             std::string pending_;
+
+            // Reused scratch buffer: when pending_ is non-empty the incoming
+            // chunk must be prepended with it; keeping the capacity avoids a
+            // fresh allocation on every such chunk.
+            std::string combined_;
 
             std::ofstream file_stream_;
             fs::path current_file_path_;

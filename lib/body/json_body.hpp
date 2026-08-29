@@ -1,29 +1,12 @@
-//
-// Copyright (c) 2022 Vinnie Falco (vinnie dot falco at gmail dot com)
-//
-// Distributed under the Boost Software License, Version 1.0. (See accompanying
-// file LICENSE_1_0.txt or copy at http://www.boost.org/LICENSE_1_0.txt)
-//
-// Official repository: https://github.com/boostorg/beast
-//
-
-//------------------------------------------------------------------------------
-//
-// Example: JSON body
-//
-//------------------------------------------------------------------------------
-
-#ifndef HTTPLIB_BODY_JSON_BODY_HPP
-#define HTTPLIB_BODY_JSON_BODY_HPP
-
+#pragma once
 #include "httplib/config.hpp"
 #include <boost/beast/http/fields.hpp>
+#include <boost/json/serializer.hpp>
+#include <boost/json/stream_parser.hpp>
 #include <boost/json/value.hpp>
-#include <memory>
 
 namespace httplib::body
 {
-
     namespace json = boost::json;
 
     struct json_body
@@ -34,26 +17,24 @@ namespace httplib::body
         {
             using const_buffers_type = net::const_buffer;
 
-            writer(http::fields const&, value_type const& body);
-            ~writer();
-            writer(writer&&) noexcept;
-            writer& operator=(writer&&) noexcept;
+            explicit writer(http::fields const&, value_type const& body);
+            writer(writer&&) noexcept = default;
+            writer& operator=(writer&&) noexcept = default;
 
             void init(boost::system::error_code& ec);
 
             boost::optional<std::pair<const_buffers_type, bool>> get(boost::system::error_code& ec);
 
           private:
-            class impl;
-            std::unique_ptr<impl> impl_;
+            json::serializer serializer_;
+            char buffer_[32768];
         };
 
         struct reader
         {
-            reader(http::fields const&, value_type& body);
-            ~reader();
-            reader(reader&&) noexcept;
-            reader& operator=(reader&&) noexcept;
+            explicit reader(http::fields const&, value_type& body);
+            reader(reader&&) noexcept = default;
+            reader& operator=(reader&&) noexcept = default;
 
             void init(boost::optional<std::uint64_t> const& content_length, boost::system::error_code& ec);
 
@@ -61,10 +42,8 @@ namespace httplib::body
             void finish(boost::system::error_code& ec);
 
           private:
-            class impl;
-            std::unique_ptr<impl> impl_;
+            json::stream_parser parser_;
+            value_type& body_;
         };
     };
 } // namespace httplib::body
-
-#endif
