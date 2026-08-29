@@ -1,11 +1,11 @@
+﻿#include "body/form_data_body.hpp"
+#include "body/json_body.hpp"
+#include "body/query_params_body.hpp"
+#include "body/string_body.hpp"
 #include "common.hpp"
-#include "httplib/body/form_data_body.hpp"
-#include "httplib/body/json_body.hpp"
-#include "httplib/body/query_params_body.hpp"
-#include "httplib/body/string_body.hpp"
 #include "httplib/client/client_pool.hpp"
-#include "httplib/client/stream_reader.hpp"
 #include "httplib/client/lazy_request.hpp"
+#include "httplib/client/stream_reader.hpp"
 #include "httplib/server/chunk_writer.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
@@ -44,7 +44,7 @@ namespace
     void
     run(Setup&& setup, Test&& test)
     {
-        net::thread_pool pool{ 1 };
+        net::thread_pool pool { 1 };
         std::exception_ptr err;
 
         net::co_spawn(
@@ -58,9 +58,7 @@ namespace
                 auto ep = server.local_endpoint();
                 server.run();
 
-                httplib::client::http_client client(pool.get_executor(),
-                                                     ep.address().to_string(),
-                                                     ep.port());
+                httplib::client::http_client client(pool.get_executor(), ep.address().to_string(), ep.port());
                 client.set_timeout(std::chrono::seconds(5));
 
                 co_await test(client);
@@ -68,21 +66,20 @@ namespace
                 client.close();
                 server.stop();
             },
-            [&](std::exception_ptr e)
-            {
-                err = e;
-            });
+            [&](std::exception_ptr e) { err = e; });
 
         pool.join();
         if (err)
+        {
             std::rethrow_exception(err);
+        }
     }
 
     template <typename Setup, typename Test>
     void
     run_pool(Setup&& setup, Test&& test)
     {
-        net::thread_pool pool{ 1 };
+        net::thread_pool pool { 1 };
         std::exception_ptr err;
 
         net::co_spawn(
@@ -96,7 +93,7 @@ namespace
                 auto ep = server.local_endpoint();
                 server.run();
 
-                httplib::client::http_client_pool client_pool(pool.get_executor(), {.max_size = 4});
+                httplib::client::http_client_pool client_pool(pool.get_executor(), { .max_size = 4 });
                 client_pool.start();
 
                 co_await test(client_pool, ep);
@@ -104,34 +101,32 @@ namespace
                 client_pool.stop();
                 server.stop();
             },
-            [&](std::exception_ptr e)
-            {
-                err = e;
-            });
+            [&](std::exception_ptr e) { err = e; });
 
         pool.join();
         if (err)
+        {
             std::rethrow_exception(err);
+        }
     }
 
     template <typename Test>
     void
     run_error(Test&& test)
     {
-        net::thread_pool pool{ 1 };
+        net::thread_pool pool { 1 };
         std::exception_ptr err;
 
         net::co_spawn(
             pool.get_executor(),
             [&]() -> net::awaitable<void> { co_await test(pool); },
-            [&](std::exception_ptr e)
-            {
-                err = e;
-            });
+            [&](std::exception_ptr e) { err = e; });
 
         pool.join();
         if (err)
+        {
             std::rethrow_exception(err);
+        }
     }
 
 #ifdef HTTPLIB_ENABLED_SSL
@@ -139,7 +134,7 @@ namespace
     void
     run_ssl(Setup&& setup, Test&& test)
     {
-        net::thread_pool pool{ 2 };
+        net::thread_pool pool { 2 };
         std::exception_ptr err;
 
         net::co_spawn(
@@ -154,10 +149,7 @@ namespace
                 auto ep = server.local_endpoint();
                 server.run();
 
-                httplib::client::http_client client(pool.get_executor(),
-                                                      "localhost",
-                                                      ep.port(),
-                                                      true);
+                httplib::client::http_client client(pool.get_executor(), "localhost", ep.port(), true);
                 client.set_timeout(std::chrono::seconds(5));
 
                 co_await test(client);
@@ -165,14 +157,13 @@ namespace
                 client.close();
                 server.stop();
             },
-            [&](std::exception_ptr e)
-            {
-                err = e;
-            });
+            [&](std::exception_ptr e) { err = e; });
 
         pool.join();
         if (err)
+        {
             std::rethrow_exception(err);
+        }
     }
 #endif
 
@@ -321,7 +312,7 @@ TEST_CASE("client: host and port", "[client]")
 
 TEST_CASE("client: URL constructor", "[client]")
 {
-    net::thread_pool pool{ 1 };
+    net::thread_pool pool { 1 };
     std::exception_ptr err;
     net::co_spawn(
         pool.get_executor(),
@@ -343,19 +334,17 @@ TEST_CASE("client: URL constructor", "[client]")
             REQUIRE(resp.result() == http::status::ok);
             server.stop();
         },
-        [&](std::exception_ptr e)
-        {
-            err = e;
-        });
+        [&](std::exception_ptr e) { err = e; });
     pool.join();
     if (err)
+    {
         std::rethrow_exception(err);
+    }
 }
 
 TEST_CASE("client: logger", "[client]")
 {
-    run(
-        [](auto&) {},
+    run([](auto&) {},
         [](auto& client) -> net::awaitable<void>
         {
             REQUIRE(client.logger() != nullptr);
@@ -419,7 +408,7 @@ TEST_CASE("client: POST string body", "[client]")
             server.router().template set_http_handler<http::verb::post>(
                 "/post-echo",
                 [](httplib::server::request& req, httplib::server::response& resp)
-                { resp.set_string_content(req.body().template as<body::string_body>(), "text/plain"); });
+                { resp.set_string_content(req.as_string(), "text/plain"); });
         },
         [](auto& client) -> net::awaitable<void>
         {
@@ -437,13 +426,16 @@ TEST_CASE("client: POST JSON body", "[client]")
                 "/json-echo",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto val = req.body().template as<body::json_body>();
+                    auto val = req.as_json();
                     resp.set_json_content(val, http::status::ok);
                 });
         },
         [](auto& client) -> net::awaitable<void>
         {
-            boost::json::value body { { "key", "value" }, { "num", 42 } };
+            boost::json::value body {
+                { "key", "value" },
+                { "num",      42 }
+            };
             auto resp = UNWRAP(co_await client.async_post("/json-echo", std::move(body)));
             REQUIRE(resp.result() == http::status::ok);
             auto val = resp.as_json();
@@ -460,7 +452,7 @@ TEST_CASE("client: PUT string body", "[client]")
             server.router().template set_http_handler<http::verb::put>(
                 "/put-echo",
                 [](httplib::server::request& req, httplib::server::response& resp)
-                { resp.set_string_content(req.body().template as<body::string_body>(), "text/plain"); });
+                { resp.set_string_content(req.as_string(), "text/plain"); });
         },
         [](auto& client) -> net::awaitable<void>
         {
@@ -477,7 +469,7 @@ TEST_CASE("client: PATCH string body", "[client]")
             server.router().template set_http_handler<http::verb::patch>(
                 "/patch-echo",
                 [](httplib::server::request& req, httplib::server::response& resp)
-                { resp.set_string_content(req.body().template as<body::string_body>(), "text/plain"); });
+                { resp.set_string_content(req.as_string(), "text/plain"); });
         },
         [](auto& client) -> net::awaitable<void>
         {
@@ -564,8 +556,7 @@ TEST_CASE("client: 304 Not Modified", "[client]")
 
 TEST_CASE("client: 404 Not Found", "[client]")
 {
-    run(
-        [](auto&) {},
+    run([](auto&) {},
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/non-existent"));
@@ -625,16 +616,16 @@ TEST_CASE("client: chunked transfer via sessions", "[client]")
         {
             server.router().template set_http_handler<http::verb::get>(
                 "/chunked",
-                [](httplib::server::request&,
-                   httplib::server::response& resp) -> net::awaitable<void>
+                [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     auto cw = resp.get_chunk_writer();
                     http::fields headers;
                     headers.set(http::field::content_type, "text/plain");
                     co_await cw->write_header(http::status::ok, headers, false);
                     for (int i = 0; i < 5; ++i)
-                        co_await cw->write_body(
-                            net::buffer(std::string("Chunk") + std::to_string(i)), i < 4);
+                    {
+                        co_await cw->write_body(net::buffer(std::string("Chunk") + std::to_string(i)), i < 4);
+                    }
                 });
         },
         [](auto& client) -> net::awaitable<void>
@@ -650,7 +641,9 @@ TEST_CASE("client: chunked transfer via sessions", "[client]")
             {
                 auto result = co_await resp.read_some_raw(net::buffer(buf));
                 if (result.has_error() || result.value() == 0)
+                {
                     break;
+                }
                 streamed.append(buf.data(), result.value());
             }
             REQUIRE(resp.result() == http::status::ok);
@@ -667,7 +660,7 @@ TEST_CASE("client: lazy request reads full response", "[client]")
                 "/echo-full",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto& body = req.body().template as<body::string_body>();
+                    auto const& body = req.as_string();
                     resp.set_string_content("echo:" + body, "text/plain");
                 });
         },
@@ -718,8 +711,7 @@ TEST_CASE("client: download to file", "[client]")
         {
             server.router().template set_http_handler<http::verb::get>(
                 "/dl-file",
-                [&](httplib::server::request&, httplib::server::response& resp)
-                { resp.set_file_content(srv); });
+                [&](httplib::server::request&, httplib::server::response& resp) { resp.set_file_content(srv); });
         },
         [&](auto& client) -> net::awaitable<void>
         {
@@ -727,8 +719,7 @@ TEST_CASE("client: download to file", "[client]")
             REQUIRE(resp.result() == http::status::ok);
             std::ifstream f(dl, std::ios::binary);
             REQUIRE(f.is_open());
-            std::string content((std::istreambuf_iterator<char>(f)),
-                                std::istreambuf_iterator<char>());
+            std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
             REQUIRE(content == "download test content\n");
         });
     std::filesystem::remove(srv);
@@ -746,11 +737,11 @@ TEST_CASE("client: download randomized round-trip", "[client]")
         std::string sent;
         sent.reserve(len);
         for (int i = 0; i < len; ++i)
+        {
             sent.push_back(static_cast<char>(byte_dist(rng)));
-        auto srv = std::filesystem::temp_directory_path()
-                   / std::format("httplib_fuzz_srv_{}.bin", round);
-        auto dl = std::filesystem::temp_directory_path()
-                  / std::format("httplib_fuzz_dl_{}.bin", round);
+        }
+        auto srv = std::filesystem::temp_directory_path() / std::format("httplib_fuzz_srv_{}.bin", round);
+        auto dl = std::filesystem::temp_directory_path() / std::format("httplib_fuzz_dl_{}.bin", round);
         {
             std::ofstream f(srv, std::ios::binary);
             f.write(sent.data(), sent.size());
@@ -760,17 +751,14 @@ TEST_CASE("client: download randomized round-trip", "[client]")
             {
                 server.router().template set_http_handler<http::verb::get>(
                     "/dl-fuzz",
-                    [&](httplib::server::request&, httplib::server::response& resp)
-                    { resp.set_file_content(srv); });
+                    [&](httplib::server::request&, httplib::server::response& resp) { resp.set_file_content(srv); });
             },
             [&](auto& client) -> net::awaitable<void>
             {
-                auto resp = UNWRAP(
-                    co_await client.async_download(http::verb::get, "/dl-fuzz", dl));
+                auto resp = UNWRAP(co_await client.async_download(http::verb::get, "/dl-fuzz", dl));
                 REQUIRE(resp.result() == http::status::ok);
                 std::ifstream f(dl, std::ios::binary);
-                std::string received((std::istreambuf_iterator<char>(f)),
-                                     std::istreambuf_iterator<char>());
+                std::string received((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
                 REQUIRE(received == sent);
             });
         std::filesystem::remove(srv);
@@ -798,13 +786,11 @@ TEST_CASE("client: download with Range", "[client]")
         {
             auto hdrs = httplib::http::fields();
             hdrs.set(http::field::range, "bytes=0-4");
-            auto resp = UNWRAP(
-                co_await client.async_download(http::verb::get, "/dl-range", dl, hdrs));
+            auto resp = UNWRAP(co_await client.async_download(http::verb::get, "/dl-range", dl, hdrs));
             REQUIRE(resp.result() == http::status::partial_content);
             std::ifstream f(dl, std::ios::binary);
             REQUIRE(f.is_open());
-            std::string content((std::istreambuf_iterator<char>(f)),
-                                std::istreambuf_iterator<char>());
+            std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
             REQUIRE(content == "01234");
         });
     std::filesystem::remove(srv);
@@ -866,9 +852,7 @@ TEST_CASE("client: redirect full URL", "[client]")
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
                     auto port = req.local_endpoint().port();
-                    resp.set_redirect(
-                        std::format("http://127.0.0.1:{}/target-page", port),
-                        http::status::found);
+                    resp.set_redirect(std::format("http://127.0.0.1:{}/target-page", port), http::status::found);
                 });
             server.router().template set_http_handler<http::verb::get>(
                 "/target-page",
@@ -947,10 +931,9 @@ TEST_CASE("client: async_send_request form_data", "[client]")
                 "/form-upload",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto& fd = req.body().template as<body::form_data_body>();
+                    auto const& fd = req.as_form_data();
                     auto fld = fd.field_by_name("name");
-                    resp.set_string_content(fld.has_value() ? fld->content : "missing",
-                                            "text/plain");
+                    resp.set_string_content(fld.has_value() ? fld->content : "missing", "text/plain");
                 });
         },
         [](auto& client) -> net::awaitable<void>
@@ -974,7 +957,7 @@ TEST_CASE("client: async_send_request query_params body", "[client]")
                 "/form-post",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto& qp = req.body().template as<body::query_params_body>();
+                    auto const& qp = req.as_query_params();
                     resp.set_string_content(std::string(qp.at("key")), "text/plain");
                 });
         },
@@ -1006,7 +989,7 @@ TEST_CASE("client: send file body upload", "[client]")
             server.router().template set_http_handler<http::verb::put>(
                 "/upload",
                 [](httplib::server::request& req, httplib::server::response& resp)
-                { resp.set_string_content(req.body().template as<body::string_body>(), "text/plain"); });
+                { resp.set_string_content(req.as_string(), "text/plain"); });
         },
         [&](auto& client) -> net::awaitable<void>
         {
@@ -1034,7 +1017,8 @@ TEST_CASE("client: lazy read text", "[client]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-text")));
+            auto resp = UNWRAP(
+                co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-text")));
             REQUIRE(resp.result() == http::status::ok);
             auto text = UNWRAP(co_await resp.read_string());
             REQUIRE(text == "lazy-hello");
@@ -1050,13 +1034,17 @@ TEST_CASE("client: lazy read json", "[client]")
                 "/lazy-json",
                 [](httplib::server::request&, httplib::server::response& resp)
                 {
-                    boost::json::value v { { "key", "value" }, { "num", 7 } };
+                    boost::json::value v {
+                        { "key", "value" },
+                        { "num",       7 }
+                    };
                     resp.set_json_content(std::move(v));
                 });
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-json")));
+            auto resp = UNWRAP(
+                co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-json")));
             REQUIRE(resp.result() == http::status::ok);
             auto val = UNWRAP(co_await resp.read_json());
             REQUIRE(val.at("key") == "value");
@@ -1076,7 +1064,8 @@ TEST_CASE("client: lazy read body typed", "[client]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-body")));
+            auto resp = UNWRAP(
+                co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-body")));
             auto text = UNWRAP(co_await resp.read_string());
             REQUIRE(text == "lazy-body");
         });
@@ -1103,7 +1092,8 @@ TEST_CASE("client: lazy read multipart body", "[client]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-form")));
+            auto resp = UNWRAP(
+                co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-form")));
             auto fd = UNWRAP(co_await resp.read_form_data());
             REQUIRE(fd.fields.size() == 2);
             REQUIRE(fd.fields[0].name == "a");
@@ -1126,7 +1116,8 @@ TEST_CASE("client: lazy read to file", "[client]")
         },
         [&](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-file")));
+            auto resp = UNWRAP(
+                co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-file")));
             auto ec = co_await resp.read_to_file(save);
             REQUIRE(!ec);
         });
@@ -1156,7 +1147,8 @@ TEST_CASE("client: lazy redirect", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             client.set_max_redirects(5);
-            auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-redirect-me")));
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(
+                httplib::client::request(http::verb::get, "/lazy-redirect-me")));
             REQUIRE(resp.result() == http::status::ok);
             auto text = UNWRAP(co_await resp.read_string());
             REQUIRE(text == "lazy-arrived");
@@ -1176,7 +1168,8 @@ TEST_CASE("client: lazy redirect loop limited", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             client.set_max_redirects(3);
-            auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-loop")));
+            auto resp = UNWRAP(
+                co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-loop")));
             REQUIRE(resp.result() == http::status::found);
         });
 }
@@ -1191,9 +1184,7 @@ TEST_CASE("client: lazy redirect full URL", "[client]")
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
                     auto port = req.local_endpoint().port();
-                    resp.set_redirect(
-                        std::format("http://127.0.0.1:{}/lazy-target-page", port),
-                        http::status::found);
+                    resp.set_redirect(std::format("http://127.0.0.1:{}/lazy-target-page", port), http::status::found);
                 });
             server.router().template set_http_handler<http::verb::get>(
                 "/lazy-target-page",
@@ -1203,7 +1194,8 @@ TEST_CASE("client: lazy redirect full URL", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             client.set_max_redirects(1);
-            auto resp = UNWRAP(co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/lazy-ext-redirect")));
+            auto resp = UNWRAP(co_await client.async_send_request_lazy(
+                httplib::client::request(http::verb::get, "/lazy-ext-redirect")));
             REQUIRE(resp.result() == http::status::ok);
             auto text = UNWRAP(co_await resp.read_string());
             REQUIRE(text == "lazy-target-reached");

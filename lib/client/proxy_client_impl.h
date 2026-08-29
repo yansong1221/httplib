@@ -16,8 +16,7 @@ namespace httplib::client
         net::awaitable<boost::system::error_code> async_connect(std::string_view target,
                                                                 http::fields const& headers = {});
 
-        net::awaitable<boost::system::result<std::size_t>> async_read_some(
-            net::mutable_buffer const& buffer);
+        net::awaitable<boost::system::result<std::size_t>> async_read_some(net::mutable_buffer const& buffer);
         net::awaitable<boost::system::error_code> async_write(net::const_buffer const& buffer);
 
         void close();
@@ -27,8 +26,16 @@ namespace httplib::client
         std::shared_ptr<spdlog::logger> logger() const;
         void set_logger(std::shared_ptr<spdlog::logger> logger);
 
-        void set_verify_ssl(bool verify) { verify_ssl_ = verify; }
-        void set_ca_cert(std::string_view cert) { ca_cert_ = cert; }
+        void
+        set_verify_ssl(bool verify)
+        {
+            verify_ssl_ = verify;
+        }
+        void
+        set_ca_cert(std::string_view cert)
+        {
+            ca_cert_ = cert;
+        }
 
       private:
         net::any_io_executor executor_;

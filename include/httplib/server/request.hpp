@@ -1,7 +1,7 @@
 #pragma once
-#include "httplib/body/any_body.hpp"
 #include "httplib/server/request_data.hpp"
 #include "httplib/server/server_fwd.hpp"
+#include "httplib/util/misc.hpp"
 #include <any>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/http/message.hpp>
@@ -10,6 +10,17 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+
+namespace boost::json
+{
+    class value;
+}
+
+namespace httplib::html
+{
+    class form_data;
+    class query_params;
+} // namespace httplib::html
 
 namespace httplib::server
 {
@@ -56,8 +67,16 @@ namespace httplib::server
         request_data& data();
         request_data const& data() const;
 
-        httplib::body::any_body::value_type& body();
-        httplib::body::any_body::value_type const& body() const;
+        std::string const& as_string() const;
+        boost::json::value const& as_json() const;
+        html::form_data const& as_form_data() const;
+        html::query_params const& as_query_params() const;
+
+        bool is_empty() const;
+        bool is_string() const;
+        bool is_json() const;
+        bool is_form_data() const;
+        bool is_query_params() const;
 
         bool is_chunked() const;
         chunk_reader* get_chunk_reader();

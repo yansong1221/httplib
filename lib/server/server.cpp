@@ -2,6 +2,7 @@
 #include "httplib/server/server.hpp"
 #include "httplib/server/router.hpp"
 #include "server_impl.h"
+#include <fstream>
 
 namespace httplib::server
 {

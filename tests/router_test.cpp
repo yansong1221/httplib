@@ -72,11 +72,9 @@ TEST_CASE("Router: regex path parameter rejects non-matching input", "[router]")
         {
             server.router().template set_http_handler<http::verb::get>(
                 "/regex/{id:^\\d+$}",
-                [](httplib::server::request&, httplib::server::response& resp)
-                { set_text(resp, "should-not-match"); });
-            server.router().set_http_not_found_handler(
-                [](httplib::server::request&, httplib::server::response& resp)
-                { set_text(resp, "not-found", http::status::not_found); });
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "should-not-match"); });
+            server.router().set_http_not_found_handler([](httplib::server::request&, httplib::server::response& resp)
+                                                       { set_text(resp, "not-found", http::status::not_found); });
         },
         [](auto& client) -> net::awaitable<void>
         {
@@ -135,8 +133,7 @@ TEST_CASE("Router: multiple HTTP verbs on one route", "[router]")
             REQUIRE(resp_get.result() == http::status::ok);
             REQUIRE(as_string(resp_get) == "get-response");
 
-            auto resp_post =
-                UNWRAP(co_await client.async_post("/multi-verb", std::string_view("")));
+            auto resp_post = UNWRAP(co_await client.async_post("/multi-verb", std::string_view("")));
             REQUIRE(resp_post.result() == http::status::ok);
             REQUIRE(as_string(resp_post) == "post-response");
             co_return;
@@ -163,8 +160,7 @@ TEST_CASE("Router: multiple named parameters", "[router]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp =
-                UNWRAP(co_await client.async_get("/blog/2024/12/hello-world"));
+            auto resp = UNWRAP(co_await client.async_get("/blog/2024/12/hello-world"));
             REQUIRE(resp.result() == http::status::ok);
             co_return;
         });
@@ -190,8 +186,7 @@ TEST_CASE("Router: path_param template overload", "[router]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp =
-                UNWRAP(co_await client.async_get("/user/42/order/19.99"));
+            auto resp = UNWRAP(co_await client.async_get("/user/42/order/19.99"));
             REQUIRE(resp.result() == http::status::ok);
             co_return;
         });
@@ -218,13 +213,11 @@ TEST_CASE("Router: set_post_routing_handler for CORS", "[router]")
                 });
             server.router().template set_http_handler<http::verb::post>(
                 "/api/data",
-                [](httplib::server::request&, httplib::server::response& resp)
-                { set_text(resp, "data-ok"); });
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "data-ok"); });
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp =
-                UNWRAP(co_await client.async_post("/api/data", std::string_view("{}")));
+            auto resp = UNWRAP(co_await client.async_post("/api/data", std::string_view("{}")));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp["Access-Control-Allow-Origin"] == "*");
             REQUIRE(as_string(resp) == "data-ok");
@@ -246,12 +239,8 @@ struct test_handler
 TEST_CASE("Router: member function handler", "[router]")
 {
     test_handler th { "member" };
-    run(
-        [&](auto& server)
-        {
-            server.router().template set_http_handler<http::verb::get>(
-                "/member/:name", &test_handler::handle, th);
-        },
+    run([&](auto& server)
+        { server.router().template set_http_handler<http::verb::get>("/member/:name", &test_handler::handle, th); },
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/member/test"));
@@ -268,13 +257,11 @@ TEST_CASE("Router: 405 Method Not Allowed", "[router]")
         {
             server.router().template set_http_handler<http::verb::get>(
                 "/readonly",
-                [](httplib::server::request&, httplib::server::response& resp)
-                { set_text(resp, "get-only"); });
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "get-only"); });
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp =
-                UNWRAP(co_await client.async_post("/readonly", std::string_view("")));
+            auto resp = UNWRAP(co_await client.async_post("/readonly", std::string_view("")));
             REQUIRE(resp.result() == http::status::method_not_allowed);
             REQUIRE(resp["Allow"] == "GET");
             co_return;
@@ -288,8 +275,7 @@ TEST_CASE("Router: static path priority over param", "[router]")
         {
             server.router().template set_http_handler<http::verb::get>(
                 "/users/all",
-                [](httplib::server::request&, httplib::server::response& resp)
-                { set_text(resp, "all-users"); });
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "all-users"); });
             server.router().template set_http_handler<http::verb::get>(
                 "/users/:id",
                 [](httplib::server::request& req, httplib::server::response& resp)
@@ -310,12 +296,11 @@ TEST_CASE("Router: static path priority over param", "[router]")
 
 TEST_CASE("Router: regex param error in pre_routing", "[router]")
 {
-    net::thread_pool pool{ 1 };
+    net::thread_pool pool { 1 };
     httplib::server::http_server server(pool.get_executor());
     REQUIRE_THROWS_AS(
         server.router().set_http_handler<http::verb::get>("/bad/{id:[}",
-                                                           [](httplib::server::request&,
-                                                              httplib::server::response&) {}),
+                                                          [](httplib::server::request&, httplib::server::response&) {}),
         std::regex_error);
     pool.join();
 }
@@ -327,12 +312,10 @@ TEST_CASE("Router: trailing slash exact match", "[router]")
         {
             server.router().template set_http_handler<http::verb::get>(
                 "/page/",
-                [](httplib::server::request&, httplib::server::response& resp)
-                { set_text(resp, "slash"); });
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "slash"); });
             server.router().template set_http_handler<http::verb::get>(
                 "/page",
-                [](httplib::server::request&, httplib::server::response& resp)
-                { set_text(resp, "no-slash"); });
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "no-slash"); });
         },
         [](auto& client) -> net::awaitable<void>
         {
@@ -347,8 +330,7 @@ TEST_CASE("Router: trailing slash exact match", "[router]")
 
 TEST_CASE("Router: returns 404 for missing route", "[router]")
 {
-    run(
-        [](auto&) {},
+    run([](auto&) {},
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/nonexistent"));

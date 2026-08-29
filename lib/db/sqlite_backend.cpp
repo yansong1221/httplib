@@ -126,8 +126,9 @@ namespace httplib::db::detail
                         {
                             // SQLite 无时区语义，无法无损保存绝对时间点，显式报错；
                             // 需要存取时间点时改用 datetime（墙上时钟）并自行决定时区解释。
-                            throw db_exception(boost::system::error_code {},
-                                               "db: sqlite bind timestamp is not supported (no timezone); use datetime");
+                            throw db_exception(
+                                boost::system::error_code {},
+                                "db: sqlite bind timestamp is not supported (no timezone); use datetime");
                         }
                         else
                         {
@@ -269,8 +270,8 @@ namespace httplib::db::detail
         stmt_is_dml(sqlite3_stmt* stmt)
         {
             auto word = stmt_first_word(stmt);
-            return boost::iequals(word, "insert") || boost::iequals(word, "replace")
-                || boost::iequals(word, "update") || boost::iequals(word, "delete");
+            return boost::iequals(word, "insert") || boost::iequals(word, "replace") || boost::iequals(word, "update")
+                   || boost::iequals(word, "delete");
         }
 
         // 数据库级故障（文件损坏/不是数据库/磁盘错误/被删）：连接本身已不可信，应标记失效；

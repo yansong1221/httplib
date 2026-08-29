@@ -385,7 +385,7 @@ TEST_CASE("db: pool stays within max_connections during health checks", "[db][re
                 [](std::exception_ptr) {});
             bool acq = co_await co_wait_for(ex, std::chrono::seconds(3), [&] { return bg_done.load(); });
             REQUIRE(acq);
-            REQUIRE_FALSE(bg.has_value()); // 等待 500ms 超时，未超建
+            REQUIRE_FALSE(bg.has_value());    // 等待 500ms 超时，未超建
             REQUIRE(pool.total_count() == 2); // 物理连接仍只有 2 条
 
             // 4) 放开 ping → 健康检查完成、连接回填，随后借出正常。
@@ -457,8 +457,8 @@ TEST_CASE("db: pool wakes waiter when health check discards a connection", "[db]
                     catch (...)
                     {
                     }
-                    r->elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now() - start);
+                    r->elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now()
+                                                                                       - start);
                     r->completed = true;
                 },
                 [](std::exception_ptr) {});
@@ -473,9 +473,9 @@ TEST_CASE("db: pool wakes waiter when health check discards a connection", "[db]
 
             bool done = co_await co_wait_for(ex, std::chrono::seconds(3), [&] { return r->completed; });
             REQUIRE(done);
-            REQUIRE(r->success); // 被唤醒后新建连接借出成功
+            REQUIRE(r->success);                                   // 被唤醒后新建连接借出成功
             REQUIRE(r->elapsed < std::chrono::milliseconds(1500)); // 靠剔除唤醒，而非睡满 2s 超时
-            REQUIRE(pool.total_count() == 1); // 池中只剩新连接
+            REQUIRE(pool.total_count() == 1);                      // 池中只剩新连接
 
             pool.stop();
         });
@@ -510,8 +510,7 @@ TEST_CASE("db: pool acquire errors are typed db_exceptions", "[db][regression]")
             }
             catch (db::db_exception const& e)
             {
-                CHECK(e.code() ==
-                      boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
+                CHECK(e.code() == boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
             }
 
             pool.start();
@@ -527,8 +526,7 @@ TEST_CASE("db: pool acquire errors are typed db_exceptions", "[db][regression]")
                 }
                 catch (db::db_exception const& e)
                 {
-                    CHECK(e.code() ==
-                          boost::system::errc::make_error_code(boost::system::errc::timed_out));
+                    CHECK(e.code() == boost::system::errc::make_error_code(boost::system::errc::timed_out));
                 }
                 h1.release();
             }
@@ -544,8 +542,7 @@ TEST_CASE("db: pool acquire errors are typed db_exceptions", "[db][regression]")
                 }
                 catch (db::db_exception const& e)
                 {
-                    CHECK(e.code() ==
-                          boost::system::errc::make_error_code(boost::system::errc::timed_out));
+                    CHECK(e.code() == boost::system::errc::make_error_code(boost::system::errc::timed_out));
                 }
                 h2.release();
             }
@@ -560,8 +557,7 @@ TEST_CASE("db: pool acquire errors are typed db_exceptions", "[db][regression]")
             }
             catch (db::db_exception const& e)
             {
-                CHECK(e.code() ==
-                      boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
+                CHECK(e.code() == boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
             }
         });
 }
@@ -596,12 +592,10 @@ TEST_CASE("db: render errors are typed db_exception", "[db][regression]")
     REQUIRE_THROWS_AS(detail::render_query("SELECT :a AS x", {}, def), db::db_exception);
 
     // 位置绑定与命名绑定混用 → 禁止
-    REQUIRE_THROWS_AS(detail::render_query("SELECT :a AS x", { db::bind(1), db::bind("a", 2) }, def),
-                      db::db_exception);
+    REQUIRE_THROWS_AS(detail::render_query("SELECT :a AS x", { db::bind(1), db::bind("a", 2) }, def), db::db_exception);
 }
 
-TEST_CASE("db: row/result access errors are typed db_exception, bounds keep std::out_of_range",
-          "[db][regression]")
+TEST_CASE("db: row/result access errors are typed db_exception, bounds keep std::out_of_range", "[db][regression]")
 {
     db::result r({
         db::result::resultset { { { db::field { std::string("hello") } } }, { "v" }, { db::column_type::string } }
@@ -712,10 +706,7 @@ TEST_CASE("db: parameterized multi-statement is rejected at session layer", "[db
             auto sess = co_await db::session::connect(ex, backend_name, "");
 
             // fake 后端不解析 SQL，纯靠 session 层统一检测拒绝参数化多语句
-            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x; SELECT :b AS y")
-                                  .bind("a", 1)
-                                  .bind("b", 2)
-                                  .execute(),
+            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x; SELECT :b AS y").bind("a", 1).bind("b", 2).execute(),
                               db::db_exception);
 
             // 单语句参数化正常（prepare 只调一次）

@@ -99,7 +99,8 @@ namespace httplib::db
         ///       等待超时（含 fail fast 未借到）时 code 为 timed_out，可按 code() 分流；
         ///       建连工厂抛出的异常原样透传。
         static constexpr auto default_timeout = std::chrono::seconds(3);
-        net::awaitable<session_handle> async_acquire(std::chrono::steady_clock::duration wait_timeout = default_timeout);
+        net::awaitable<session_handle> async_acquire(std::chrono::steady_clock::duration wait_timeout
+                                                     = default_timeout);
 
         /// 关闭池，唤醒所有等待者。
         void stop();

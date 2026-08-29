@@ -65,7 +65,7 @@ namespace httplib::db
             std::function<size_t(size_t& next_col)> resolve_col; ///< 解析目标列（位置序按声明顺序递增）。
             size_t col = 0;                                      ///< 解析出的列号，供 apply 使用。
             std::function<void(row const&, size_t col, size_t row_count)> apply;
-            std::function<void()> on_empty;                      ///< 结果集为空时回调（如 vector 提取清空已有数据）。
+            std::function<void()> on_empty; ///< 结果集为空时回调（如 vector 提取清空已有数据）。
         };
 
         template <typename E>
@@ -193,7 +193,7 @@ namespace httplib::db
                      auto val = r.get<T>(c);
                      if (!val)
                      {
-                          throw db_exception(boost::system::error_code {}, "db: NULL value when extracting into vector");
+                         throw db_exception(boost::system::error_code {}, "db: NULL value when extracting into vector");
                      }
                      v.push_back(std::move(*val));
                  },
@@ -218,7 +218,7 @@ namespace httplib::db
                      auto val = r.get<T>(n);
                      if (!val)
                      {
-                          throw db_exception(boost::system::error_code {}, "db: NULL value when extracting into vector");
+                         throw db_exception(boost::system::error_code {}, "db: NULL value when extracting into vector");
                      }
                      v.push_back(std::move(*val));
                  },
@@ -243,7 +243,7 @@ namespace httplib::db
                      auto val = r.get<T>(c);
                      if (!val)
                      {
-                          throw db_exception(boost::system::error_code {}, "db: NULL value when extracting into vector");
+                         throw db_exception(boost::system::error_code {}, "db: NULL value when extracting into vector");
                      }
                      v.push_back(std::move(*val));
                  },
@@ -265,7 +265,8 @@ namespace httplib::db
                          auto val = r.get<T>(c);
                          if (!val)
                          {
-                              throw db_exception(boost::system::error_code {}, "db: NULL value when extracting into scalar");
+                             throw db_exception(boost::system::error_code {},
+                                                "db: NULL value when extracting into scalar");
                          }
                          v = std::move(*val);
                          first = false;
@@ -287,7 +288,8 @@ namespace httplib::db
                          auto val = r.get<T>(n);
                          if (!val)
                          {
-                              throw db_exception(boost::system::error_code {}, "db: NULL value when extracting into scalar");
+                             throw db_exception(boost::system::error_code {},
+                                                "db: NULL value when extracting into scalar");
                          }
                          v = std::move(*val);
                          first = false;
@@ -309,7 +311,8 @@ namespace httplib::db
                          auto val = r.get<T>(c);
                          if (!val)
                          {
-                              throw db_exception(boost::system::error_code {}, "db: NULL value when extracting into scalar");
+                             throw db_exception(boost::system::error_code {},
+                                                "db: NULL value when extracting into scalar");
                          }
                          v = std::move(*val);
                          first = false;

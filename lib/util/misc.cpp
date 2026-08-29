@@ -68,8 +68,7 @@ namespace httplib::util
 
         for (char c : value)
         {
-            if (std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || c == '.'
-                || c == '~')
+            if (std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || c == '.' || c == '~')
             {
                 escaped << c;
             }

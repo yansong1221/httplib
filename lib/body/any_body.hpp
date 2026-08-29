@@ -1,11 +1,11 @@
-#pragma once
-#include "httplib/body/buffer_body.hpp"
-#include "httplib/body/empty_body.hpp"
-#include "httplib/body/file_body.hpp"
-#include "httplib/body/form_data_body.hpp"
-#include "httplib/body/json_body.hpp"
-#include "httplib/body/query_params_body.hpp"
-#include "httplib/body/string_body.hpp"
+﻿#pragma once
+#include "body/buffer_body.hpp"
+#include "body/empty_body.hpp"
+#include "body/file_body.hpp"
+#include "body/form_data_body.hpp"
+#include "body/json_body.hpp"
+#include "body/query_params_body.hpp"
+#include "body/string_body.hpp"
 #include <tuple>
 
 namespace httplib::body

@@ -2,6 +2,7 @@
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "stream/http_stream.hpp"
+#include "util/logging.hpp"
 #include <boost/beast/core/buffers_to_string.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/empty_body.hpp>
@@ -9,16 +10,12 @@
 #include <boost/beast/http/read.hpp>
 #include <boost/beast/http/serializer.hpp>
 #include <boost/beast/http/write.hpp>
-#include "util/logging.hpp"
 #include <spdlog/spdlog.h>
 
 namespace httplib::client
 {
 
-    proxy_client::impl::impl(net::any_io_executor const& ex,
-                             std::string_view host,
-                             uint16_t port,
-                             bool ssl)
+    proxy_client::impl::impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl)
         : executor_(ex)
         , resolver_(ex)
         , host_(host)
@@ -39,8 +36,7 @@ namespace httplib::client
             co_return boost::system::error_code {};
         }
 
-        auto stream_result
-            = http_stream::create_stream(executor_, host_, use_ssl_, verify_ssl_, ca_cert_);
+        auto stream_result = http_stream::create_stream(executor_, host_, use_ssl_, verify_ssl_, ca_cert_);
         if (!stream_result)
         {
             logger()->error("proxy connect failed {}:{}: {}", host_, port_, stream_result.error().message());
@@ -48,8 +44,7 @@ namespace httplib::client
         }
         auto stream = std::make_unique<http_stream>(std::move(*stream_result));
 
-        auto endpoints
-            = co_await resolver_.async_resolve(host_, std::to_string(port_), util::net_awaitable[ec]);
+        auto endpoints = co_await resolver_.async_resolve(host_, std::to_string(port_), util::net_awaitable[ec]);
         if (ec)
         {
             logger()->error("proxy connect failed {}:{}: {}", host_, port_, ec.message());

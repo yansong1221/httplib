@@ -1,9 +1,9 @@
 #include "ws_client_impl.h"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
+#include "util/logging.hpp"
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/beast/core/buffers_to_string.hpp>
-#include "util/logging.hpp"
 #include <spdlog/spdlog.h>
 
 namespace httplib::client

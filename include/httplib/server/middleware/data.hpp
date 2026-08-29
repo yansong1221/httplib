@@ -30,8 +30,7 @@ namespace httplib::server::middleware
     void
     store(request& req, std::any val, std::string_view tag = {})
     {
-        req.data().template store<typename MW::value_type>(
-            tag, std::any_cast<typename MW::value_type>(std::move(val)));
+        req.data().template store<typename MW::value_type>(tag, std::any_cast<typename MW::value_type>(std::move(val)));
     }
 
     template <typename MW>

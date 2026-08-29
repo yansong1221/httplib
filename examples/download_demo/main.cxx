@@ -4,12 +4,12 @@
 #include "httplib/server/server.hpp"
 #include "httplib/version.hpp"
 #include <boost/asio/thread_pool.hpp>
-#include <spdlog/spdlog.h>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <random>
+#include <spdlog/spdlog.h>
 #include <string>
 #include <thread>
 
@@ -96,34 +96,34 @@ main(int argc, char* argv[])
         "/",
         [&](httplib::server::request&, httplib::server::response& resp)
         {
-            std::string html = std::format(
-                "<html><body>"
-                "<h1>File Download Demo</h1>"
-                "<ul>"
-                "<li><a href=\"/download\">download.bin ({} MB, octet-stream, not compressed)</a></li>"
-                "<li><a href=\"/download.txt\">download.txt ({} MB, text/plain, compressed)</a></li>"
-                "</ul>"
-                "</body></html>",
-                size_mb,
-                size_mb);
+            std::string html
+                = std::format("<html><body>"
+                              "<h1>File Download Demo</h1>"
+                              "<ul>"
+                              "<li><a href=\"/download\">download.bin ({} MB, octet-stream, not compressed)</a></li>"
+                              "<li><a href=\"/download.txt\">download.txt ({} MB, text/plain, compressed)</a></li>"
+                              "</ul>"
+                              "</body></html>",
+                              size_mb,
+                              size_mb);
             resp.set_string_content(std::move(html), "text/html; charset=utf-8");
         });
 
-    router.set_http_handler<http::verb::get>(
-        "/download",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set_file_content(bin_path);
-            resp.set(http::field::content_disposition, "attachment; filename=download.bin");
-        });
+    router.set_http_handler<http::verb::get>("/download",
+                                             [&](httplib::server::request&, httplib::server::response& resp)
+                                             {
+                                                 resp.set_file_content(bin_path);
+                                                 resp.set(http::field::content_disposition,
+                                                          "attachment; filename=download.bin");
+                                             });
 
-    router.set_http_handler<http::verb::get>(
-        "/download.txt",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set_file_content(txt_path);
-            resp.set(http::field::content_disposition, "attachment; filename=download.txt");
-        });
+    router.set_http_handler<http::verb::get>("/download.txt",
+                                             [&](httplib::server::request&, httplib::server::response& resp)
+                                             {
+                                                 resp.set_file_content(txt_path);
+                                                 resp.set(http::field::content_disposition,
+                                                          "attachment; filename=download.txt");
+                                             });
 
     auto ep = svr.local_endpoint();
     spdlog::info("server listening on http://{}:{}", ep.address().to_string(), ep.port());

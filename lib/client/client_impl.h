@@ -1,5 +1,6 @@
 #pragma once
 
+#include "body/any_body.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "stream/http_stream.hpp"
@@ -49,8 +50,7 @@ namespace httplib::client
 
         net::awaitable<http_client::response_result> async_send_request_lazy(http_client::request& req);
 
-        net::awaitable<http_client::response_result> async_send_request_lazy_with_redirect(
-            http_client::request& req);
+        net::awaitable<http_client::response_result> async_send_request_lazy_with_redirect(http_client::request& req);
 
         std::shared_ptr<lazy_request> create_lazy_request();
 

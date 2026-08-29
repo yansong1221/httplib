@@ -10,10 +10,7 @@ namespace httplib::db
     result& result::operator=(result&&) noexcept = default;
     result::~result() = default;
 
-    result::result(std::vector<resultset> sets)
-        : sets_(std::move(sets))
-    {
-    }
+    result::result(std::vector<resultset> sets) : sets_(std::move(sets)) {}
 
     result::resultset const&
     result::cur() const

@@ -325,8 +325,8 @@ namespace httplib::db
         using std::chrono::local_days;
         auto local = local_days { std::chrono::year { static_cast<int>(year) } / std::chrono::month { month }
                                   / std::chrono::day { day } }
-                     + std::chrono::hours { hour } + std::chrono::minutes { minute }
-                     + std::chrono::seconds { second } + std::chrono::microseconds { microsecond };
+                     + std::chrono::hours { hour } + std::chrono::minutes { minute } + std::chrono::seconds { second }
+                     + std::chrono::microseconds { microsecond };
         return current_zone()->to_sys(local);
     }
 

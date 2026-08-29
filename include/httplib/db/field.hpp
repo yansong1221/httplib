@@ -48,10 +48,7 @@ namespace httplib::db
             std::shared_ptr<void> owner_;
 
             borrowed_value() = default;
-            borrowed_value(View view, std::shared_ptr<void> anchor = {})
-                : data_(view), owner_(std::move(anchor))
-            {
-            }
+            borrowed_value(View view, std::shared_ptr<void> anchor = {}) : data_(view), owner_(std::move(anchor)) {}
 
             /// 拥有型：接管一个拥有容器（vector/string），data_ 指向其存储。
             template <typename Owned>
@@ -64,11 +61,27 @@ namespace httplib::db
             }
 
           public:
-            View data() const noexcept { return data_; }
-            size_t size() const noexcept { return data_.size(); }
-            bool empty() const noexcept { return data_.empty(); }
+            View
+            data() const noexcept
+            {
+                return data_;
+            }
+            size_t
+            size() const noexcept
+            {
+                return data_.size();
+            }
+            bool
+            empty() const noexcept
+            {
+                return data_.empty();
+            }
             /// 是否持有保活锚点（拥有型或带锚点借用均为 true；仅无锚点借用为 false）。
-            bool owned() const noexcept { return owner_ != nullptr; }
+            bool
+            owned() const noexcept
+            {
+                return owner_ != nullptr;
+            }
         };
     } // namespace detail
 
@@ -90,24 +103,32 @@ namespace httplib::db
         blob(std::vector<std::byte> v) { this->own(std::move(v)); }
 
         /// 借用型：外部 buffer + 保活锚点（可为空）。
-        blob(std::span<std::byte const> view, std::shared_ptr<void> anchor = {})
-            : base(view, std::move(anchor))
-        {
-        }
+        blob(std::span<std::byte const> view, std::shared_ptr<void> anchor = {}) : base(view, std::move(anchor)) {}
 
-        bool operator==(blob const& o) const noexcept
+        bool
+        operator==(blob const& o) const noexcept
         {
             return this->size() == o.size()
                    && (this->data().data() == o.data().data()
                        || std::memcmp(this->data().data(), o.data().data(), this->size()) == 0);
         }
-        bool operator!=(blob const& o) const noexcept { return !(*this == o); }
-        bool operator==(std::span<std::byte const> o) const noexcept
+        bool
+        operator!=(blob const& o) const noexcept
+        {
+            return !(*this == o);
+        }
+        bool
+        operator==(std::span<std::byte const> o) const noexcept
         {
             return this->size() == o.size()
-                   && (this->data().data() == o.data() || std::memcmp(this->data().data(), o.data(), this->size()) == 0);
+                   && (this->data().data() == o.data()
+                       || std::memcmp(this->data().data(), o.data(), this->size()) == 0);
         }
-        bool operator!=(std::span<std::byte const> o) const noexcept { return !(*this == o); }
+        bool
+        operator!=(std::span<std::byte const> o) const noexcept
+        {
+            return !(*this == o);
+        }
     };
 
     /**
@@ -128,15 +149,28 @@ namespace httplib::db
         text(std::string s) { this->own(std::move(s)); }
 
         /// 借用型：外部 buffer + 保活锚点（可为空）。
-        text(std::string_view view, std::shared_ptr<void> anchor = {})
-            : base(view, std::move(anchor))
-        {
-        }
+        text(std::string_view view, std::shared_ptr<void> anchor = {}) : base(view, std::move(anchor)) {}
 
-        bool operator==(text const& o) const noexcept { return this->data() == o.data(); }
-        bool operator!=(text const& o) const noexcept { return !(*this == o); }
-        bool operator==(std::string_view o) const noexcept { return this->data() == o; }
-        bool operator!=(std::string_view o) const noexcept { return !(*this == o); }
+        bool
+        operator==(text const& o) const noexcept
+        {
+            return this->data() == o.data();
+        }
+        bool
+        operator!=(text const& o) const noexcept
+        {
+            return !(*this == o);
+        }
+        bool
+        operator==(std::string_view o) const noexcept
+        {
+            return this->data() == o;
+        }
+        bool
+        operator!=(std::string_view o) const noexcept
+        {
+            return !(*this == o);
+        }
     };
 
     /**
@@ -150,15 +184,6 @@ namespace httplib::db
      * - date/datetime/time 为无时区墙上时钟
      * - \c timestamp 为 UTC 时间点（TIMESTAMP 等时区敏感列专用，与 datetime 不混用）
      */
-    using field = std::variant<std::monostate,
-                               int64_t,
-                               uint64_t,
-                               double,
-                               text,
-                               blob,
-                               date,
-                               datetime,
-                               time,
-                               timestamp>;
+    using field = std::variant<std::monostate, int64_t, uint64_t, double, text, blob, date, datetime, time, timestamp>;
 
 } // namespace httplib::db

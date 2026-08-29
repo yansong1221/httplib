@@ -1,8 +1,8 @@
+﻿#include "body/file_body.hpp"
+#include "body/form_data_body.hpp"
+#include "body/json_body.hpp"
+#include "body/string_body.hpp"
 #include "common.hpp"
-#include "httplib/body/file_body.hpp"
-#include "httplib/body/form_data_body.hpp"
-#include "httplib/body/json_body.hpp"
-#include "httplib/body/string_body.hpp"
 #include "httplib/client/lazy_request.hpp"
 #include "httplib/server/chunk_writer.hpp"
 #include "httplib/server/mount_point_entry.hpp"
@@ -80,8 +80,7 @@ TEST_CASE("Response: set_redirect", "[response]")
                 { resp.set_redirect("/new", http::status::moved_permanently); });
             server.router().template set_http_handler<http::verb::get>(
                 "/new",
-                [](httplib::server::request&, httplib::server::response& resp)
-                { set_text(resp, "new-location"); });
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "new-location"); });
         },
         [](auto& client) -> net::awaitable<void>
         {
@@ -99,8 +98,7 @@ TEST_CASE("Response: set_chunked_write_handler with multiple chunks", "[response
         {
             server.router().template set_http_handler<http::verb::get>(
                 "/stream",
-                [](httplib::server::request&,
-                   httplib::server::response& resp) -> net::awaitable<void>
+                [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     auto cw = resp.get_chunk_writer();
                     http::fields headers;
@@ -126,7 +124,9 @@ TEST_CASE("Response: set_chunked_write_handler with multiple chunks", "[response
             {
                 auto result = co_await resp.read_some_raw(net::buffer(buf));
                 if (result.has_error() || result.value() == 0)
+                {
                     break;
+                }
                 streamed.append(buf.data(), result.value());
             }
 
@@ -250,7 +250,8 @@ TEST_CASE("Response: set_file_content with Range request", "[response]")
                 auto range_headers = httplib::http::fields();
                 range_headers.set(http::field::range, "bytes=0-4");
 
-                auto resp = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/file-range", range_headers)));
+                auto resp = UNWRAP(co_await client.async_send_request(
+                    httplib::client::request(http::verb::get, "/file-range", range_headers)));
                 REQUIRE(resp.result() == http::status::partial_content);
                 REQUIRE(resp.as_string() == "01234");
                 co_return;
@@ -282,7 +283,8 @@ TEST_CASE("Response: Range request open-ended (bytes=N-)", "[response]")
                 auto range_headers = httplib::http::fields();
                 range_headers.set(http::field::range, "bytes=7-");
 
-                auto resp = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/file-range-open", range_headers)));
+                auto resp = UNWRAP(co_await client.async_send_request(
+                    httplib::client::request(http::verb::get, "/file-range-open", range_headers)));
                 REQUIRE(resp.result() == http::status::partial_content);
                 REQUIRE(resp.as_string() == "789");
                 co_return;
@@ -314,7 +316,8 @@ TEST_CASE("Response: Range request suffix (bytes=-N)", "[response]")
                 auto range_headers = httplib::http::fields();
                 range_headers.set(http::field::range, "bytes=-4");
 
-                auto resp = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/file-range-suffix", range_headers)));
+                auto resp = UNWRAP(co_await client.async_send_request(
+                    httplib::client::request(http::verb::get, "/file-range-suffix", range_headers)));
                 REQUIRE(resp.result() == http::status::partial_content);
                 REQUIRE(resp.as_string() == "6789");
                 co_return;
@@ -346,7 +349,8 @@ TEST_CASE("Response: Range request Content-Range header", "[response]")
                 auto range_headers = httplib::http::fields();
                 range_headers.set(http::field::range, "bytes=2-5");
 
-                auto resp = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/file-cr", range_headers)));
+                auto resp = UNWRAP(co_await client.async_send_request(
+                    httplib::client::request(http::verb::get, "/file-cr", range_headers)));
                 REQUIRE(resp.result() == http::status::partial_content);
                 REQUIRE(resp.as_string() == "cdef");
                 REQUIRE(resp.base().find(http::field::content_range) != resp.base().end());
@@ -380,7 +384,8 @@ TEST_CASE("Response: Range request out of bounds returns 416", "[response]")
                 auto range_headers = httplib::http::fields();
                 range_headers.set(http::field::range, "bytes=10-20");
 
-                auto resp = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/file-range-oob", range_headers)));
+                auto resp = UNWRAP(co_await client.async_send_request(
+                    httplib::client::request(http::verb::get, "/file-range-oob", range_headers)));
                 REQUIRE(resp.result() == http::status::range_not_satisfiable);
                 REQUIRE(resp.base().find(http::field::content_range) != resp.base().end());
                 co_return;
@@ -516,7 +521,8 @@ TEST_CASE("Response: Multi-range request returns multipart/byteranges", "[respon
                 auto range_headers = httplib::http::fields();
                 range_headers.set(http::field::range, "bytes=0-2,5-7");
 
-                auto resp = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/file-multi-range", range_headers)));
+                auto resp = UNWRAP(co_await client.async_send_request(
+                    httplib::client::request(http::verb::get, "/file-multi-range", range_headers)));
                 REQUIRE(resp.result() == http::status::partial_content);
                 auto ct = std::string(resp[http::field::content_type]);
                 REQUIRE(ct.starts_with("multipart/byteranges"));
@@ -643,11 +649,7 @@ TEST_CASE("Static mount: serves a file", "[response]")
     }
 
     {
-        run(
-            [&](auto& server)
-            {
-                server.router().set_static_mount_point("/static", tmp_dir);
-            },
+        run([&](auto& server) { server.router().set_static_mount_point("/static", tmp_dir); },
             [](auto& client) -> net::awaitable<void>
             {
                 auto resp = UNWRAP(co_await client.async_get("/static/test.txt"));
@@ -665,11 +667,7 @@ TEST_CASE("Static mount: returns 404 for non-existent file", "[response]")
     auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_404";
     std::filesystem::create_directories(tmp_dir);
 
-    run(
-        [&](auto& server)
-        {
-            server.router().set_static_mount_point("/files", tmp_dir);
-        },
+    run([&](auto& server) { server.router().set_static_mount_point("/files", tmp_dir); },
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/files/nope.txt"));
@@ -685,11 +683,7 @@ TEST_CASE("Static mount: blocks path traversal", "[response]")
     auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_pt";
     std::filesystem::create_directories(tmp_dir);
 
-    run(
-        [&](auto& server)
-        {
-            server.router().set_static_mount_point("/files", tmp_dir);
-        },
+    run([&](auto& server) { server.router().set_static_mount_point("/files", tmp_dir); },
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/files/../../../etc/passwd"));
@@ -710,11 +704,7 @@ TEST_CASE("Static mount: default document index.html", "[response]")
     }
 
     {
-        run(
-            [&](auto& server)
-            {
-                server.router().set_static_mount_point("/", tmp_dir);
-            },
+        run([&](auto& server) { server.router().set_static_mount_point("/", tmp_dir); },
             [](auto& client) -> net::awaitable<void>
             {
                 auto resp = UNWRAP(co_await client.async_get("/"));
@@ -743,8 +733,7 @@ TEST_CASE("Static mount: directory listing via subpath", "[response]")
             {
                 auto entry = httplib::server::mount_point_entry("/dir", tmp_dir);
                 entry.set_enabled_directory(true);
-                entry.set_directory_format(
-                    httplib::server::mount_point_entry::dir_format_type::json);
+                entry.set_directory_format(httplib::server::mount_point_entry::dir_format_type::json);
                 server.router().set_static_mount_point(std::move(entry));
             },
             [](auto& client) -> net::awaitable<void>
@@ -763,11 +752,7 @@ TEST_CASE("Static mount: non-existent file returns 404 via mount", "[response]")
     auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_no";
     std::filesystem::create_directories(tmp_dir);
 
-    run(
-        [&](auto& server)
-        {
-            server.router().set_static_mount_point("/pub", tmp_dir);
-        },
+    run([&](auto& server) { server.router().set_static_mount_point("/pub", tmp_dir); },
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/pub/nope.txt"));
@@ -789,11 +774,7 @@ TEST_CASE("Static mount: file in subdirectory", "[response]")
     }
 
     {
-        run(
-            [&](auto& server)
-            {
-                server.router().set_static_mount_point("/pub", tmp_dir);
-            },
+        run([&](auto& server) { server.router().set_static_mount_point("/pub", tmp_dir); },
             [](auto& client) -> net::awaitable<void>
             {
                 auto resp = UNWRAP(co_await client.async_get("/pub/sub/deep.txt"));
@@ -813,6 +794,7 @@ namespace
           "streaming decompressor keeps up with the pace of the wire";
 } // namespace
 
+#ifdef HTTPLIB_ENABLED_COMPRESS
 TEST_CASE("Response: read_some_decompressed decodes gzip body", "[response]")
 {
     run(
@@ -876,6 +858,7 @@ TEST_CASE("Response: read_some_decompressed with single large buffer", "[respons
             co_return;
         });
 }
+#endif
 
 TEST_CASE("Response: read_some_decompressed passes through identity body", "[response]")
 {
@@ -911,6 +894,7 @@ TEST_CASE("Response: read_some_decompressed passes through identity body", "[res
         });
 }
 
+#ifdef HTTPLIB_ENABLED_COMPRESS
 TEST_CASE("Response: is_body_done reflects decompressed pending overflow", "[response]")
 {
     run(
@@ -947,3 +931,4 @@ TEST_CASE("Response: is_body_done reflects decompressed pending overflow", "[res
             co_return;
         });
 }
+#endif

@@ -387,7 +387,7 @@ namespace httplib::server
                 server_impl_->logger()->error("unknown exception in handler for {} {} {}",
                                               req.method_string(),
                                               req_target,
-                                              log_endp_format); 
+                                              log_endp_format);
                 get_impl(resp).keep_alive(false);
                 resp.set_error_content(http::status::internal_server_error);
             }

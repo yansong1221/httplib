@@ -9,10 +9,7 @@ namespace httplib::client
     {
     }
 
-    proxy_client::proxy_client(net::any_io_executor const& ex,
-                               std::string_view host,
-                               uint16_t port,
-                               bool ssl)
+    proxy_client::proxy_client(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl)
         : impl_(std::make_shared<proxy_client::impl>(ex, host, port, ssl))
     {
     }

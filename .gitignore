@@ -1,4 +1,5 @@
 /build
+/build-db
 /.vscode
 /.idea
 /.DS_Store

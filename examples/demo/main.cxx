@@ -1,12 +1,10 @@
-#include "httplib/body/form_data_body.hpp"
-#include "httplib/body/json_body.hpp"
-#include "httplib/body/query_params_body.hpp"
-#include "httplib/body/string_body.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
-#include "httplib/client/stream_reader.hpp"
 #include "httplib/client/lazy_request.hpp"
+#include "httplib/client/stream_reader.hpp"
 #include "httplib/client/ws_client.hpp"
+#include "httplib/html/form_data.hpp"
+#include "httplib/html/query_params.hpp"
 #include "httplib/server/chunk_reader.hpp"
 #include "httplib/server/chunk_writer.hpp"
 #include "httplib/server/middleware/auth.hpp"
@@ -139,14 +137,13 @@ setup_http_routes(httplib::server::router& router)
     // ---- JSON echo ----
     router.set_http_handler<http::verb::post>("/api/echo-json",
                                               [](httplib::server::request& req, httplib::server::response& resp)
-                                              { resp.set_json_content(req.body().as<httplib::body::json_body>()); });
+                                              { resp.set_json_content(req.as_json()); });
 
     // ---- URL-encoded form ----
     router.set_http_handler<http::verb::post>("/api/form-urlencoded",
                                               [](httplib::server::request& req, httplib::server::response& resp)
                                               {
-                                                  auto const& params
-                                                      = req.body().as<httplib::body::query_params_body>();
+                                                  auto const& params = req.as_query_params();
                                                   boost::json::object obj;
                                                   for (auto const& [k, v] : params.params())
                                                   {
@@ -159,7 +156,7 @@ setup_http_routes(httplib::server::router& router)
     router.set_http_handler<http::verb::post>("/api/form-multipart",
                                               [](httplib::server::request& req, httplib::server::response& resp)
                                               {
-                                                  auto const& fd = req.body().as<httplib::body::form_data_body>();
+                                                  auto const& fd = req.as_form_data();
                                                   boost::json::object obj;
                                                   for (auto const& field : fd.fields)
                                                   {
@@ -445,9 +442,7 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
         auto r = co_await client.async_get("/api/greet/client");
         if (r)
         {
-            spdlog::info("GET  /api/greet/client -> {} [{}]",
-                         r.value().result_int(),
-                         r->as_string());
+            spdlog::info("GET  /api/greet/client -> {} [{}]", r.value().result_int(), r->as_string());
         }
     }
 
@@ -595,7 +590,7 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 static net::awaitable<void>
 run_http_client_pool_demo(net::any_io_executor ex, std::string host, uint16_t port)
 {
-    httplib::client::http_client_pool pool(ex, {.max_size = 4});
+    httplib::client::http_client_pool pool(ex, { .max_size = 4 });
     {
         auto h = co_await pool.async_acquire(host, port, false);
         if (h)

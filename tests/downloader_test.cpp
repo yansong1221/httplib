@@ -32,8 +32,8 @@ namespace
         {
             auto null_sink = std::make_shared<spdlog::sinks::null_sink_mt>();
             server.set_logger(std::make_shared<spdlog::logger>("httplib.tests", null_sink));
-            pool = std::make_shared<httplib::client::http_client_pool>(
-                ioc_.get_executor(), httplib::client::pool_params { .max_size = 8 });
+            pool = std::make_shared<httplib::client::http_client_pool>(ioc_.get_executor(),
+                                                                       httplib::client::pool_params { .max_size = 8 });
             pool->start();
         }
 
@@ -639,8 +639,8 @@ TEST_CASE("http_client_pool: acquire timeout", "[downloader]")
     dl_test_scaffold ts;
     ts.start();
 
-    auto pool = std::make_shared<httplib::client::http_client_pool>(
-        ts.ioc_.get_executor(), httplib::client::pool_params { .max_size = 1 });
+    auto pool = std::make_shared<httplib::client::http_client_pool>(ts.ioc_.get_executor(),
+                                                                    httplib::client::pool_params { .max_size = 1 });
     pool->start();
 
     auto h1 = co_spawn(ts.ioc_, pool->async_acquire("127.0.0.1", ts.endpoint.port(), false), net::use_future).get();

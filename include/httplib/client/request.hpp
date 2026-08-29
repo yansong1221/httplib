@@ -1,10 +1,13 @@
 #pragma once
-#include "httplib/body/any_body.hpp"
 #include "httplib/config.hpp"
+#include "httplib/html/form_data.hpp"
+#include "httplib/html/query_params.hpp"
 #include <boost/beast/http/fields.hpp>
+#include <boost/json/value.hpp>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <string>
 #include <string_view>
 
 namespace httplib::client
@@ -43,8 +46,17 @@ namespace httplib::client
         http::fields& base();
         http::fields const& base() const;
 
-        body::any_body::value_type& body();
-        body::any_body::value_type const& body() const;
+        std::string const& as_string() const;
+        boost::json::value const& as_json() const;
+        html::form_data const& as_form_data() const;
+        html::query_params const& as_query_params() const;
+
+        bool is_empty() const;
+        bool is_string() const;
+        bool is_json() const;
+        bool is_form_data() const;
+        bool is_query_params() const;
+        bool is_file() const;
 
         void content_length(std::uint64_t n);
         bool keep_alive() const;

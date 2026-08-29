@@ -51,8 +51,7 @@ namespace
 // SQLite
 // ---------------------------------------------------------------------------
 
-TEST_CASE("db(sqlite/bug): temporal column decls recognized case-insensitively and with modifiers",
-          "[db][sqlite][bug]")
+TEST_CASE("db(sqlite/bug): temporal column decls recognized case-insensitively and with modifiers", "[db][sqlite][bug]")
 {
     net::io_context ioc;
     std::exception_ptr err;
@@ -63,13 +62,12 @@ TEST_CASE("db(sqlite/bug): temporal column decls recognized case-insensitively a
             auto sess = co_await db::session::connect(ioc.get_executor(), "sqlite", "db=:memory:");
             // 小写声明与带修饰符的声明（datetime(3)）都应按声明首词识别列语义
             co_await sess.query("CREATE TABLE t (d date, dt datetime, tm time, ts TIMESTAMP, d3 datetime(3))");
-            co_await sess.query(
-                "INSERT INTO t VALUES (:d, :dt, :tm, :ts, :d3)",
-                db::bind("d", db::date { 2024, 6, 1 }),
-                db::bind("dt", db::datetime { 2024, 6, 1, 12, 30, 45, 123456 }),
-                db::bind("tm", db::time::from_duration(std::chrono::microseconds { 3723000000LL })),
-                db::bind("ts", db::datetime { 2024, 6, 2, 1, 2, 3, 0 }),
-                db::bind("d3", db::datetime { 2024, 6, 3, 4, 5, 6, 7 }));
+            co_await sess.query("INSERT INTO t VALUES (:d, :dt, :tm, :ts, :d3)",
+                                db::bind("d", db::date { 2024, 6, 1 }),
+                                db::bind("dt", db::datetime { 2024, 6, 1, 12, 30, 45, 123456 }),
+                                db::bind("tm", db::time::from_duration(std::chrono::microseconds { 3723000000LL })),
+                                db::bind("ts", db::datetime { 2024, 6, 2, 1, 2, 3, 0 }),
+                                db::bind("d3", db::datetime { 2024, 6, 3, 4, 5, 6, 7 }));
 
             auto r = co_await sess.query("SELECT d, dt, tm, ts, d3 FROM t");
             REQUIRE(r.column_type(0) == db::column_type::date);
@@ -138,8 +136,7 @@ TEST_CASE("db(sqlite/bug): last_insert_id does not leak into SELECT results", "[
     rethrow_or_skip(err, "");
 }
 
-TEST_CASE("db(sqlite/bug): uint64 binding above INT64_MAX fails instead of wrapping",
-          "[db][sqlite][bug]")
+TEST_CASE("db(sqlite/bug): uint64 binding above INT64_MAX fails instead of wrapping", "[db][sqlite][bug]")
 {
     net::io_context ioc;
     std::exception_ptr err;
@@ -151,8 +148,7 @@ TEST_CASE("db(sqlite/bug): uint64 binding above INT64_MAX fails instead of wrapp
             // uint64_t > INT64_MAX 不能 static_cast 成 sqlite3_int64（回绕成负数，读回 out-of-range）；
             // 应与 MySQL 后端语义一致：要么可逆存储，要么明确失败，而非静默损坏。
             auto const max_u64 = std::numeric_limits<uint64_t>::max();
-            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x").bind("a", max_u64).execute(),
-                              db::db_exception);
+            REQUIRE_THROWS_AS(co_await sess.stmt("SELECT :a AS x").bind("a", max_u64).execute(), db::db_exception);
         },
         [&](std::exception_ptr e) { err = e; });
     ioc.run();
@@ -284,8 +280,10 @@ TEST_CASE("db(odbc/bug): DATETIMEOFFSET column maps to absolute timestamp", "[db
         ioc,
         [&]() -> net::awaitable<void>
         {
-            auto sess = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_bug_config().to_connection_string());
-            co_await sess.query("IF OBJECT_ID('httplib_odbc_bug_dto', 'U') IS NOT NULL DROP TABLE httplib_odbc_bug_dto");
+            auto sess
+                = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_bug_config().to_connection_string());
+            co_await sess.query(
+                "IF OBJECT_ID('httplib_odbc_bug_dto', 'U') IS NOT NULL DROP TABLE httplib_odbc_bug_dto");
             co_await sess.query("CREATE TABLE httplib_odbc_bug_dto (v DATETIMEOFFSET(6) NOT NULL)");
 
             // 绑定绝对时间点（UTC）→ 存 DATETIMEOFFSET +00:00 → 读回绝对时间点（固定，不随会话时区漂移）
@@ -295,8 +293,7 @@ TEST_CASE("db(odbc/bug): DATETIMEOFFSET column maps to absolute timestamp", "[db
             co_await sess.query("INSERT INTO httplib_odbc_bug_dto VALUES (:v)", db::bind("v", tp));
 
             // 字面量带偏移 +05:30 → 读回换算成 UTC 时间点 07:04:56.789
-            co_await sess.query(
-                "INSERT INTO httplib_odbc_bug_dto VALUES ('2024-06-01 12:34:56.789000 +05:30')");
+            co_await sess.query("INSERT INTO httplib_odbc_bug_dto VALUES ('2024-06-01 12:34:56.789000 +05:30')");
 
             auto r = co_await sess.query("SELECT TOP 2 v FROM httplib_odbc_bug_dto ORDER BY v");
             REQUIRE(r.column_count() == 1);
@@ -321,8 +318,7 @@ TEST_CASE("db(odbc/bug): DATETIMEOFFSET column maps to absolute timestamp", "[db
     rethrow_or_skip(err, "odbc connect");
 }
 
-TEST_CASE("db(odbc/bug): uint64 binding above INT64_MAX fails explicitly",
-          "[db][odbc][bug][integration]")
+TEST_CASE("db(odbc/bug): uint64 binding above INT64_MAX fails explicitly", "[db][odbc][bug][integration]")
 {
     net::io_context ioc;
     std::exception_ptr err;
@@ -330,7 +326,8 @@ TEST_CASE("db(odbc/bug): uint64 binding above INT64_MAX fails explicitly",
         ioc,
         [&]() -> net::awaitable<void>
         {
-            auto sess = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_bug_config().to_connection_string());
+            auto sess
+                = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_bug_config().to_connection_string());
 
             // SQL Server BIGINT 有符号：绑定 > INT64_MAX 的 uint64 应显式报错（与 SQLite 后端一致），
             // 而非静默交给驱动报 22003。
@@ -343,8 +340,7 @@ TEST_CASE("db(odbc/bug): uint64 binding above INT64_MAX fails explicitly",
     rethrow_or_skip(err, "odbc connect");
 }
 
-TEST_CASE("db(odbc/bug): column name longer than 1023 chars does not corrupt metadata",
-          "[db][odbc][bug][integration]")
+TEST_CASE("db(odbc/bug): column name longer than 1023 chars does not corrupt metadata", "[db][odbc][bug][integration]")
 {
     net::io_context ioc;
     std::exception_ptr err;
@@ -352,7 +348,8 @@ TEST_CASE("db(odbc/bug): column name longer than 1023 chars does not corrupt met
         ioc,
         [&]() -> net::awaitable<void>
         {
-            auto sess = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_bug_config().to_connection_string());
+            auto sess
+                = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_bug_config().to_connection_string());
 
             // 无别名的长表达式：SQL Server 对无别名表达式列返回空列名（不返回表达式文本，
             // 与 MySQL 不同）。关键是 >1024 字符的表达式不影响元数据读取：

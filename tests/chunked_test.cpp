@@ -1,5 +1,5 @@
+﻿#include "body/string_body.hpp"
 #include "common.hpp"
-#include "httplib/body/string_body.hpp"
 #include "httplib/client/lazy_request.hpp"
 #include "httplib/server/chunk_reader.hpp"
 #include "httplib/server/middleware/cors.hpp"
@@ -39,7 +39,7 @@ namespace
         auto resp = co_await writer->read_response_lazy();
         if (resp.has_error())
         {
-            co_return std::string{};
+            co_return std::string {};
         }
 
         std::string body;
@@ -89,7 +89,7 @@ TEST_CASE("Chunked: regular POST takes precedence over chunked", "[chunked]")
                 "/chunked/precedence",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto& body = req.body().template as<body::string_body>();
+                    auto const& body = req.as_string();
                     resp.set_string_content("regular-" + body, "text/plain");
                 });
 
@@ -122,8 +122,7 @@ TEST_CASE("Chunked: GET coexists with chunked POST", "[chunked]")
 
             server.router().template set_chunked_http_handler<http::verb::post>(
                 "/chunked/both",
-                [](httplib::server::request& req,
-                   httplib::server::response& resp) -> net::awaitable<void>
+                [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     REQUIRE(req.is_chunked());
                     std::array<char, 4096> buf;
@@ -174,8 +173,7 @@ TEST_CASE("Chunked: multi-verb chunked handler registration", "[chunked]")
         {
             server.router().template set_chunked_http_handler<http::verb::post, http::verb::put>(
                 "/chunked/multi",
-                [](httplib::server::request& req,
-                   httplib::server::response& resp) -> net::awaitable<void>
+                [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     std::array<char, 1024> buf;
                     co_await req.get_chunk_reader()->read_some(net::buffer(buf));
@@ -204,8 +202,7 @@ TEST_CASE("Chunked: handler with path param", "[chunked]")
         {
             server.router().template set_chunked_http_handler<http::verb::post>(
                 "/chunked/user/:id",
-                [](httplib::server::request& req,
-                   httplib::server::response& resp) -> net::awaitable<void>
+                [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     auto id = req.path_param("id");
                     resp.set_string_content("chunked-" + std::string(id), "text/plain");
@@ -239,8 +236,7 @@ TEST_CASE("Chunked: handler with wildcard path", "[chunked]")
         {
             server.router().template set_chunked_http_handler<http::verb::post>(
                 "/chunked/ws/*",
-                [](httplib::server::request& req,
-                   httplib::server::response& resp) -> net::awaitable<void>
+                [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     auto wild = req.path_param("*");
                     resp.set_string_content("chunked-" + std::string(wild), "text/plain");
@@ -278,8 +274,7 @@ TEST_CASE("Chunked: middleware is wrapped via set_chunked_http_handler", "[chunk
         {
             server.router().template set_chunked_http_handler<http::verb::post>(
                 "/chunked/cors_middleware",
-                [](httplib::server::request&,
-                   httplib::server::response& resp) -> net::awaitable<void>
+                [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     resp.set_string_content("should-not-run"sv, "text/plain");
                     co_return;
@@ -295,9 +290,8 @@ TEST_CASE("Chunked: middleware is wrapped via set_chunked_http_handler", "[chunk
         {
             auto hdrs = httplib::http::fields();
             hdrs.set(http::field::origin, "https://example.com");
-            auto get_resp = UNWRAP(
-                co_await client.async_send_request(
-                    httplib::client::request(http::verb::get, "/chunked/cors_middleware", hdrs)));
+            auto get_resp = UNWRAP(co_await client.async_send_request(
+                httplib::client::request(http::verb::get, "/chunked/cors_middleware", hdrs)));
             REQUIRE(get_resp.result() == http::status::ok);
             REQUIRE(as_string(get_resp) == "cors_middleware-get");
             REQUIRE(get_resp[http::field::access_control_allow_origin] == "https://example.com");
@@ -314,14 +308,13 @@ TEST_CASE("Chunked: regular PUT coexists with chunked POST", "[chunked]")
                 "/chunked/mixed",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto& body = req.body().template as<body::string_body>();
+                    auto const& body = req.as_string();
                     resp.set_string_content("regular-put-" + body, "text/plain");
                 });
 
             server.router().template set_chunked_http_handler<http::verb::post>(
                 "/chunked/mixed",
-                [](httplib::server::request&,
-                   httplib::server::response& resp) -> net::awaitable<void>
+                [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     resp.set_string_content("chunked-post"sv, "text/plain");
                     co_return;
@@ -347,8 +340,7 @@ TEST_CASE("Chunked: chunked handler does not affect path that only has regular h
         {
             server.router().template set_chunked_http_handler<http::verb::post>(
                 "/chunked/isolated",
-                [](httplib::server::request&,
-                   httplib::server::response& resp) -> net::awaitable<void>
+                [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     resp.set_string_content("should-not-run"sv, "text/plain");
                     co_return;
@@ -358,7 +350,7 @@ TEST_CASE("Chunked: chunked handler does not affect path that only has regular h
                 "/regular/path",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto& body = req.body().template as<body::string_body>();
+                    auto const& body = req.as_string();
                     resp.set_string_content("regular-" + body, "text/plain");
                 });
         },
@@ -378,8 +370,7 @@ TEST_CASE("Chunked: buffer_body receives de-chunked data", "[chunked]")
         {
             server.router().template set_chunked_http_handler<http::verb::post>(
                 "/chunked/read",
-                [](httplib::server::request& req,
-                   httplib::server::response& resp) -> net::awaitable<void>
+                [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     REQUIRE(req.is_chunked());
                     std::string accumulated;
@@ -416,8 +407,7 @@ TEST_CASE("Chunked: multiple chunks are de-chunked into single body", "[chunked]
         {
             server.router().template set_chunked_http_handler<http::verb::post>(
                 "/chunked/read-ext",
-                [](httplib::server::request& req,
-                   httplib::server::response& resp) -> net::awaitable<void>
+                [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     REQUIRE(req.is_chunked());
                     std::string accumulated;
@@ -457,8 +447,7 @@ TEST_CASE("Chunked: large chunk via buffer_body", "[chunked]")
         {
             server.router().template set_chunked_http_handler<http::verb::post>(
                 "/chunked/read-large",
-                [](httplib::server::request& req,
-                   httplib::server::response& resp) -> net::awaitable<void>
+                [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     REQUIRE(req.is_chunked());
                     std::string accumulated;
@@ -496,8 +485,7 @@ TEST_CASE("Chunked: empty chunks via buffer_body", "[chunked]")
         {
             server.router().template set_chunked_http_handler<http::verb::post>(
                 "/chunked/read-empty",
-                [](httplib::server::request& req,
-                   httplib::server::response& resp) -> net::awaitable<void>
+                [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     REQUIRE(req.is_chunked());
                     std::string accumulated;
@@ -521,8 +509,7 @@ TEST_CASE("Chunked: is_buffer_body_handler() is true", "[chunked]")
         {
             server.router().template set_chunked_http_handler<http::verb::post>(
                 "/chunked/read-is-chunked",
-                [](httplib::server::request& req,
-                   httplib::server::response& resp) -> net::awaitable<void>
+                [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     bool was_body = req.is_chunked();
                     std::array<char, 8192> buf;
@@ -532,8 +519,7 @@ TEST_CASE("Chunked: is_buffer_body_handler() is true", "[chunked]")
                         co_return;
                     }
                     auto bytes = bytes_result.value();
-                    resp.set_string_content(std::string(was_body ? "yes:" : "no:")
-                                                + std::string(buf.data(), bytes),
+                    resp.set_string_content(std::string(was_body ? "yes:" : "no:") + std::string(buf.data(), bytes),
                                             "text/plain");
                 });
         },
@@ -552,8 +538,7 @@ TEST_CASE("Chunked: with path parameters via buffer_body", "[chunked]")
         {
             server.router().template set_chunked_http_handler<http::verb::post>(
                 "/chunked/read/:id",
-                [](httplib::server::request& req,
-                   httplib::server::response& resp) -> net::awaitable<void>
+                [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     REQUIRE(req.is_chunked());
                     auto id = std::string(req.path_param("id"));
@@ -591,8 +576,7 @@ TEST_CASE("Chunked: with wildcard path via buffer_body", "[chunked]")
         {
             server.router().template set_chunked_http_handler<http::verb::post>(
                 "/chunked/read-ws/*",
-                [](httplib::server::request& req,
-                   httplib::server::response& resp) -> net::awaitable<void>
+                [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     REQUIRE(req.is_chunked());
                     auto wild = std::string(req.path_param("*"));
@@ -630,8 +614,7 @@ TEST_CASE("Chunked: PUT via buffer_body", "[chunked]")
         {
             server.router().template set_chunked_http_handler<http::verb::put>(
                 "/chunked/read-put",
-                [](httplib::server::request& req,
-                   httplib::server::response& resp) -> net::awaitable<void>
+                [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     REQUIRE(req.is_chunked());
                     std::string accumulated;
@@ -668,8 +651,7 @@ TEST_CASE("Chunked: multi-verb via buffer_body", "[chunked]")
         {
             server.router().template set_chunked_http_handler<http::verb::post, http::verb::patch>(
                 "/chunked/read-multi",
-                [](httplib::server::request& req,
-                   httplib::server::response& resp) -> net::awaitable<void>
+                [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     REQUIRE(req.is_chunked());
                     std::string accumulated;
@@ -694,8 +676,7 @@ TEST_CASE("Chunked: multi-verb via buffer_body", "[chunked]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto post_result
-                = co_await send_chunked(client, http::verb::post, "/chunked/read-multi", { "from-post" });
+            auto post_result = co_await send_chunked(client, http::verb::post, "/chunked/read-multi", { "from-post" });
             REQUIRE(post_result == "POST:from-post");
 
             auto patch_result
@@ -712,8 +693,7 @@ TEST_CASE("Chunked: sync send_chunked_request via buffer_body", "[chunked]")
         {
             server.router().template set_chunked_http_handler<http::verb::post>(
                 "/chunked/sync",
-                [](httplib::server::request& req,
-                   httplib::server::response& resp) -> net::awaitable<void>
+                [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     REQUIRE(req.is_chunked());
                     std::string accumulated;

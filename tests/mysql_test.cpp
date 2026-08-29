@@ -385,8 +385,7 @@ TEST_CASE("db: unknown backend throws", "[db]")
                 thrown = true;
             }
             REQUIRE(thrown);
-            REQUIRE_THROWS_AS(db::make_pool(ioc.get_executor(), "oracle", "user=x"),
-                              db::db_exception);
+            REQUIRE_THROWS_AS(db::make_pool(ioc.get_executor(), "oracle", "user=x"), db::db_exception);
         },
         [&](std::exception_ptr e) { err = e; });
     ioc.run();

@@ -194,7 +194,7 @@ namespace httplib::client
                         && req.method() != http::verb::head))
                 {
                     req.method(http::verb::get);
-                    req.body() = body::empty_body::value_type {};
+                    get_impl(req).body() = body::empty_body::value_type {};
                     req.erase(http::field::content_type);
                     req.erase(http::field::content_length);
                     get_impl(req).prepare_payload();
@@ -270,7 +270,7 @@ namespace httplib::client
         {
             // any_body 不是 sized body，prepare_payload() 对空 body 也会设 Transfer-Encoding: chunked，
             // 导致服务端把空 POST 解析成 chunked body 而非 empty_body。空 body 显式设 Content-Length: 0。
-            if (std::holds_alternative<body::empty_body::value_type>(req.body()))
+            if (std::holds_alternative<body::empty_body::value_type>(get_impl(req).body()))
             {
                 get_impl(req).content_length(0);
             }

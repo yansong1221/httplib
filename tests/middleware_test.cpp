@@ -1,5 +1,5 @@
+﻿#include "body/string_body.hpp"
 #include "common.hpp"
-#include "httplib/body/string_body.hpp"
 #include "httplib/server/middleware/auth.hpp"
 #include "httplib/server/middleware/cors.hpp"
 #include "httplib/server/middleware/rate_limit.hpp"
@@ -21,7 +21,7 @@ namespace
     void
     run_with_ep(Setup&& setup, Test&& test)
     {
-        net::thread_pool pool{ 1 };
+        net::thread_pool pool { 1 };
         std::exception_ptr err;
 
         net::co_spawn(
@@ -35,9 +35,7 @@ namespace
                 auto ep = server.local_endpoint();
                 server.run();
 
-                httplib::client::http_client client(pool.get_executor(),
-                                                     ep.address().to_string(),
-                                                     ep.port());
+                httplib::client::http_client client(pool.get_executor(), ep.address().to_string(), ep.port());
                 client.set_timeout(std::chrono::seconds(5));
 
                 co_await test(client, ep, pool);
@@ -45,14 +43,13 @@ namespace
                 client.close();
                 server.stop();
             },
-            [&](std::exception_ptr e)
-            {
-                err = e;
-            });
+            [&](std::exception_ptr e) { err = e; });
 
         pool.join();
         if (err)
+        {
             std::rethrow_exception(err);
+        }
     }
 
 } // namespace
@@ -101,8 +98,11 @@ TEST_CASE("Global middleware: execution order with route middleware", "[middlewa
             auto resp = UNWRAP(co_await client.async_get("/order"));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(*order
-                    == std::vector<std::string>{ "global_before", "route_before", "handler",
-                                                 "route_after", "global_after" });
+                    == std::vector<std::string> { "global_before",
+                                                  "route_before",
+                                                  "handler",
+                                                  "route_after",
+                                                  "global_after" });
             co_return;
         });
 }
@@ -110,7 +110,7 @@ TEST_CASE("Global middleware: execution order with route middleware", "[middlewa
 TEST_CASE("Global middleware: applies to all routes", "[middleware]")
 {
     mw::basic_auth_middleware auth([](std::string_view u, std::string_view p)
-                                    { return u == "admin" && p == "secret"; });
+                                   { return u == "admin" && p == "secret"; });
 
     run(
         [&](auto& server)
@@ -130,10 +130,12 @@ TEST_CASE("Global middleware: applies to all routes", "[middleware]")
         {
             auto hdrs = httplib::http::fields();
             hdrs.set(http::field::authorization, "Basic YWRtaW46c2VjcmV0");
-            auto resp1 = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/public", hdrs)));
+            auto resp1 = UNWRAP(
+                co_await client.async_send_request(httplib::client::request(http::verb::get, "/public", hdrs)));
             REQUIRE(resp1.result() == http::status::ok);
 
-            auto resp2 = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/private", hdrs)));
+            auto resp2 = UNWRAP(
+                co_await client.async_send_request(httplib::client::request(http::verb::get, "/private", hdrs)));
             REQUIRE(resp2.result() == http::status::ok);
 
             auto resp3 = UNWRAP(co_await client.async_get("/public"));
@@ -254,8 +256,8 @@ TEST_CASE("cors_middleware: allow_origins with multiple origins", "[middleware]"
         {
             auto hdrs = httplib::http::fields();
             hdrs.set(http::field::origin, "https://a.com");
-            auto resp = UNWRAP(
-                co_await client.async_send_request(httplib::client::request(http::verb::get, "/cors_middleware-multi", hdrs)));
+            auto resp = UNWRAP(co_await client.async_send_request(
+                httplib::client::request(http::verb::get, "/cors_middleware-multi", hdrs)));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp.as_string() == "cors_middleware-data");
             co_return;
@@ -281,8 +283,8 @@ TEST_CASE("cors_middleware: allow_methods custom", "[middleware]")
         {
             auto hdrs = httplib::http::fields();
             hdrs.set(http::field::origin, "https://x.com");
-            auto resp = UNWRAP(
-                co_await client.async_send_request(httplib::client::request(http::verb::options, "/cors_middleware-methods", hdrs)));
+            auto resp = UNWRAP(co_await client.async_send_request(
+                httplib::client::request(http::verb::options, "/cors_middleware-methods", hdrs)));
             REQUIRE(resp.result() == http::status::no_content);
             auto methods = std::string(resp["Access-Control-Allow-Methods"]);
             REQUIRE(methods.find("PUT") != std::string::npos);
@@ -295,8 +297,7 @@ TEST_CASE("cors_middleware: allow_methods custom", "[middleware]")
 
 TEST_CASE("Basic Auth: valid credentials pass through", "[middleware]")
 {
-    mw::basic_auth_middleware auth(
-        [](std::string_view u, std::string_view p) { return u == "user" && p == "pass"; });
+    mw::basic_auth_middleware auth([](std::string_view u, std::string_view p) { return u == "user" && p == "pass"; });
 
     run(
         [&](auto& server)
@@ -322,8 +323,7 @@ TEST_CASE("Basic Auth: valid credentials pass through", "[middleware]")
 
 TEST_CASE("Basic Auth: invalid credentials return 401", "[middleware]")
 {
-    mw::basic_auth_middleware auth(
-        [](std::string_view u, std::string_view p) { return u == "user" && p == "pass"; });
+    mw::basic_auth_middleware auth([](std::string_view u, std::string_view p) { return u == "user" && p == "pass"; });
 
     run(
         [&](auto& server)
@@ -570,10 +570,9 @@ TEST_CASE("Rate Limit: shared limits apply across routes", "[middleware]")
             REQUIRE(blocked.has_value());
             REQUIRE(blocked->result() == http::status::too_many_requests);
 
-            auto client2 = std::make_unique<httplib::client::http_client>(
-                pool.get_executor(),
-                ep.address().to_string(),
-                ep.port());
+            auto client2 = std::make_unique<httplib::client::http_client>(pool.get_executor(),
+                                                                          ep.address().to_string(),
+                                                                          ep.port());
             client2->set_timeout(std::chrono::seconds(5));
             auto resp2 = co_await client2->async_get("/rl-ip");
             REQUIRE(resp2.has_value());
@@ -588,8 +587,7 @@ TEST_CASE("Rate Limit: shared limits apply across routes", "[middleware]")
 TEST_CASE("Combined: cors_middleware + Auth", "[middleware]")
 {
     mw::cors_middleware cors;
-    mw::basic_auth_middleware auth(
-        [](std::string_view u, std::string_view p) { return u == "u" && p == "p"; });
+    mw::basic_auth_middleware auth([](std::string_view u, std::string_view p) { return u == "u" && p == "p"; });
 
     run(
         [&](auto& server)

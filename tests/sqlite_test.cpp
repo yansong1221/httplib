@@ -341,12 +341,11 @@ TEST_CASE("db(sqlite): temporal types round-trip", "[db][sqlite]")
         {
             auto sess = co_await db::session::connect(ioc.get_executor(), "sqlite", "db=:memory:");
             co_await sess.query("CREATE TABLE t (d DATE, dt DATETIME, tm TIME, ts TIMESTAMP)");
-            co_await sess.query(
-                "INSERT INTO t VALUES (:d, :dt, :tm, :ts)",
-                db::bind("d", db::date { 2024, 6, 1 }),
-                db::bind("dt", db::datetime { 2024, 6, 1, 12, 30, 45, 123456 }),
-                db::bind("tm", db::time::from_duration(std::chrono::microseconds { 3723000000LL })),
-                db::bind("ts", db::datetime { 2024, 6, 1, 12, 0, 0 }));
+            co_await sess.query("INSERT INTO t VALUES (:d, :dt, :tm, :ts)",
+                                db::bind("d", db::date { 2024, 6, 1 }),
+                                db::bind("dt", db::datetime { 2024, 6, 1, 12, 30, 45, 123456 }),
+                                db::bind("tm", db::time::from_duration(std::chrono::microseconds { 3723000000LL })),
+                                db::bind("ts", db::datetime { 2024, 6, 1, 12, 0, 0 }));
 
             auto r = co_await sess.query("SELECT d, dt, tm, ts FROM t");
             REQUIRE(r.column_count() == 4);

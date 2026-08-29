@@ -1,4 +1,4 @@
-#include "httplib/body/form_data_body.hpp"
+﻿#include "body/form_data_body.hpp"
 #include "html/html.h"
 #include "httplib/util/misc.hpp"
 #include <fmt/format.h>
@@ -327,7 +327,8 @@ namespace httplib::body
                         step_ = step::boundary_header;
                         continue;
                     }
-                    if (sv.size() >= boundary_line_last.size() && sv.substr(0, boundary_line_last.size()) == boundary_line_last)
+                    if (sv.size() >= boundary_line_last.size()
+                        && sv.substr(0, boundary_line_last.size()) == boundary_line_last)
                     {
                         sv.remove_prefix(boundary_line_last.size());
                         step_ = step::eof;

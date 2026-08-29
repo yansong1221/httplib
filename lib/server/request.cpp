@@ -138,16 +138,58 @@ namespace httplib::server
         return impl_->query_params();
     }
 
-    httplib::body::any_body::value_type&
-    request::body()
+    std::string const&
+    request::as_string() const
     {
-        return impl_->body();
+        return std::get<std::string>(impl_->body());
     }
 
-    httplib::body::any_body::value_type const&
-    request::body() const
+    boost::json::value const&
+    request::as_json() const
     {
-        return impl_->body();
+        return std::get<boost::json::value>(impl_->body());
+    }
+
+    html::form_data const&
+    request::as_form_data() const
+    {
+        return std::get<html::form_data>(impl_->body());
+    }
+
+    html::query_params const&
+    request::as_query_params() const
+    {
+        return std::get<html::query_params>(impl_->body());
+    }
+
+    bool
+    request::is_empty() const
+    {
+        return impl_->body().template is_body_type<body::empty_body>();
+    }
+
+    bool
+    request::is_string() const
+    {
+        return impl_->body().template is_body_type<body::string_body>();
+    }
+
+    bool
+    request::is_json() const
+    {
+        return impl_->body().template is_body_type<body::json_body>();
+    }
+
+    bool
+    request::is_form_data() const
+    {
+        return impl_->body().template is_body_type<body::form_data_body>();
+    }
+
+    bool
+    request::is_query_params() const
+    {
+        return impl_->body().template is_body_type<body::query_params_body>();
     }
 
     bool

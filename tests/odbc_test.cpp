@@ -85,7 +85,8 @@ TEST_CASE("db(odbc): query and bindings", "[db][odbc]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            auto sess = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_test_config().to_connection_string());
+            auto sess
+                = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_test_config().to_connection_string());
             co_await setup_database(sess);
 
             // 纯文本查询
@@ -207,7 +208,8 @@ TEST_CASE("db(odbc): transaction", "[db][odbc]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            auto sess = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_test_config().to_connection_string());
+            auto sess
+                = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_test_config().to_connection_string());
             co_await setup_database(sess);
 
             co_await sess.begin_transaction();
@@ -235,7 +237,8 @@ TEST_CASE("db(odbc): reconnect", "[db][odbc]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            auto sess = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_test_config().to_connection_string());
+            auto sess
+                = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_test_config().to_connection_string());
             co_await setup_database(sess);
 
             co_await sess.query("INSERT INTO httplib_odbc_i (v) VALUES (:v)", db::bind("v", 5));
@@ -262,7 +265,8 @@ TEST_CASE("db(odbc): uniqueidentifier", "[db][odbc]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            auto sess = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_test_config().to_connection_string());
+            auto sess
+                = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_test_config().to_connection_string());
             co_await sess.query("IF OBJECT_ID('httplib_odbc_u', 'U') IS NOT NULL DROP TABLE httplib_odbc_u");
             co_await sess.query(
                 "CREATE TABLE httplib_odbc_u (id INT IDENTITY(1,1) PRIMARY KEY, g UNIQUEIDENTIFIER NULL)");
@@ -298,7 +302,8 @@ TEST_CASE("db(odbc): async notification (slow query does not block io thread)", 
         ioc,
         [&]() -> net::awaitable<void>
         {
-            auto sess = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_test_config().to_connection_string());
+            auto sess
+                = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_test_config().to_connection_string());
             co_await sess.query("WAITFOR DELAY '00:00:02'");
             query_done.store(true);
         },
@@ -329,7 +334,8 @@ TEST_CASE("db(odbc): multiple result sets", "[db][odbc]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            auto sess = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_test_config().to_connection_string());
+            auto sess
+                = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_test_config().to_connection_string());
             auto r = co_await sess.query("SELECT 1 AS a; SELECT 'x' AS b");
             REQUIRE(r.resultset_count() == 2);
             REQUIRE(*r[0].as_int64("a") == 1);
@@ -349,7 +355,8 @@ TEST_CASE("db(odbc): big text VARCHAR(MAX) chunked read", "[db][odbc]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            auto sess = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_test_config().to_connection_string());
+            auto sess
+                = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_test_config().to_connection_string());
             co_await sess.query(
                 "IF OBJECT_ID('httplib_odbc_bigtext', 'U') IS NOT NULL DROP TABLE httplib_odbc_bigtext");
             co_await sess.query(
@@ -380,7 +387,8 @@ TEST_CASE("db(odbc): datetimeoffset / time2 type mapping", "[db][odbc]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            auto sess = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_test_config().to_connection_string());
+            auto sess
+                = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_test_config().to_connection_string());
             co_await sess.query("IF OBJECT_ID('httplib_odbc_map', 'U') IS NOT NULL DROP TABLE httplib_odbc_map");
             co_await sess.query("CREATE TABLE httplib_odbc_map (id INT IDENTITY(1,1) PRIMARY KEY, "
                                 "o DATETIMEOFFSET(6) NULL, t TIME(3) NULL, ts DATETIME2(7) NULL)");
@@ -423,7 +431,8 @@ TEST_CASE("db(odbc): long error message is clamped", "[db][odbc]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            auto sess = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_test_config().to_connection_string());
+            auto sess
+                = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_test_config().to_connection_string());
 
             // RAISERROR 消息上限 2047 字节；此处 1500+，足以越过 odbc_error_text 的 1024 栈缓冲。
             std::string msg;
@@ -464,7 +473,8 @@ TEST_CASE("db(odbc): ping and close_statement lifecycle", "[db][odbc]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            auto sess = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_test_config().to_connection_string());
+            auto sess
+                = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_test_config().to_connection_string());
             REQUIRE(co_await sess.ping());
 
             // 反复创建/销毁 prepared statement，触发 close_statement 资源释放路径。
@@ -490,7 +500,8 @@ TEST_CASE("db(odbc): error paths", "[db][odbc]")
         ioc,
         [&]() -> net::awaitable<void>
         {
-            auto sess = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_test_config().to_connection_string());
+            auto sess
+                = co_await db::session::connect(ioc.get_executor(), "odbc", odbc_test_config().to_connection_string());
             co_await setup_database(sess);
 
             // 主键冲突 → SQL Server 原生错误 2627 → db_exception（含诊断文本）

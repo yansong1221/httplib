@@ -1,8 +1,8 @@
+﻿#include "body/form_data_body.hpp"
+#include "body/json_body.hpp"
+#include "body/query_params_body.hpp"
+#include "body/string_body.hpp"
 #include "common.hpp"
-#include "httplib/body/form_data_body.hpp"
-#include "httplib/body/json_body.hpp"
-#include "httplib/body/query_params_body.hpp"
-#include "httplib/body/string_body.hpp"
 #include "httplib/html/query_params.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
@@ -94,8 +94,7 @@ TEST_CASE("HTTP GET returns correct body and status", "[http-methods]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp
-                = UNWRAP(co_await client.async_get("/method/get", query_q1(), base_headers()));
+            auto resp = UNWRAP(co_await client.async_get("/method/get", query_q1(), base_headers()));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp.as_string() == "get-ok");
             co_return;
@@ -117,8 +116,7 @@ TEST_CASE("HTTP HEAD returns correct headers and no body", "[http-methods]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(
-                co_await client.async_head("/method/head", query_q1(), base_headers()));
+            auto resp = UNWRAP(co_await client.async_head("/method/head", query_q1(), base_headers()));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp[http::field::content_type] == "text/plain");
             REQUIRE(resp["X-Head-Test"] == "head-ok");
@@ -135,14 +133,13 @@ TEST_CASE("HTTP POST with string body", "[http-methods]")
                 "/method/post",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    REQUIRE(req.body().template as<body::string_body>() == "post-body");
+                    REQUIRE(req.as_string() == "post-body");
                     set_text(resp, "post-ok"sv);
                 });
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_post(
-                "/method/post", "post-body"sv, query_q1(), base_headers()));
+            auto resp = UNWRAP(co_await client.async_post("/method/post", "post-body"sv, query_q1(), base_headers()));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp.as_string() == "post-ok");
             co_return;
@@ -158,8 +155,7 @@ TEST_CASE("HTTP POST with JSON body", "[http-methods]")
                 "/method/post-json",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto const& obj
-                        = req.body().template as<body::json_body>().as_object();
+                    auto const& obj = req.as_json().as_object();
                     REQUIRE(obj.at("name").as_string() == "client");
                     resp.set_json_content({
                         {   "ok",           true },
@@ -170,7 +166,9 @@ TEST_CASE("HTTP POST with JSON body", "[http-methods]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_post("/method/post-json",
-                                                          { { "name", "client" } },
+                                                          {
+                                                              { "name", "client" }
+            },
                                                           query_q1(),
                                                           base_headers()));
             REQUIRE(resp.result() == http::status::ok);
@@ -187,13 +185,11 @@ TEST_CASE("HTTP PUT no body", "[http-methods]")
         {
             server.router().template set_http_handler<http::verb::put>(
                 "/method/put-empty",
-                [](httplib::server::request&, httplib::server::response& resp)
-                { set_text(resp, "put-empty-ok"sv); });
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "put-empty-ok"sv); });
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(
-                co_await client.async_put("/method/put-empty", query_q1(), base_headers()));
+            auto resp = UNWRAP(co_await client.async_put("/method/put-empty", query_q1(), base_headers()));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp.as_string() == "put-empty-ok");
             co_return;
@@ -209,14 +205,13 @@ TEST_CASE("HTTP PUT with string body", "[http-methods]")
                 "/method/put",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    REQUIRE(req.body().template as<body::string_body>() == "put-body");
+                    REQUIRE(req.as_string() == "put-body");
                     set_text(resp, "put-ok"sv);
                 });
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_put(
-                "/method/put", "put-body"sv, query_q1(), base_headers()));
+            auto resp = UNWRAP(co_await client.async_put("/method/put", "put-body"sv, query_q1(), base_headers()));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp.as_string() == "put-ok");
             co_return;
@@ -232,8 +227,7 @@ TEST_CASE("HTTP PUT with JSON body", "[http-methods]")
                 "/method/put-json",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto const& obj
-                        = req.body().template as<body::json_body>().as_object();
+                    auto const& obj = req.as_json().as_object();
                     REQUIRE(obj.at("name").as_string() == "put-json");
                     resp.set_json_content({
                         {     "ok",  true },
@@ -244,7 +238,9 @@ TEST_CASE("HTTP PUT with JSON body", "[http-methods]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_put("/method/put-json",
-                                                         { { "name", "put-json" } },
+                                                         {
+                                                             { "name", "put-json" }
+            },
                                                          query_q1(),
                                                          base_headers()));
             REQUIRE(resp.result() == http::status::ok);
@@ -262,14 +258,14 @@ TEST_CASE("HTTP PATCH with string body", "[http-methods]")
                 "/method/patch",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    REQUIRE(req.body().template as<body::string_body>() == "patch-body");
+                    REQUIRE(req.as_string() == "patch-body");
                     set_text(resp, "patch-ok"sv);
                 });
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_patch(
-                "/method/patch", "patch-body"sv, query_q1(), base_headers()));
+            auto resp
+                = UNWRAP(co_await client.async_patch("/method/patch", "patch-body"sv, query_q1(), base_headers()));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp.as_string() == "patch-ok");
             co_return;
@@ -285,8 +281,7 @@ TEST_CASE("HTTP PATCH with JSON body", "[http-methods]")
                 "/method/patch-json",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto const& obj
-                        = req.body().template as<body::json_body>().as_object();
+                    auto const& obj = req.as_json().as_object();
                     REQUIRE(obj.at("name").as_string() == "patch-json");
                     resp.set_json_content({
                         {     "ok",    true },
@@ -297,7 +292,9 @@ TEST_CASE("HTTP PATCH with JSON body", "[http-methods]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_patch("/method/patch-json",
-                                                           { { "name", "patch-json" } },
+                                                           {
+                                                               { "name", "patch-json" }
+            },
                                                            query_q1(),
                                                            base_headers()));
             REQUIRE(resp.result() == http::status::ok);
@@ -313,13 +310,11 @@ TEST_CASE("HTTP DELETE", "[http-methods]")
         {
             server.router().template set_http_handler<http::verb::delete_>(
                 "/method/delete",
-                [](httplib::server::request&, httplib::server::response& resp)
-                { set_text(resp, "delete-ok"sv); });
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "delete-ok"sv); });
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(
-                co_await client.async_del("/method/delete", query_q1(), base_headers()));
+            auto resp = UNWRAP(co_await client.async_del("/method/delete", query_q1(), base_headers()));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp.as_string() == "delete-ok");
             co_return;
@@ -341,11 +336,9 @@ TEST_CASE("HTTP OPTIONS with Allow header", "[http-methods]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_options(
-                "/method/options", query_q1(), base_headers()));
+            auto resp = UNWRAP(co_await client.async_options("/method/options", query_q1(), base_headers()));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp[http::field::allow]
-                    == "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS");
+            REQUIRE(resp[http::field::allow] == "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS");
             REQUIRE(resp.as_string() == "options-ok");
             co_return;
         });
@@ -360,8 +353,7 @@ TEST_CASE("send_request generic method", "[http-methods]")
                 "/method/send-request",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    REQUIRE(req.body().template as<body::string_body>()
-                            == "generic-body");
+                    REQUIRE(req.as_string() == "generic-body");
                     set_text(resp, "send-request-ok"sv);
                 });
         },
@@ -412,10 +404,10 @@ TEST_CASE("Client respects user-agent header", "[http-methods]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_get(
-                "/agent",
-                {},
-                headers({ { http::field::user_agent, "custom-agent" } })));
+            auto resp = UNWRAP(co_await client.async_get("/agent",
+                                                         {
+            },
+                                                         headers({ { http::field::user_agent, "custom-agent" } })));
             REQUIRE(resp.result() == http::status::ok);
             co_return;
         });
@@ -459,8 +451,7 @@ TEST_CASE("HTTP Expect: 100-continue header is sent", "[http-methods]")
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
                     REQUIRE(req.base()[http::field::expect] == "100-continue");
-                    REQUIRE(req.body().template as<body::string_body>()
-                            == "large-payload");
+                    REQUIRE(req.as_string() == "large-payload");
                     resp.set_empty_content(http::status::ok);
                 });
         },
@@ -486,8 +477,7 @@ TEST_CASE("Form-urlencoded body parsing", "[http-methods]")
                 "/form-encoded",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto const& params
-                        = req.body().template as<body::query_params_body>();
+                    auto const& params = req.as_query_params();
                     auto it_name = params.params().find("name");
                     auto it_value = params.params().find("value");
                     REQUIRE(it_name != params.params().end());
@@ -519,7 +509,7 @@ TEST_CASE("Multipart form-data body parsing", "[http-methods]")
                 "/multipart",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto const& fd = req.body().template as<body::form_data_body>();
+                    auto const& fd = req.as_form_data();
                     std::string result;
                     for (auto const& field : fd.fields)
                     {
@@ -551,14 +541,12 @@ TEST_CASE("Multipart form-data body parsing", "[http-methods]")
                                            boundary);
 
             auto hdrs = httplib::http::fields();
-            hdrs.set(http::field::content_type,
-                     std::format("multipart/form-data; boundary={}", boundary));
+            hdrs.set(http::field::content_type, std::format("multipart/form-data; boundary={}", boundary));
             auto req = httplib::client::request(http::verb::post, "/multipart", hdrs);
             req.set_body(body);
             auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
             REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp.as_string()
-                    == "field1=value1;file1=file-content:test.txt;");
+            REQUIRE(resp.as_string() == "field1=value1;file1=file-content:test.txt;");
             co_return;
         });
 }
@@ -576,7 +564,7 @@ TEST_CASE("Multipart file upload saved to disk", "[http-methods]")
                 "/upload-disk",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto const& fd = req.body().template as<body::form_data_body>();
+                    auto const& fd = req.as_form_data();
                     REQUIRE(fd.fields.size() == 2);
                     REQUIRE(fd.fields[0].name == "text");
                     REQUIRE(fd.fields[0].content == "hello");
@@ -605,8 +593,7 @@ TEST_CASE("Multipart file upload saved to disk", "[http-methods]")
                                            boundary);
 
             auto hdrs = httplib::http::fields();
-            hdrs.set(http::field::content_type,
-                     std::format("multipart/form-data; boundary={}", boundary));
+            hdrs.set(http::field::content_type, std::format("multipart/form-data; boundary={}", boundary));
             auto req = httplib::client::request(http::verb::post, "/upload-disk", hdrs);
             req.set_body(body);
             auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
@@ -644,8 +631,7 @@ TEST_CASE("Multipart file upload exceeds size limit", "[http-methods]")
                                            boundary);
 
             auto hdrs = httplib::http::fields();
-            hdrs.set(http::field::content_type,
-                     std::format("multipart/form-data; boundary={}", boundary));
+            hdrs.set(http::field::content_type, std::format("multipart/form-data; boundary={}", boundary));
             auto req = httplib::client::request(http::verb::post, "/upload-limit", hdrs);
             req.set_body(body);
             auto resp = co_await client.async_send_request(std::move(req));
@@ -669,7 +655,7 @@ TEST_CASE("Multipart multiple files saved to disk", "[http-methods]")
                 "/upload-multi",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto const& fd = req.body().template as<body::form_data_body>();
+                    auto const& fd = req.as_form_data();
                     REQUIRE(fd.fields.size() == 2);
                     REQUIRE(fd.fields[0].name == "f1");
                     REQUIRE(fd.fields[0].file_path.has_value());
@@ -696,8 +682,7 @@ TEST_CASE("Multipart multiple files saved to disk", "[http-methods]")
                                            boundary);
 
             auto hdrs = httplib::http::fields();
-            hdrs.set(http::field::content_type,
-                     std::format("multipart/form-data; boundary={}", boundary));
+            hdrs.set(http::field::content_type, std::format("multipart/form-data; boundary={}", boundary));
             auto req = httplib::client::request(http::verb::post, "/upload-multi", hdrs);
             req.set_body(body);
             auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
@@ -765,7 +750,7 @@ TEST_CASE("Multipart randomized round-trip", "[http-methods]")
                     "/fuzz",
                     [&](httplib::server::request& req, httplib::server::response& resp)
                     {
-                        auto const& fd = req.body().template as<body::form_data_body>();
+                        auto const& fd = req.as_form_data();
                         REQUIRE(fd.fields.size() == static_cast<size_t>(nfields));
                         for (int i = 0; i < nfields; ++i)
                         {
@@ -778,11 +763,9 @@ TEST_CASE("Multipart randomized round-trip", "[http-methods]")
                             {
                                 REQUIRE(fd.fields[i].filename == filenames[i]);
                                 REQUIRE(fd.fields[i].file_path.has_value());
-                                std::ifstream f(*fd.fields[i].file_path,
-                                                std::ios::binary);
-                                std::string disk_content(
-                                    (std::istreambuf_iterator<char>(f)),
-                                    std::istreambuf_iterator<char>());
+                                std::ifstream f(*fd.fields[i].file_path, std::ios::binary);
+                                std::string disk_content((std::istreambuf_iterator<char>(f)),
+                                                         std::istreambuf_iterator<char>());
                                 REQUIRE(disk_content == contents[i]);
                             }
                         }
@@ -792,8 +775,7 @@ TEST_CASE("Multipart randomized round-trip", "[http-methods]")
             [&](auto& client) -> net::awaitable<void>
             {
                 auto hdrs = httplib::http::fields();
-                hdrs.set(http::field::content_type,
-                         std::format("multipart/form-data; boundary={}", boundary));
+                hdrs.set(http::field::content_type, std::format("multipart/form-data; boundary={}", boundary));
                 auto req = httplib::client::request(http::verb::post, "/fuzz", hdrs);
                 req.set_body(body);
                 auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
@@ -823,7 +805,7 @@ TEST_CASE("Multipart upload rejects path traversal via parent dir", "[http-metho
                 "/upload-pt",
                 [&upload_dir](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto const& fd = req.body().template as<body::form_data_body>();
+                    auto const& fd = req.as_form_data();
                     REQUIRE(fd.fields.size() == 1);
                     REQUIRE(fd.fields[0].filename == "../../../etc/passwd");
                     REQUIRE(fd.fields[0].file_path.has_value());
@@ -848,8 +830,7 @@ TEST_CASE("Multipart upload rejects path traversal via parent dir", "[http-metho
                                            boundary);
 
             auto hdrs = httplib::http::fields();
-            hdrs.set(http::field::content_type,
-                     std::format("multipart/form-data; boundary={}", boundary));
+            hdrs.set(http::field::content_type, std::format("multipart/form-data; boundary={}", boundary));
             auto req = httplib::client::request(http::verb::post, "/upload-pt", hdrs);
             req.set_body(body);
             auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
@@ -879,7 +860,7 @@ TEST_CASE("Multipart upload strips absolute path filename to basename", "[http-m
                 "/upload-abs",
                 [&upload_dir](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto const& fd = req.body().template as<body::form_data_body>();
+                    auto const& fd = req.as_form_data();
                     REQUIRE(fd.fields.size() == 1);
                     REQUIRE(fd.fields[0].file_path.has_value());
                     auto const& fp = fd.fields[0].file_path.value();
@@ -904,8 +885,7 @@ TEST_CASE("Multipart upload strips absolute path filename to basename", "[http-m
                                            boundary);
 
             auto hdrs = httplib::http::fields();
-            hdrs.set(http::field::content_type,
-                     std::format("multipart/form-data; boundary={}", boundary));
+            hdrs.set(http::field::content_type, std::format("multipart/form-data; boundary={}", boundary));
             auto req = httplib::client::request(http::verb::post, "/upload-abs", hdrs);
             req.set_body(body);
             auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
@@ -929,7 +909,7 @@ TEST_CASE("Multipart upload basename-only safe filename", "[http-methods]")
                 "/upload-safe",
                 [&upload_dir](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto const& fd = req.body().template as<body::form_data_body>();
+                    auto const& fd = req.as_form_data();
                     REQUIRE(fd.fields.size() == 1);
                     REQUIRE(fd.fields[0].filename == "a/b/c/legit.txt");
                     REQUIRE(fd.fields[0].file_path.has_value());
@@ -952,8 +932,7 @@ TEST_CASE("Multipart upload basename-only safe filename", "[http-methods]")
                                            boundary);
 
             auto hdrs = httplib::http::fields();
-            hdrs.set(http::field::content_type,
-                     std::format("multipart/form-data; boundary={}", boundary));
+            hdrs.set(http::field::content_type, std::format("multipart/form-data; boundary={}", boundary));
             auto req = httplib::client::request(http::verb::post, "/upload-safe", hdrs);
             req.set_body(body);
             auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
@@ -1009,7 +988,7 @@ TEST_CASE("Server: read timeout", "[http-methods]")
                 "/read-timeout",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    REQUIRE(req.body().template as<body::string_body>() == "ok");
+                    REQUIRE(req.as_string() == "ok");
                     set_text(resp, "received"sv);
                 });
         },
@@ -1029,8 +1008,7 @@ TEST_CASE("Server: write timeout", "[http-methods]")
             server.set_write_timeout(std::chrono::seconds(5));
             server.router().template set_http_handler<http::verb::get>(
                 "/write-timeout",
-                [](httplib::server::request&, httplib::server::response& resp)
-                { set_text(resp, "ok"sv); });
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "ok"sv); });
         },
         [](auto& client) -> net::awaitable<void>
         {
@@ -1068,7 +1046,7 @@ TEST_CASE("Body: empty JSON object", "[http-methods]")
                 "/empty-json",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto& j = req.body().template as<body::json_body>();
+                    auto& j = req.as_json();
                     REQUIRE(j.is_object());
                     REQUIRE(j.as_object().empty());
                     set_text(resp, "empty-ok"sv);
@@ -1097,7 +1075,7 @@ TEST_CASE("Body: JSON array as root", "[http-methods]")
                 "/json-array",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto& j = req.body().template as<body::json_body>();
+                    auto& j = req.as_json();
                     REQUIRE(j.is_array());
                     REQUIRE(j.as_array().size() == 3);
                     set_text(resp, "array-ok"sv);
@@ -1126,7 +1104,7 @@ TEST_CASE("Body: large JSON body", "[http-methods]")
                 "/large-json",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto& j = req.body().template as<body::json_body>();
+                    auto& j = req.as_json();
                     REQUIRE(j.is_object());
                     REQUIRE(j.as_object().size() == 3);
                     set_text(resp, "large-ok"sv);
@@ -1157,8 +1135,7 @@ TEST_CASE("Body: urlencoded with special characters", "[http-methods]")
                 "/url-special",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto const& params
-                        = req.body().template as<body::query_params_body>();
+                    auto const& params = req.as_query_params();
                     auto it = params.params().find("msg");
                     REQUIRE(it != params.params().end());
                     REQUIRE(it->second == "hello world");
@@ -1188,7 +1165,7 @@ TEST_CASE("Body: multipart form with empty field", "[http-methods]")
                 "/multipart-empty",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto const& fd = req.body().template as<body::form_data_body>();
+                    auto const& fd = req.as_form_data();
                     REQUIRE(fd.fields.size() == 1);
                     REQUIRE(fd.fields[0].name == "empty-field");
                     REQUIRE(fd.fields[0].content.empty());
@@ -1208,8 +1185,7 @@ TEST_CASE("Body: multipart form with empty field", "[http-methods]")
                                            boundary);
 
             auto hdrs = headers({
-                { http::field::content_type,
-                  std::format("multipart/form-data; boundary={}", boundary) }
+                { http::field::content_type, std::format("multipart/form-data; boundary={}", boundary) }
             });
             auto req = httplib::client::request(http::verb::post, "/multipart-empty", hdrs);
             req.set_body(body);
@@ -1251,7 +1227,7 @@ TEST_CASE("Body: empty_body on empty POST request", "[http-methods]")
                 "/empty-post",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    REQUIRE(req.body().template is_body_type<body::empty_body>());
+                    REQUIRE(req.is_empty());
                     set_text(resp, "empty-ok"sv);
                 });
         },
@@ -1312,7 +1288,7 @@ TEST_CASE("JSON randomized round-trip", "[http-methods]")
                     "/json-fuzz",
                     [&](httplib::server::request& req, httplib::server::response& resp)
                     {
-                        auto& j = req.body().template as<body::json_body>();
+                        auto& j = req.as_json();
                         REQUIRE(j.is_object());
                         REQUIRE(j.as_object() == sent);
                         resp.set_json_content({
@@ -1367,7 +1343,7 @@ TEST_CASE("Query params randomized round-trip", "[http-methods]")
                     "/query-fuzz",
                     [&](httplib::server::request& req, httplib::server::response& resp)
                     {
-                        auto const& pq = req.body().template as<body::query_params_body>();
+                        auto const& pq = req.as_query_params();
                         auto const& map = pq.params();
                         REQUIRE(map.size() == expected.size());
                         resp.set_string_content("ok"sv, "text/plain"sv);
@@ -1402,7 +1378,8 @@ TEST_CASE("Server: header limit rejects oversized headers", "[http-methods]")
             auto hdrs = httplib::http::fields();
             std::string big_value(200, 'A');
             hdrs.set("X-Big-Header", big_value);
-            auto resp = co_await client.async_send_request(httplib::client::request(http::verb::get, "/hdr-limit", hdrs));
+            auto resp
+                = co_await client.async_send_request(httplib::client::request(http::verb::get, "/hdr-limit", hdrs));
             REQUIRE_FALSE(resp.has_value());
             co_return;
         });

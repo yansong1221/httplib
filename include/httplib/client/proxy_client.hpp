@@ -16,10 +16,7 @@ namespace httplib::client
     {
       public:
         explicit proxy_client(net::io_context& ex, std::string_view host, uint16_t port, bool ssl = false);
-        explicit proxy_client(net::any_io_executor const& ex,
-                              std::string_view host,
-                              uint16_t port,
-                              bool ssl = false);
+        explicit proxy_client(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl = false);
         ~proxy_client();
 
         net::awaitable<boost::system::error_code> async_connect(std::string_view target,

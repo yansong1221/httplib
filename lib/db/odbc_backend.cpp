@@ -571,11 +571,7 @@ namespace httplib::db::detail
 
         // 读单个字段。
         net::awaitable<field>
-        read_field(SQLHSTMT stmt,
-                   async_waiter& obj,
-                   SQLSMALLINT col,
-                   db::column_type ct,
-                   SQLSMALLINT sqltype)
+        read_field(SQLHSTMT stmt, async_waiter& obj, SQLSMALLINT col, db::column_type ct, SQLSMALLINT sqltype)
         {
             SQLLEN ind = 0;
             SQLRETURN rc = SQL_SUCCESS;
@@ -707,8 +703,7 @@ namespace httplib::db::detail
                     rc = co_await odbc_async(stmt,
                                              SQL_HANDLE_STMT,
                                              obj,
-                                             [&]
-                                             { return SQLGetData(stmt, col, SQL_C_BINARY, &t, sizeof(t), &ind); });
+                                             [&] { return SQLGetData(stmt, col, SQL_C_BINARY, &t, sizeof(t), &ind); });
                     check_ok(rc, stmt, SQL_HANDLE_STMT, "odbc read datetimeoffset");
                     if (ind == SQL_NULL_DATA)
                     {
@@ -958,8 +953,8 @@ namespace httplib::db::detail
         // 据此判定能否走 3.8 异步通知：能 → 3.80 + 异步；不能 → 回退 3.52 同步执行（对齐 SOCI）。
         rc = SQLSetEnvAttr(env_,
                            SQL_ATTR_ODBC_VERSION,
-                           reinterpret_cast<SQLPOINTER>(static_cast<SQLULEN>(
-                               load_SQLCompleteAsync() ? SQL_OV_ODBC3_80 : SQL_OV_ODBC3)),
+                           reinterpret_cast<SQLPOINTER>(
+                               static_cast<SQLULEN>(load_SQLCompleteAsync() ? SQL_OV_ODBC3_80 : SQL_OV_ODBC3)),
                            0);
         check_ok(rc, env_, SQL_HANDLE_ENV, "odbc set version");
 
@@ -1155,13 +1150,7 @@ namespace httplib::db::detail
                     if (sqltype == SQL_TINYINT || sqltype == SQL_SMALLINT || sqltype == SQL_INTEGER
                         || sqltype == SQL_BIGINT)
                     {
-                        rc = SQLColAttribute(s.stmt,
-                                             i,
-                                             SQL_DESC_UNSIGNED,
-                                             nullptr,
-                                             0,
-                                             nullptr,
-                                             &unsigned_attr);
+                        rc = SQLColAttribute(s.stmt, i, SQL_DESC_UNSIGNED, nullptr, 0, nullptr, &unsigned_attr);
                         is_unsigned = (rc == SQL_SUCCESS || rc == SQL_SUCCESS_WITH_INFO) && unsigned_attr == SQL_TRUE;
                     }
                     rs.types.push_back(map_sql_type(sqltype, is_unsigned));
@@ -1220,13 +1209,12 @@ namespace httplib::db::detail
                                                                      static_cast<SQLINTEGER>(sql_str.size()));
                                                });
             check_ok(rc, s->stmt, SQL_HANDLE_STMT, "odbc prepare");
-            co_return statement_handle { std::shared_ptr<odbc_stmt>(
-                s.release(),
-                [](odbc_stmt* p)
-                {
-                    odbc_backend::free_stmt(*p);
-                    delete p;
-                }) };
+            co_return statement_handle { std::shared_ptr<odbc_stmt>(s.release(),
+                                                                    [](odbc_stmt* p)
+                                                                    {
+                                                                        odbc_backend::free_stmt(*p);
+                                                                        delete p;
+                                                                    }) };
         }
         catch (...)
         {

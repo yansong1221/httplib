@@ -155,10 +155,9 @@ TEST_CASE("Aspect: 404 handler also supports aspects", "[aspect]")
     run(
         [&](auto& server)
         {
-            server.router().set_http_not_found_handler(
-                [](httplib::server::request&, httplib::server::response& resp)
-                { set_text(resp, "custom-404", http::status::not_found); },
-                logging_aspect { log });
+            server.router().set_http_not_found_handler([](httplib::server::request&, httplib::server::response& resp)
+                                                       { set_text(resp, "custom-404", http::status::not_found); },
+                                                       logging_aspect { log });
         },
         [&](auto& client) -> net::awaitable<void>
         {
