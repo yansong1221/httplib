@@ -449,13 +449,13 @@ namespace httplib::server
 
         std::string prefix = detail::strip_proxy_prefix(location);
 
-        router_.set_chunked_http_handler<http::verb::get,
-                                         http::verb::head,
-                                         http::verb::post,
-                                         http::verb::put,
-                                         http::verb::patch,
-                                         http::verb::delete_,
-                                         http::verb::options>(
+        router_.set_lazy_http_handler<http::verb::get,
+                                      http::verb::head,
+                                      http::verb::post,
+                                      http::verb::put,
+                                      http::verb::patch,
+                                      http::verb::delete_,
+                                      http::verb::options>(
             location,
             [this,
              self = shared_from_this(),
@@ -582,16 +582,16 @@ namespace httplib::server
 
                 std::array<char, 8192> relay_buf {};
 
-                while (!req.get_chunk_reader()->is_done())
+                while (!req.is_body_done())
                 {
-                    auto bytes_result = co_await req.get_chunk_reader()->read_some(net::buffer(relay_buf));
+                    auto bytes_result = co_await req.read_some_raw(net::buffer(relay_buf));
                     if (bytes_result.has_error())
                     {
                         logger()->trace("[proxy] read request body failed: {}", bytes_result.error().message());
                         resp.set_error_content(http::status::bad_request);
                         co_return;
                     }
-                    auto more = !req.get_chunk_reader()->is_done();
+                    auto more = !req.is_body_done();
                     auto bytes = bytes_result.value();
 
                     if (interceptor)

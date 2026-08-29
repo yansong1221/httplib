@@ -1,26 +1,22 @@
 #pragma once
+#include "httplib/config.hpp"
+#include "httplib/html/form_data.hpp"
+#include "httplib/html/query_params.hpp"
 #include "httplib/server/request_data.hpp"
 #include "httplib/server/server_fwd.hpp"
 #include "httplib/util/misc.hpp"
 #include <any>
+#include <boost/asio/awaitable.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/http/message.hpp>
+#include <boost/json/value.hpp>
+#include <boost/system/result.hpp>
 #include <charconv>
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <unordered_map>
-
-namespace boost::json
-{
-    class value;
-}
-
-namespace httplib::html
-{
-    class form_data;
-    class query_params;
-} // namespace httplib::html
 
 namespace httplib::server
 {
@@ -78,8 +74,26 @@ namespace httplib::server
         bool is_form_data() const;
         bool is_query_params() const;
 
-        bool is_chunked() const;
-        chunk_reader* get_chunk_reader();
+        // ---- body 懒读取（lazy handler）----
+        // 是否为懒读取请求：body 尚未读入，需通过 read_* 系列异步读取。
+        bool is_lazy() const;
+
+        // ---- 未读完 body（lazy）：异步读取 ----
+        // 读取剩余 body 并按指定类型物化，成功后可继续用 as_* 同步取引用。
+        net::awaitable<boost::system::result<std::string>> read_string();
+        net::awaitable<boost::system::result<boost::json::value>> read_json();
+        net::awaitable<boost::system::result<html::form_data>> read_form_data();
+        net::awaitable<boost::system::result<html::query_params>> read_query_params();
+
+        // 读取剩余 body 并物化到本请求（按 content-type 自动派发 body 类型）
+        net::awaitable<boost::system::result<void>> read_body();
+
+        // 低层流式读：返回未解压的（原始）body 字节
+        net::awaitable<boost::system::result<std::size_t>> read_some_raw(net::mutable_buffer const& buffer);
+
+        // 低层流式读：返回解压后的（content-encoding 已解码）body 字节
+        net::awaitable<boost::system::result<std::size_t>> read_some_decompressed(net::mutable_buffer const& buffer);
+        bool is_body_done() const;
 
         template <typename T = std::string_view>
             requires std::integral<T> || std::floating_point<T> || std::same_as<T, std::string>

@@ -11,7 +11,7 @@ A small, embeddable HTTP/1.1 & WebSocket server and client library for C++23, bu
 - **Flexible routing** �?fixed paths, `:named` parameters, `{param:regex}` constraints, `*` wildcard
 - **Multiple body types** �?string, JSON (Boost.JSON), multipart form-data, URL-encoded forms, file serving, empty
 - **Static file serving** �?mount directories with Range/Content-Range support, directory listing (HTML/JSON)
-- **Chunked streaming** �?`chunk_writer` / `chunk_reader` for server and client
+- **Streaming bodies** �?`set_lazy_http_handler` + `req.read_some_raw()` for request streaming, `chunk_writer` for responses
 - **SSE (Server-Sent Events)** �?`create_sse_writer()` / `sse_reader` streaming
 - **NDJSON** �?`create_ndjson_writer()` / `ndjson_reader` for newline-delimited JSON
 - **Redirects** �?`resp.set_redirect(url)`

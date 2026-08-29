@@ -5,7 +5,6 @@
 #include "httplib/client/ws_client.hpp"
 #include "httplib/html/form_data.hpp"
 #include "httplib/html/query_params.hpp"
-#include "httplib/server/chunk_reader.hpp"
 #include "httplib/server/chunk_writer.hpp"
 #include "httplib/server/middleware/auth.hpp"
 #include "httplib/server/middleware/cors.hpp"
@@ -278,7 +277,7 @@ setup_http_routes(httplib::server::router& router)
             }
         });
 
-    router.set_chunked_http_handler<http::verb::post>(
+    router.set_lazy_http_handler<http::verb::post>(
         "/api/buffer",
         [](httplib::server::request& req, httplib::server::response& resp) -> httplib::net::awaitable<void>
         {
@@ -286,7 +285,7 @@ setup_http_routes(httplib::server::router& router)
             std::array<char, 1024> buffer;
             for (;;)
             {
-                auto bytes_result = co_await req.get_chunk_reader()->read_some(httplib::net::buffer(buffer));
+                auto bytes_result = co_await req.read_some_raw(httplib::net::buffer(buffer));
                 if (bytes_result.has_error() || bytes_result.value() == 0)
                 {
                     break;

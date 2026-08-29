@@ -166,10 +166,10 @@ namespace httplib::server
 
         get_impl(req).set_path_param(std::unordered_map<std::string, std::string>(match.params));
 
-        if (match.chunked)
+        if (match.lazy)
         {
-            auto iter = match.node->chunked_handlers.find(req.method());
-            if (iter != match.node->chunked_handlers.end())
+            auto iter = match.node->lazy_handlers.find(req.method());
+            if (iter != match.node->lazy_handlers.end())
             {
                 co_await iter->second(req, resp);
             }
@@ -255,9 +255,9 @@ namespace httplib::server
                                       {
                                           return true;
                                       }
-                                      if (node->chunked_handlers.find(req.method()) != node->chunked_handlers.end())
+                                      if (node->lazy_handlers.find(req.method()) != node->lazy_handlers.end())
                                       {
-                                          result.chunked = true;
+                                          result.lazy = true;
                                           return true;
                                       }
                                       return false;
@@ -416,14 +416,14 @@ namespace httplib::server
     }
 
     void
-    router_impl::set_chunked_http_handler_impl(http::verb method,
-                                               std::string_view key,
-                                               coro_http_handler_type&& handler)
+    router_impl::set_lazy_http_handler_impl(http::verb method,
+                                            std::string_view key,
+                                            coro_http_handler_type&& handler)
     {
         std::unique_lock lock(mutex_);
         auto segments = detail::split_segments(key);
         auto node = insert(root_.get(), segments, 0);
-        node->chunked_handlers[method] = wrap_global(std::move(handler));
+        node->lazy_handlers[method] = wrap_global(std::move(handler));
     }
 
     void
@@ -433,7 +433,7 @@ namespace httplib::server
         {
             allows.insert(to_string(v.first));
         }
-        for (auto const& v : node->chunked_handlers)
+        for (auto const& v : node->lazy_handlers)
         {
             allows.insert(to_string(v.first));
         }

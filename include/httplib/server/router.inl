@@ -253,9 +253,9 @@ namespace httplib::server
 
     template <typename Func, typename... Aspects>
     void
-    router::set_chunked_http_handler(http::verb method, std::string_view key, Func&& handler, Aspects... asps)
+    router::set_lazy_http_handler(http::verb method, std::string_view key, Func&& handler, Aspects... asps)
     {
-        set_chunked_http_handler_impl(
+        set_lazy_http_handler_impl(
             method,
             key,
             make_coro_http_handler(std::forward<Func>(handler), std::forward<Aspects>(asps)...));

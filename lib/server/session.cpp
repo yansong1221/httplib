@@ -213,12 +213,12 @@ namespace httplib::server
 
         for (;;)
         {
-            http::request_parser<http::empty_body> header_parser;
-            header_parser.header_limit(server_impl_->header_limit());
-            header_parser.body_limit(server_impl_->body_limit());
+            auto header_parser = std::make_unique<http::request_parser<http::empty_body>>();
+            header_parser->header_limit(server_impl_->header_limit());
+            header_parser->body_limit(server_impl_->body_limit());
 
             stream_.expires_after(server_impl_->read_timeout());
-            co_await http::async_read_header(stream_, buffer_, header_parser, util::net_awaitable[ec]);
+            co_await http::async_read_header(stream_, buffer_, *header_parser, util::net_awaitable[ec]);
             stream_.expires_never();
             if (ec)
             {
@@ -227,12 +227,12 @@ namespace httplib::server
             }
 
             auto start_time = std::chrono::steady_clock::now();
-            auto const& header = header_parser.get();
+            auto const& header = header_parser->get();
             auto req_target = std::string(header.target());
 
             if (header.method() == http::verb::connect)
             {
-                auto req = request::impl::make_request(local_endp, remote_endp, std::move(header_parser.release()));
+                auto req = request::impl::make_request(local_endp, remote_endp, std::move(header_parser->release()));
                 auto resp = response::impl::make_response(header.version(),
                                                           header.keep_alive(),
                                                           &stream_,
@@ -258,7 +258,7 @@ namespace httplib::server
             if (websocket::is_upgrade(header.base()))
             {
                 server_impl_->logger()->trace("ws upgrade {}", req_target);
-                auto req = request::impl::make_request(local_endp, remote_endp, std::move(header_parser.release()));
+                auto req = request::impl::make_request(local_endp, remote_endp, std::move(header_parser->release()));
                 co_return std::make_unique<websocket_task>(websocket_stream(std::move(stream_)),
                                                            std::move(req),
                                                            server_impl_);
@@ -317,17 +317,39 @@ namespace httplib::server
                         }
                     }
 
-                    if (match.chunked)
+                    if (match.lazy)
                     {
-                        get_impl(req).setup_chunked_reading(stream_,
-                                                            buffer_,
-                                                            std::move(header_parser),
-                                                            server_impl_->read_timeout());
+                        get_impl(req).setup_lazy_reading(stream_,
+                                                         buffer_,
+                                                         std::move(header_parser),
+                                                         server_impl_->read_timeout());
+                        if (!(*server_impl_).upload_dir().empty())
+                        {
+                            auto upload_dir = (*server_impl_).upload_dir();
+                            auto max_file_size = (*server_impl_).upload_file_limit();
+                            get_impl(req).set_default_body_setup(
+                                [upload_dir, max_file_size](http::request<body::any_body>& r)
+                                {
+                                    auto ct = r[http::field::content_type];
+                                    if (!ct.starts_with("multipart/form-data"))
+                                    {
+                                        return;
+                                    }
+                                    auto& body = r.body();
+                                    if (!std::holds_alternative<body::form_data_body::value_type>(body))
+                                    {
+                                        body = body::form_data_body::value_type {};
+                                    }
+                                    auto& fd = std::get<body::form_data_body::value_type>(body);
+                                    fd.save_dir = upload_dir;
+                                    fd.max_file_size = max_file_size;
+                                });
+                        }
                     }
                     else
                     {
                         boost::system::error_code ec;
-                        http::request_parser<body::any_body> body_parser(std::move(header_parser));
+                        http::request_parser<body::any_body> body_parser(std::move(*header_parser));
 
                         if (!(*server_impl_).upload_dir().empty())
                         {
@@ -363,13 +385,9 @@ namespace httplib::server
                 }
                 co_await _router.post_routing(req, resp);
 
-                if (req.is_chunked())
+                if (req.is_lazy() && !req.is_body_done())
                 {
-                    auto reader = req.get_chunk_reader();
-                    if (!reader->is_done())
-                    {
-                        get_impl(resp).keep_alive(false);
-                    }
+                    get_impl(resp).keep_alive(false);
                 }
             }
             catch (std::exception const& e)

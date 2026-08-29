@@ -52,14 +52,14 @@ namespace httplib::server
         void set_static_mount_point(mount_point_entry&& entry, Aspects&&... asps);
 
         template <typename Func, typename... Aspects>
-        void set_chunked_http_handler(http::verb method, std::string_view key, Func&& handler, Aspects... asps);
+        void set_lazy_http_handler(http::verb method, std::string_view key, Func&& handler, Aspects... asps);
 
         template <http::verb... method, typename Func, typename... Aspects>
         void
-        set_chunked_http_handler(std::string_view key, Func handler, Aspects&&... asps)
+        set_lazy_http_handler(std::string_view key, Func handler, Aspects&&... asps)
         {
             static_assert(sizeof...(method) >= 1, "must set method");
-            (set_chunked_http_handler(method, key, handler, std::forward<Aspects>(asps)...), ...);
+            (set_lazy_http_handler(method, key, handler, std::forward<Aspects>(asps)...), ...);
         }
 
         template <typename Func>
@@ -88,9 +88,9 @@ namespace httplib::server
 
         virtual void set_connect_handler_impl(std::string_view key, coro_http_handler_type&& handler) = 0;
 
-        virtual void set_chunked_http_handler_impl(http::verb method,
-                                                   std::string_view key,
-                                                   coro_http_handler_type&& handler)
+        virtual void set_lazy_http_handler_impl(http::verb method,
+                                                std::string_view key,
+                                                coro_http_handler_type&& handler)
             = 0;
 
         virtual void use_impl(coro_mw_handler_type&& before, coro_mw_handler_type&& after) = 0;
