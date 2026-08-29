@@ -322,29 +322,9 @@ namespace httplib::server
                         get_impl(req).setup_lazy_reading(stream_,
                                                          buffer_,
                                                          std::move(header_parser),
-                                                         server_impl_->read_timeout());
-                        if (!(*server_impl_).upload_dir().empty())
-                        {
-                            auto upload_dir = (*server_impl_).upload_dir();
-                            auto max_file_size = (*server_impl_).upload_file_limit();
-                            get_impl(req).set_default_body_setup(
-                                [upload_dir, max_file_size](http::request<body::any_body>& r)
-                                {
-                                    auto ct = r[http::field::content_type];
-                                    if (!ct.starts_with("multipart/form-data"))
-                                    {
-                                        return;
-                                    }
-                                    auto& body = r.body();
-                                    if (!std::holds_alternative<body::form_data_body::value_type>(body))
-                                    {
-                                        body = body::form_data_body::value_type {};
-                                    }
-                                    auto& fd = std::get<body::form_data_body::value_type>(body);
-                                    fd.save_dir = upload_dir;
-                                    fd.max_file_size = max_file_size;
-                                });
-                        }
+                                                         server_impl_->read_timeout(),
+                                                         (*server_impl_).upload_dir(),
+                                                         (*server_impl_).upload_file_limit());
                     }
                     else
                     {
