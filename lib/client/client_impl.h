@@ -5,7 +5,10 @@
 #include "httplib/util/use_awaitable.hpp"
 #include "stream/http_stream.hpp"
 #include <boost/asio/strand.hpp>
+#include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/read.hpp>
+#include <boost/beast/http/serializer.hpp>
+#include <boost/beast/http/write.hpp>
 #include <functional>
 #include <spdlog/spdlog.h>
 

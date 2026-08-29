@@ -1,6 +1,7 @@
 #pragma once
 #include "httplib/client/client_fwd.hpp"
 #include <boost/beast/http/field.hpp>
+#include <boost/beast/http/fields.hpp>
 #include <cstdint>
 #include <filesystem>
 #include <memory>

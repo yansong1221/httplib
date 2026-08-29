@@ -3,6 +3,7 @@
 #include "httplib/util/action_queue.hpp"
 #include "stream/websocket_stream.hpp"
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/beast/core/flat_buffer.hpp>
 #include <boost/system/result.hpp>
 #include <spdlog/spdlog.h>
 

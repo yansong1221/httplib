@@ -7,6 +7,8 @@
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/thread_pool.hpp>
+#include <boost/asio/use_future.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <future>
 #include <memory>

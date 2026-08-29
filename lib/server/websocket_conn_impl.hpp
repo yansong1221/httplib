@@ -8,6 +8,7 @@
 #include "stream/websocket_stream.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/strand.hpp>
+#include <boost/beast/core/flat_buffer.hpp>
 #include <memory>
 #include <queue>
 #include <span>

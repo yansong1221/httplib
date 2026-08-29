@@ -22,8 +22,6 @@ endif()
 
 target_include_directories(${MOUDLE} PRIVATE ${HTTPLIB_LIB_DIR})
 
-target_precompile_headers(${MOUDLE} PRIVATE ${HTTPLIB_LIB_DIR}/pch.hpp)
-
 if (MSVC)
     target_compile_options(${MOUDLE} PRIVATE /bigobj)
 endif()

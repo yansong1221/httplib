@@ -2,6 +2,7 @@
 #include "httplib/client/proxy_client.hpp"
 #include "stream/http_stream.hpp"
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/beast/core/flat_buffer.hpp>
 #include <spdlog/spdlog.h>
 
 namespace httplib::client

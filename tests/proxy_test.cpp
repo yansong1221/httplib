@@ -4,7 +4,9 @@
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/write.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <string>
 #include <thread>

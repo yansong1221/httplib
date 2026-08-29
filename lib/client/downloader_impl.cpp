@@ -4,6 +4,8 @@
 #include "httplib/client/lazy_request.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/when_all.hpp"
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/use_future.hpp>
 #include <boost/url.hpp>
 #include <format>
 #include <fstream>
