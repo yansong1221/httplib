@@ -5,6 +5,8 @@
 #include "httplib/client/response.hpp"
 #include <algorithm>
 #include <boost/asio/post.hpp>
+#include <boost/beast/http/buffer_body.hpp>
+#include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/parser.hpp>
 #include <cstring>
@@ -311,6 +313,14 @@ namespace httplib::client
             msg_ = body_parser.release();
             parent_->read_impl_.reset();
             co_return boost::system::error_code {};
+        }
+
+        // 移动取出已物化的 body（不拷贝，取出后本响应不再持有该 body）。
+        template <typename T>
+        T
+        take_body()
+        {
+            return std::move(std::get<T>(msg_->body()));
         }
 
         std::shared_ptr<http_client::impl> parent_;

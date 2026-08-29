@@ -8,6 +8,7 @@
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/parser.hpp>
 #include <boost/beast/http/serializer.hpp>
+#include <boost/beast/version.hpp>
 #include <limits>
 
 namespace httplib::client
@@ -83,7 +84,11 @@ namespace httplib::client
             {
                 co_return result.error();
             }
-            co_return co_await result->read_body();
+            if (auto ec = co_await result->read_body(); ec)
+            {
+                co_return ec;
+            }
+            co_return result;
         }
 
         std::shared_ptr<http_client::impl> parent_;

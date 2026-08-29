@@ -45,8 +45,8 @@ namespace httplib::client
         net::awaitable<boost::system::result<html::form_data>> read_form_data();
         net::awaitable<boost::system::result<html::query_params>> read_query_params();
 
-        // 读取剩余 body 并物化为已读完（eager）响应
-        net::awaitable<boost::system::result<response>> read_body();
+        // 读取剩余 body 并物化到本响应（eager）
+        net::awaitable<boost::system::error_code> read_body();
 
         // 流式读取器（接管本响应的 body）
         std::unique_ptr<sse_reader> create_sse_reader();

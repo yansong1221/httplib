@@ -111,7 +111,7 @@ namespace httplib::client
         {
             co_return ec;
         }
-        co_return as_string();
+        co_return impl_->take_body<std::string>();
     }
 
     net::awaitable<boost::system::result<boost::json::value>>
@@ -123,7 +123,7 @@ namespace httplib::client
         {
             co_return ec;
         }
-        co_return as_json();
+        co_return impl_->take_body<boost::json::value>();
     }
 
     net::awaitable<boost::system::result<html::form_data>>
@@ -135,7 +135,7 @@ namespace httplib::client
         {
             co_return ec;
         }
-        co_return as_form_data();
+        co_return impl_->take_body<html::form_data>();
     }
 
     net::awaitable<boost::system::result<html::query_params>>
@@ -147,18 +147,13 @@ namespace httplib::client
         {
             co_return ec;
         }
-        co_return as_query_params();
+        co_return impl_->take_body<html::query_params>();
     }
 
-    net::awaitable<boost::system::result<response>>
+    net::awaitable<boost::system::error_code>
     response::read_body()
     {
-        auto ec = co_await impl_->read_body(nullptr);
-        if (ec)
-        {
-            co_return ec;
-        }
-        co_return std::move(*this);
+        co_return co_await impl_->read_body(nullptr);
     }
 
     net::awaitable<boost::system::error_code>

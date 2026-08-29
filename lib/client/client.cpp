@@ -90,7 +90,11 @@ namespace httplib::client
         {
             co_return result.error();
         }
-        co_return co_await result->read_body();
+        if (auto ec = co_await result->read_body(); ec)
+        {
+            co_return ec;
+        }
+        co_return result;
     }
 
     net::awaitable<http_client::response_result>
