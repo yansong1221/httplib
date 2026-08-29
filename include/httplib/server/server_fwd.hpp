@@ -12,7 +12,7 @@ namespace httplib::server
     class mount_point_entry;
     class session;
 
-    class chunk_writer;
+    class stream_writer;
     class sse_writer;
     class ndjson_writer;
 

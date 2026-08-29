@@ -125,7 +125,7 @@ TEST_CASE("Chunked: GET coexists with chunked POST", "[chunked]")
                 {
                     REQUIRE(req.is_lazy());
                     std::array<char, 4096> buf;
-                    auto result = co_await req.read_some_raw(net::buffer(buf));
+                    co_await req.read_some_raw(net::buffer(buf));
                     resp.set_string_content("chunked-ok"sv, "text/plain");
                     co_return;
                 });
@@ -376,12 +376,7 @@ TEST_CASE("Chunked: buffer_body receives de-chunked data", "[chunked]")
                     std::array<char, 8192> buf;
                     for (;;)
                     {
-                        auto _bytes_r = co_await req.read_some_raw(net::buffer(buf));
-                        if (_bytes_r.has_error())
-                        {
-                            break;
-                        }
-                        auto bytes = _bytes_r.value();
+                        auto bytes = co_await req.read_some_raw(net::buffer(buf));
                         if (bytes == 0)
                         {
                             break;
@@ -413,12 +408,7 @@ TEST_CASE("Chunked: multiple chunks are de-chunked into single body", "[chunked]
                     std::array<char, 8192> buf;
                     for (;;)
                     {
-                        auto _bytes_r = co_await req.read_some_raw(net::buffer(buf));
-                        if (_bytes_r.has_error())
-                        {
-                            break;
-                        }
-                        auto bytes = _bytes_r.value();
+                        auto bytes = co_await req.read_some_raw(net::buffer(buf));
                         if (bytes == 0)
                         {
                             break;
@@ -453,12 +443,7 @@ TEST_CASE("Chunked: large chunk via buffer_body", "[chunked]")
                     std::array<char, 8192> buf;
                     for (;;)
                     {
-                        auto _bytes_r = co_await req.read_some_raw(net::buffer(buf));
-                        if (_bytes_r.has_error())
-                        {
-                            break;
-                        }
-                        auto bytes = _bytes_r.value();
+                        auto bytes = co_await req.read_some_raw(net::buffer(buf));
                         if (bytes == 0)
                         {
                             break;
@@ -489,7 +474,7 @@ TEST_CASE("Chunked: empty chunks via buffer_body", "[chunked]")
                     REQUIRE(req.is_lazy());
                     std::string accumulated;
                     std::array<char, 4096> buf;
-                    auto bytes_result = co_await req.read_some_raw(net::buffer(buf));
+                    co_await req.read_some_raw(net::buffer(buf));
                     resp.set_string_content(std::to_string(accumulated.size()), "text/plain");
                 });
         },
@@ -512,12 +497,7 @@ TEST_CASE("Chunked: is_lazy() is true", "[chunked]")
                 {
                     bool was_body = req.is_lazy();
                     std::array<char, 8192> buf;
-                    auto bytes_result = co_await req.read_some_raw(net::buffer(buf));
-                    if (bytes_result.has_error())
-                    {
-                        co_return;
-                    }
-                    auto bytes = bytes_result.value();
+                    auto bytes = co_await req.read_some_raw(net::buffer(buf));
                     resp.set_string_content(std::string(was_body ? "yes:" : "no:") + std::string(buf.data(), bytes),
                                             "text/plain");
                 });
@@ -545,12 +525,7 @@ TEST_CASE("Chunked: with path parameters via buffer_body", "[chunked]")
                     std::array<char, 8192> buf;
                     for (;;)
                     {
-                        auto _bytes_r = co_await req.read_some_raw(net::buffer(buf));
-                        if (_bytes_r.has_error())
-                        {
-                            break;
-                        }
-                        auto bytes = _bytes_r.value();
+                        auto bytes = co_await req.read_some_raw(net::buffer(buf));
                         if (bytes == 0)
                         {
                             break;
@@ -583,12 +558,7 @@ TEST_CASE("Chunked: with wildcard path via buffer_body", "[chunked]")
                     std::array<char, 8192> buf;
                     for (;;)
                     {
-                        auto _bytes_r = co_await req.read_some_raw(net::buffer(buf));
-                        if (_bytes_r.has_error())
-                        {
-                            break;
-                        }
-                        auto bytes = _bytes_r.value();
+                        auto bytes = co_await req.read_some_raw(net::buffer(buf));
                         if (bytes == 0)
                         {
                             break;
@@ -620,12 +590,7 @@ TEST_CASE("Chunked: PUT via buffer_body", "[chunked]")
                     std::array<char, 8192> buf;
                     for (;;)
                     {
-                        auto _bytes_r = co_await req.read_some_raw(net::buffer(buf));
-                        if (_bytes_r.has_error())
-                        {
-                            break;
-                        }
-                        auto bytes = _bytes_r.value();
+                        auto bytes = co_await req.read_some_raw(net::buffer(buf));
                         if (bytes == 0)
                         {
                             break;
@@ -657,12 +622,7 @@ TEST_CASE("Chunked: multi-verb via buffer_body", "[chunked]")
                     std::array<char, 8192> buf;
                     for (;;)
                     {
-                        auto _bytes_r = co_await req.read_some_raw(net::buffer(buf));
-                        if (_bytes_r.has_error())
-                        {
-                            break;
-                        }
-                        auto bytes = _bytes_r.value();
+                        auto bytes = co_await req.read_some_raw(net::buffer(buf));
                         if (bytes == 0)
                         {
                             break;
@@ -699,12 +659,7 @@ TEST_CASE("Chunked: sync send_chunked_request via buffer_body", "[chunked]")
                     std::array<char, 8192> buf;
                     for (;;)
                     {
-                        auto _bytes_r = co_await req.read_some_raw(net::buffer(buf));
-                        if (_bytes_r.has_error())
-                        {
-                            break;
-                        }
-                        auto bytes = _bytes_r.value();
+                        auto bytes = co_await req.read_some_raw(net::buffer(buf));
                         if (bytes == 0)
                         {
                             break;

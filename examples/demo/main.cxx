@@ -5,7 +5,7 @@
 #include "httplib/client/ws_client.hpp"
 #include "httplib/html/form_data.hpp"
 #include "httplib/html/query_params.hpp"
-#include "httplib/server/chunk_writer.hpp"
+#include "httplib/server/stream_writer.hpp"
 #include "httplib/server/middleware/auth.hpp"
 #include "httplib/server/middleware/cors.hpp"
 #include "httplib/server/middleware/rate_limit.hpp"
@@ -236,7 +236,7 @@ setup_http_routes(httplib::server::router& router)
         "/api/stream",
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
-            auto cw = resp.get_chunk_writer();
+            auto cw = resp.create_stream_writer();
             http::fields headers;
             headers.set(http::field::content_type, "text/plain");
             co_await cw->write_header(http::status::ok, headers, false);
@@ -285,12 +285,20 @@ setup_http_routes(httplib::server::router& router)
             std::array<char, 1024> buffer;
             for (;;)
             {
-                auto bytes_result = co_await req.read_some_raw(httplib::net::buffer(buffer));
-                if (bytes_result.has_error() || bytes_result.value() == 0)
+                std::size_t bytes;
+                try
+                {
+                    bytes = co_await req.read_some_raw(httplib::net::buffer(buffer));
+                }
+                catch (boost::system::system_error const&)
                 {
                     break;
                 }
-                all.append(buffer.data(), bytes_result.value());
+                if (bytes == 0)
+                {
+                    break;
+                }
+                all.append(buffer.data(), bytes);
             }
             resp.set_string_content(all, "text/plain");
             co_return;

@@ -1,4 +1,4 @@
-﻿#include "body/form_data_body.hpp"
+#include "body/form_data_body.hpp"
 #include "body/json_body.hpp"
 #include "body/query_params_body.hpp"
 #include "body/string_body.hpp"
@@ -6,7 +6,7 @@
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/lazy_request.hpp"
 #include "httplib/client/stream_reader.hpp"
-#include "httplib/server/chunk_writer.hpp"
+#include "httplib/server/stream_writer.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include <boost/asio/co_spawn.hpp>
@@ -618,7 +618,7 @@ TEST_CASE("client: chunked transfer via sessions", "[client]")
                 "/chunked",
                 [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    auto cw = resp.get_chunk_writer();
+                    auto cw = resp.create_stream_writer();
                     http::fields headers;
                     headers.set(http::field::content_type, "text/plain");
                     co_await cw->write_header(http::status::ok, headers, false);

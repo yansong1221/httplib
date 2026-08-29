@@ -8,6 +8,7 @@
 #include <array>
 #include <boost/json/serialize.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -44,7 +45,7 @@ TEST_CASE("server lazy: read_string", "[server-lazy]")
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     REQUIRE(req.is_lazy());
-                    auto data = UNWRAP(co_await req.read_string());
+                    auto data = co_await req.read_string();
                     resp.set_string_content(std::move(data), "text/plain");
                 });
         },
@@ -65,13 +66,16 @@ TEST_CASE("server lazy: read_json", "[server-lazy]")
                 "/json",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    auto result = co_await req.read_json();
-                    if (result.has_error())
+                    boost::json::value value;
+                    try
                     {
-                        resp.set_string_content(std::string("ERR:") + result.error().message(), "text/plain");
+                        value = co_await req.read_json();
+                    }
+                    catch (boost::system::system_error const& e)
+                    {
+                        resp.set_string_content(std::string("ERR:") + e.what(), "text/plain");
                         co_return;
                     }
-                    auto value = result.value();
                     spdlog::info("server json value kind={} is_obj={} dump={}",
                                  (int)value.kind(),
                                  value.is_object(),
@@ -104,7 +108,7 @@ TEST_CASE("server lazy: read_body default content-type dispatch", "[server-lazy]
                 "/any",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    UNWRAP(co_await req.read_body());
+                    co_await req.read_body();
                     // content-type: application/json 触发 json 派发，body 类型为 json_body
                     REQUIRE_NOTHROW(req.as_json());
                     auto const& value = req.as_json();
@@ -127,7 +131,7 @@ TEST_CASE("server lazy: read_query_params", "[server-lazy]")
                 "/params",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    auto qp = UNWRAP(co_await req.read_query_params());
+                    auto qp = co_await req.read_query_params();
                     resp.set_string_content(std::string(qp.at("key")), "text/plain");
                 });
         },
@@ -156,13 +160,16 @@ TEST_CASE("server lazy: read_some_raw streaming", "[server-lazy]")
                     std::array<char, 64 * 1024> buf;
                     for (;;)
                     {
-                        auto result = co_await req.read_some_raw(net::buffer(buf));
-                        if (result.has_error())
+                        std::size_t n;
+                        try
                         {
-                            resp.set_string_content(std::string("ERR:") + result.error().message(), "text/plain");
+                            n = co_await req.read_some_raw(net::buffer(buf));
+                        }
+                        catch (boost::system::system_error const& e)
+                        {
+                            resp.set_string_content(std::string("ERR:") + e.what(), "text/plain");
                             co_return;
                         }
-                        auto n = result.value();
                         if (n == 0)
                         {
                             break;
@@ -244,7 +251,7 @@ TEST_CASE("server lazy: read_form_data with file upload", "[server-lazy]")
                 "/upload",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    auto fd = UNWRAP(co_await req.read_form_data());
+                    auto fd = co_await req.read_form_data();
                     auto fld = fd.field_by_name("file");
                     if (!fld || fld->content.empty())
                     {

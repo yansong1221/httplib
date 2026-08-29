@@ -1,6 +1,6 @@
 #pragma once
-#include "httplib/server/chunk_writer.hpp"
 #include "httplib/server/ndjson_writer.hpp"
+#include "httplib/server/stream_writer.hpp"
 #include <boost/json/serialize.hpp>
 #include <string>
 
@@ -10,7 +10,7 @@ namespace httplib::server
     class ndjson_writer_impl : public server::ndjson_writer
     {
       public:
-        explicit ndjson_writer_impl(server::chunk_writer* cw) : cw_(cw) {}
+        explicit ndjson_writer_impl(server::stream_writer* cw) : cw_(cw) {}
 
         net::awaitable<void>
         begin()
@@ -35,7 +35,7 @@ namespace httplib::server
         }
 
       private:
-        server::chunk_writer* cw_;
+        server::stream_writer* cw_;
     };
 
 } // namespace httplib::server

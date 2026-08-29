@@ -198,75 +198,85 @@ namespace httplib::server
         return impl_->is_lazy();
     }
 
-    net::awaitable<boost::system::result<std::string>>
+    net::awaitable<std::string>
     request::read_string()
     {
         auto ec = co_await impl_->read_body([](http::request<body::any_body>& req)
                                             { req.body() = body::string_body::value_type {}; });
         if (ec)
         {
-            co_return ec;
+            throw boost::system::system_error(ec);
         }
-        co_return as_string();
+        co_return std::move(std::get<std::string>(impl_->body()));
     }
 
-    net::awaitable<boost::system::result<boost::json::value>>
+    net::awaitable<boost::json::value>
     request::read_json()
     {
         auto ec = co_await impl_->read_body([](http::request<body::any_body>& req)
                                             { req.body() = body::json_body::value_type {}; });
         if (ec)
         {
-            co_return ec;
+            throw boost::system::system_error(ec);
         }
-        co_return as_json();
+        co_return std::move(std::get<boost::json::value>(impl_->body()));
     }
 
-    net::awaitable<boost::system::result<html::form_data>>
+    net::awaitable<html::form_data>
     request::read_form_data()
     {
         auto ec = co_await impl_->read_body([](http::request<body::any_body>& req)
                                             { req.body() = body::form_data_body::value_type {}; });
         if (ec)
         {
-            co_return ec;
+            throw boost::system::system_error(ec);
         }
-        co_return as_form_data();
+        co_return std::move(std::get<html::form_data>(impl_->body()));
     }
 
-    net::awaitable<boost::system::result<html::query_params>>
+    net::awaitable<html::query_params>
     request::read_query_params()
     {
         auto ec = co_await impl_->read_body([](http::request<body::any_body>& req)
                                             { req.body() = body::query_params_body::value_type {}; });
         if (ec)
         {
-            co_return ec;
+            throw boost::system::system_error(ec);
         }
-        co_return as_query_params();
+        co_return std::move(std::get<html::query_params>(impl_->body()));
     }
 
-    net::awaitable<boost::system::result<void>>
+    net::awaitable<void>
     request::read_body()
     {
         auto ec = co_await impl_->read_body(nullptr);
         if (ec)
         {
-            co_return ec;
+            throw boost::system::system_error(ec);
         }
-        co_return boost::system::result<void> {};
+        co_return;
     }
 
-    net::awaitable<boost::system::result<std::size_t>>
+    net::awaitable<std::size_t>
     request::read_some_raw(net::mutable_buffer const& buffer)
     {
-        co_return co_await impl_->read_some_raw(buffer);
+        auto result = co_await impl_->read_some_raw(buffer);
+        if (result.has_error())
+        {
+            throw boost::system::system_error(result.error());
+        }
+        co_return result.value();
     }
 
-    net::awaitable<boost::system::result<std::size_t>>
+    net::awaitable<std::size_t>
     request::read_some_decompressed(net::mutable_buffer const& buffer)
     {
-        co_return co_await impl_->read_some_decompressed(buffer);
+        auto result = co_await impl_->read_some_decompressed(buffer);
+        if (result.has_error())
+        {
+            throw boost::system::system_error(result.error());
+        }
+        co_return result.value();
     }
 
     bool

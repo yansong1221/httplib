@@ -11,7 +11,7 @@ A small, embeddable HTTP/1.1 & WebSocket server and client library for C++23, bu
 - **Flexible routing** �?fixed paths, `:named` parameters, `{param:regex}` constraints, `*` wildcard
 - **Multiple body types** �?string, JSON (Boost.JSON), multipart form-data, URL-encoded forms, file serving, empty
 - **Static file serving** �?mount directories with Range/Content-Range support, directory listing (HTML/JSON)
-- **Streaming bodies** �?`set_lazy_http_handler` + `req.read_some_raw()` for request streaming, `chunk_writer` for responses
+- **Streaming bodies** �?`set_lazy_http_handler` + `req.read_some_raw()` for request streaming, `stream_writer` for responses
 - **SSE (Server-Sent Events)** �?`create_sse_writer()` / `sse_reader` streaming
 - **NDJSON** �?`create_ndjson_writer()` / `ndjson_reader` for newline-delimited JSON
 - **Redirects** �?`resp.set_redirect(url)`
@@ -201,7 +201,7 @@ resp.set_form_data_content({
 resp.set_http_handler<http::verb::get>(
     "/stream",
     [](server::request&, server::response& resp) -> net::awaitable<void> {
-        auto* writer = resp.get_chunk_writer();
+        auto* writer = resp.create_stream_writer();
         for (int i = 0; i < 5; ++i)
             co_await writer->write_chunk(std::format("chunk #{}\n", i));
         co_await writer->close();

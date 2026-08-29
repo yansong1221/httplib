@@ -8,10 +8,10 @@
 namespace httplib::server
 {
 
-    class HTTPLIB_API chunk_writer
+    class HTTPLIB_API stream_writer
     {
       public:
-        virtual ~chunk_writer() = default;
+        virtual ~stream_writer() = default;
 
         virtual bool has_header() const = 0;
 

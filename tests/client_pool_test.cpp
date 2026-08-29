@@ -1,7 +1,7 @@
 #include "common.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/lazy_request.hpp"
-#include "httplib/server/chunk_writer.hpp"
+#include "httplib/server/stream_writer.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/util/use_awaitable.hpp"
@@ -780,7 +780,7 @@ TEST_CASE("client_pool: reader survives handle destruction", "[client_pool]")
                 "/stream",
                 [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    auto cw = resp.get_chunk_writer();
+                    auto cw = resp.create_stream_writer();
                     http::fields headers;
                     headers.set(http::field::content_type, "text/plain");
                     co_await cw->write_header(http::status::ok, headers, false);

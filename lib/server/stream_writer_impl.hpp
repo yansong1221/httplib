@@ -1,22 +1,25 @@
 #pragma once
 #include "body/any_body.hpp"
-#include "httplib/server/chunk_writer.hpp"
+#include "httplib/server/stream_writer.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "response_impl.hpp"
 #include "stream/http_stream.hpp"
 #include <boost/beast/http/buffer_body.hpp>
 #include <boost/beast/http/serializer.hpp>
 #include <boost/beast/http/write.hpp>
+#include <boost/asio/strand.hpp>
 #include <memory>
 #include <string>
 
 namespace httplib::server
 {
 
-    class chunk_writer_impl : public chunk_writer
+    class stream_writer_impl : public stream_writer
     {
       public:
-        chunk_writer_impl(response::impl& resp, http_stream& stream, std::chrono::steady_clock::duration write_timeout)
+        stream_writer_impl(response::impl& resp,
+                           http_stream& stream,
+                           std::chrono::steady_clock::duration write_timeout)
             : resp_(&resp)
             , stream_(&stream)
             , write_timeout_(write_timeout)

@@ -1,9 +1,9 @@
 #include "httplib/server/response.hpp"
-#include "chunk_writer_impl.hpp"
 #include "html/html.h"
 #include "ndjson_writer_impl.hpp"
 #include "response_impl.hpp"
 #include "sse_writer_impl.hpp"
+#include "stream_writer_impl.hpp"
 #include "util/mime_types.hpp"
 #include <boost/beast/version.hpp>
 #include <fmt/format.h>
@@ -149,29 +149,29 @@ namespace httplib::server
     std::unique_ptr<server::sse_writer>
     response::create_sse_writer()
     {
-        return std::make_unique<sse_writer_impl>(get_chunk_writer());
+        return std::make_unique<sse_writer_impl>(create_stream_writer());
     }
 
     std::unique_ptr<server::ndjson_writer>
     response::create_ndjson_writer()
     {
-        return std::make_unique<ndjson_writer_impl>(get_chunk_writer());
+        return std::make_unique<ndjson_writer_impl>(create_stream_writer());
     }
 
-    chunk_writer*
-    response::get_chunk_writer()
+    stream_writer*
+    response::create_stream_writer()
     {
-        if (!impl_->chunk_writer_)
+        if (!impl_->stream_writer_)
         {
-            impl_->chunk_writer_ = std::make_unique<chunk_writer_impl>(*impl_, *impl_->stream_, impl_->write_timeout_);
+            impl_->stream_writer_ = std::make_unique<stream_writer_impl>(*impl_, *impl_->stream_, impl_->write_timeout_);
         }
-        return impl_->chunk_writer_.get();
+        return impl_->stream_writer_.get();
     }
 
     bool
-    response::is_chunked_done() const
+    response::is_stream_started() const
     {
-        return impl_->chunk_writer_ && impl_->chunk_writer_->has_header();
+        return impl_->stream_writer_ && impl_->stream_writer_->has_header();
     }
 
 } // namespace httplib::server

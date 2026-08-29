@@ -1,5 +1,5 @@
 #include "common.hpp"
-#include "httplib/server/chunk_writer.hpp"
+#include "httplib/server/stream_writer.hpp"
 #include "httplib/server/ndjson_writer.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
@@ -189,7 +189,7 @@ TEST_CASE("NDJSON: reader stops early", "[ndjson]")
 }
 
 // ===========================================================================
-// NDJSON chunk-boundary tests (server sends split lines via chunk_writer)
+// NDJSON chunk-boundary tests (server sends split lines via stream_writer)
 // ===========================================================================
 
 TEST_CASE("NDJSON: single line split across chunks", "[ndjson]")
@@ -201,7 +201,7 @@ TEST_CASE("NDJSON: single line split across chunks", "[ndjson]")
                 "/ndjson",
                 [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    auto cw = resp.get_chunk_writer();
+                    auto cw = resp.create_stream_writer();
                     http::fields headers;
                     headers.set(http::field::content_type, "application/x-ndjson");
                     co_await cw->write_header(http::status::ok, headers, false);
@@ -234,7 +234,7 @@ TEST_CASE("NDJSON: multiple lines in one chunk", "[ndjson]")
                 "/ndjson",
                 [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    auto cw = resp.get_chunk_writer();
+                    auto cw = resp.create_stream_writer();
                     http::fields headers;
                     headers.set(http::field::content_type, "application/x-ndjson");
                     co_await cw->write_header(http::status::ok, headers, false);
@@ -267,7 +267,7 @@ TEST_CASE("NDJSON: partial line split across chunks", "[ndjson]")
                 "/ndjson",
                 [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    auto cw = resp.get_chunk_writer();
+                    auto cw = resp.create_stream_writer();
                     http::fields headers;
                     headers.set(http::field::content_type, "application/x-ndjson");
                     co_await cw->write_header(http::status::ok, headers, false);

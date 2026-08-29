@@ -10,6 +10,7 @@
 #include "request_impl.hpp"
 #include "response_impl.hpp"
 #include "util/logging.hpp"
+#include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/asio/use_future.hpp>
 #include <boost/url.hpp>
@@ -584,15 +585,18 @@ namespace httplib::server
 
                 while (!req.is_body_done())
                 {
-                    auto bytes_result = co_await req.read_some_raw(net::buffer(relay_buf));
-                    if (bytes_result.has_error())
+                    std::size_t bytes;
+                    try
                     {
-                        logger()->trace("[proxy] read request body failed: {}", bytes_result.error().message());
+                        bytes = co_await req.read_some_raw(net::buffer(relay_buf));
+                    }
+                    catch (boost::system::system_error const& e)
+                    {
+                        logger()->trace("[proxy] read request body failed: {}", e.what());
                         resp.set_error_content(http::status::bad_request);
                         co_return;
                     }
                     auto more = !req.is_body_done();
-                    auto bytes = bytes_result.value();
 
                     if (interceptor)
                     {
@@ -651,7 +655,7 @@ namespace httplib::server
                     }
                 }
 
-                if (auto rel_ec = co_await resp.get_chunk_writer()->write_header(result, response_hdrs); rel_ec)
+                if (auto rel_ec = co_await resp.create_stream_writer()->write_header(result, response_hdrs); rel_ec)
                 {
                     logger()->trace("[proxy] write response header failed: {}", rel_ec.message());
                     co_return;
@@ -673,7 +677,7 @@ namespace httplib::server
                         co_await interceptor->on_upstream_response_body(net::buffer(relay_buf, bytes), more);
                     }
 
-                    if (auto rel_ec = co_await resp.get_chunk_writer()->write_body(net::buffer(relay_buf, bytes), more);
+                    if (auto rel_ec = co_await resp.create_stream_writer()->write_body(net::buffer(relay_buf, bytes), more);
                         rel_ec)
                     {
                         logger()->trace("[proxy] write response body failed: {}", rel_ec.message());

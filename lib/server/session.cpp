@@ -7,6 +7,7 @@
 #include "request_impl.hpp"
 #include "response_impl.hpp"
 #include "websocket_conn_impl.hpp"
+#include <boost/algorithm/string/join.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/write.hpp>
 #include <boost/beast/core/detect_ssl.hpp>
@@ -425,7 +426,7 @@ namespace httplib::server
     net::awaitable<bool>
     session::http_task::async_write(request const& req, response& resp)
     {
-        if (resp.is_chunked_done())
+        if (resp.is_stream_started())
         {
             co_return true;
         }

@@ -1,10 +1,10 @@
-﻿#include "body/file_body.hpp"
+#include "body/file_body.hpp"
 #include "body/form_data_body.hpp"
 #include "body/json_body.hpp"
 #include "body/string_body.hpp"
 #include "common.hpp"
 #include "httplib/client/lazy_request.hpp"
-#include "httplib/server/chunk_writer.hpp"
+#include "httplib/server/stream_writer.hpp"
 #include "httplib/server/mount_point_entry.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
@@ -100,7 +100,7 @@ TEST_CASE("Response: set_chunked_write_handler with multiple chunks", "[response
                 "/stream",
                 [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    auto cw = resp.get_chunk_writer();
+                    auto cw = resp.create_stream_writer();
                     http::fields headers;
                     headers.set(http::field::content_type, "text/plain");
                     co_await cw->write_header(http::status::ok, headers, false);
@@ -137,7 +137,7 @@ TEST_CASE("Response: set_chunked_write_handler with multiple chunks", "[response
 }
 
 #ifdef HTTPLIB_ENABLED_COMPRESS
-TEST_CASE("Response: chunk_writer gzip compression", "[response][compression]")
+TEST_CASE("Response: stream_writer gzip compression", "[response][compression]")
 {
     run(
         [](auto& server)
@@ -146,7 +146,7 @@ TEST_CASE("Response: chunk_writer gzip compression", "[response][compression]")
                 "/stream-gzip",
                 [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    auto cw = resp.get_chunk_writer();
+                    auto cw = resp.create_stream_writer();
                     http::fields headers;
                     headers.set(http::field::content_type, "text/plain");
                     headers.set(http::field::content_encoding, "gzip");

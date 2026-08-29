@@ -1,6 +1,6 @@
 #pragma once
-#include "httplib/server/chunk_writer.hpp"
 #include "httplib/server/sse_writer.hpp"
+#include "httplib/server/stream_writer.hpp"
 #include <string>
 
 namespace httplib::server
@@ -9,7 +9,7 @@ namespace httplib::server
     class sse_writer_impl : public server::sse_writer
     {
       public:
-        explicit sse_writer_impl(server::chunk_writer* cw) : cw_(cw) {}
+        explicit sse_writer_impl(server::stream_writer* cw) : cw_(cw) {}
 
         net::awaitable<void>
         begin()
@@ -102,7 +102,7 @@ namespace httplib::server
         }
 
       private:
-        server::chunk_writer* cw_;
+        server::stream_writer* cw_;
     };
 
 } // namespace httplib::server

@@ -62,9 +62,10 @@ namespace httplib::server
         std::unique_ptr<server::sse_writer> create_sse_writer();
         std::unique_ptr<server::ndjson_writer> create_ndjson_writer();
 
-        chunk_writer* get_chunk_writer();
+        // 低层流式写响应：write_header 后逐段 write_body（可配合 Content-Encoding 压缩）
+        stream_writer* create_stream_writer();
 
-        bool is_chunked_done() const;
+        bool is_stream_started() const;
 
         class impl;
 

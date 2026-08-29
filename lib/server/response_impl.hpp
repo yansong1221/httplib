@@ -1,8 +1,8 @@
 #pragma once
 #include "body/any_body.hpp"
 #include "html/html.h"
-#include "httplib/server/chunk_writer.hpp"
 #include "httplib/server/response.hpp"
+#include "httplib/server/stream_writer.hpp"
 #include "stream/http_stream.hpp"
 #include "util/mime_types.hpp"
 #include <boost/beast/version.hpp>
@@ -213,7 +213,7 @@ namespace httplib::server
             return response(std::move(_impl));
         }
 
-        std::unique_ptr<chunk_writer> chunk_writer_;
+        std::unique_ptr<stream_writer> stream_writer_;
         http_stream* stream_ = nullptr;
         std::chrono::steady_clock::duration write_timeout_ { 30 };
     };
