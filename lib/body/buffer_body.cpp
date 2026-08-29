@@ -1,6 +1,7 @@
 ﻿#include "body/buffer_body.hpp"
 
 #include <boost/asio/buffer.hpp>
+#include <boost/beast/http/error.hpp>
 #include <cstring>
 
 namespace httplib::body
@@ -46,13 +47,22 @@ namespace httplib::body
     {
         if (done_)
         {
-            ec = {};
+            // 已取走当前缓冲：more 则要求调用方换上新的缓冲，否则本段即结尾。
+            if (body_.more)
+            {
+                done_ = false;
+                ec = http::error::need_buffer;
+            }
+            else
+            {
+                ec = {};
+            }
             return boost::none;
         }
         done_ = true;
         ec = {};
         return {
-            { const_buffers_type { body_.data, body_.size }, false }
+            { const_buffers_type { body_.data, body_.size }, body_.more }
         };
     }
 

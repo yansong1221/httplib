@@ -28,6 +28,9 @@ namespace httplib::body
             /** Number of free octets at @ref data. */
             std::size_t size = 0;
 
+            /** Whether more body octets follow after @ref data (streaming write). */
+            bool more = false;
+
             /** Overflow: decoded octets that did not fit into @ref data. */
             std::string pending;
         };

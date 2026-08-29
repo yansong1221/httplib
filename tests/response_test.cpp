@@ -136,6 +136,39 @@ TEST_CASE("Response: set_chunked_write_handler with multiple chunks", "[response
         });
 }
 
+#ifdef HTTPLIB_ENABLED_COMPRESS
+TEST_CASE("Response: chunk_writer gzip compression", "[response][compression]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/stream-gzip",
+                [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+                {
+                    auto cw = resp.get_chunk_writer();
+                    http::fields headers;
+                    headers.set(http::field::content_type, "text/plain");
+                    headers.set(http::field::content_encoding, "gzip");
+                    co_await cw->write_header(http::status::ok, headers, false);
+                    constexpr std::string_view chunks[] = { "A", "B", "C" };
+                    for (int i = 0; i < 3; ++i)
+                    {
+                        co_await cw->write_body(net::buffer(chunks[i]), i < 2);
+                    }
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/stream-gzip"));
+            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp[http::field::content_encoding] == "gzip");
+            REQUIRE(resp.as_string() == "ABC");
+            co_return;
+        });
+}
+#endif
+
 TEST_CASE("Response: set_form_data_content", "[response]")
 {
     run(

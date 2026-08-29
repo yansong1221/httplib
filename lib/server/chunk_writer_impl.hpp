@@ -1,4 +1,5 @@
 #pragma once
+#include "body/any_body.hpp"
 #include "httplib/server/chunk_writer.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "response_impl.hpp"
@@ -7,6 +8,7 @@
 #include <boost/beast/http/serializer.hpp>
 #include <boost/beast/http/write.hpp>
 #include <memory>
+#include <string>
 
 namespace httplib::server
 {
@@ -38,18 +40,27 @@ namespace httplib::server
             {
                 resp_->set(f.name_string(), f.value());
             }
-            resp_->reset_content();
-            if (!relay)
-            {
-                resp_->chunked(true);
-            }
-
-            msg_ = std::make_unique<http::response<http::buffer_body>>(*resp_);
-            sr_ = std::make_unique<http::response_serializer<http::buffer_body>>(*msg_);
 
             boost::system::error_code ec;
             stream_->expires_after(write_timeout_);
-            co_await http::async_write_header(*stream_, *sr_, util::net_awaitable[ec]);
+
+            if (relay)
+            {
+                resp_->reset_content();
+
+                // 代理转发：原样透传上游字节，不做二次压缩。
+                relay_msg_ = std::make_unique<http::response<http::buffer_body>>(*resp_);
+                relay_sr_ = std::make_unique<http::response_serializer<http::buffer_body>>(*relay_msg_);
+                co_await http::async_write_header(*stream_, *relay_sr_, util::net_awaitable[ec]);
+            }
+            else
+            {
+                resp_->body() = body::buffer_body::value_type {};
+                resp_->chunked(true);
+
+                sr_ = std::make_unique<http::response_serializer<body::any_body>>(*resp_);
+                co_await http::async_write_header(*stream_, *sr_, util::net_awaitable[ec]);
+            }
             stream_->expires_never();
             if (ec)
             {
@@ -67,19 +78,35 @@ namespace httplib::server
         {
             co_await boost::asio::post(strand_);
 
-            if (!msg_ || !sr_)
+            if (!sr_ && !relay_sr_)
             {
                 throw boost::system::system_error(
                     boost::system::errc::make_error_code(boost::system::errc::invalid_argument));
             }
 
-            msg_->body().data = (void*)data.data();
-            msg_->body().size = data.size();
-            msg_->body().more = more;
+            if (sr_)
+            {
+                auto& body = std::get<body::buffer_body::value_type>(sr_->get().body());
+                body.data = (void*)data.data();
+                body.size = data.size();
+                body.more = more;
+                co_return co_await write_buffer(*sr_);
+            }
 
+            relay_msg_->body().data = (void*)data.data();
+            relay_msg_->body().size = data.size();
+            relay_msg_->body().more = more;
+            co_return co_await write_buffer(*relay_sr_);
+        }
+
+      private:
+        template <typename Serializer>
+        net::awaitable<boost::system::error_code>
+        write_buffer(Serializer& sr)
+        {
             boost::system::error_code ec;
             stream_->expires_after(write_timeout_);
-            co_await http::async_write(*stream_, *sr_, util::net_awaitable[ec]);
+            co_await http::async_write(*stream_, sr, util::net_awaitable[ec]);
             stream_->expires_never();
             if (ec == http::error::need_buffer)
             {
@@ -97,8 +124,11 @@ namespace httplib::server
         response::impl* resp_;
         http_stream* stream_;
         std::chrono::steady_clock::duration write_timeout_;
-        std::unique_ptr<http::response<http::buffer_body>> msg_;
-        std::unique_ptr<http::response_serializer<http::buffer_body>> sr_;
+        // 直连流式：any_body 序列化（支持 Content-Encoding 压缩）。
+        std::unique_ptr<http::response_serializer<body::any_body>> sr_;
+        // 代理转发：beast buffer_body 原样透传。
+        std::unique_ptr<http::response<http::buffer_body>> relay_msg_;
+        std::unique_ptr<http::response_serializer<http::buffer_body>> relay_sr_;
         bool header_sent_ = false;
     };
 
