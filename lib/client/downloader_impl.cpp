@@ -523,7 +523,7 @@ namespace httplib::client
             handle->set_verify_ssl(config_.verify_ssl);
 
             auto req = httplib::client::request(method, t, merged);
-            auto resp_result = co_await handle->async_send_request_lazy(std::move(req));
+            auto resp_result = co_await handle->async_send_request(std::move(req), http_client::body_mode::lazy);
             if (!resp_result.has_value())
             {
                 co_return request_result {};

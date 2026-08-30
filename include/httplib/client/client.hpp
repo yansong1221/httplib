@@ -19,6 +19,12 @@ namespace httplib::client
             never
         };
 
+        enum class body_mode
+        {
+            eager,
+            lazy
+        };
+
         using response = client::response;
         using request = client::request;
         using response_result = boost::system::result<response>;
@@ -50,8 +56,7 @@ namespace httplib::client
       public:
         // ---- core send ----
 
-        net::awaitable<response_result> async_send_request(request req);
-        net::awaitable<response_result> async_send_request_lazy(request req);
+        net::awaitable<response_result> async_send_request(request req, body_mode mode = body_mode::eager);
 
         // ---- HTTP method shorthands (no body) ----
 

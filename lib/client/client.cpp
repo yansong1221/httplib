@@ -83,24 +83,21 @@ namespace httplib::client
     // =============================================================================
 
     net::awaitable<http_client::response_result>
-    http_client::async_send_request(http_client::request req)
+    http_client::async_send_request(http_client::request req, http_client::body_mode mode)
     {
         auto result = co_await impl_->async_send_request_lazy_with_redirect(req);
         if (result.has_error())
         {
             co_return result.error();
         }
-        if (auto ec = co_await result->read_body(); ec)
+        if (mode == body_mode::eager)
         {
-            co_return ec;
+            if (auto ec = co_await result->read_body(); ec)
+            {
+                co_return ec;
+            }
         }
         co_return result;
-    }
-
-    net::awaitable<http_client::response_result>
-    http_client::async_send_request_lazy(http_client::request req)
-    {
-        co_return co_await impl_->async_send_request_lazy_with_redirect(req);
     }
 
     // =============================================================================

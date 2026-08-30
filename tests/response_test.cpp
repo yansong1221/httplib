@@ -841,8 +841,9 @@ TEST_CASE("Response: read_some_decompressed decodes gzip body", "[response]")
         {
             httplib::http::fields headers;
             headers.set(http::field::accept_encoding, "gzip");
-            auto resp = UNWRAP(co_await client.async_send_request_lazy(
-                httplib::client::request(http::verb::get, "/gzip-stream", headers)));
+            auto resp = UNWRAP(co_await client.async_send_request(
+                httplib::client::request(http::verb::get, "/gzip-stream", headers),
+                httplib::client::http_client::body_mode::lazy));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp[http::field::content_encoding] == "gzip");
 
@@ -875,8 +876,9 @@ TEST_CASE("Response: read_some_decompressed with single large buffer", "[respons
         {
             httplib::http::fields headers;
             headers.set(http::field::accept_encoding, "gzip");
-            auto resp = UNWRAP(co_await client.async_send_request_lazy(
-                httplib::client::request(http::verb::get, "/gzip-big", headers)));
+            auto resp = UNWRAP(co_await client.async_send_request(
+                httplib::client::request(http::verb::get, "/gzip-big", headers),
+                httplib::client::http_client::body_mode::lazy));
             REQUIRE(resp[http::field::content_encoding] == "gzip");
 
             std::array<char, 4096> buf;
@@ -906,8 +908,9 @@ TEST_CASE("Response: read_some_decompressed passes through identity body", "[res
         {
             httplib::http::fields headers;
             headers.set(http::field::accept_encoding, "identity");
-            auto resp = UNWRAP(
-                co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/plain", headers)));
+            auto resp = UNWRAP(co_await client.async_send_request(
+                httplib::client::request(http::verb::get, "/plain", headers),
+                httplib::client::http_client::body_mode::lazy));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE_FALSE(resp[http::field::content_encoding] == "gzip");
 
@@ -941,8 +944,9 @@ TEST_CASE("Response: is_body_done reflects decompressed pending overflow", "[res
         {
             httplib::http::fields headers;
             headers.set(http::field::accept_encoding, "gzip");
-            auto resp = UNWRAP(co_await client.async_send_request_lazy(
-                httplib::client::request(http::verb::get, "/gzip-done", headers)));
+            auto resp = UNWRAP(co_await client.async_send_request(
+                httplib::client::request(http::verb::get, "/gzip-done", headers),
+                httplib::client::http_client::body_mode::lazy));
             REQUIRE_FALSE(resp.is_body_done());
 
             std::array<char, 5> buf;

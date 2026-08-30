@@ -499,7 +499,9 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 
     // Stream with chunk handler
     {
-        auto resp = co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/api/stream"));
+        auto resp
+            = co_await client.async_send_request(httplib::client::request(http::verb::get, "/api/stream"),
+                                                 httplib::client::http_client::body_mode::lazy);
         if (resp)
         {
             while (true)
@@ -518,7 +520,9 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 
     // SSE (Server-Sent Events)
     {
-        auto resp = co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/api/sse"));
+        auto resp
+            = co_await client.async_send_request(httplib::client::request(http::verb::get, "/api/sse"),
+                                                 httplib::client::http_client::body_mode::lazy);
         if (resp)
         {
             auto sse = resp->create_sse_reader();
@@ -542,7 +546,9 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 
     // NDJSON (Newline Delimited JSON)
     {
-        auto resp = co_await client.async_send_request_lazy(httplib::client::request(http::verb::get, "/api/ndjson"));
+        auto resp
+            = co_await client.async_send_request(httplib::client::request(http::verb::get, "/api/ndjson"),
+                                                 httplib::client::http_client::body_mode::lazy);
         if (resp)
         {
             auto ndjson = resp->create_ndjson_reader();
