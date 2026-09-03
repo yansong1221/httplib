@@ -62,6 +62,7 @@ namespace httplib::server::detail
 
         // ---- per-request state (set by stages) ----
         std::shared_ptr<proxy_interceptor> interceptor_;
+        std::shared_ptr<http_server::proxy_target> target_;
 
         std::string upstream_scheme_;
         std::string upstream_host_;

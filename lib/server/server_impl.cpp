@@ -425,10 +425,10 @@ namespace httplib::server
                                          std::string_view upstream_url,
                                          http_server::proxy_interceptor_factory factory)
     {
-        auto u = std::string(upstream_url);
         set_reverse_proxy(
             location,
-            [u = std::move(u)](request&) -> net::awaitable<std::string> { co_return u; },
+            std::vector<upstream_backend> { upstream_backend { std::string(upstream_url) } },
+            upstream_locator::round_robin,
             std::move(factory));
     }
 
@@ -438,10 +438,11 @@ namespace httplib::server
                                          upstream_locator locator,
                                          http_server::proxy_interceptor_factory factory)
     {
-        auto group = std::make_shared<upstream_group>(make_backends(backends));
+        auto group = std::make_shared<upstream_group>(make_backends(backends), locator);
         set_reverse_proxy(
             location,
-            [g = std::move(group), locator](request&) -> net::awaitable<std::string> { co_return g->resolve(locator); },
+            [g = std::move(group)](request&) -> net::awaitable<std::shared_ptr<http_server::proxy_target>>
+            { co_return g->resolve_target(); },
             std::move(factory));
     }
 
@@ -484,7 +485,22 @@ namespace httplib::server
         auto u = std::string(upstream_url);
         set_ws_forward(
             location,
-            [u = std::move(u)](request&) -> net::awaitable<std::string> { co_return u; },
+            [u = std::move(u)](request&) -> net::awaitable<std::shared_ptr<http_server::proxy_target>>
+            {
+                struct ws_target final : http_server::proxy_target
+                {
+                    explicit ws_target(std::string u)
+                        : url_(std::move(u))
+                    {
+                    }
+                    std::string const& url() const override
+                    {
+                        return url_;
+                    }
+                    std::string url_;
+                };
+                co_return std::make_shared<ws_target>(u);
+            },
             std::move(factory));
     }
 
@@ -508,7 +524,14 @@ namespace httplib::server
             auto& req = conn->http_request();
             auto interceptor = factory ? factory(req) : nullptr;
 
-            auto url = co_await resolver(req);
+            auto target = co_await resolver(req);
+            if (!target)
+            {
+                logger()->warn("[ws-forward] resolver returned null target");
+                conn->close("resolver failed");
+                co_return;
+            }
+            auto const& url = target->url();
 
             auto r = boost::urls::parse_uri(url);
             if (!r)

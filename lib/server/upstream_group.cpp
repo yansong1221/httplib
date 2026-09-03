@@ -7,11 +7,37 @@
 namespace httplib::server
 {
 
-    group_backend::group_backend(upstream_backend const& cfg) : url(cfg.url), weight(cfg.weight) {}
+    class upstream_proxy_target final : public http_server::proxy_target
+    {
+      public:
+        upstream_proxy_target(std::string url, std::shared_ptr<upstream_group> group, size_t idx)
+            : url_(std::move(url))
+            , group_(std::move(group))
+            , idx_(idx)
+        {
+            group_->active_inc(idx_);
+        }
+
+        ~upstream_proxy_target() override
+        {
+            group_->active_dec(idx_);
+        }
+
+        std::string const& url() const override
+        {
+            return url_;
+        }
+
+      private:
+        std::string url_;
+        std::shared_ptr<upstream_group> group_;
+        size_t idx_;
+    };
+
+    group_backend::group_backend(upstream_backend const& cfg) : upstream_backend(cfg) {}
 
     group_backend::group_backend(group_backend const& other)
-        : url(other.url)
-        , weight(other.weight)
+        : upstream_backend(other)
         , active(other.active.load())
         , healthy(other.healthy.load())
     {
@@ -22,8 +48,7 @@ namespace httplib::server
     {
         if (this != &other)
         {
-            url = other.url;
-            weight = other.weight;
+            upstream_backend::operator=(other);
             active.store(other.active.load());
             healthy.store(other.healthy.load());
         }
@@ -31,8 +56,7 @@ namespace httplib::server
     }
 
     group_backend::group_backend(group_backend&& other) noexcept
-        : url(std::move(other.url))
-        , weight(other.weight)
+        : upstream_backend(std::move(other))
         , active(other.active.load())
         , healthy(other.healthy.load())
     {
@@ -43,15 +67,18 @@ namespace httplib::server
     {
         if (this != &other)
         {
-            url = std::move(other.url);
-            weight = other.weight;
+            upstream_backend::operator=(std::move(other));
             active.store(other.active.load());
             healthy.store(other.healthy.load());
         }
         return *this;
     }
 
-    upstream_group::upstream_group(std::vector<group_backend> backends) : backends_(std::move(backends)) {}
+    upstream_group::upstream_group(std::vector<group_backend> backends, upstream_locator locator)
+        : backends_(std::move(backends))
+        , locator_(locator)
+    {
+    }
 
     size_t
     upstream_group::size() const
@@ -71,18 +98,44 @@ namespace httplib::server
         return backends_[i];
     }
 
-    std::string
-    upstream_group::resolve(upstream_locator locator)
+    group_backend&
+    upstream_group::do_resolve()
     {
-        switch (locator)
+        switch (locator_)
         {
             case upstream_locator::weighted_round_robin:
-                return next_weighted().url;
+                return next_weighted();
             case upstream_locator::least_connections:
-                return least_conn().url;
+                return least_conn();
             case upstream_locator::round_robin:
             default:
-                return next_rr().url;
+                return next_rr();
+        }
+    }
+
+    std::shared_ptr<http_server::proxy_target>
+    upstream_group::resolve_target()
+    {
+        auto& b = do_resolve();
+        auto idx = &b - &backends_[0];
+        return std::make_shared<upstream_proxy_target>(b.url, shared_from_this(), idx);
+    }
+
+    void
+    upstream_group::active_inc(size_t idx)
+    {
+        if (idx < backends_.size())
+        {
+            backends_[idx].active.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+
+    void
+    upstream_group::active_dec(size_t idx)
+    {
+        if (idx < backends_.size())
+        {
+            backends_[idx].active.fetch_sub(1, std::memory_order_relaxed);
         }
     }
 

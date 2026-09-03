@@ -1,5 +1,6 @@
 #pragma once
 #include "httplib/server/proxy_strategy.hpp"
+#include "httplib/server/server.hpp"
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -12,16 +13,14 @@ namespace httplib::server
 {
 
     /// An upstream backend with runtime health/load state (internal only).
-    struct group_backend
+    struct group_backend : upstream_backend
     {
-        std::string url;
-        uint32_t weight = 1;
         std::atomic<size_t> active { 0 };
         std::atomic<bool> healthy { true };
 
+        group_backend() = default;
         explicit group_backend(upstream_backend const& cfg);
 
-        group_backend() = default;
         group_backend(group_backend const& other);
         group_backend& operator=(group_backend const& other);
         group_backend(group_backend&& other) noexcept;
@@ -34,15 +33,19 @@ namespace httplib::server
     class upstream_group : public std::enable_shared_from_this<upstream_group>
     {
       public:
-        explicit upstream_group(std::vector<group_backend> backends);
+        explicit upstream_group(std::vector<group_backend> backends,
+                                upstream_locator locator = upstream_locator::round_robin);
 
         size_t size() const;
 
         group_backend& at(size_t i);
         group_backend const& at(size_t i) const;
 
-        /// Resolve the next upstream URL using the given selection algorithm.
-        std::string resolve(upstream_locator locator = upstream_locator::round_robin);
+        /// Resolve and return an RAII proxy_target that manages active connection count.
+        std::shared_ptr<http_server::proxy_target> resolve_target();
+
+        void active_inc(size_t idx);
+        void active_dec(size_t idx);
 
         /// Return all healthy backends.
         std::vector<group_backend*> healthy_backends();
@@ -52,6 +55,7 @@ namespace httplib::server
 
       private:
         std::vector<group_backend> backends_;
+        upstream_locator locator_;
         std::atomic<size_t> rr_index_ { 0 };
 
         mutable std::mutex mu_;
@@ -65,6 +69,8 @@ namespace httplib::server
 
         /// Least active connections.
         group_backend& least_conn();
+
+        group_backend& do_resolve();
     };
 
     std::vector<group_backend> make_backends(std::vector<upstream_backend> const& cfg);

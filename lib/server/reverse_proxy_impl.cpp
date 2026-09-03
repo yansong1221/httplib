@@ -114,7 +114,14 @@ namespace httplib::server::detail
     {
         interceptor_ = factory_ ? factory_(req) : nullptr;
 
-        auto url = co_await resolver_(req);
+        target_ = co_await resolver_(req);
+        if (!target_)
+        {
+            logger_->trace("[proxy] resolver returned null target");
+            resp.set_error_content(http::status::bad_gateway);
+            co_return false;
+        }
+        auto const& url = target_->url();
         logger_->debug("[proxy] {} {} -> {}", req.method_string(), req.target(), url);
 
         auto r = boost::urls::parse_uri(url);
