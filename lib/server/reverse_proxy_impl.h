@@ -4,6 +4,7 @@
 #include "httplib/client/response.hpp"
 #include "httplib/server/proxy_interceptor.hpp"
 #include "httplib/server/server.hpp"
+#include "proxy_util.hpp"
 #include "request_impl.hpp"
 #include "response_impl.hpp"
 #include <array>
@@ -62,15 +63,7 @@ namespace httplib::server::detail
 
         // ---- per-request state (set by stages) ----
         std::shared_ptr<proxy_interceptor> interceptor_;
-        std::shared_ptr<http_server::proxy_target> target_;
-
-        std::string upstream_scheme_;
-        std::string upstream_host_;
-        uint16_t port_ = 80;
-        bool ssl_ = false;
-        std::string upstream_prefix_;
-        std::string upstream_target_;
-        std::string upstream_url_;
+        parsed_upstream upstream_;
 
         http::fields upstream_headers_ {};
         client::http_client_pool::client_handle client_;

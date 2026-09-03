@@ -2,8 +2,6 @@
 #include "httplib/client/ws_client.hpp"
 #include "httplib/util/misc.hpp"
 #include "proxy_util.hpp"
-#include "request_impl.hpp"
-#include <boost/url.hpp>
 
 namespace httplib::server::detail
 {
@@ -38,14 +36,14 @@ namespace httplib::server::detail
         request& req = conn->http_request();
         if (interceptor_)
         {
-            co_await interceptor_->on_upstream_request(req, upstream_headers_, upstream_url_);
+            co_await interceptor_->on_upstream_request(req, upstream_headers_, upstream_.url);
         }
 
-        auto upstream = std::make_shared<client::ws_client>(ex_, upstream_host_, upstream_port_, upstream_ssl_);
+        auto upstream = std::make_shared<client::ws_client>(ex_, upstream_.host, upstream_.port, upstream_.ssl);
         upstream->set_logger(logger_);
 
         auto ec = co_await upstream->async_run(
-            upstream_target_,
+            upstream_.target_path,
             [conn = websocket_conn::weak_ptr(conn), interceptor = interceptor_](std::string_view data,
                                                                                 bool binary) -> net::awaitable<void>
             {
@@ -89,33 +87,23 @@ namespace httplib::server::detail
 
         interceptor_ = factory_ ? factory_(req) : nullptr;
 
-        target_ = co_await resolver_(req);
-        if (!target_)
+        auto result = co_await resolve_upstream(resolver_, req, prefix_, true);
+        if (result.rc == upstream_resolve_rc::no_target)
         {
             logger_->warn("[ws-forward] resolver returned null target");
             conn.close("resolver failed");
             co_return false;
         }
-        auto const& url = target_->url();
-
-        auto r = boost::urls::parse_uri(url);
-        if (!r)
+        if (result.rc == upstream_resolve_rc::bad_url)
         {
-            logger_->warn("[ws-forward] invalid upstream url: {}", url);
+            logger_->warn("[ws-forward] invalid upstream url: {}", result.value.raw_url);
             conn.close("bad upstream");
             co_return false;
         }
 
-        auto const& u = *r;
-        upstream_host_ = std::string(u.host());
-        upstream_scheme_ = std::string(u.scheme());
-        upstream_ssl_ = (upstream_scheme_ == "wss" || upstream_scheme_ == "https");
-        upstream_port_ = u.port_number() ? u.port_number() : (upstream_ssl_ ? 443 : 80);
-        upstream_target_ = make_upstream_path(req.target(), prefix_, u.encoded_path());
-        upstream_url_
-            = util::make_url_value(upstream_host_, upstream_port_, upstream_ssl_, upstream_target_, upstream_scheme_);
+        upstream_ = std::move(result.value);
 
-        logger_->debug("[ws-forward] {} -> {}", req.target(), upstream_url_);
+        logger_->debug("[ws-forward] {} -> {}", req.target(), upstream_.url);
 
         upstream_headers_ = http::fields(req.base());
         upstream_headers_.erase(http::field::host);
@@ -124,7 +112,7 @@ namespace httplib::server::detail
         upstream_headers_.erase(http::field::sec_websocket_version);
         upstream_headers_.erase(http::field::upgrade);
         upstream_headers_.erase(http::field::connection);
-        upstream_headers_.set(http::field::host, util::make_host_value(upstream_host_, upstream_port_, upstream_ssl_));
+        upstream_headers_.set(http::field::host, util::make_host_value(upstream_.host, upstream_.port, upstream_.ssl));
 
         co_return true;
     }

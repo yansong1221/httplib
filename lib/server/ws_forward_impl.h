@@ -2,6 +2,7 @@
 #include "httplib/config.hpp"
 #include "httplib/server/server.hpp"
 #include "httplib/server/websocket_conn.hpp"
+#include "proxy_util.hpp"
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/beast/http/fields.hpp>
@@ -71,15 +72,8 @@ namespace httplib::server::detail
         std::shared_ptr<spdlog::logger> logger_;
 
         // ---- per-connection state (set by prepare_upstream) ----
-        std::shared_ptr<http_server::proxy_target> target_;
         std::shared_ptr<ws_interceptor> interceptor_;
-
-        std::string upstream_host_;
-        uint16_t upstream_port_ = 80;
-        bool upstream_ssl_ = false;
-        std::string upstream_scheme_;
-        std::string upstream_target_;
-        std::string upstream_url_;
+        parsed_upstream upstream_;
         http::fields upstream_headers_ {};
     };
 } // namespace httplib::server::detail

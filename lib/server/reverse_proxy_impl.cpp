@@ -64,33 +64,22 @@ namespace httplib::server::detail
     {
         interceptor_ = factory_ ? factory_(req) : nullptr;
 
-        target_ = co_await resolver_(req);
-        if (!target_)
+        auto result = co_await resolve_upstream(resolver_, req, prefix_, false);
+        if (result.rc == upstream_resolve_rc::no_target)
         {
             logger_->trace("[proxy] resolver returned null target");
             resp.set_error_content(http::status::bad_gateway);
             co_return false;
         }
-        auto const& url = target_->url();
-        logger_->debug("[proxy] {} {} -> {}", req.method_string(), req.target(), url);
-
-        auto r = boost::urls::parse_uri(url);
-        if (!r)
+        logger_->debug("[proxy] {} {} -> {}", req.method_string(), req.target(), result.value.raw_url);
+        if (result.rc == upstream_resolve_rc::bad_url)
         {
-            logger_->trace("[proxy] invalid upstream url: {}", url);
+            logger_->trace("[proxy] invalid upstream url: {}", result.value.raw_url);
             resp.set_error_content(http::status::bad_gateway);
             co_return false;
         }
 
-        auto const& u = *r;
-        upstream_host_ = std::string(u.host());
-        port_ = (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
-        port_ = u.has_port() ? u.port_number() : port_;
-        ssl_ = u.scheme_id() == boost::urls::scheme::https;
-        upstream_prefix_ = std::string(u.encoded_path());
-        upstream_scheme_ = std::string(u.scheme());
-        upstream_target_ = make_upstream_path(req.target(), prefix_, upstream_prefix_);
-        upstream_url_ = util::make_url_value(u.host(), port_, ssl_, upstream_target_);
+        upstream_ = std::move(result.value);
 
         co_return true;
     }
@@ -120,8 +109,10 @@ namespace httplib::server::detail
                 rewritten.emplace_back(item);
             }
             using namespace std::string_view_literals;
-            rewritten.emplace_back(std::format("Domain={}", util::make_host_value(upstream_host_, port_, ssl_)));
-            rewritten.emplace_back(std::format("Path={}", upstream_prefix_.empty() ? "/"sv : upstream_prefix_));
+            rewritten.emplace_back(
+                std::format("Domain={}", util::make_host_value(upstream_.host, upstream_.port, upstream_.ssl)));
+            rewritten.emplace_back(
+                std::format("Path={}", upstream_.prefix_path.empty() ? "/"sv : upstream_.prefix_path));
             upstream_headers.set(http::field::cookie, boost::join(rewritten, ";"));
         }
 
@@ -131,7 +122,7 @@ namespace httplib::server::detail
             client_ip = std::format("{},{}", xff, client_ip);
         }
         upstream_headers.set("X-Forwarded-For", client_ip);
-        upstream_headers.set("X-Forwarded-Proto", ssl_ ? "https" : "http");
+        upstream_headers.set("X-Forwarded-Proto", upstream_.ssl ? "https" : "http");
         upstream_headers.set("X-Forwarded-Host", req["Host"]);
 
         // Rewrite Referer to upstream
@@ -145,9 +136,9 @@ namespace httplib::server::detail
                 {
                     ref_path = ref_path.substr(prefix_.size());
                 }
-                if (!upstream_prefix_.empty())
+                if (!upstream_.prefix_path.empty())
                 {
-                    ref_path.insert(0, upstream_prefix_);
+                    ref_path.insert(0, upstream_.prefix_path);
                 }
                 if (ref_path.empty() || ref_path[0] != '/')
                 {
@@ -155,8 +146,8 @@ namespace httplib::server::detail
                 }
 
                 auto new_ref = std::format("{}://{}{}",
-                                           upstream_scheme_,
-                                           util::make_host_value(upstream_host_, port_, ssl_),
+                                           upstream_.scheme,
+                                           util::make_host_value(upstream_.host, upstream_.port, upstream_.ssl),
                                            ref_path);
                 if (!r->encoded_query().empty())
                 {
@@ -178,22 +169,26 @@ namespace httplib::server::detail
     {
         if (interceptor_)
         {
-            co_await interceptor_->on_upstream_request(req, upstream_headers_, upstream_url_);
+            co_await interceptor_->on_upstream_request(req, upstream_headers_, upstream_.url);
         }
 
-        client_ = co_await pool_->async_acquire(upstream_host_, port_, ssl_);
+        client_ = co_await pool_->async_acquire(upstream_.host, upstream_.port, upstream_.ssl);
         if (!client_)
         {
-            logger_->trace("[proxy] acquire client failed for {}:{}", upstream_host_, port_);
+            logger_->trace("[proxy] acquire client failed for {}:{}", upstream_.host, upstream_.port);
             resp.set_error_content(http::status::service_unavailable);
             co_return false;
         }
 
         writer_ = client_->create_lazy_request();
 
-        if (auto rel_ec = co_await writer_->write_header(req.method(), upstream_target_, upstream_headers_); rel_ec)
+        if (auto rel_ec = co_await writer_->write_header(req.method(), upstream_.target_path, upstream_headers_);
+            rel_ec)
         {
-            logger_->trace("[proxy] write_header to {}:{} failed: {}", upstream_host_, port_, rel_ec.message());
+            logger_->trace("[proxy] write_header to {}:{} failed: {}",
+                           upstream_.host,
+                           upstream_.port,
+                           rel_ec.message());
             resp.set_error_content(upstream_error_to_status(rel_ec));
             co_return false;
         }
@@ -220,7 +215,10 @@ namespace httplib::server::detail
 
             if (auto rel_ec = co_await writer_->write_body(net::buffer(relay_buf_, bytes), more); rel_ec)
             {
-                logger_->trace("[proxy] write_body to {}:{} failed: {}", upstream_host_, port_, rel_ec.message());
+                logger_->trace("[proxy] write_body to {}:{} failed: {}",
+                               upstream_.host,
+                               upstream_.port,
+                               rel_ec.message());
                 resp.set_error_content(upstream_error_to_status(rel_ec));
                 co_return false;
             }
@@ -236,8 +234,8 @@ namespace httplib::server::detail
         if (up_result.has_error())
         {
             logger_->trace("[proxy] read_header from {}:{} failed: {}",
-                           upstream_host_,
-                           port_,
+                           upstream_.host,
+                           upstream_.port,
                            up_result.error().message());
             resp.set_error_content(upstream_error_to_status(up_result.error()));
             co_return false;
@@ -250,7 +248,7 @@ namespace httplib::server::detail
                        req.method_string(),
                        req.target(),
                        static_cast<unsigned>(result),
-                       upstream_host_);
+                       upstream_.host);
 
         if (interceptor_)
         {
@@ -268,7 +266,7 @@ namespace httplib::server::detail
         if (result >= http::status::moved_permanently && result <= http::status::permanent_redirect
             && result != http::status::not_modified)
         {
-            auto upstream_base = util::make_url_value(upstream_host_, port_, ssl_);
+            auto upstream_base = util::make_url_value(upstream_.host, upstream_.port, upstream_.ssl);
             std::string location(response_hdrs[http::field::location]);
             if (location.starts_with(upstream_base))
             {
