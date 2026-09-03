@@ -426,6 +426,20 @@ namespace httplib::server
 
     void
     http_server::impl::set_ws_forward(std::string_view location,
+                                      std::vector<upstream_backend> backends,
+                                      upstream_locator locator,
+                                      http_server::ws_interceptor_factory factory)
+    {
+        auto group = std::make_shared<upstream_group>(make_backends(backends), locator);
+        set_ws_forward(
+            location,
+            [g = std::move(group)](request&) -> net::awaitable<std::shared_ptr<http_server::proxy_target>>
+            { co_return g->resolve_target(); },
+            std::move(factory));
+    }
+
+    void
+    http_server::impl::set_ws_forward(std::string_view location,
                                       http_server::proxy_resolver resolver,
                                       http_server::ws_interceptor_factory factory)
     {

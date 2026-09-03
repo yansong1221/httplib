@@ -196,6 +196,15 @@ namespace httplib::server
     }
 
     void
+    http_server::set_ws_forward(std::string_view location,
+                                std::vector<upstream_backend> backends,
+                                upstream_locator locator,
+                                ws_interceptor_factory factory)
+    {
+        impl_->set_ws_forward(location, std::move(backends), locator, std::move(factory));
+    }
+
+    void
     http_server::set_ssl(std::span<char const> const& cert_file,
                          std::span<char const> const& key_file,
                          std::string passwd /*= {}*/)

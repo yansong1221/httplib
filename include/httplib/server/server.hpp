@@ -93,6 +93,10 @@ namespace httplib::server
         void set_ws_forward(std::string_view location,
                             proxy_resolver resolver,
                             ws_interceptor_factory factory = nullptr);
+        void set_ws_forward(std::string_view location,
+                            std::vector<upstream_backend> backends,
+                            upstream_locator locator = upstream_locator::round_robin,
+                            ws_interceptor_factory factory = nullptr);
 
         void set_ssl(std::span<char const> const& cert_file,
                      std::span<char const> const& key_file,

@@ -1,13 +1,16 @@
 #include "common.hpp"
 #include "httplib/client/proxy_client.hpp"
 #include "httplib/client/ws_client.hpp"
+#include "httplib/server/proxy_strategy.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
+#include <algorithm>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/write.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -1127,6 +1130,89 @@ TEST_CASE("ws-interceptor: messages intercepted", "[proxy][ws-forward]")
     REQUIRE(req_called.load() == 1);
     REQUIRE(client_msg_called.load() == 3);
     REQUIRE(upstream_msg_called.load() == 3);
+}
+
+TEST_CASE("ws-forward multi-backend: round-robin across upstreams", "[proxy][ws-forward]")
+{
+    net::thread_pool ioc { 4 };
+    server::http_server upstream1(ioc.get_executor());
+    server::http_server upstream2(ioc.get_executor());
+
+    auto install_echo = [](server::http_server& srv, std::string const& tag)
+    {
+        srv.router().set_ws_handler(
+            "/echo",
+            [](server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; },
+            [tag](server::websocket_conn::weak_ptr wp, std::string_view msg, bool binary)
+            {
+                if (auto c = wp.lock())
+                {
+                    c->send(std::string(tag) + std::string(msg), binary);
+                }
+            },
+            [](server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });
+    };
+    install_echo(upstream1, "u1");
+    install_echo(upstream2, "u2");
+
+    auto e1 = upstream1.listen("127.0.0.1", 0).local_endpoint();
+    auto e2 = upstream2.listen("127.0.0.1", 0).local_endpoint();
+
+    std::vector<server::upstream_backend> backends {
+        server::upstream_backend { std::format("ws://{}:{}", e1.address().to_string(), e1.port()) },
+        server::upstream_backend { std::format("ws://{}:{}", e2.address().to_string(), e2.port()) },
+    };
+
+    server::http_server proxy(ioc.get_executor());
+    proxy.set_ws_forward("/ws/*", backends, server::upstream_locator::round_robin);
+    proxy.listen("127.0.0.1", 0);
+    auto pep = proxy.local_endpoint();
+
+    upstream1.run();
+    upstream2.run();
+    proxy.run();
+
+    constexpr int kConnections = 6;
+    std::mutex mu;
+    std::vector<std::string> tags;
+    std::vector<std::unique_ptr<client::ws_client>> clients;
+    clients.reserve(kConnections);
+
+    for (int i = 0; i < kConnections; ++i)
+    {
+        auto ws = std::make_unique<client::ws_client>(ioc.get_executor(), pep.address().to_string(), pep.port());
+        ws->run(
+            "/ws/echo",
+            [ws = ws.get()](boost::system::error_code ec) -> net::awaitable<void>
+            {
+                if (!ec)
+                {
+                    ws->send(std::string("hello"));
+                }
+                co_return;
+            },
+            [&mu, &tags](std::string_view msg, bool) -> net::awaitable<void>
+            {
+                {
+                    std::scoped_lock lk(mu);
+                    tags.emplace_back(msg.substr(0, 2));
+                }
+                co_return;
+            },
+            []() -> net::awaitable<void> { co_return; });
+        clients.push_back(std::move(ws));
+    }
+
+    std::this_thread::sleep_for(std::chrono::seconds(5));
+
+    upstream1.stop();
+    upstream2.stop();
+    proxy.stop();
+    ioc.join();
+
+    REQUIRE(tags.size() == kConnections);
+    CHECK(std::count(tags.begin(), tags.end(), "u1") == kConnections / 2);
+    CHECK(std::count(tags.begin(), tags.end(), "u2") == kConnections / 2);
 }
 
 TEST_CASE("CONNECT: rejected by default", "[proxy]")
