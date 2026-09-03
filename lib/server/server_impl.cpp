@@ -3,20 +3,20 @@
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/lazy_request.hpp"
-#include "httplib/client/ws_client.hpp"
 #include "httplib/server/proxy_strategy.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "httplib/util/when_all.hpp"
+#include "proxy_util.hpp"
 #include "request_impl.hpp"
 #include "response_impl.hpp"
 #include "reverse_proxy_impl.h"
 #include "upstream_group.hpp"
+#include "ws_forward_impl.h"
 #include "util/logging.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/asio/use_future.hpp>
-#include <boost/url.hpp>
 #include <spdlog/spdlog.h>
 
 #ifdef HTTPLIB_ENABLED_SSL
@@ -26,63 +26,6 @@
 
 namespace httplib::server
 {
-    namespace detail
-    {
-
-        using ws_client_ptr = std::shared_ptr<client::ws_client>;
-        using ws_interceptor_ptr = std::shared_ptr<ws_interceptor>;
-
-        static std::string
-        strip_proxy_prefix(std::string_view route)
-        {
-            std::string result(route);
-            while (!result.empty() && (result.back() == '/' || result.back() == '*'))
-            {
-                result.pop_back();
-            }
-            return result;
-        }
-
-        static std::string
-        make_upstream_path(std::string_view client_target,
-                           std::string_view proxy_prefix,
-                           std::string_view upstream_base)
-        {
-            if (!client_target.starts_with(proxy_prefix))
-            {
-                return {};
-            }
-
-            auto tail = client_target.substr(proxy_prefix.size());
-
-            if (tail.empty())
-            {
-                return upstream_base.empty() ? "/" : std::string(upstream_base);
-            }
-
-            std::string result(upstream_base);
-
-            if (result.size() > 1 && result.ends_with('/'))
-            {
-                result.pop_back();
-            }
-
-            if (tail.front() != '/' && tail.front() != '?')
-            {
-                result += '/';
-            }
-            else if (result.ends_with('/') && tail.front() == '/')
-            {
-                tail.remove_prefix(1);
-            }
-
-            result += tail;
-
-            return result;
-        }
-
-    } // namespace detail
-
     http_server::impl::impl(net::any_io_executor const& ex) : ex_(ex), acceptor_(ex)
     {
         default_logger_ = httplib::detail::make_console_logger("httplib.server");
@@ -425,11 +368,7 @@ namespace httplib::server
                                          std::string_view upstream_url,
                                          http_server::proxy_interceptor_factory factory)
     {
-        set_reverse_proxy(
-            location,
-            std::vector<upstream_backend> { upstream_backend { std::string(upstream_url) } },
-            upstream_locator::round_robin,
-            std::move(factory));
+        set_reverse_proxy(location, detail::make_static_resolver(std::string(upstream_url)), std::move(factory));
     }
 
     void
@@ -482,26 +421,7 @@ namespace httplib::server
                                       std::string_view upstream_url,
                                       http_server::ws_interceptor_factory factory)
     {
-        auto u = std::string(upstream_url);
-        set_ws_forward(
-            location,
-            [u = std::move(u)](request&) -> net::awaitable<std::shared_ptr<http_server::proxy_target>>
-            {
-                struct ws_target final : http_server::proxy_target
-                {
-                    explicit ws_target(std::string u)
-                        : url_(std::move(u))
-                    {
-                    }
-                    std::string const& url() const override
-                    {
-                        return url_;
-                    }
-                    std::string url_;
-                };
-                co_return std::make_shared<ws_target>(u);
-            },
-            std::move(factory));
+        set_ws_forward(location, detail::make_static_resolver(std::string(upstream_url)), std::move(factory));
     }
 
     void
@@ -510,154 +430,20 @@ namespace httplib::server
                                       http_server::ws_interceptor_factory factory)
     {
         std::string prefix = detail::strip_proxy_prefix(location);
+        auto logger = this->logger();
 
-        auto open_handler
-            = [self = shared_from_this(), this, prefix, resolver = std::move(resolver), factory = std::move(factory)](
-                  websocket_conn::weak_ptr wp) -> net::awaitable<void>
-        {
-            auto conn = wp.lock();
-            if (!conn)
+        router_.set_ws_handler(
+            location,
+            [ex = ex_, prefix, logger, resolver = std::move(resolver), factory = std::move(factory)](
+                websocket_conn::weak_ptr wp) -> net::awaitable<void>
             {
-                co_return;
-            }
-
-            auto& req = conn->http_request();
-            auto interceptor = factory ? factory(req) : nullptr;
-
-            auto target = co_await resolver(req);
-            if (!target)
-            {
-                logger()->warn("[ws-forward] resolver returned null target");
-                conn->close("resolver failed");
-                co_return;
-            }
-            auto const& url = target->url();
-
-            auto r = boost::urls::parse_uri(url);
-            if (!r)
-            {
-                logger()->warn("[ws-forward] invalid upstream url: {}", url);
-                conn->close("bad upstream");
-                co_return;
-            }
-
-            auto const& u = *r;
-            auto host = u.host();
-            auto scheme = u.scheme();
-            auto ssl = (scheme == "wss" || scheme == "https");
-            auto port = u.port_number() ? u.port_number() : (ssl ? 443 : 80);
-
-            auto upstream_target = detail::make_upstream_path(req.target(), prefix, u.encoded_path());
-            auto upstream_url = util::make_url_value(host, port, ssl, upstream_target, scheme);
-
-            logger()->debug("[ws-forward] {} -> {}", req.target(), upstream_url);
-
-            http::fields upstream_headers(req.base());
-            upstream_headers.erase(http::field::host);
-            upstream_headers.erase(http::field::sec_websocket_key);
-            upstream_headers.erase(http::field::sec_websocket_accept);
-            upstream_headers.erase(http::field::sec_websocket_version);
-            upstream_headers.erase(http::field::upgrade);
-            upstream_headers.erase(http::field::connection);
-            upstream_headers.set(http::field::host, util::make_host_value(host, port, ssl));
-
-            if (interceptor)
-            {
-                co_await interceptor->on_upstream_request(req, upstream_headers, upstream_url);
-            }
-
-            auto upstream = std::make_shared<client::ws_client>(ex_, host, port, ssl);
-            upstream->set_logger(logger());
-
-            auto ec = co_await upstream->async_run(
-                upstream_target,
-                [upstream, interceptor, conn = websocket_conn::weak_ptr(conn)](std::string_view data,
-                                                                               bool binary) -> net::awaitable<void>
-                {
-                    if (interceptor)
-                    {
-                        co_await interceptor->on_upstream_recv(data, binary);
-                    }
-                    if (auto c = conn.lock())
-                    {
-                        c->send(std::move(data), binary);
-                    }
-                },
-                [upstream, conn = websocket_conn::weak_ptr(conn)]() -> net::awaitable<void>
-                {
-                    if (auto c = conn.lock())
-                    {
-                        c->close();
-                    }
-                    co_return;
-                },
-                upstream_headers);
-            if (ec)
-            {
-                logger()->trace("[ws-forward] upstream connect failed: {}", ec.message());
-                conn->close(ec.message());
-                co_return;
-            }
-
-            req.data().store<detail::ws_client_ptr>(std::move(upstream));
-            if (interceptor)
-            {
-                req.data().store<detail::ws_interceptor_ptr>(std::move(interceptor));
-            }
-        };
-
-        auto message_handler
-            = [](websocket_conn::weak_ptr wp, std::string_view data, bool binary) -> net::awaitable<void>
-        {
-            auto conn = wp.lock();
-            if (!conn)
-            {
-                co_return;
-            }
-
-            auto& req = conn->http_request();
-            if (!req.data().has<detail::ws_client_ptr>())
-            {
-                conn->close();
-                co_return;
-            }
-
-            if (req.data().has<detail::ws_interceptor_ptr>())
-            {
-                auto wsi = req.data().fetch<detail::ws_interceptor_ptr>();
-                co_await wsi->on_upstream_send(data, binary);
-            }
-
-            auto upstream = req.data().fetch<detail::ws_client_ptr>();
-            auto ec = co_await upstream->async_send(std::string(data), binary);
-            if (ec)
-            {
-                conn->close();
-            }
-            co_return;
-        };
-
-        auto close_handler = [](websocket_conn::weak_ptr wp) -> net::awaitable<void>
-        {
-            auto conn = wp.lock();
-            if (!conn)
-            {
-                co_return;
-            }
-
-            auto& req = conn->http_request();
-            if (!req.data().has<detail::ws_client_ptr>())
-            {
-                co_return;
-            }
-            auto upstream = req.data().fetch<detail::ws_client_ptr>();
-            if (upstream)
-            {
-                co_await upstream->async_close();
-            }
-        };
-
-        router_.set_ws_handler(location, std::move(open_handler), std::move(message_handler), std::move(close_handler));
+                detail::ws_forward_context ctx(ex, prefix, resolver, factory, logger);
+                co_await ctx.run(wp);
+            },
+            [](websocket_conn::weak_ptr wp, std::string_view data, bool binary) -> net::awaitable<void>
+            { co_await detail::ws_forward_context::send_to_upstream(wp, data, binary); },
+            [](websocket_conn::weak_ptr wp) -> net::awaitable<void>
+            { co_await detail::ws_forward_context::close_upstream(wp); });
     }
 
     bool

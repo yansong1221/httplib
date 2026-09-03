@@ -1,5 +1,6 @@
 #include "reverse_proxy_impl.h"
 #include "httplib/util/misc.hpp"
+#include "proxy_util.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/url.hpp>
@@ -19,57 +20,6 @@ namespace httplib::server::detail
                 return http::status::gateway_timeout;
             }
             return http::status::bad_gateway;
-        }
-
-        /// Strips trailing '/' and '*' from a proxy route prefix.
-        std::string
-        strip_proxy_prefix(std::string_view route)
-        {
-            std::string result(route);
-            while (!result.empty() && (result.back() == '/' || result.back() == '*'))
-            {
-                result.pop_back();
-            }
-            return result;
-        }
-
-        /// Joins a client target path with the proxy prefix onto an upstream base path.
-        std::string
-        make_upstream_path(std::string_view client_target,
-                           std::string_view proxy_prefix,
-                           std::string_view upstream_base)
-        {
-            if (!client_target.starts_with(proxy_prefix))
-            {
-                return {};
-            }
-
-            auto tail = client_target.substr(proxy_prefix.size());
-
-            if (tail.empty())
-            {
-                return upstream_base.empty() ? "/" : std::string(upstream_base);
-            }
-
-            std::string result(upstream_base);
-
-            if (result.size() > 1 && result.ends_with('/'))
-            {
-                result.pop_back();
-            }
-
-            if (tail.front() != '/' && tail.front() != '?')
-            {
-                result += '/';
-            }
-            else if (result.ends_with('/') && tail.front() == '/')
-            {
-                tail.remove_prefix(1);
-            }
-
-            result += tail;
-
-            return result;
         }
     } // namespace
 

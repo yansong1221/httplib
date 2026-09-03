@@ -1,4 +1,5 @@
 ﻿#include "websocket_conn_impl.hpp"
+#include "ws_forward_impl.h"
 #include "httplib/client/ws_client.hpp"
 #include "request_impl.hpp"
 #include "response_impl.hpp"
@@ -8,8 +9,6 @@
 
 namespace httplib::server
 {
-
-    using ws_client_ptr = std::shared_ptr<client::ws_client>;
 
     websocket_conn_impl::websocket_conn_impl(std::shared_ptr<http_server::impl> server_impl,
                                              websocket_stream&& stream,
@@ -117,12 +116,12 @@ namespace httplib::server
             return;
         }
 
-        if (req_.data().has<ws_client_ptr>())
+        if (req_.data().has<detail::ws_forward_state_ptr>())
         {
-            auto upstream = req_.data().fetch<ws_client_ptr>();
-            if (upstream)
+            auto state = req_.data().fetch<detail::ws_forward_state_ptr>();
+            if (state && state->upstream)
             {
-                upstream->abort();
+                state->upstream->abort();
             }
         }
 
