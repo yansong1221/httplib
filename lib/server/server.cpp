@@ -175,6 +175,15 @@ namespace httplib::server
     }
 
     void
+    http_server::set_reverse_proxy(std::string_view location,
+                                   std::vector<upstream_backend> backends,
+                                   upstream_locator locator,
+                                   proxy_interceptor_factory factory)
+    {
+        impl_->set_reverse_proxy(location, std::move(backends), locator, std::move(factory));
+    }
+
+    void
     http_server::set_ws_forward(std::string_view location, std::string_view url, ws_interceptor_factory factory)
     {
         impl_->set_ws_forward(location, url, std::move(factory));

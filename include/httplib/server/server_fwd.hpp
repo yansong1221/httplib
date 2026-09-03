@@ -19,4 +19,6 @@ namespace httplib::server
     class proxy_interceptor;
     class ws_interceptor;
 
+    enum class upstream_locator;
+
 } // namespace httplib::server

@@ -1,6 +1,7 @@
 #pragma once
 #include "httplib/config.hpp"
 #include "httplib/server/proxy_interceptor.hpp"
+#include "httplib/server/proxy_strategy.hpp"
 #include "httplib/server/server_fwd.hpp"
 #include "httplib/server/ws_interceptor.hpp"
 #include <boost/asio/any_io_executor.hpp>
@@ -13,7 +14,9 @@
 #include <future>
 #include <memory>
 #include <span>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace httplib::server
 {
@@ -73,6 +76,10 @@ namespace httplib::server
                                proxy_interceptor_factory factory = nullptr);
         void set_reverse_proxy(std::string_view location,
                                proxy_resolver resolver,
+                               proxy_interceptor_factory factory = nullptr);
+        void set_reverse_proxy(std::string_view location,
+                               std::vector<upstream_backend> backends,
+                               upstream_locator locator = upstream_locator::round_robin,
                                proxy_interceptor_factory factory = nullptr);
 
         void set_ws_forward(std::string_view location, std::string_view url, ws_interceptor_factory factory = nullptr);

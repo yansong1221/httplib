@@ -15,6 +15,7 @@
 #include <spdlog/spdlog.h>
 #include <string_view>
 #include <unordered_set>
+#include <vector>
 
 namespace httplib::client
 {
@@ -110,6 +111,10 @@ namespace httplib::server
                                http_server::proxy_interceptor_factory factory);
         void set_reverse_proxy(std::string_view location,
                                http_server::proxy_resolver resolver,
+                               http_server::proxy_interceptor_factory factory);
+        void set_reverse_proxy(std::string_view location,
+                               std::vector<upstream_backend> backends,
+                               upstream_locator locator,
                                http_server::proxy_interceptor_factory factory);
 
         void set_ws_forward(std::string_view location,

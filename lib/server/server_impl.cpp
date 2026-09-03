@@ -1,15 +1,17 @@
 ﻿#include "server_impl.h"
-#include "reverse_proxy_impl.h"
 #include "client/client_impl.h"
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/lazy_request.hpp"
 #include "httplib/client/ws_client.hpp"
+#include "httplib/server/proxy_strategy.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "httplib/util/when_all.hpp"
 #include "request_impl.hpp"
 #include "response_impl.hpp"
+#include "reverse_proxy_impl.h"
+#include "upstream_group.hpp"
 #include "util/logging.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/predicate.hpp>
@@ -432,6 +434,19 @@ namespace httplib::server
 
     void
     http_server::impl::set_reverse_proxy(std::string_view location,
+                                         std::vector<upstream_backend> backends,
+                                         upstream_locator locator,
+                                         http_server::proxy_interceptor_factory factory)
+    {
+        auto group = std::make_shared<upstream_group>(make_backends(backends));
+        set_reverse_proxy(
+            location,
+            [g = std::move(group), locator](request&) -> net::awaitable<std::string> { co_return g->resolve(locator); },
+            std::move(factory));
+    }
+
+    void
+    http_server::impl::set_reverse_proxy(std::string_view location,
                                          http_server::proxy_resolver resolver,
                                          http_server::proxy_interceptor_factory factory)
     {
@@ -456,9 +471,8 @@ namespace httplib::server
              resolver = std::move(resolver),
              factory = std::move(factory)](request& req, response& resp) -> net::awaitable<void>
             {
-                auto ctx = std::make_shared<detail::reverse_proxy_context>(
-                    proxy_pool, prefix, resolver, factory, logger());
-                co_await ctx->run(req, resp);
+                detail::reverse_proxy_context ctx(proxy_pool, prefix, resolver, factory, logger());
+                co_await ctx.run(req, resp);
             });
     }
 
