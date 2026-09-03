@@ -50,6 +50,8 @@ namespace httplib::client
         void set_max_redirects(int n);
         void set_verify_ssl(bool verify);
         void set_ca_cert(std::string_view cert);
+        void set_header_limit(std::uint32_t limit);
+        void set_body_limit(std::uint64_t limit);
 
         net::any_io_executor get_executor() const;
 

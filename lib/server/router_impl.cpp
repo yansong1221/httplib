@@ -373,6 +373,7 @@ namespace httplib::server
     void
     router_impl::reset()
     {
+        std::unique_lock lock(mutex_);
         root_ = std::make_unique<Node>();
         post_routing_handler_ = nullptr;
         not_found_handler_ = nullptr;

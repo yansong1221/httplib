@@ -65,8 +65,8 @@ namespace httplib::client
         {
             auto header_parser = std::make_unique<http::response_parser<http::empty_body>>();
             header_parser->skip(method_ == http::verb::head);
-            header_parser->header_limit((std::numeric_limits<std::uint32_t>::max)());
-            header_parser->body_limit((std::numeric_limits<std::uint64_t>::max)());
+            header_parser->header_limit(parent_->header_limit_);
+            header_parser->body_limit(parent_->body_limit_);
 
             if (auto ec = co_await parent_->async_read(*header_parser, true); ec)
             {

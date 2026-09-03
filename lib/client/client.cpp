@@ -292,6 +292,18 @@ namespace httplib::client
         impl_->ca_cert_ = cert;
     }
 
+    void
+    http_client::set_header_limit(std::uint32_t limit)
+    {
+        impl_->set_header_limit(limit);
+    }
+
+    void
+    http_client::set_body_limit(std::uint64_t limit)
+    {
+        impl_->set_body_limit(limit);
+    }
+
     net::any_io_executor
     http_client::get_executor() const
     {

@@ -108,8 +108,8 @@ namespace httplib::client
 
         auto header_parser = std::make_unique<http::response_parser<http::empty_body>>();
         header_parser->skip(req.method() == http::verb::head);
-        header_parser->header_limit(std::numeric_limits<std::uint32_t>::max());
-        header_parser->body_limit(std::numeric_limits<std::uint64_t>::max());
+        header_parser->header_limit(header_limit_);
+        header_parser->body_limit(body_limit_);
 
         auto ec = co_await async_read(*header_parser, true);
         if (ec)
@@ -177,6 +177,8 @@ namespace httplib::client
                         new_impl->verify_ssl_ = verify_ssl_;
                         new_impl->set_logger(logger());
                         new_impl->max_redirects_ = max_redirects_ - r - 1;
+                        new_impl->header_limit_ = header_limit_;
+                        new_impl->body_limit_ = body_limit_;
 
                         co_return co_await new_impl->async_send_request_lazy_with_redirect(req);
                     }

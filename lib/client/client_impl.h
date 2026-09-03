@@ -10,6 +10,7 @@
 #include <boost/beast/http/serializer.hpp>
 #include <boost/beast/http/write.hpp>
 #include <functional>
+#include <limits>
 #include <spdlog/spdlog.h>
 
 namespace httplib::client
@@ -40,6 +41,18 @@ namespace httplib::client
         set_max_redirects(int n)
         {
             max_redirects_ = n;
+        }
+
+        void
+        set_header_limit(std::uint32_t limit)
+        {
+            header_limit_ = limit;
+        }
+
+        void
+        set_body_limit(std::uint64_t limit)
+        {
+            body_limit_ = limit;
         }
 
       public:
@@ -165,6 +178,9 @@ namespace httplib::client
         std::weak_ptr<void> read_impl_;
 
         int max_redirects_ = 0;
+
+        std::uint32_t header_limit_ = 65536;
+        std::uint64_t body_limit_ = std::numeric_limits<std::uint64_t>::max();
 
         std::shared_ptr<spdlog::logger> default_logger_;
         std::shared_ptr<spdlog::logger> custom_logger_;
