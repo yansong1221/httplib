@@ -1,8 +1,7 @@
 #include "reverse_proxy_impl.h"
 #include "httplib/util/misc.hpp"
 #include "proxy_util.hpp"
-#include <boost/algorithm/string/join.hpp>
-#include <boost/algorithm/string/predicate.hpp>
+#include <boost/algorithm/string/trim.hpp>
 #include <boost/url.hpp>
 #include <spdlog/spdlog.h>
 #include <string_view>
@@ -20,6 +19,47 @@ namespace httplib::server::detail
                 return http::status::gateway_timeout;
             }
             return http::status::bad_gateway;
+        }
+
+        /// RFC 7230 §6.1 hop-by-hop headers. These must never be forwarded between
+        /// a client and an upstream server (nor the reverse).
+        ///
+        /// Transfer-Encoding is the one RFC 7230 hop-by-hop field intentionally
+        /// NOT removed. This proxy is a streaming relay: it never buffers and
+        /// reassembles bodies, so it must carry the framing through unchanged --
+        /// in the request direction it re-chunks the de-chunked bytes via
+        /// buffer_body, and in the response direction it passes the upstream's raw
+        /// chunked bytes straight through. Stripping it would leave the relayed
+        /// body without valid framing.
+        void
+        strip_hop_by_hop(http::fields& headers)
+        {
+            // Collect the tokens named in the Connection header first, since it
+            // may additionally nominate hop-by-hop headers that must be removed.
+            std::vector<std::string> connection_tokens;
+            if (auto conn = headers[http::field::connection]; !conn.empty())
+            {
+                for (auto item : util::split(conn, ","))
+                {
+                    auto token = std::string(boost::algorithm::trim_copy(item));
+                    if (!token.empty())
+                    {
+                        connection_tokens.push_back(std::move(token));
+                    }
+                }
+            }
+
+            headers.erase(http::field::connection);
+            headers.erase(http::field::keep_alive);
+            headers.erase(http::field::proxy_connection);
+            headers.erase(http::field::te);
+            headers.erase(http::field::trailer);
+            headers.erase(http::field::upgrade);
+
+            for (auto const& token : connection_tokens)
+            {
+                headers.erase(token);
+            }
         }
     } // namespace
 
@@ -88,33 +128,15 @@ namespace httplib::server::detail
     reverse_proxy_context::build_upstream_headers(request& req, response& resp)
     {
         (void)resp;
-        http::fields upstream_headers(req.base());
 
-        // Strip and rewrite Cookie Domain/Path before forwarding upstream
-        if (auto cookie = req[http::field::cookie]; !cookie.empty())
-        {
-            std::vector<std::string> rewritten;
-            for (auto item : util::split(cookie, ";"))
-            {
-                auto parts = util::split(item, "=");
-                if (parts.empty())
-                {
-                    continue;
-                }
-                auto key = parts.front();
-                if (boost::iequals(key, "Domain") || boost::iequals(key, "Path"))
-                {
-                    continue;
-                }
-                rewritten.emplace_back(item);
-            }
-            using namespace std::string_view_literals;
-            rewritten.emplace_back(
-                std::format("Domain={}", util::make_host_value(upstream_.host, upstream_.port, upstream_.ssl)));
-            rewritten.emplace_back(
-                std::format("Path={}", upstream_.prefix_path.empty() ? "/"sv : upstream_.prefix_path));
-            upstream_headers.set(http::field::cookie, boost::join(rewritten, ";"));
-        }
+        // Copy the client's request headers, then remove hop-by-hop headers so they
+        // are not (mis)interpreted as applying to the client->proxy hop.
+        http::fields upstream_headers(req.base());
+        strip_hop_by_hop(upstream_headers);
+
+        // Forward the client's Cookie scope unchanged. Domain/Path are Set-Cookie
+        // attributes, not Cookie attributes, so they must not be injected here.
+        // (Cookie rewriting across origins is an application-level concern.)
 
         auto client_ip = req.remote_endpoint().address().to_string();
         if (auto xff = req["X-Forwarded-For"]; !xff.empty())
@@ -122,7 +144,9 @@ namespace httplib::server::detail
             client_ip = std::format("{},{}", xff, client_ip);
         }
         upstream_headers.set("X-Forwarded-For", client_ip);
-        upstream_headers.set("X-Forwarded-Proto", upstream_.ssl ? "https" : "http");
+        // X-Forwarded-Proto must reflect the client's connection to *this* proxy,
+        // not the proxy's own transport to the upstream server.
+        upstream_headers.set("X-Forwarded-Proto", req.is_ssl() ? "https" : "http");
         upstream_headers.set("X-Forwarded-Host", req["Host"]);
 
         // Rewrite Referer to upstream
@@ -256,12 +280,9 @@ namespace httplib::server::detail
         }
 
         auto response_hdrs = http::fields(headers);
-        // Strip hop-by-hop headers before relaying to client
-        response_hdrs.erase(http::field::connection);
-        response_hdrs.erase(http::field::keep_alive);
-        response_hdrs.erase(http::field::te);
-        response_hdrs.erase(http::field::trailer);
-        response_hdrs.erase(http::field::upgrade);
+        // Strip hop-by-hop headers before relaying to the client. Transfer-Encoding
+        // is preserved because the relay streams the raw (possibly chunked) body.
+        strip_hop_by_hop(response_hdrs);
 
         if (result >= http::status::moved_permanently && result <= http::status::permanent_redirect
             && result != http::status::not_modified)

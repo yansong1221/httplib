@@ -1,4 +1,5 @@
 #include "common.hpp"
+#include "httplib/client/lazy_request.hpp"
 #include "httplib/client/proxy_client.hpp"
 #include "httplib/client/ws_client.hpp"
 #include "httplib/server/proxy_strategy.hpp"
@@ -513,7 +514,7 @@ TEST_CASE("proxy: redirect (301) proxying", "[proxy]")
 // Proxy rewrites
 // ===========================================================================
 
-TEST_CASE("proxy: rewrites Cookie header", "[proxy]")
+TEST_CASE("proxy: forwards Cookie header unchanged", "[proxy]")
 {
     net::thread_pool pool { 2 };
     std::exception_ptr err;
@@ -548,11 +549,11 @@ TEST_CASE("proxy: rewrites Cookie header", "[proxy]")
                 co_await c.async_send_request(httplib::client::request(http::verb::get, "/api/check-cookie", hdrs)));
             REQUIRE(resp.result() == http::status::ok);
             auto body = as_string(resp);
-            REQUIRE(body.find("token=abc") != std::string::npos);
-            REQUIRE(body.find("Domain=upstream.com") == std::string::npos);
-            REQUIRE(body.find("Path=/api") == std::string::npos);
-            REQUIRE(body.find("Domain=" + u_host) != std::string::npos);
-            REQUIRE(body.find("Path=/") != std::string::npos);
+            // The Cookie request header is scoped per origin and must be forwarded
+            // verbatim; Domain/Path are Set-Cookie attributes and must not be
+            // injected into (or stripped from) the request's Cookie header.
+            REQUIRE(body == "token=abc; Domain=upstream.com; Path=/api");
+            REQUIRE(body.find("Domain=" + u_host) == std::string::npos);
 
             upstream.stop();
             proxy.stop();
@@ -1408,4 +1409,29 @@ TEST_CASE("CONNECT: tunnel forwards data bidirectionally", "[proxy]")
     REQUIRE(tunnel_ok);
     REQUIRE(echo_recv_bytes.load() == 4);
     REQUIRE(echo_data == "ping");
+}
+
+TEST_CASE("proxy: chunked request body forwarded", "[proxy]")
+{
+    run_proxy(
+        [](auto& upstream)
+        {
+            upstream.router().template set_http_handler<http::verb::post>(
+                "/echo",
+                [](server::request& req, server::response& resp)
+                { resp.set_string_content(as_string(req), "text/plain"); });
+        },
+        [](auto& upstream_client, auto& proxy_client) -> net::awaitable<void>
+        {
+            auto writer = proxy_client.create_lazy_request();
+            co_await writer->write_header(http::verb::post, "/api/echo", {}, false);
+            co_await writer->write_body(net::buffer(std::string("Hello")), true);
+            co_await writer->write_body(net::buffer(std::string(" World")), false);
+            auto resp = co_await writer->read_response_lazy();
+            REQUIRE(resp.has_value());
+            REQUIRE(resp->result() == http::status::ok);
+            auto body_res = co_await resp->read_string();
+            REQUIRE(body_res.has_value());
+            REQUIRE(*body_res == "Hello World");
+        });
 }

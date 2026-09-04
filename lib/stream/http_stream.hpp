@@ -188,6 +188,17 @@ namespace httplib
             return std::move(stream_);
         }
 
+        /// Whether this stream carries a TLS layer (i.e. the connection is HTTPS).
+        bool
+        is_ssl() const
+        {
+#ifdef HTTPLIB_ENABLED_SSL
+            return std::holds_alternative<tls_stream>(stream_);
+#else
+            return false;
+#endif
+        }
+
         http_stream(stream_t&& stream) : stream_(std::move(stream)) {}
 
         static boost::system::result<stream_t>

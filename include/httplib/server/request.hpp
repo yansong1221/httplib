@@ -58,6 +58,8 @@ namespace httplib::server
         net::ip::address get_client_ip() const;
         tcp::endpoint const& local_endpoint() const;
         tcp::endpoint const& remote_endpoint() const;
+        /// Whether the client connection arrived over TLS (HTTPS).
+        bool is_ssl() const;
 
         request_data& data();
         request_data const& data() const;

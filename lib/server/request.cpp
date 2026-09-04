@@ -115,6 +115,12 @@ namespace httplib::server
         return impl_->remote_endpoint();
     }
 
+    bool
+    request::is_ssl() const
+    {
+        return impl_->is_ssl();
+    }
+
     std::string_view
     request::path_param_raw(std::string const& key) const
     {

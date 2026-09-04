@@ -233,7 +233,8 @@ namespace httplib::server
 
             if (header.method() == http::verb::connect)
             {
-                auto req = request::impl::make_request(local_endp, remote_endp, std::move(header_parser->release()));
+                auto req = request::impl::make_request(local_endp, remote_endp, std::move(header_parser->release()),
+                                                       stream_.is_ssl());
                 auto resp = response::impl::make_response(header.version(),
                                                           header.keep_alive(),
                                                           &stream_,
@@ -259,7 +260,8 @@ namespace httplib::server
             if (websocket::is_upgrade(header.base()))
             {
                 server_impl_->logger()->trace("ws upgrade {}", req_target);
-                auto req = request::impl::make_request(local_endp, remote_endp, std::move(header_parser->release()));
+                auto req = request::impl::make_request(local_endp, remote_endp, std::move(header_parser->release()),
+                                                       stream_.is_ssl());
                 co_return std::make_unique<websocket_task>(websocket_stream(std::move(stream_)),
                                                            std::move(req),
                                                            server_impl_);
@@ -269,7 +271,8 @@ namespace httplib::server
                                                       header.keep_alive(),
                                                       &stream_,
                                                       server_impl_->write_timeout());
-            auto req = request::impl::make_request(local_endp, remote_endp, http::request<http::empty_body>(header));
+            auto req = request::impl::make_request(local_endp, remote_endp, http::request<http::empty_body>(header),
+                                                   stream_.is_ssl());
 
             auto h_start = std::chrono::steady_clock::time_point {};
             auto handler_ms = std::chrono::milliseconds::zero();

@@ -25,10 +25,12 @@ namespace httplib::server
       public:
         impl(tcp::endpoint const& local_endpoint,
              tcp::endpoint const& remote_endpoint,
-             http::request<body::any_body>&& other)
+             http::request<body::any_body>&& other,
+             bool is_ssl = false)
             : http::request<body::any_body>(std::move(other))
             , local_endpoint_(local_endpoint)
             , remote_endpoint_(remote_endpoint)
+            , is_ssl_(is_ssl)
         {
             if (auto pos = this->target().find("?"); pos == std::string_view::npos)
             {
@@ -43,8 +45,9 @@ namespace httplib::server
 
         impl(tcp::endpoint const& local_endpoint,
              tcp::endpoint const& remote_endpoint,
-             http::request<http::empty_body>&& other)
-            : impl(local_endpoint, remote_endpoint, http::request<body::any_body>(other))
+             http::request<http::empty_body>&& other,
+             bool is_ssl = false)
+            : impl(local_endpoint, remote_endpoint, http::request<body::any_body>(other), is_ssl)
         {
         }
 
@@ -99,6 +102,11 @@ namespace httplib::server
         remote_endpoint() const
         {
             return this->remote_endpoint_;
+        }
+        bool
+        is_ssl() const
+        {
+            return is_ssl_;
         }
 
         request_data&
@@ -447,17 +455,19 @@ namespace httplib::server
         static request
         make_request(tcp::endpoint const& local_endpoint,
                      tcp::endpoint const& remote_endpoint,
-                     http::request<body::any_body>&& other)
+                     http::request<body::any_body>&& other,
+                     bool is_ssl = false)
         {
-            auto _impl = std::make_unique<request::impl>(local_endpoint, remote_endpoint, std::move(other));
+            auto _impl = std::make_unique<request::impl>(local_endpoint, remote_endpoint, std::move(other), is_ssl);
             return request(std::move(_impl));
         }
         static request
         make_request(tcp::endpoint const& local_endpoint,
                      tcp::endpoint const& remote_endpoint,
-                     http::request<http::empty_body>&& other)
+                     http::request<http::empty_body>&& other,
+                     bool is_ssl = false)
         {
-            auto _impl = std::make_unique<request::impl>(local_endpoint, remote_endpoint, std::move(other));
+            auto _impl = std::make_unique<request::impl>(local_endpoint, remote_endpoint, std::move(other), is_ssl);
             return request(std::move(_impl));
         }
 
@@ -467,6 +477,7 @@ namespace httplib::server
 
         tcp::endpoint local_endpoint_;
         tcp::endpoint remote_endpoint_;
+        bool is_ssl_ = false;
 
         std::unordered_map<std::string, std::string> path_params_;
         request_data data_;
