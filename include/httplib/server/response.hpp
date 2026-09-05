@@ -32,6 +32,9 @@ namespace httplib::server
         void set(http::field name, std::string_view value);
         void set(std::string_view name, std::string_view value);
 
+        void insert(http::field name, std::string_view value);
+        void insert(std::string_view name, std::string_view value);
+
         bool has(http::field name) const;
         bool has(std::string_view name) const;
         void erase(http::field name);

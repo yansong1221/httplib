@@ -106,6 +106,17 @@ namespace httplib::client
     {
         return impl_->base().at(name);
     }
+    void
+    request::insert(http::field name, std::string_view value)
+    {
+        impl_->insert(name, value);
+    }
+
+    void
+    request::insert(std::string_view name, std::string_view value)
+    {
+        impl_->insert(name, value);
+    }
 
     void
     request::set(http::field name, std::string_view value)

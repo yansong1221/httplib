@@ -4,10 +4,10 @@
 #include "httplib/util/use_awaitable.hpp"
 #include "response_impl.hpp"
 #include "stream/http_stream.hpp"
+#include <boost/asio/strand.hpp>
 #include <boost/beast/http/buffer_body.hpp>
 #include <boost/beast/http/serializer.hpp>
 #include <boost/beast/http/write.hpp>
-#include <boost/asio/strand.hpp>
 #include <memory>
 #include <string>
 
@@ -17,9 +17,7 @@ namespace httplib::server
     class stream_writer_impl : public stream_writer
     {
       public:
-        stream_writer_impl(response::impl& resp,
-                           http_stream& stream,
-                           std::chrono::steady_clock::duration write_timeout)
+        stream_writer_impl(response::impl& resp, http_stream& stream, std::chrono::steady_clock::duration write_timeout)
             : resp_(&resp)
             , stream_(&stream)
             , write_timeout_(write_timeout)
@@ -38,10 +36,14 @@ namespace httplib::server
         {
             co_await boost::asio::post(strand_);
 
+            for (auto const& f : headers)
+            {
+                resp_->erase(f.name());
+            }
             resp_->result(status);
             for (auto const& f : headers)
             {
-                resp_->set(f.name_string(), f.value());
+                resp_->insert(f.name(), f.value());
             }
 
             boost::system::error_code ec;

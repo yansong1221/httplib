@@ -36,7 +36,16 @@ namespace httplib::server
     {
         impl_->set(name, value);
     }
-
+    void
+    response::insert(http::field name, std::string_view value)
+    {
+        impl_->insert(name, value);
+    }
+    void
+    response::insert(std::string_view name, std::string_view value)
+    {
+        impl_->insert(name, value);
+    }
     std::string_view
     response::operator[](http::field name) const
     {
@@ -163,7 +172,8 @@ namespace httplib::server
     {
         if (!impl_->stream_writer_)
         {
-            impl_->stream_writer_ = std::make_unique<stream_writer_impl>(*impl_, *impl_->stream_, impl_->write_timeout_);
+            impl_->stream_writer_
+                = std::make_unique<stream_writer_impl>(*impl_, *impl_->stream_, impl_->write_timeout_);
         }
         return impl_->stream_writer_.get();
     }

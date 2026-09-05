@@ -38,6 +38,10 @@ namespace httplib::client
 
         void set(http::field name, std::string_view value);
         void set(std::string_view name, std::string_view value);
+
+        void insert(http::field name, std::string_view value);
+        void insert(std::string_view name, std::string_view value);
+
         void erase(http::field name);
         void erase(std::string_view name);
         bool has(http::field name) const;

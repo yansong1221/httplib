@@ -1435,3 +1435,114 @@ TEST_CASE("proxy: chunked request body forwarded", "[proxy]")
             REQUIRE(*body_res == "Hello World");
         });
 }
+
+TEST_CASE("proxy: Set-Cookie Domain dropped for IP public host", "[proxy]")
+{
+    run_proxy(
+        [](auto& upstream)
+        {
+            upstream.router().template set_http_handler<http::verb::get>(
+                "/set-cookie",
+                [](server::request&, server::response& resp)
+                {
+                    resp.base().insert(http::field::set_cookie, "sid=abc; Domain=upstream.internal; Path=/api");
+                    resp.base().insert(http::field::set_cookie, "theme=dark; Path=/");
+                    resp.set_string_content("ok"sv, "text/plain"sv);
+                });
+        },
+        [](auto& upstream_client, auto& proxy_client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await proxy_client.async_get("/api/set-cookie"));
+            REQUIRE(resp.result() == http::status::ok);
+            std::vector<std::string> cookies;
+            for (auto const& f : resp.base())
+            {
+                if (f.name() == http::field::set_cookie)
+                {
+                    cookies.push_back(std::string(f.value()));
+                }
+            }
+            REQUIRE(cookies.size() == 2);
+            auto has_cookie = [&](std::string_view name)
+            {
+                return std::find_if(cookies.begin(), cookies.end(), [&](std::string const& c)
+                                    { return c.rfind(name, 0) == 0; })
+                       != cookies.end();
+            };
+            REQUIRE(has_cookie("sid="));
+            REQUIRE(has_cookie("theme="));
+            bool leaked = std::any_of(cookies.begin(), cookies.end(), [](std::string const& c)
+                                      { return c.find("upstream.internal") != std::string::npos; });
+            // The upstream's internal Domain must not leak to the public client;
+            // with an IP public host it is dropped so the cookie stays host-only.
+            REQUIRE_FALSE(leaked);
+            bool domain_set = std::any_of(cookies.begin(), cookies.end(), [](std::string const& c)
+                                          { return c.find("Domain=") != std::string::npos; });
+            REQUIRE_FALSE(domain_set);
+            auto sid = has_cookie("sid=") ? *std::find_if(cookies.begin(), cookies.end(), [](std::string const& c)
+                                                          { return c.rfind("sid=", 0) == 0; })
+                                          : std::string();
+            REQUIRE(sid.find("Path=/api") != std::string::npos);
+        });
+}
+
+TEST_CASE("proxy: Set-Cookie Domain rewritten to public hostname", "[proxy]")
+{
+    net::io_context ioc;
+
+    std::unique_ptr<server::http_server> upstream;
+    std::unique_ptr<server::http_server> proxy;
+    std::string received;
+
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            upstream = std::make_unique<server::http_server>(ioc.get_executor());
+            proxy = std::make_unique<server::http_server>(ioc.get_executor());
+            upstream->router().template set_http_handler<http::verb::get>(
+                "/set-cookie",
+                [](server::request&, server::response& resp)
+                {
+                    resp.base().insert(http::field::set_cookie, "sid=abc; Domain=upstream.internal; Path=/api");
+                    resp.set_string_content(std::string_view("ok"), "text/plain");
+                });
+            upstream->listen("127.0.0.1", 0);
+            proxy->listen("127.0.0.1", 0);
+            auto u_ep = upstream->local_endpoint();
+            proxy->set_reverse_proxy("/api/*", std::format("http://{}:{}", u_ep.address().to_string(), u_ep.port()));
+            upstream->run();
+            proxy->run();
+
+            tcp::socket sock(ioc.get_executor());
+            co_await sock.async_connect(proxy->local_endpoint(), net::use_awaitable);
+            std::string raw = "GET /api/set-cookie HTTP/1.1\r\nHost: api.example.com\r\nConnection: close\r\n\r\n";
+            co_await net::async_write(sock, net::buffer(raw), net::use_awaitable);
+
+            std::array<char, 8192> buf {};
+            for (;;)
+            {
+                boost::system::error_code ec;
+                auto n = co_await sock.async_read_some(net::buffer(buf), net::use_awaitable);
+                received.append(buf.data(), n);
+                if (received.find("\r\n\r\n") != std::string::npos)
+                {
+                    break;
+                }
+                if (ec == boost::asio::error::eof)
+                {
+                    break;
+                }
+            }
+            sock.close();
+            proxy->stop();
+            upstream->stop();
+        },
+        net::detached);
+
+    ioc.run();
+
+    REQUIRE(received.find("Set-Cookie: sid=abc;Domain=api.example.com;Path=/api") != std::string::npos);
+    REQUIRE(received.find("upstream.internal") == std::string::npos);
+}
+

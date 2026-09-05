@@ -1,6 +1,8 @@
 #include "reverse_proxy_impl.h"
 #include "httplib/util/misc.hpp"
 #include "proxy_util.hpp"
+#include <boost/algorithm/string/join.hpp>
+#include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string/trim.hpp>
 #include <boost/url.hpp>
 #include <spdlog/spdlog.h>
@@ -59,6 +61,71 @@ namespace httplib::server::detail
             for (auto const& token : connection_tokens)
             {
                 headers.erase(token);
+            }
+        }
+
+        /// The upstream sets a Set-Cookie Domain that points at its own (internal)
+        /// host, which the public client cannot see. Rewrite that attribute to the
+        /// host the client used to reach this proxy so the cookie still applies;
+        /// when the public host is not a valid cookie domain (IPv6 literal, or a
+        /// host:port) fall back to dropping the attribute so the cookie becomes
+        /// host-only and still scopes to the proxy's public host.
+        void
+        rewrite_set_cookie_domain(http::fields& headers, std::string_view public_host)
+        {
+            std::string public_domain;
+            if (public_host.find(']') == std::string_view::npos)
+            {
+                public_domain = std::string(public_host.substr(0, public_host.rfind(':')));
+                if (public_domain.empty())
+                {
+                    public_domain = std::string(public_host);
+                }
+            }
+            // A cookie Domain must be a bare hostname: no port and not an IP address.
+            bool usable = false;
+            if (!public_domain.empty() && public_domain.find(':') == std::string::npos)
+            {
+                boost::system::error_code ec;
+                (void)net::ip::make_address(public_domain, ec);
+                usable = static_cast<bool>(ec); // valid hostname => not an IP => usable
+            }
+
+            std::vector<std::string> rewritten;
+            for (auto const& f : headers)
+            {
+                if (f.name() != http::field::set_cookie)
+                {
+                    continue;
+                }
+                std::vector<std::string> attrs;
+                for (auto item : util::split(f.value(), ";"))
+                {
+                    auto pos = item.find('=');
+                    auto key = pos == std::string_view::npos ? std::string(item)
+                                                             : std::string(item.substr(0, pos));
+                    boost::algorithm::trim(key);
+                    if (boost::iequals(key, "Domain"))
+                    {
+                        // Replace with the public domain, or drop to make host-only.
+                        if (usable)
+                        {
+                            attrs.emplace_back(std::format("Domain={}", public_domain));
+                        }
+                        continue;
+                    }
+                    attrs.emplace_back(item);
+                }
+                rewritten.push_back(boost::algorithm::join(attrs, ";"));
+            }
+
+            if (!rewritten.empty())
+            {
+                headers.erase(http::field::set_cookie);
+                for (auto const& value : rewritten)
+                {
+                    headers.insert(http::field::set_cookie, value);
+                }
             }
         }
     } // namespace
@@ -283,6 +350,9 @@ namespace httplib::server::detail
         // Strip hop-by-hop headers before relaying to the client. Transfer-Encoding
         // is preserved because the relay streams the raw (possibly chunked) body.
         strip_hop_by_hop(response_hdrs);
+        // The upstream hosts cookies on its own internal domain; rebind them to
+        // the public host the client actually reached.
+        rewrite_set_cookie_domain(response_hdrs, req[http::field::host]);
 
         if (result >= http::status::moved_permanently && result <= http::status::permanent_redirect
             && result != http::status::not_modified)
