@@ -197,12 +197,16 @@ namespace httplib::server::middleware
 
     // ---- session_middleware ----
 
+    namespace
+    {
+        constexpr std::string_view session_new_tag = "httplib.session_middleware.new";
+    }
+
     class session_middleware::impl
     {
       public:
         session_config config_;
         std::shared_ptr<session_store> store_;
-        bool is_new_ = true;
 
         static std::string
         generate_id()
@@ -311,17 +315,15 @@ namespace httplib::server::middleware
         auto sid = jar.get(impl_->config_.cookie_name);
         auto sess = sid ? impl_->store_->load(*sid) : nullptr;
 
+        bool is_new = false;
         if (!sess)
         {
             sess = std::make_shared<session>(impl::generate_id());
-            impl_->is_new_ = true;
-        }
-        else
-        {
-            impl_->is_new_ = false;
+            is_new = true;
         }
 
         req.data().store<value_type>(std::move(sess));
+        req.data().store<bool>(session_new_tag, std::move(is_new));
         return true;
     }
 
@@ -329,10 +331,11 @@ namespace httplib::server::middleware
     session_middleware::after(request& req, response& resp)
     {
         auto sess = req.data().fetch<value_type>();
+        bool is_new = req.data().fetch<bool>(session_new_tag);
 
         impl_->store_->save(*sess);
 
-        if (impl_->is_new_ || sess->last_access() - sess->created() < std::chrono::seconds(1))
+        if (is_new || sess->last_access() - sess->created() < std::chrono::seconds(1))
         {
             impl::set_cookie(impl_->config_, *sess, resp);
         }

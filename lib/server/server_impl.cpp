@@ -212,11 +212,13 @@ namespace httplib::server
         logger()->trace("accept new connection [{}:{}]", remote_endp.address().to_string(), remote_endp.port());
 
         auto conn = std::make_shared<session>(std::move(sock), shared_from_this());
+        std::size_t session_count = 0;
         {
             std::lock_guard lck(session_mutex_);
             sessions_.insert(conn);
+            session_count = sessions_.size();
         }
-        logger()->trace("[session] running, total={}", sessions_.size());
+        logger()->trace("[session] running, total={}", session_count);
         try
         {
             co_await conn->run();
@@ -232,8 +234,9 @@ namespace httplib::server
         {
             std::lock_guard lck(session_mutex_);
             sessions_.erase(conn);
+            session_count = sessions_.size();
         }
-        logger()->trace("[session] done, total={}", sessions_.size());
+        logger()->trace("[session] done, total={}", session_count);
     }
 
     void

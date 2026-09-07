@@ -180,7 +180,7 @@ namespace httplib::client
         int max_redirects_ = 0;
 
         std::uint32_t header_limit_ = 65536;
-        std::uint64_t body_limit_ = std::numeric_limits<std::uint64_t>::max();
+        std::uint64_t body_limit_ = 1024ULL * 1024 * 1024;
 
         std::shared_ptr<spdlog::logger> default_logger_;
         std::shared_ptr<spdlog::logger> custom_logger_;
