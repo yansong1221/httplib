@@ -1230,9 +1230,10 @@ TEST_CASE("CONNECT: rejected by default", "[proxy]")
         },
         [](auto& client) -> net::awaitable<void>
         {
+            // 未注册任何 CONNECT 目标 => 路由未命中 => 404（默认拒绝，不会建立隧道）。
             auto resp = UNWRAP(
                 co_await client.async_send_request(httplib::client::request(http::verb::connect, "example.com:80")));
-            REQUIRE(resp.result() == http::status::method_not_allowed);
+            REQUIRE(resp.result() == http::status::not_found);
             co_return;
         });
 }
@@ -1253,6 +1254,8 @@ TEST_CASE("CONNECT: route handler can approve", "[proxy]")
                 {
                     REQUIRE(req.target() == "example.com:80");
                     handler_called = true;
+                    // CONNECT 与普通方法一致：必须显式给出 2xx 才会放行进入隧道。
+                    resp.set_empty_content(http::status::ok);
                     co_return;
                 });
         },
@@ -1303,6 +1306,7 @@ TEST_CASE("CONNECT: wildcard handler matches any target", "[proxy]")
                 [&](server::request& req, server::response& resp) -> net::awaitable<void>
                 {
                     handler_called = true;
+                    resp.set_empty_content(http::status::ok);
                     co_return;
                 });
         },
@@ -1323,14 +1327,105 @@ TEST_CASE("CONNECT: path-specific handlers don't interfere", "[proxy]")
         [](auto& server)
         {
             server.router().set_connect_handler("allowed.host:80",
-                                                [](server::request&, server::response&) -> net::awaitable<void>
-                                                { co_return; });
+                                                [](server::request&, server::response& resp) -> net::awaitable<void>
+                                                {
+                                                    resp.set_empty_content(http::status::ok);
+                                                    co_return;
+                                                });
         },
         [](auto& client) -> net::awaitable<void>
         {
+            // 只注册了 allowed.host:80；其它目标没有路由 => 404，不会被误放行。
             auto resp = UNWRAP(
                 co_await client.async_send_request(httplib::client::request(http::verb::connect, "other.host:80")));
-            REQUIRE(resp.result() == http::status::method_not_allowed);
+            REQUIRE(resp.result() == http::status::not_found);
+            co_return;
+        });
+}
+
+TEST_CASE("CONNECT: empty handler does not tunnel (explicit 2xx required)", "[proxy]")
+{
+    using test_common::run;
+    using test_common::setup_logger;
+
+    bool handler_called = false;
+
+    run(
+        [&](auto& server)
+        {
+            server.router().set_connect_handler(
+                "*",
+                [&](server::request&, server::response&) -> net::awaitable<void>
+                {
+                    handler_called = true;
+                    co_return;
+                });
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            // handler 未设置状态 => 响应保持默认 404 => 不满足 <300，拒绝建隧。
+            auto resp = UNWRAP(
+                co_await client.async_send_request(httplib::client::request(http::verb::connect, "any.host:443")));
+            REQUIRE(handler_called);
+            REQUIRE(resp.result() == http::status::not_found);
+            co_return;
+        });
+}
+
+TEST_CASE("CONNECT: global middleware, route Aspects and post-routing all run", "[proxy]")
+{
+    using test_common::run;
+    using test_common::setup_logger;
+
+    struct order_mw
+    {
+        std::string name;
+        std::shared_ptr<std::vector<std::string>> order;
+        bool
+        before(httplib::server::request&, httplib::server::response&)
+        {
+            order->push_back(name + "_before");
+            return true;
+        }
+        bool
+        after(httplib::server::request&, httplib::server::response&)
+        {
+            order->push_back(name + "_after");
+            return true;
+        }
+    };
+
+    auto order = std::make_shared<std::vector<std::string>>();
+    order_mw global { "global", order };
+
+    run(
+        [&](auto& server)
+        {
+            server.router().use(global);
+            server.router().set_post_routing_handler(
+                [order](httplib::server::request&, httplib::server::response&) -> net::awaitable<void>
+                {
+                    order->push_back("post_routing");
+                    co_return;
+                });
+            server.router().set_connect_handler(
+                "example.com:80",
+                [order](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+                {
+                    order->push_back("handler");
+                    resp.set_error_content(http::status::forbidden);
+                    co_return;
+                },
+                order_mw { "route", order });
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(
+                co_await client.async_send_request(httplib::client::request(http::verb::connect, "example.com:80")));
+            REQUIRE(resp.result() == http::status::forbidden);
+            REQUIRE(*order
+                    == std::vector<std::string> { "global_before", "route_before", "handler", "route_after",
+                                                  "global_after", "post_routing" });
             co_return;
         });
 }
@@ -1369,8 +1464,12 @@ TEST_CASE("CONNECT: tunnel forwards data bidirectionally", "[proxy]")
 
     httplib::server::http_server proxy(ioc.get_executor());
     proxy.router().set_connect_handler("*",
-                                       [](httplib::server::request&, httplib::server::response&) -> net::awaitable<void>
-                                       { co_return; });
+                                       [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+                                       {
+                                           // 显式放行：2xx 才会建立隧道。
+                                           resp.set_empty_content(http::status::ok);
+                                           co_return;
+                                       });
     proxy.listen("127.0.0.1", 0);
     auto proxy_ep = proxy.local_endpoint();
     proxy.run();

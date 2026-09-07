@@ -201,7 +201,7 @@ namespace httplib::server
 
     {
         boost::system::error_code ec;
-        auto& _router = (*server_impl_).router();
+        auto& _router = server_impl_->router();
 
         auto local_endp = stream_.socket().local_endpoint(ec);
         auto remote_endp = stream_.socket().remote_endpoint(ec);
@@ -231,36 +231,12 @@ namespace httplib::server
             auto const& header = header_parser->get();
             auto req_target = std::string(header.target());
 
-            if (header.method() == http::verb::connect)
-            {
-                auto req = request::impl::make_request(local_endp, remote_endp, std::move(header_parser->release()),
-                                                       stream_.is_ssl());
-                auto resp = response::impl::make_response(header.version(),
-                                                          header.keep_alive(),
-                                                          &stream_,
-                                                          server_impl_->write_timeout());
-                get_impl(resp).result(http::status::ok);
-
-                auto connect_handler = _router.query_connect_handler(req);
-                if (connect_handler)
-                {
-                    co_await (*connect_handler)(req, resp);
-                    if (resp.result_int() < 300)
-                    {
-                        co_return std::make_unique<http_proxy_task>(std::move(stream_), std::move(req), server_impl_);
-                    }
-                    co_await async_write(req, resp);
-                    co_return nullptr;
-                }
-                server_impl_->logger()->trace("CONNECT rejected, no handler for {}", req_target);
-                get_impl(resp).result(http::status::method_not_allowed);
-                co_await async_write(req, resp);
-                co_return nullptr;
-            }
             if (websocket::is_upgrade(header.base()))
             {
                 server_impl_->logger()->trace("ws upgrade {}", req_target);
-                auto req = request::impl::make_request(local_endp, remote_endp, std::move(header_parser->release()),
+                auto req = request::impl::make_request(local_endp,
+                                                       remote_endp,
+                                                       std::move(header_parser->release()),
                                                        stream_.is_ssl());
                 co_return std::make_unique<websocket_task>(websocket_stream(std::move(stream_)),
                                                            std::move(req),
@@ -271,7 +247,9 @@ namespace httplib::server
                                                       header.keep_alive(),
                                                       &stream_,
                                                       server_impl_->write_timeout());
-            auto req = request::impl::make_request(local_endp, remote_endp, http::request<http::empty_body>(header),
+            auto req = request::impl::make_request(local_endp,
+                                                   remote_endp,
+                                                   http::request<http::empty_body>(header),
                                                    stream_.is_ssl());
 
             auto h_start = std::chrono::steady_clock::time_point {};
@@ -282,7 +260,6 @@ namespace httplib::server
                 auto match = co_await _router.pre_routing(req);
                 if (!match.node)
                 {
-                    h_start = std::chrono::steady_clock::now();
                     switch (req.method())
                     {
                         case http::verb::get:
@@ -311,55 +288,58 @@ namespace httplib::server
                 }
                 else
                 {
-                    if (beast::iequals(header[http::field::expect], "100-continue"))
+                    if (header.method() != http::verb::connect)
                     {
-                        auto cont_resp = response::impl::make_response(header.version(), true);
-                        cont_resp.set_empty_content(http::status::continue_);
-                        if (!co_await async_write(req, cont_resp))
+                        if (beast::iequals(header[http::field::expect], "100-continue"))
                         {
-                            co_return nullptr;
-                        }
-                    }
-
-                    if (match.lazy)
-                    {
-                        get_impl(req).setup_lazy_reading(stream_,
-                                                         buffer_,
-                                                         std::move(header_parser),
-                                                         server_impl_->read_timeout(),
-                                                         (*server_impl_).upload_dir(),
-                                                         (*server_impl_).upload_file_limit());
-                    }
-                    else
-                    {
-                        boost::system::error_code ec;
-                        http::request_parser<body::any_body> body_parser(std::move(*header_parser));
-
-                        if (!(*server_impl_).upload_dir().empty())
-                        {
-                            auto ct = body_parser.get()[http::field::content_type];
-                            if (ct.starts_with("multipart/form-data"))
+                            auto cont_resp = response::impl::make_response(header.version(), true);
+                            cont_resp.set_empty_content(http::status::continue_);
+                            if (!co_await async_write(req, cont_resp))
                             {
-                                auto& body = body_parser.get().body();
-                                body = body::form_data_body::value_type {};
-                                auto& fd = std::get<body::form_data_body::value_type>(body);
-                                fd.save_dir = (*server_impl_).upload_dir();
-                                fd.max_file_size = (*server_impl_).upload_file_limit();
-                            }
-                        }
-
-                        while (!body_parser.is_done())
-                        {
-                            stream_.expires_after(server_impl_->read_timeout());
-                            co_await http::async_read_some(stream_, buffer_, body_parser, util::net_awaitable[ec]);
-                            stream_.expires_never();
-                            if (ec)
-                            {
-                                server_impl_->logger()->trace("read http body failed: {}", ec.message());
                                 co_return nullptr;
                             }
                         }
-                        get_impl(req).body() = std::move(body_parser.release().body());
+
+                        if (match.lazy)
+                        {
+                            get_impl(req).setup_lazy_reading(stream_,
+                                                             buffer_,
+                                                             std::move(header_parser),
+                                                             server_impl_->read_timeout(),
+                                                             server_impl_->upload_dir(),
+                                                             server_impl_->upload_file_limit());
+                        }
+                        else
+                        {
+                            boost::system::error_code ec;
+                            http::request_parser<body::any_body> body_parser(std::move(*header_parser));
+
+                            if (!server_impl_->upload_dir().empty())
+                            {
+                                auto ct = body_parser.get()[http::field::content_type];
+                                if (ct.starts_with("multipart/form-data"))
+                                {
+                                    auto& body = body_parser.get().body();
+                                    body = body::form_data_body::value_type {};
+                                    auto& fd = std::get<body::form_data_body::value_type>(body);
+                                    fd.save_dir = (*server_impl_).upload_dir();
+                                    fd.max_file_size = (*server_impl_).upload_file_limit();
+                                }
+                            }
+
+                            while (!body_parser.is_done())
+                            {
+                                stream_.expires_after(server_impl_->read_timeout());
+                                co_await http::async_read_some(stream_, buffer_, body_parser, util::net_awaitable[ec]);
+                                stream_.expires_never();
+                                if (ec)
+                                {
+                                    server_impl_->logger()->trace("read http body failed: {}", ec.message());
+                                    co_return nullptr;
+                                }
+                            }
+                            get_impl(req).body() = std::move(body_parser.release().body());
+                        }
                     }
 
                     h_start = std::chrono::steady_clock::now();
@@ -392,6 +372,16 @@ namespace httplib::server
                                               log_endp_format);
                 get_impl(resp).keep_alive(false);
                 resp.set_error_content(http::status::internal_server_error);
+            }
+
+            if (header.method() == http::verb::connect)
+            {
+                // 放行(<300)进入隧道；否则回写拒绝响应后结束本会话（不再继续读下一个请求）。
+                if (resp.result_int() < 300)
+                {
+                    co_return std::make_unique<http_proxy_task>(std::move(stream_), std::move(req), server_impl_);
+                }
+                get_impl(resp).keep_alive(false);
             }
 
             if (!co_await async_write(req, resp))

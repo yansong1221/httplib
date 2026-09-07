@@ -65,8 +65,8 @@ namespace httplib::server
         template <typename Func>
         void set_post_routing_handler(Func&& handler);
 
-        template <typename Func>
-        void set_connect_handler(std::string_view key, Func&& handler);
+        template <typename Func, typename... Aspects>
+        void set_connect_handler(std::string_view key, Func&& handler, Aspects&&... asps);
 
       protected:
         using coro_http_handler_type = std::function<net::awaitable<void>(request& req, response& resp)>;
@@ -85,8 +85,6 @@ namespace httplib::server
                                          websocket_conn::coro_close_handler_type&& close_handler)
             = 0;
         virtual void set_post_routing_handler_impl(coro_http_handler_type&& handler) = 0;
-
-        virtual void set_connect_handler_impl(std::string_view key, coro_http_handler_type&& handler) = 0;
 
         virtual void set_lazy_http_handler_impl(http::verb method,
                                                 std::string_view key,

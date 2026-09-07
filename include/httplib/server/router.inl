@@ -243,12 +243,12 @@ namespace httplib::server
         set_post_routing_handler_impl(std::move(coro_handler));
     }
 
-    template <typename Func>
+    template <typename Func, typename... Aspects>
     void
-    router::set_connect_handler(std::string_view key, Func&& handler)
+    router::set_connect_handler(std::string_view key, Func&& handler, Aspects&&... asps)
     {
-        auto coro_handler = util::make_coro_handler(std::forward<Func>(handler));
-        set_connect_handler_impl(key, std::move(coro_handler));
+        // CONNECT 只是路由表中的一个普通动词：与其它 HTTP 方法共用注册/匹配/中间件管线。
+        set_http_handler(http::verb::connect, key, std::forward<Func>(handler), std::forward<Aspects>(asps)...);
     }
 
     template <typename Func, typename... Aspects>

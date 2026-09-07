@@ -49,7 +49,6 @@ namespace httplib::server
             std::unordered_map<http::verb, coro_http_handler_type> handlers;
             std::unordered_map<http::verb, coro_http_handler_type> lazy_handlers;
             std::optional<ws_handler_entry> ws_handler;
-            std::optional<coro_http_handler_type> connect_handler;
 
             util::string_map<std::unique_ptr<Node>> static_children;
             std::vector<std::unique_ptr<Node>> param_children;
@@ -58,8 +57,6 @@ namespace httplib::server
         };
 
         std::optional<ws_handler_entry> query_ws_handler(request& req) const;
-
-        std::optional<coro_http_handler_type> query_connect_handler(request& req) const;
 
         net::awaitable<route_match> pre_routing(request& req) const;
         net::awaitable<void> post_routing(request& req, response& resp) const;
@@ -74,7 +71,6 @@ namespace httplib::server
                                  websocket_conn::coro_message_handler_type&& message_handler,
                                  websocket_conn::coro_close_handler_type&& close_handler) override;
         void set_post_routing_handler_impl(coro_http_handler_type&& handler) override;
-        void set_connect_handler_impl(std::string_view key, coro_http_handler_type&& handler) override;
         void set_lazy_http_handler_impl(http::verb method,
                                         std::string_view key,
                                         coro_http_handler_type&& handler) override;
