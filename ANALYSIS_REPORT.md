@@ -217,10 +217,14 @@ file_stream_.open(current_file_path_, std::ios::out | std::ios::binary | std::io
 
 #### CL-01：HTTP 客户端的失败重试可能发送残缺请求
 
-`async_write` 在部分数据已经写出后遇到 retryable error，会关闭连接并递归复用同一个已推进的 Beast serializer。新连接可能只发送请求剩余部分，而不是完整请求。
+> 状态：✅ **已修复**（复查 2026-09-07）
+
+~~`async_write` 在部分数据已经写出后遇到 retryable error，会关闭连接并递归复用同一个已推进的 Beast serializer。新连接可能只发送请求剩余部分，而不是完整请求。~~
+
+现状（[lib/client/client_impl.h](lib/client/client_impl.h#L90)）：写入循环中追踪 `bytes_written` 标志，仅在 `retryable && !bytes_written` 时允许重试——即连接建立后未发送任何字节（如连接刚建立即 reset）才会重试；一旦有任何字节成功写入，连接状态已不可恢复，重试将产生残缺请求，此时直接返回错误，由调用方决定后续策略。
 
 - 位置：[lib/client/client_impl.h](lib/client/client_impl.h#L81)
-- 建议：只有在确认尚未发送任何字节且方法可安全重试时才自动重试；重试必须重建 request 和 serializer。
+- 建议：~~只有在确认尚未发送任何字节且方法可安全重试时才自动重试；重试必须重建 request 和 serializer~~ 已落实；后续可讨论更高层（调用方重建 request+serializer）的透明重试。
 
 #### CL-02：跨域重定向可能泄漏认证信息
 
@@ -377,7 +381,7 @@ with any of the following names:
 ### P1：进入生产压测前完成
 
 1. 明确 executor/strand 模型，消除 server sessions、Session middleware、socket stop、client 并发读写等数据竞争。
-2. 修复客户端部分写入重试和 downloader 重定向连接复用。
+2. ~~修复客户端部分写入重试和 downloader 重定向连接复用~~ → 客户端重试已修复（仅零字节时允许重试）。
 3. ~~跨 origin 重定向删除敏感 header，禁止非授权协议降级~~ → 已修复（client + downloader，含回归测试）。
 4. 重构 cache key 和 HTTP cache policy。
 5. ~~完整实现代理 hop-by-hop、Cookie/Set-Cookie 和 Forwarded header 语义~~ → 已修复。

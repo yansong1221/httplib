@@ -98,6 +98,7 @@ namespace httplib::client
                 co_return ec;
             }
 
+            bool bytes_written = false;
             serializer.split(headers_only);
             while (headers_only ? !serializer.is_header_done() : !serializer.is_done())
             {
@@ -111,10 +112,12 @@ namespace httplib::client
                     }
                     break;
                 }
+                bytes_written = true;
                 end_io();
             }
 
-            if (is_retryable(ec) && retry)
+            // CL-01: 仅在未发送任何字节时才重试（否则新连接上只发剩余部分，形成残缺请求）
+            if (is_retryable(ec) && retry && !bytes_written)
             {
                 close();
                 logger()->trace("retrying request...");
