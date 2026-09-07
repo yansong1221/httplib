@@ -158,6 +158,17 @@ namespace httplib::db
             co_await node->async_wait(util::net_awaitable[ec]);
         } while (deadline > std::chrono::steady_clock::now());
 
+        {
+            std::lock_guard<std::mutex> lock(self->mutex_);
+            self->logger()->warn(
+                "db pool acquire timed out after {}ms: active={} idle={} validating={} total={} max={}",
+                std::chrono::duration_cast<std::chrono::milliseconds>(wait_timeout).count(),
+                self->active_count_,
+                self->idle_.size(),
+                self->validating_,
+                self->total_locked(),
+                self->cfg_.max_connections);
+        }
         throw pool_timeout_error();
     }
 

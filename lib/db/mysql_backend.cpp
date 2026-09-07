@@ -289,11 +289,9 @@ namespace httplib::db::detail
         {
             return false;
         }
-        // 取消/超时（operation_aborted）不是断连：连接对象仍可复用。
-        if (ec == net::error::operation_aborted)
-        {
-            return false;
-        }
+        // 取消/超时（operation_aborted）后协议状态未知，不能安全复用：
+        // 可能是网络半开（服务端已回收连接）导致的挂起被 query_timeout 掐断，
+        // 复用会再次无限等待，因此视同断连，交给池剔除。ping 走独立路径自行判活。
         return true;
     }
 
@@ -442,7 +440,18 @@ namespace httplib::db::detail
         boost::mysql::diagnostics diag;
         boost::system::error_code ec;
         boost::mysql::results data;
-        co_await conn_->async_execute(sql, data, diag, net::redirect_error(net::use_awaitable, ec));
+        if (cfg_.query_timeout.count() > 0)
+        {
+            co_await conn_->async_execute(sql,
+                                          data,
+                                          diag,
+                                          net::redirect_error(net::cancel_after(cfg_.query_timeout, net::use_awaitable),
+                                                              ec));
+        }
+        else
+        {
+            co_await conn_->async_execute(sql, data, diag, net::redirect_error(net::use_awaitable, ec));
+        }
         raise_error(ec, diag, sql);
 
         co_return build_result(std::move(data), utc_offset_);
@@ -453,9 +462,21 @@ namespace httplib::db::detail
     {
         boost::mysql::diagnostics diag;
         boost::system::error_code ec;
-        auto stmt = co_await conn_->async_prepare_statement(sql, diag, net::redirect_error(net::use_awaitable, ec));
-        raise_error(ec, diag, sql);
-        co_return statement_handle { std::make_shared<boost::mysql::statement>(std::move(stmt)) };
+        statement_handle handle;
+        if (cfg_.query_timeout.count() > 0)
+        {
+            auto stmt = co_await conn_->async_prepare_statement(
+                sql, diag, net::redirect_error(net::cancel_after(cfg_.query_timeout, net::use_awaitable), ec));
+            raise_error(ec, diag, sql);
+            handle = statement_handle { std::make_shared<boost::mysql::statement>(std::move(stmt)) };
+        }
+        else
+        {
+            auto stmt = co_await conn_->async_prepare_statement(sql, diag, net::redirect_error(net::use_awaitable, ec));
+            raise_error(ec, diag, sql);
+            handle = statement_handle { std::make_shared<boost::mysql::statement>(std::move(stmt)) };
+        }
+        co_return handle;
     }
 
     net::awaitable<result>
@@ -473,16 +494,40 @@ namespace httplib::db::detail
         }
 
         boost::mysql::results data;
-        if (views.empty())
+        if (cfg_.query_timeout.count() > 0)
         {
-            co_await conn_->async_execute(stmt->bind(), data, diag, net::redirect_error(net::use_awaitable, ec));
+            if (views.empty())
+            {
+                co_await conn_->async_execute(stmt->bind(),
+                                              data,
+                                              diag,
+                                              net::redirect_error(net::cancel_after(cfg_.query_timeout,
+                                                                                    net::use_awaitable),
+                                                                  ec));
+            }
+            else
+            {
+                co_await conn_->async_execute(stmt->bind(views.begin(), views.end()),
+                                              data,
+                                              diag,
+                                              net::redirect_error(net::cancel_after(cfg_.query_timeout,
+                                                                                    net::use_awaitable),
+                                                                  ec));
+            }
         }
         else
         {
-            co_await conn_->async_execute(stmt->bind(views.begin(), views.end()),
-                                          data,
-                                          diag,
-                                          net::redirect_error(net::use_awaitable, ec));
+            if (views.empty())
+            {
+                co_await conn_->async_execute(stmt->bind(), data, diag, net::redirect_error(net::use_awaitable, ec));
+            }
+            else
+            {
+                co_await conn_->async_execute(stmt->bind(views.begin(), views.end()),
+                                              data,
+                                              diag,
+                                              net::redirect_error(net::use_awaitable, ec));
+            }
         }
         raise_error(ec, diag);
 
@@ -499,9 +544,19 @@ namespace httplib::db::detail
             boost::mysql::diagnostics close_diag;
             try
             {
-                co_await conn_->async_close_statement(*stmt,
-                                                      close_diag,
-                                                      net::redirect_error(net::use_awaitable, close_ec));
+                if (cfg_.query_timeout.count() > 0)
+                {
+                    co_await conn_->async_close_statement(
+                        *stmt, close_diag, net::redirect_error(net::cancel_after(cfg_.query_timeout,
+                                                                                  net::use_awaitable),
+                                                               close_ec));
+                }
+                else
+                {
+                    co_await conn_->async_close_statement(*stmt,
+                                                          close_diag,
+                                                          net::redirect_error(net::use_awaitable, close_ec));
+                }
             }
             catch (...)
             {
@@ -519,7 +574,18 @@ namespace httplib::db::detail
         boost::mysql::results r;
         boost::mysql::diagnostics diag;
         boost::system::error_code ec;
-        co_await conn_->async_execute("START TRANSACTION", r, diag, net::redirect_error(net::use_awaitable, ec));
+        if (cfg_.query_timeout.count() > 0)
+        {
+            co_await conn_->async_execute("START TRANSACTION",
+                                          r,
+                                          diag,
+                                          net::redirect_error(net::cancel_after(cfg_.query_timeout, net::use_awaitable),
+                                                              ec));
+        }
+        else
+        {
+            co_await conn_->async_execute("START TRANSACTION", r, diag, net::redirect_error(net::use_awaitable, ec));
+        }
         raise_error(ec, diag);
         co_return;
     }
@@ -530,7 +596,18 @@ namespace httplib::db::detail
         boost::mysql::results r;
         boost::mysql::diagnostics diag;
         boost::system::error_code ec;
-        co_await conn_->async_execute("COMMIT", r, diag, net::redirect_error(net::use_awaitable, ec));
+        if (cfg_.query_timeout.count() > 0)
+        {
+            co_await conn_->async_execute("COMMIT",
+                                          r,
+                                          diag,
+                                          net::redirect_error(net::cancel_after(cfg_.query_timeout, net::use_awaitable),
+                                                              ec));
+        }
+        else
+        {
+            co_await conn_->async_execute("COMMIT", r, diag, net::redirect_error(net::use_awaitable, ec));
+        }
         raise_error(ec, diag);
         co_return;
     }
@@ -541,7 +618,18 @@ namespace httplib::db::detail
         boost::mysql::results r;
         boost::mysql::diagnostics diag;
         boost::system::error_code ec;
-        co_await conn_->async_execute("ROLLBACK", r, diag, net::redirect_error(net::use_awaitable, ec));
+        if (cfg_.query_timeout.count() > 0)
+        {
+            co_await conn_->async_execute("ROLLBACK",
+                                          r,
+                                          diag,
+                                          net::redirect_error(net::cancel_after(cfg_.query_timeout, net::use_awaitable),
+                                                              ec));
+        }
+        else
+        {
+            co_await conn_->async_execute("ROLLBACK", r, diag, net::redirect_error(net::use_awaitable, ec));
+        }
         raise_error(ec, diag);
         co_return;
     }
@@ -562,6 +650,7 @@ namespace httplib::db::detail
                              cfg.time_zone = opts.get_or("time_zone", cfg.time_zone);
                              cfg.connect_timeout = opts.as_seconds("connect_timeout").value_or(cfg.connect_timeout);
                              cfg.ping_timeout = opts.as_seconds("ping_timeout").value_or(cfg.ping_timeout);
+                             cfg.query_timeout = opts.as_seconds("query_timeout").value_or(cfg.query_timeout);
                              cfg.ssl = opts.as_bool("ssl").value_or(cfg.ssl);
                              return std::make_unique<mysql_backend>(ex, std::move(cfg));
                          });
