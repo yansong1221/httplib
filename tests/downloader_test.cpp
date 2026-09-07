@@ -249,6 +249,89 @@ TEST_CASE("Downloader: redirect follow", "[downloader]")
     fs::remove(dl_path);
 }
 
+TEST_CASE("Downloader: strips sensitive headers on cross-origin redirect", "[downloader]")
+{
+    auto srv_path = fs::temp_directory_path() / "httplib_dl_cross_srv.txt";
+    {
+        std::ofstream f(srv_path, std::ios::binary);
+        f << "cross-origin-ok\n";
+    }
+    auto dl_path = fs::temp_directory_path() / "httplib_dl_cross_out.bin";
+
+    net::io_context ioc;
+    httplib::server::http_server target { ioc };
+    httplib::server::http_server origin { ioc };
+    std::thread worker;
+    std::atomic<bool> leaked_auth = false;
+    std::atomic<bool> leaked_cookie = false;
+    std::atomic<int> target_hits = 0;
+    auto null_sink = std::make_shared<spdlog::sinks::null_sink_mt>();
+
+    target.set_logger(std::make_shared<spdlog::logger>("t", null_sink));
+    origin.set_logger(std::make_shared<spdlog::logger>("o", null_sink));
+    target.router().set_http_handler<http::verb::get>(
+        "/target",
+        [&](httplib::server::request& req, httplib::server::response& resp)
+        {
+            ++target_hits;
+            leaked_auth = req.has(http::field::authorization);
+            leaked_cookie = req.has(http::field::cookie);
+            resp.set_file_content(srv_path);
+        });
+    target.router().set_http_handler<http::verb::head>(
+        "/target",
+        [&](httplib::server::request& req, httplib::server::response& resp)
+        {
+            leaked_auth = req.has(http::field::authorization);
+            leaked_cookie = req.has(http::field::cookie);
+            resp.set(http::field::content_length, "17");
+            resp.set(http::field::accept_ranges, "bytes");
+        });
+
+    target.listen("127.0.0.1", 0);
+    auto target_port = target.local_endpoint().port();
+    origin.router().set_http_handler<http::verb::get>(
+        "/start",
+        [&](httplib::server::request&, httplib::server::response& resp)
+        { resp.set_redirect(std::format("http://127.0.0.1:{}/target", target_port), http::status::found); });
+    origin.router().set_http_handler<http::verb::head>(
+        "/start",
+        [&](httplib::server::request&, httplib::server::response& resp)
+        {
+            resp.set(http::field::location, std::format("http://127.0.0.1:{}/target", target_port));
+            resp.set_empty_content(http::status::found);
+        });
+    origin.listen("127.0.0.1", 0);
+
+    auto pool = std::make_shared<httplib::client::http_client_pool>(ioc.get_executor(),
+                                                                    httplib::client::pool_params { .max_size = 8 });
+    pool->start();
+    target.run();
+    origin.run();
+    worker = std::thread([&] { ioc.run(); });
+
+    httplib::client::downloader dl(ioc, pool);
+    http::fields headers;
+    headers.set(http::field::authorization, "Bearer secret");
+    headers.set(http::field::cookie, "session=abc");
+    dl.set_config({ .max_redirects = 5 });
+    auto ec = dl.download(std::format("http://127.0.0.1:{}/start", origin.local_endpoint().port()), dl_path, headers);
+    REQUIRE_FALSE(ec);
+    REQUIRE(read_file(dl_path) == "cross-origin-ok\n");
+    REQUIRE(target_hits.load() >= 1);
+    REQUIRE_FALSE(leaked_auth.load());
+    REQUIRE_FALSE(leaked_cookie.load());
+
+    pool->stop();
+    origin.stop();
+    target.stop();
+    ioc.stop();
+    worker.join();
+
+    fs::remove(srv_path);
+    fs::remove(dl_path);
+}
+
 TEST_CASE("Downloader: resume partial download", "[downloader]")
 {
     auto server_path = fs::temp_directory_path() / "httplib_dl_resume_srv.bin";

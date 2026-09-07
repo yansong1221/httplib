@@ -867,6 +867,69 @@ TEST_CASE("client: redirect full URL", "[client]")
         });
 }
 
+TEST_CASE("client: strips sensitive headers on cross-origin redirect", "[client]")
+{
+    net::thread_pool pool { 2 };
+    std::exception_ptr err;
+    std::atomic<bool> leaked_auth = false;
+    std::atomic<bool> leaked_cookie = false;
+
+    net::co_spawn(
+        pool.get_executor(),
+        [&]() -> net::awaitable<void>
+        {
+            httplib::server::http_server target(pool.get_executor());
+            setup_logger(target);
+            target.router().template set_http_handler<http::verb::get>(
+                "/target",
+                [&](httplib::server::request& req, httplib::server::response& resp)
+                {
+                    leaked_auth = req.has(http::field::authorization);
+                    leaked_cookie = req.has(http::field::cookie);
+                    resp.set_string_content("target-ok"sv, "text/plain");
+                });
+            target.listen("127.0.0.1", 0);
+            auto target_port = target.local_endpoint().port();
+            target.run();
+
+            httplib::server::http_server origin(pool.get_executor());
+            setup_logger(origin);
+            origin.router().template set_http_handler<http::verb::get>(
+                "/start",
+                [&](httplib::server::request&, httplib::server::response& resp)
+                {
+                    resp.set_redirect(std::format("http://127.0.0.1:{}/target", target_port), http::status::found);
+                });
+            origin.listen("127.0.0.1", 0);
+            auto origin_port = origin.local_endpoint().port();
+            origin.run();
+
+            httplib::client::http_client client(pool.get_executor(), "127.0.0.1", origin_port);
+            client.set_timeout(std::chrono::seconds(5));
+            client.set_max_redirects(2);
+
+            auto req = httplib::client::request(http::verb::get, "/start");
+            req.set(http::field::authorization, "Bearer secret");
+            req.set(http::field::cookie, "session=abc");
+            auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
+            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.as_string() == "target-ok");
+            REQUIRE_FALSE(leaked_auth.load());
+            REQUIRE_FALSE(leaked_cookie.load());
+
+            client.close();
+            origin.stop();
+            target.stop();
+        },
+        [&](std::exception_ptr e) { err = e; });
+
+    pool.join();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
 // ===========================================================================
 // Error paths
 // ===========================================================================

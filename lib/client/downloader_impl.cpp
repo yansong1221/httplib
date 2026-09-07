@@ -540,6 +540,15 @@ namespace httplib::client
                 auto rt = parse_redirect(resp.headers());
                 if (rt.has_value() && rt->valid)
                 {
+                    // CL-02: 仅当 Location 为绝对 URL 且 origin 变化时移除敏感头，避免凭据泄露；
+                    // 相对 Location 或同 origin 重定向保留原头。
+                    if (!rt->host.empty() && (rt->host != h || rt->port != p || rt->ssl != s))
+                    {
+                        merged.erase(http::field::authorization);
+                        merged.erase(http::field::proxy_authorization);
+                        merged.erase(http::field::cookie);
+                        merged.erase(http::field::cookie2);
+                    }
                     h = rt->host.empty() ? h : rt->host;
                     p = rt->port == 0 ? p : rt->port;
                     s = rt->ssl;

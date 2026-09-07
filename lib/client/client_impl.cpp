@@ -169,6 +169,12 @@ namespace httplib::client
 
                     if (new_host != host_ || new_port != port_ || new_ssl != use_ssl_)
                     {
+                        // CL-02: 跨 origin 重定向时移除 origin-bound 敏感头，避免认证凭据泄露到新主机
+                        req.erase(http::field::authorization);
+                        req.erase(http::field::proxy_authorization);
+                        req.erase(http::field::cookie);
+                        req.erase(http::field::cookie2);
+
                         req.target(u.encoded_target().empty() ? "/" : u.encoded_target());
 
                         auto new_impl = std::make_shared<impl>(executor_, std::move(new_host), new_port, new_ssl);
