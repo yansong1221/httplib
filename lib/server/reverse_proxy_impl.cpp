@@ -102,8 +102,7 @@ namespace httplib::server::detail
                 for (auto item : util::split(f.value(), ";"))
                 {
                     auto pos = item.find('=');
-                    auto key = pos == std::string_view::npos ? std::string(item)
-                                                             : std::string(item.substr(0, pos));
+                    auto key = pos == std::string_view::npos ? std::string(item) : std::string(item.substr(0, pos));
                     boost::algorithm::trim(key);
                     if (boost::iequals(key, "Domain"))
                     {
@@ -132,12 +131,12 @@ namespace httplib::server::detail
 
     reverse_proxy_context::reverse_proxy_context(std::shared_ptr<client::http_client_pool> pool,
                                                  std::string prefix,
-                                                 http_server::proxy_resolver resolver,
+                                                 std::shared_ptr<upstream_provider> provider,
                                                  http_server::proxy_interceptor_factory factory,
                                                  std::shared_ptr<spdlog::logger> logger)
         : pool_(std::move(pool))
         , prefix_(std::move(prefix))
-        , resolver_(std::move(resolver))
+        , provider_(std::move(provider))
         , factory_(std::move(factory))
         , logger_(std::move(logger))
     {
@@ -171,10 +170,10 @@ namespace httplib::server::detail
     {
         interceptor_ = factory_ ? factory_(req) : nullptr;
 
-        auto result = co_await resolve_upstream(resolver_, req, prefix_, false);
+        auto result = co_await resolve_upstream(provider_, req, prefix_, false);
         if (result.rc == upstream_resolve_rc::no_target)
         {
-            logger_->trace("[proxy] resolver returned null target");
+            logger_->trace("[proxy] provider is null");
             resp.set_error_content(http::status::bad_gateway);
             co_return false;
         }

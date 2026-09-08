@@ -67,14 +67,6 @@ namespace httplib::server
         void set_header_limit(std::uint32_t limit);
         void set_body_limit(std::uint64_t limit);
 
-        class proxy_target
-        {
-          public:
-            virtual ~proxy_target() = default;
-            virtual std::string const& url() const = 0;
-        };
-
-        using proxy_resolver = std::function<net::awaitable<std::shared_ptr<proxy_target>>(request& req)>;
         using proxy_interceptor_factory = std::function<std::shared_ptr<proxy_interceptor>(request& req)>;
         using ws_interceptor_factory = std::function<std::shared_ptr<ws_interceptor>(request& req)>;
 
@@ -82,7 +74,7 @@ namespace httplib::server
                                std::string_view url,
                                proxy_interceptor_factory factory = nullptr);
         void set_reverse_proxy(std::string_view location,
-                               proxy_resolver resolver,
+                               std::shared_ptr<upstream_provider> provider,
                                proxy_interceptor_factory factory = nullptr);
         void set_reverse_proxy(std::string_view location,
                                std::vector<upstream_backend> backends,
@@ -91,7 +83,7 @@ namespace httplib::server
 
         void set_ws_forward(std::string_view location, std::string_view url, ws_interceptor_factory factory = nullptr);
         void set_ws_forward(std::string_view location,
-                            proxy_resolver resolver,
+                            std::shared_ptr<upstream_provider> provider,
                             ws_interceptor_factory factory = nullptr);
         void set_ws_forward(std::string_view location,
                             std::vector<upstream_backend> backends,
@@ -109,4 +101,5 @@ namespace httplib::server
 
         std::shared_ptr<impl> impl_;
     };
+
 } // namespace httplib::server

@@ -44,7 +44,7 @@ namespace httplib::server::detail
       public:
         ws_forward_context(net::any_io_executor const& ex,
                            std::string prefix,
-                           http_server::proxy_resolver resolver,
+                           std::shared_ptr<upstream_provider> provider,
                            http_server::ws_interceptor_factory factory,
                            std::shared_ptr<spdlog::logger> logger);
 
@@ -67,7 +67,7 @@ namespace httplib::server::detail
       private:
         net::any_io_executor ex_;
         std::string prefix_;
-        http_server::proxy_resolver resolver_;
+        std::shared_ptr<upstream_provider> provider_;
         http_server::ws_interceptor_factory factory_;
         std::shared_ptr<spdlog::logger> logger_;
 

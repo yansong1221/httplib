@@ -62,34 +62,26 @@ namespace httplib::server::detail
         return result;
     }
 
-    /// Fixed-URL proxy target backing the URL convenience overloads.
-    class static_proxy_target final : public http_server::proxy_target
+    /// \brief Provider that always yields a fixed upstream URL.
+    class static_upstream_provider final : public upstream_provider
     {
       public:
-        explicit static_proxy_target(std::string url) : url_(std::move(url)) {}
-        std::string const&
-        url() const override
+        explicit static_upstream_provider(std::string url) : url_(std::move(url)) {}
+
+        net::awaitable<std::string>
+        url(request&) override
         {
-            return url_;
+            co_return url_;
         }
 
       private:
         std::string url_;
     };
 
-    /// Wraps a fixed upstream URL into a resolver that always yields it.
-    inline http_server::proxy_resolver
-    make_static_resolver(std::string url)
-    {
-        auto target = std::make_shared<static_proxy_target>(std::move(url));
-        return [target = std::move(target)](request&) -> net::awaitable<std::shared_ptr<http_server::proxy_target>>
-        { co_return target; };
-    }
-
-    /// Transport-neutral description of an upstream endpoint derived from a proxy_target URL.
+    /// Transport-neutral description of an upstream endpoint derived from a provided URL.
     struct parsed_upstream
     {
-        std::string raw_url; // the URL string returned by the resolver (for diagnostics)
+        std::string raw_url; // the URL string returned by the provider (for diagnostics)
         std::string host;
         std::string scheme;
         uint16_t port = 80;
@@ -102,8 +94,8 @@ namespace httplib::server::detail
     enum class upstream_resolve_rc
     {
         ok,
-        no_target, // resolver returned null
-        bad_url    // resolver URL failed to parse
+        no_target, // provider is null
+        bad_url    // provider returned a URL that failed to parse
     };
 
     struct upstream_resolve_result
@@ -112,23 +104,25 @@ namespace httplib::server::detail
         parsed_upstream value;
     };
 
-    /// Resolves the upstream target and parses its URL in one step.
+    /// Resolves the upstream URL by asking the provider and parses it in one step.
     ///
     /// \param websocket Whether the caller speaks WebSocket semantics: affects the
     ///                  TLS detection (wss counts) and the scheme of the built URL.
     inline net::awaitable<upstream_resolve_result>
-    resolve_upstream(http_server::proxy_resolver const& resolver, request& req, std::string_view prefix, bool websocket)
+    resolve_upstream(std::shared_ptr<upstream_provider> const& provider,
+                     request& req,
+                     std::string_view prefix,
+                     bool websocket)
     {
         upstream_resolve_result out;
 
-        auto target = co_await resolver(req);
-        if (!target)
+        if (!provider)
         {
             out.rc = upstream_resolve_rc::no_target;
             co_return out;
         }
 
-        auto const& url = target->url();
+        auto url = co_await provider->url(req);
         out.value.raw_url = url;
 
         auto r = boost::urls::parse_uri(url);

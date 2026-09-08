@@ -12,8 +12,8 @@
 #include "response_impl.hpp"
 #include "reverse_proxy_impl.h"
 #include "upstream_group.hpp"
-#include "ws_forward_impl.h"
 #include "util/logging.hpp"
+#include "ws_forward_impl.h"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/asio/use_future.hpp>
@@ -371,7 +371,9 @@ namespace httplib::server
                                          std::string_view upstream_url,
                                          http_server::proxy_interceptor_factory factory)
     {
-        set_reverse_proxy(location, detail::make_static_resolver(std::string(upstream_url)), std::move(factory));
+        set_reverse_proxy(location,
+                          std::make_shared<detail::static_upstream_provider>(std::string(upstream_url)),
+                          std::move(factory));
     }
 
     void
@@ -381,19 +383,14 @@ namespace httplib::server
                                          http_server::proxy_interceptor_factory factory)
     {
         auto group = std::make_shared<upstream_group>(make_backends(backends), locator);
-        set_reverse_proxy(
-            location,
-            [g = std::move(group)](request&) -> net::awaitable<std::shared_ptr<http_server::proxy_target>>
-            { co_return g->resolve_target(); },
-            std::move(factory));
+        set_reverse_proxy(location, group, std::move(factory));
     }
 
     void
     http_server::impl::set_reverse_proxy(std::string_view location,
-                                         http_server::proxy_resolver resolver,
+                                         std::shared_ptr<upstream_provider> provider,
                                          http_server::proxy_interceptor_factory factory)
     {
-
         auto proxy_pool = std::make_shared<client::http_client_pool>(ex_);
         proxy_pool->start();
 
@@ -411,10 +408,10 @@ namespace httplib::server
              self = shared_from_this(),
              proxy_pool,
              prefix,
-             resolver = std::move(resolver),
+             provider = std::move(provider),
              factory = std::move(factory)](request& req, response& resp) -> net::awaitable<void>
             {
-                detail::reverse_proxy_context ctx(proxy_pool, prefix, resolver, factory, logger());
+                detail::reverse_proxy_context ctx(proxy_pool, prefix, provider, factory, logger());
                 co_await ctx.run(req, resp);
             });
     }
@@ -424,7 +421,9 @@ namespace httplib::server
                                       std::string_view upstream_url,
                                       http_server::ws_interceptor_factory factory)
     {
-        set_ws_forward(location, detail::make_static_resolver(std::string(upstream_url)), std::move(factory));
+        set_ws_forward(location,
+                       std::make_shared<detail::static_upstream_provider>(std::string(upstream_url)),
+                       std::move(factory));
     }
 
     void
@@ -434,16 +433,12 @@ namespace httplib::server
                                       http_server::ws_interceptor_factory factory)
     {
         auto group = std::make_shared<upstream_group>(make_backends(backends), locator);
-        set_ws_forward(
-            location,
-            [g = std::move(group)](request&) -> net::awaitable<std::shared_ptr<http_server::proxy_target>>
-            { co_return g->resolve_target(); },
-            std::move(factory));
+        set_ws_forward(location, group, std::move(factory));
     }
 
     void
     http_server::impl::set_ws_forward(std::string_view location,
-                                      http_server::proxy_resolver resolver,
+                                      std::shared_ptr<upstream_provider> provider,
                                       http_server::ws_interceptor_factory factory)
     {
         std::string prefix = detail::strip_proxy_prefix(location);
@@ -451,10 +446,10 @@ namespace httplib::server
 
         router_.set_ws_handler(
             location,
-            [ex = ex_, prefix, logger, resolver = std::move(resolver), factory = std::move(factory)](
+            [ex = ex_, prefix, logger, provider = std::move(provider), factory = std::move(factory)](
                 websocket_conn::weak_ptr wp) -> net::awaitable<void>
             {
-                detail::ws_forward_context ctx(ex, prefix, resolver, factory, logger);
+                detail::ws_forward_context ctx(ex, prefix, provider, factory, logger);
                 co_await ctx.run(wp);
             },
             [](websocket_conn::weak_ptr wp, std::string_view data, bool binary) -> net::awaitable<void>

@@ -1,6 +1,5 @@
 #pragma once
 #include "httplib/server/proxy_strategy.hpp"
-#include "httplib/server/server.hpp"
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -29,8 +28,12 @@ namespace httplib::server
 
     /**
      * \brief Thread-safe collection of upstream backends shared across requests.
+     * \details Also acts as an upstream_provider: selecting a backend via the
+     * configured locator and yielding its URL for each request.
      */
-    class upstream_group : public std::enable_shared_from_this<upstream_group>
+    class upstream_group
+        : public upstream_provider
+        , public std::enable_shared_from_this<upstream_group>
     {
       public:
         explicit upstream_group(std::vector<group_backend> backends,
@@ -41,11 +44,11 @@ namespace httplib::server
         group_backend& at(size_t i);
         group_backend const& at(size_t i) const;
 
-        /// Resolve and return an RAII proxy_target that manages active connection count.
-        std::shared_ptr<http_server::proxy_target> resolve_target();
+        net::awaitable<std::string> url(request&) override;
 
-        void active_inc(size_t idx);
-        void active_dec(size_t idx);
+        /// Pick the next backend per the locator and return its URL (synchronous).
+        /// Throws when there are no healthy backends.
+        std::string const& resolve_url();
 
         /// Return all healthy backends.
         std::vector<group_backend*> healthy_backends();

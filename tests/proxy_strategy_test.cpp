@@ -74,43 +74,40 @@ TEST_CASE("upstream_group: mark_healthy restores backend")
 
 TEST_CASE("upstream_group: round_robin cycles through all backends")
 {
-    auto group = std::make_shared<upstream_group>(
-        make_backends({ upstream_backend { "http://a:80" },
-                        upstream_backend { "http://b:80" },
-                        upstream_backend { "http://c:80" } }),
-        upstream_locator::round_robin);
+    auto group = std::make_shared<upstream_group>(make_backends({ upstream_backend { "http://a:80" },
+                                                                  upstream_backend { "http://b:80" },
+                                                                  upstream_backend { "http://c:80" } }),
+                                                  upstream_locator::round_robin);
 
-    CHECK(group->resolve_target()->url() == "http://a:80");
-    CHECK(group->resolve_target()->url() == "http://b:80");
-    CHECK(group->resolve_target()->url() == "http://c:80");
-    CHECK(group->resolve_target()->url() == "http://a:80");
-    CHECK(group->resolve_target()->url() == "http://b:80");
-    CHECK(group->resolve_target()->url() == "http://c:80");
+    CHECK(group->resolve_url() == "http://a:80");
+    CHECK(group->resolve_url() == "http://b:80");
+    CHECK(group->resolve_url() == "http://c:80");
+    CHECK(group->resolve_url() == "http://a:80");
+    CHECK(group->resolve_url() == "http://b:80");
+    CHECK(group->resolve_url() == "http://c:80");
 }
 
 TEST_CASE("upstream_group: round_robin skips unhealthy backends")
 {
-    auto group = std::make_shared<upstream_group>(
-        make_backends({ upstream_backend { "http://a:80" },
-                        upstream_backend { "http://b:80" },
-                        upstream_backend { "http://c:80" } }),
-        upstream_locator::round_robin);
+    auto group = std::make_shared<upstream_group>(make_backends({ upstream_backend { "http://a:80" },
+                                                                  upstream_backend { "http://b:80" },
+                                                                  upstream_backend { "http://c:80" } }),
+                                                  upstream_locator::round_robin);
     group->mark_unhealthy(1); // b is down
 
-    CHECK(group->resolve_target()->url() == "http://a:80");
-    CHECK(group->resolve_target()->url() == "http://c:80");
-    CHECK(group->resolve_target()->url() == "http://a:80");
-    CHECK(group->resolve_target()->url() == "http://c:80");
+    CHECK(group->resolve_url() == "http://a:80");
+    CHECK(group->resolve_url() == "http://c:80");
+    CHECK(group->resolve_url() == "http://a:80");
+    CHECK(group->resolve_url() == "http://c:80");
 }
 
 TEST_CASE("upstream_group: round_robin single backend")
 {
-    auto group = std::make_shared<upstream_group>(
-        make_backends({ upstream_backend { "http://only:80" } }),
-        upstream_locator::round_robin);
+    auto group = std::make_shared<upstream_group>(make_backends({ upstream_backend { "http://only:80" } }),
+                                                  upstream_locator::round_robin);
     for (int i = 0; i < 5; ++i)
     {
-        CHECK(group->resolve_target()->url() == "http://only:80");
+        CHECK(group->resolve_url() == "http://only:80");
     }
 }
 
@@ -118,8 +115,8 @@ TEST_CASE("upstream_group: resolve defaults to round_robin")
 {
     auto group = std::make_shared<upstream_group>(
         make_backends({ upstream_backend { "http://a:80" }, upstream_backend { "http://b:80" } }));
-    CHECK(group->resolve_target()->url() == "http://a:80");
-    CHECK(group->resolve_target()->url() == "http://b:80");
+    CHECK(group->resolve_url() == "http://a:80");
+    CHECK(group->resolve_url() == "http://b:80");
 }
 
 // ===========================================================================
@@ -129,14 +126,15 @@ TEST_CASE("upstream_group: resolve defaults to round_robin")
 TEST_CASE("upstream_group: weighted_round_robin respects weights")
 {
     auto group = std::make_shared<upstream_group>(make_backends(make_weighted({
-        { "http://a:80", 3 },
-        { "http://b:80", 1 }
-    })), upstream_locator::weighted_round_robin);
+                                                      { "http://a:80", 3 },
+                                                      { "http://b:80", 1 }
+    })),
+                                                  upstream_locator::weighted_round_robin);
 
     std::map<std::string, size_t> counts;
     for (int i = 0; i < 12; ++i)
     {
-        counts[group->resolve_target()->url()]++;
+        counts[group->resolve_url()]++;
     }
 
     CHECK(counts["http://a:80"] >= 7);
@@ -147,25 +145,27 @@ TEST_CASE("upstream_group: weighted_round_robin respects weights")
 TEST_CASE("upstream_group: weighted_round_robin skips unhealthy")
 {
     auto group = std::make_shared<upstream_group>(make_backends(make_weighted({
-        { "http://a:80", 3 },
-        { "http://b:80", 1 }
-    })), upstream_locator::weighted_round_robin);
+                                                      { "http://a:80", 3 },
+                                                      { "http://b:80", 1 }
+    })),
+                                                  upstream_locator::weighted_round_robin);
     group->mark_unhealthy(0); // a is down
 
     for (int i = 0; i < 4; ++i)
     {
-        CHECK(group->resolve_target()->url() == "http://b:80");
+        CHECK(group->resolve_url() == "http://b:80");
     }
 }
 
 TEST_CASE("upstream_group: weighted_round_robin single backend")
 {
     auto group = std::make_shared<upstream_group>(make_backends(make_weighted({
-        { "http://only:80", 5 }
-    })), upstream_locator::weighted_round_robin);
+                                                      { "http://only:80", 5 }
+    })),
+                                                  upstream_locator::weighted_round_robin);
     for (int i = 0; i < 5; ++i)
     {
-        CHECK(group->resolve_target()->url() == "http://only:80");
+        CHECK(group->resolve_url() == "http://only:80");
     }
 }
 
@@ -175,11 +175,10 @@ TEST_CASE("upstream_group: weighted_round_robin single backend")
 
 TEST_CASE("upstream_group: least_connections picks backend with fewest active")
 {
-    auto group = std::make_shared<upstream_group>(
-        make_backends({ upstream_backend { "http://a:80" },
-                        upstream_backend { "http://b:80" },
-                        upstream_backend { "http://c:80" } }),
-        upstream_locator::least_connections);
+    auto group = std::make_shared<upstream_group>(make_backends({ upstream_backend { "http://a:80" },
+                                                                  upstream_backend { "http://b:80" },
+                                                                  upstream_backend { "http://c:80" } }),
+                                                  upstream_locator::least_connections);
 
     group->at(0).active.store(5);
     group->at(1).active.store(2);
@@ -187,7 +186,7 @@ TEST_CASE("upstream_group: least_connections picks backend with fewest active")
 
     for (int i = 0; i < 3; ++i)
     {
-        CHECK(group->resolve_target()->url() == "http://b:80");
+        CHECK(group->resolve_url() == "http://b:80");
     }
 }
 
@@ -202,20 +201,19 @@ TEST_CASE("upstream_group: least_connections skips unhealthy backends")
 
     for (int i = 0; i < 3; ++i)
     {
-        CHECK(group->resolve_target()->url() == "http://b:80");
+        CHECK(group->resolve_url() == "http://b:80");
     }
 }
 
 TEST_CASE("upstream_group: least_connections single backend")
 {
-    auto group = std::make_shared<upstream_group>(
-        make_backends({ upstream_backend { "http://only:80" } }),
-        upstream_locator::least_connections);
+    auto group = std::make_shared<upstream_group>(make_backends({ upstream_backend { "http://only:80" } }),
+                                                  upstream_locator::least_connections);
     group->at(0).active.store(42);
 
     for (int i = 0; i < 3; ++i)
     {
-        CHECK(group->resolve_target()->url() == "http://only:80");
+        CHECK(group->resolve_url() == "http://only:80");
     }
 }
 
@@ -229,7 +227,7 @@ TEST_CASE("upstream_group: least_connections ties go to first found")
 
     for (int i = 0; i < 5; ++i)
     {
-        CHECK(group->resolve_target()->url() == "http://a:80");
+        CHECK(group->resolve_url() == "http://a:80");
     }
 }
 
@@ -244,7 +242,7 @@ TEST_CASE("upstream_group: throws when all backends unhealthy")
     group->mark_unhealthy(0);
     group->mark_unhealthy(1);
 
-    CHECK_THROWS(group->resolve_target());
+    CHECK_THROWS(group->resolve_url());
 }
 
 // ===========================================================================
@@ -362,6 +360,78 @@ TEST_CASE("proxy[group]: least_connections picks least busy upstream", "[proxy][
             // All connections idle -> least-conn ties to first (u1)
             auto r1 = UNWRAP(co_await c.async_get("/api/who"));
             REQUIRE(as_string(r1) == "u1");
+
+            c.close();
+            proxy.stop();
+            upstream1.stop();
+            upstream2.stop();
+        },
+        [&](std::exception_ptr e) { err = e; });
+    pool.join();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
+// ===========================================================================
+// End-to-end: set_reverse_proxy with an upstream_provider returning a URL
+// ===========================================================================
+
+TEST_CASE("proxy[url-provider]: per-request single upstream URL", "[proxy][url-provider]")
+{
+    net::thread_pool pool { 4 };
+    std::exception_ptr err;
+    net::co_spawn(
+        pool.get_executor(),
+        [&]() -> net::awaitable<void>
+        {
+            server::http_server upstream1(pool.get_executor());
+            upstream1.router().template set_http_handler<http::verb::get>(
+                "/u1",
+                [](server::request&, server::response& resp)
+                { resp.set_string_content(std::string("u1"), "text/plain"); });
+
+            server::http_server upstream2(pool.get_executor());
+            upstream2.router().template set_http_handler<http::verb::get>(
+                "/u2",
+                [](server::request&, server::response& resp)
+                { resp.set_string_content(std::string("u2"), "text/plain"); });
+
+            auto e1 = upstream1.listen("127.0.0.1", 0).local_endpoint();
+            auto e2 = upstream2.listen("127.0.0.1", 0).local_endpoint();
+
+            auto url1 = std::format("http://{}:{}", e1.address().to_string(), e1.port());
+            auto url2 = std::format("http://{}:{}", e2.address().to_string(), e2.port());
+
+            struct pick_provider final : server::upstream_provider
+            {
+                pick_provider(std::string u1, std::string u2) : url1_(std::move(u1)), url2_(std::move(u2)) {}
+                net::awaitable<std::string>
+                url(server::request& req) override
+                {
+                    co_return req.target().ends_with("/u1") ? url1_ : url2_;
+                }
+                std::string url1_;
+                std::string url2_;
+            };
+
+            server::http_server proxy(pool.get_executor());
+            proxy.set_reverse_proxy("/api/*", std::make_shared<pick_provider>(url1, url2));
+            proxy.listen("127.0.0.1", 0);
+            auto pep = proxy.local_endpoint();
+
+            upstream1.run();
+            upstream2.run();
+            proxy.run();
+
+            client::http_client c(pool.get_executor(), "127.0.0.1", pep.port());
+            c.set_timeout(std::chrono::seconds(10));
+
+            auto r1 = UNWRAP(co_await c.async_get("/api/u1"));
+            REQUIRE(as_string(r1) == "u1");
+            auto r2 = UNWRAP(co_await c.async_get("/api/u2"));
+            REQUIRE(as_string(r2) == "u2");
 
             c.close();
             proxy.stop();

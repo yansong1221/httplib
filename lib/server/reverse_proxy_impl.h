@@ -29,7 +29,7 @@ namespace httplib::server::detail
       public:
         reverse_proxy_context(std::shared_ptr<client::http_client_pool> pool,
                               std::string prefix,
-                              http_server::proxy_resolver resolver,
+                              std::shared_ptr<upstream_provider> provider,
                               http_server::proxy_interceptor_factory factory,
                               std::shared_ptr<spdlog::logger> logger);
 
@@ -57,7 +57,7 @@ namespace httplib::server::detail
       private:
         std::shared_ptr<client::http_client_pool> pool_;
         std::string prefix_;
-        http_server::proxy_resolver resolver_;
+        std::shared_ptr<upstream_provider> provider_;
         http_server::proxy_interceptor_factory factory_;
         std::shared_ptr<spdlog::logger> logger_;
 

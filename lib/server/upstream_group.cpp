@@ -7,33 +7,6 @@
 namespace httplib::server
 {
 
-    class upstream_proxy_target final : public http_server::proxy_target
-    {
-      public:
-        upstream_proxy_target(std::string url, std::shared_ptr<upstream_group> group, size_t idx)
-            : url_(std::move(url))
-            , group_(std::move(group))
-            , idx_(idx)
-        {
-            group_->active_inc(idx_);
-        }
-
-        ~upstream_proxy_target() override
-        {
-            group_->active_dec(idx_);
-        }
-
-        std::string const& url() const override
-        {
-            return url_;
-        }
-
-      private:
-        std::string url_;
-        std::shared_ptr<upstream_group> group_;
-        size_t idx_;
-    };
-
     group_backend::group_backend(upstream_backend const& cfg) : upstream_backend(cfg) {}
 
     group_backend::group_backend(group_backend const& other)
@@ -113,30 +86,17 @@ namespace httplib::server
         }
     }
 
-    std::shared_ptr<http_server::proxy_target>
-    upstream_group::resolve_target()
+    net::awaitable<std::string>
+    upstream_group::url(request&)
+    {
+        co_return resolve_url();
+    }
+
+    std::string const&
+    upstream_group::resolve_url()
     {
         auto& b = do_resolve();
-        auto idx = &b - &backends_[0];
-        return std::make_shared<upstream_proxy_target>(b.url, shared_from_this(), idx);
-    }
-
-    void
-    upstream_group::active_inc(size_t idx)
-    {
-        if (idx < backends_.size())
-        {
-            backends_[idx].active.fetch_add(1, std::memory_order_relaxed);
-        }
-    }
-
-    void
-    upstream_group::active_dec(size_t idx)
-    {
-        if (idx < backends_.size())
-        {
-            backends_[idx].active.fetch_sub(1, std::memory_order_relaxed);
-        }
+        return b.url;
     }
 
     std::vector<group_backend*>

@@ -110,7 +110,7 @@ namespace httplib::server
                                std::string_view upstream_url,
                                http_server::proxy_interceptor_factory factory);
         void set_reverse_proxy(std::string_view location,
-                               http_server::proxy_resolver resolver,
+                               std::shared_ptr<upstream_provider> provider,
                                http_server::proxy_interceptor_factory factory);
         void set_reverse_proxy(std::string_view location,
                                std::vector<upstream_backend> backends,
@@ -121,7 +121,7 @@ namespace httplib::server
                             std::string_view upstream_url,
                             http_server::ws_interceptor_factory factory);
         void set_ws_forward(std::string_view location,
-                            http_server::proxy_resolver resolver,
+                            std::shared_ptr<upstream_provider> provider,
                             http_server::ws_interceptor_factory factory);
         void set_ws_forward(std::string_view location,
                             std::vector<upstream_backend> backends,

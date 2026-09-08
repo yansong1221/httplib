@@ -168,10 +168,10 @@ namespace httplib::server
 
     void
     http_server::set_reverse_proxy(std::string_view location,
-                                   proxy_resolver resolver,
+                                   std::shared_ptr<upstream_provider> provider,
                                    proxy_interceptor_factory factory)
     {
-        impl_->set_reverse_proxy(location, std::move(resolver), std::move(factory));
+        impl_->set_reverse_proxy(location, std::move(provider), std::move(factory));
     }
 
     void
@@ -190,9 +190,11 @@ namespace httplib::server
     }
 
     void
-    http_server::set_ws_forward(std::string_view location, proxy_resolver resolver, ws_interceptor_factory factory)
+    http_server::set_ws_forward(std::string_view location,
+                                std::shared_ptr<upstream_provider> provider,
+                                ws_interceptor_factory factory)
     {
-        impl_->set_ws_forward(location, std::move(resolver), std::move(factory));
+        impl_->set_ws_forward(location, std::move(provider), std::move(factory));
     }
 
     void

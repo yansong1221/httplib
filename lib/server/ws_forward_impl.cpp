@@ -8,12 +8,12 @@ namespace httplib::server::detail
 
     ws_forward_context::ws_forward_context(net::any_io_executor const& ex,
                                            std::string prefix,
-                                           http_server::proxy_resolver resolver,
+                                           std::shared_ptr<upstream_provider> provider,
                                            http_server::ws_interceptor_factory factory,
                                            std::shared_ptr<spdlog::logger> logger)
         : ex_(ex)
         , prefix_(std::move(prefix))
-        , resolver_(std::move(resolver))
+        , provider_(std::move(provider))
         , factory_(std::move(factory))
         , logger_(std::move(logger))
     {
@@ -87,10 +87,10 @@ namespace httplib::server::detail
 
         interceptor_ = factory_ ? factory_(req) : nullptr;
 
-        auto result = co_await resolve_upstream(resolver_, req, prefix_, true);
+        auto result = co_await resolve_upstream(provider_, req, prefix_, true);
         if (result.rc == upstream_resolve_rc::no_target)
         {
-            logger_->warn("[ws-forward] resolver returned null target");
+            logger_->warn("[ws-forward] provider is null");
             conn.close("resolver failed");
             co_return false;
         }

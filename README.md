@@ -478,12 +478,19 @@ svr.set_reverse_proxy("/api/*", "http://upstream:8080",
         headers.set("X-Custom", "value");
     });
 
-// Dynamic upstream selection
-svr.set_reverse_proxy("/api/*",
-    [](server::request& req) -> std::string {
-        return "http://backend-" + std::string(req.path_param("id")) + ":8080";
-    },
-    headers_callback);
+// Dynamic upstream selection: return a single URL per request.
+// Implement upstream_provider (see httplib/server/proxy_strategy.hpp) and
+// pass an instance directly. The URL may depend on the incoming request.
+struct pick_upstream : server::upstream_provider
+{
+    pick_upstream(std::string a, std::string b) : a_(std::move(a)), b_(std::move(b)) {}
+    net::awaitable<std::string> url(server::request& req) override
+    {
+        co_return req.target().starts_with("/v1/") ? a_ : b_;
+    }
+    std::string a_, b_;
+};
+svr.set_reverse_proxy("/api/*", std::make_shared<pick_upstream>("http://a:8080", "http://b:8080"));
 ```
 
 ### Proxy Config
