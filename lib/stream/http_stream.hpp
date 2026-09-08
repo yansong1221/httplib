@@ -129,22 +129,38 @@ namespace httplib
         void
         close()
         {
-            std::visit(
-                [](auto& stream) mutable
-                {
-                    using stream_type = std::decay_t<decltype(stream)>;
-#ifdef HTTPLIB_ENABLED_SSL
-                    if constexpr (std::is_same_v<stream_type, tls_stream>)
-                    {
-                        boost::system::error_code ec;
-                        stream.shutdown(ec);
-                    }
-#endif
-                },
-                stream_);
             boost::system::error_code ec;
             socket().shutdown(net::socket_base::shutdown_type::shutdown_both, ec);
             socket().close(ec);
+        }
+
+        /**
+         * \brief 优雅收尾：TLS 下先发送 close_notify 并限时等待对端回包，
+         * 再半关闭并释放底层 socket；plain 连接等价于 close()。
+         * \details 仅用于“主动结束连接且希望对端看到干净 EOF”的正常路径
+         * （如服务端写完整响应后按 Connection: close 收场）。
+         * 超时或对端不回包时自动降级为硬关闭，不会无限等待。
+         * \param timeout close_notify 握手的最长等待时间。
+         */
+        net::awaitable<void>
+        async_graceful_close(net::steady_timer::duration timeout = std::chrono::milliseconds(500))
+        {
+            boost::system::error_code ec;
+            co_await std::visit(
+                [&](auto& t) -> net::awaitable<void>
+                {
+                    using stream_type = std::decay_t<decltype(t)>;
+#ifdef HTTPLIB_ENABLED_SSL
+                    if constexpr (std::is_same_v<stream_type, tls_stream>)
+                    {
+                        beast::get_lowest_layer(t).expires_after(timeout);
+                        co_await t.async_shutdown(util::net_awaitable[ec]);
+                    }
+#endif
+                    co_return;
+                },
+                stream_);
+            close();
         }
 
         template <typename EndPoints>

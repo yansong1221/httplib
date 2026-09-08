@@ -402,8 +402,7 @@ namespace httplib::server
 
             if (!get_impl(resp).keep_alive())
             {
-                boost::system::error_code ec;
-                stream_.close();
+                co_await stream_.async_graceful_close();
                 co_return nullptr;
             }
         }
