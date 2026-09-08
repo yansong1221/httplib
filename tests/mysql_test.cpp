@@ -128,7 +128,6 @@ TEST_CASE("config: defaults", "[db]")
     db::mysql_config c;
     REQUIRE(c.host == "127.0.0.1");
     REQUIRE(c.port == 3306);
-    REQUIRE(c.connect_timeout == std::chrono::seconds(5));
     REQUIRE(c.max_cached_statements == 64);
     REQUIRE(c.time_zone.empty());
 
@@ -149,11 +148,11 @@ TEST_CASE("db options: parse connection string", "[db]")
     REQUIRE_FALSE(o.has("time_zone"));
     REQUIRE(o.get_or("missing", "default") == "default");
 
-    auto q = db::options::parse("db=\"my db\" time_zone='+08:00' ssl=1 connect_timeout=3");
+    auto q = db::options::parse("db=\"my db\" time_zone='+08:00' ssl=1");
     REQUIRE(q.get_or("db") == "my db");
     REQUIRE(q.get_or("time_zone") == "+08:00");
     REQUIRE(*q.as_bool("ssl"));
-    REQUIRE(*q.as_seconds("connect_timeout") == std::chrono::seconds(3));
+    REQUIRE_FALSE(q.has("connect_timeout"));
 
     REQUIRE(db::options::parse("").get_or("x", "y") == "y");
     REQUIRE_FALSE(db::options::parse("port=abc").as_uint16("port").has_value());
@@ -554,7 +553,6 @@ TEST_CASE("db(mysql): pool survives unreachable server", "[db][mysql]")
     // 连接失败应被维护协程捕获并记录日志，而不是冒泡到 completion handler 导致崩溃
     auto mc = make_mysql_cfg();
     mc.port = 1; // 无 MySQL 监听
-    mc.connect_timeout = std::chrono::seconds(1);
     auto cfg = make_cfg();
     cfg.min_connections = 2;
     cfg.idle_check_interval = std::chrono::seconds(1);
