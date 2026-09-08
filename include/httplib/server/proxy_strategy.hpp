@@ -49,6 +49,24 @@ namespace httplib::server
         /// \brief Resolve the upstream URL for a single request.
         /// reverse proxy expects http(s)://, ws forward expects ws(s)://.
         virtual net::awaitable<std::string> url(request& req) = 0;
+
+        /// \brief Called once the upstream connection for this request was acquired.
+        /// \details \p url is the exact string previously returned by url(). The
+        /// default implementation does nothing; upstream_group overrides it to track
+        /// in-flight load for least_connections.
+        virtual void
+        on_acquired(std::string const& url)
+        {
+            (void)url;
+        }
+
+        /// \brief Called when the request's upstream connection is released/closed.
+        /// Must pair with on_acquired(); guarded by the implementation to fire once.
+        virtual void
+        on_released(std::string const& url)
+        {
+            (void)url;
+        }
     };
 
 } // namespace httplib::server

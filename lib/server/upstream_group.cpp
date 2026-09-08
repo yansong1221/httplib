@@ -51,6 +51,30 @@ namespace httplib::server
         : backends_(std::move(backends))
         , locator_(locator)
     {
+        for (size_t i = 0; i < backends_.size(); ++i)
+        {
+            url_index_[backends_[i].url] = i;
+        }
+    }
+
+    void
+    upstream_group::on_acquired(std::string const& url)
+    {
+        auto it = url_index_.find(url);
+        if (it != url_index_.end())
+        {
+            backends_[it->second].active.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
+
+    void
+    upstream_group::on_released(std::string const& url)
+    {
+        auto it = url_index_.find(url);
+        if (it != url_index_.end())
+        {
+            backends_[it->second].active.fetch_sub(1, std::memory_order_relaxed);
+        }
     }
 
     size_t

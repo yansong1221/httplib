@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace httplib::server
@@ -46,6 +47,12 @@ namespace httplib::server
 
         net::awaitable<std::string> url(request&) override;
 
+        /// \brief Track an in-flight request against the backend that yielded \p url.
+        void on_acquired(std::string const& url) override;
+
+        /// \brief Release the in-flight request for the backend that yielded \p url.
+        void on_released(std::string const& url) override;
+
         /// Pick the next backend per the locator and return its URL (synchronous).
         /// Throws when there are no healthy backends.
         std::string const& resolve_url();
@@ -60,6 +67,10 @@ namespace httplib::server
         std::vector<group_backend> backends_;
         upstream_locator locator_;
         std::atomic<size_t> rr_index_ { 0 };
+
+        /// backend url -> index; built once in the constructor and read-only after,
+        /// so concurrent lookups need no lock.
+        std::unordered_map<std::string, size_t> url_index_;
 
         mutable std::mutex mu_;
         std::vector<std::ptrdiff_t> current_;

@@ -1,8 +1,8 @@
 ﻿#include "websocket_conn_impl.hpp"
-#include "ws_forward_impl.h"
 #include "httplib/client/ws_client.hpp"
 #include "request_impl.hpp"
 #include "response_impl.hpp"
+#include "ws_forward_impl.h"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <spdlog/spdlog.h>
@@ -123,6 +123,7 @@ namespace httplib::server
             {
                 state->upstream->abort();
             }
+            detail::release_upstream_accounting(state);
         }
 
         boost::system::error_code ec;

@@ -77,6 +77,12 @@ namespace httplib::server::detail
         auto state = std::make_shared<ws_forward_state>();
         state->upstream = std::move(upstream);
         state->interceptor = std::move(interceptor_);
+        state->provider = provider_;
+        state->url = upstream_.raw_url;
+        if (provider_)
+        {
+            provider_->on_acquired(upstream_.raw_url);
+        }
         req.data().store<ws_forward_state_ptr>(std::move(state));
     }
 
@@ -172,6 +178,7 @@ namespace httplib::server::detail
         {
             co_await state->upstream->async_close();
         }
+        release_upstream_accounting(state);
     }
 
 } // namespace httplib::server::detail

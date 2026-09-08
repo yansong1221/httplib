@@ -29,9 +29,24 @@ namespace httplib::server::detail
     {
         std::shared_ptr<client::ws_client> upstream;
         std::shared_ptr<ws_interceptor> interceptor;
+        std::shared_ptr<upstream_provider> provider;
+        std::string url;
     };
 
     using ws_forward_state_ptr = std::shared_ptr<ws_forward_state>;
+
+    /// \brief Release the upstream in-flight accounting for a forwarded session.
+    /// \details Safe to call more than once; the provider handle is cleared after
+    /// the first release.
+    inline void
+    release_upstream_accounting(ws_forward_state_ptr const& state)
+    {
+        if (state && state->provider)
+        {
+            state->provider->on_released(state->url);
+            state->provider.reset();
+        }
+    }
 
     /**
      * \brief Per-connection WebSocket forward execution context.

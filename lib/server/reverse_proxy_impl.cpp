@@ -270,6 +270,10 @@ namespace httplib::server::detail
             co_return false;
         }
 
+        // Start the in-flight accounting for the chosen backend; the lease releases
+        // it when this context (and its pooled connection) is torn down.
+        lease_.emplace(provider_, upstream_.raw_url);
+
         writer_ = client_->create_lazy_request();
 
         if (auto rel_ec = co_await writer_->write_header(req.method(), upstream_.target_path, upstream_headers_);

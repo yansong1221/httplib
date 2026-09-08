@@ -231,6 +231,28 @@ TEST_CASE("upstream_group: least_connections ties go to first found")
     }
 }
 
+TEST_CASE("upstream_group: on_acquired/on_released track in-flight load")
+{
+    auto group = std::make_shared<upstream_group>(
+        make_backends({ upstream_backend { "http://a:80" }, upstream_backend { "http://b:80" } }),
+        upstream_locator::least_connections);
+
+    // a takes two in-flight requests -> least-conn prefers b
+    group->on_acquired("http://a:80");
+    group->on_acquired("http://a:80");
+    CHECK(group->resolve_url() == "http://b:80");
+    CHECK(group->resolve_url() == "http://b:80");
+
+    // release both -> both idle, ties go to the first found backend (a)
+    group->on_released("http://a:80");
+    group->on_released("http://a:80");
+    CHECK(group->resolve_url() == "http://a:80");
+
+    // unknown urls are ignored
+    group->on_acquired("http://unknown:80");
+    CHECK(group->resolve_url() == "http://a:80");
+}
+
 // ===========================================================================
 // Error cases
 // ===========================================================================
