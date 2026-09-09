@@ -4,22 +4,22 @@
 > 审查分支：`dev`  
 > 审查提交：`56f47cf811254b90057239360b499f9b2f09efca`（修复卡死bug）  
 > 上游仓库：<https://github.com/yansong1221/httplib>  
-> 复查日期：2026-09-07  
+> 复查日期：2026-09-07；2026-09-09 更新 CON-01/02、HTTP-01 修复状态  
 > 复查提交：`6f8a602`（HEAD，逐一核对各风险项修复状态）
 
 ## 1. 执行摘要
 
 该项目是一套基于 Boost.Asio/Beast、面向 C++23 的异步 HTTP/1.1 与 WebSocket 客户端/服务端框架，同时包含路由、中间件、反向代理、文件服务、SSE、NDJSON、JWT、Session、下载器、磁盘缓存和可选数据库支持。
 
-总体判断：**架构方向合理、功能覆盖完整、测试投入较明显。截至 2026-09-07 复查，报告中的安全阻断项（上传路径逃逸、TLS/JWT 校验、URL 解码越界等）已大部分修复；但 body 默认上限、跨域重定向敏感头、并发数据竞争和发布工程仍未收口，不建议未经整改直接暴露在公网或承担认证、上传、代理等关键业务。**
+总体判断：**架构方向合理、功能覆盖完整、测试投入较明显。截至 2026-09-09 复查，报告中的安全阻断项（上传路径逃逸、TLS/JWT 校验、URL 解码越界、Range 边界等）已大部分修复；端到端数据竞争（CON-01/02）也已收口；但 body/multipart/Range/WS 资源上限、缓存 key、HTML 目录注入和发布工程仍未收口，不建议未经整改直接暴露在公网或承担认证、上传、代理等关键业务。**
 
 | 维度 | 评分 | 结论 |
 |---|---:|---|
 | 架构设计 | 6.5/10 | 分层和核心抽象合理，但职责范围过宽 |
 | 模块化与可读性 | 6/10 | 目录清楚，部分中心文件过大、耦合偏重 |
 | 测试建设 | 7/10 | 273 个真实 TCP 测试，但安全和并发边界覆盖不足 |
-| 并发可靠性 | 4/10 | 仍存在数据竞争，线程模型约束不清晰 |
-| 安全性 | 5/10 | 上传路径逃逸、TLS/JWT、URL 解码等已修复；body 上限、敏感头重定向等仍待整改 |
+| 并发可靠性 | 5/10 | 端到端 session 数据竞争（CON-01/02）已修复；线程模型约束仍不清晰 |
+| 安全性 | 5/10 | 上传路径逃逸、TLS/JWT、URL 解码、重定向敏感头等已修复；body/multipart/Range/WS 资源上限、目录 HTML 注入仍待整改 |
 | 构建与发布成熟度 | 3.5/10 | 缺依赖锁定、CI、许可证，安装配置不完整 |
 
 建议定位：当前版本适合作为个人项目、内部实验框架或二次开发基础；完成本报告 P0/P1 整改、动态检测和压力测试前，不应判定为生产就绪。
@@ -203,17 +203,33 @@ file_stream_.open(current_file_path_, std::ios::out | std::ios::binary | std::io
 
 #### CON-01：服务端 session 容器存在明确数据竞争
 
-`sessions_` 的 insert/erase 使用 mutex，但随后记录日志时在锁外调用 `sessions_.size()`。当 server 使用多线程 executor 时，这属于未定义行为。
+> 状态：✅ **已修复**（复查 2026-09-09）
 
-- 位置：[lib/server/server_impl.cpp](lib/server/server_impl.cpp#L260)
-- 建议：在同一临界区计算 count，或将 session 生命周期完整串行化到 strand。
+~~`sessions_` 的 insert/erase 使用 mutex，但随后记录日志时在锁外调用 `sessions_.size()`。当 server 使用多线程 executor 时，这属于未定义行为。~~
+
+现状（[lib/server/server_impl.cpp](lib/server/server_impl.cpp#L216)）：
+- `sessions_.insert()` 和 `sessions_.size()` 均在 `lock_guard` 临界区内完成，count 捕获到局部变量 `session_count`；
+- `sessions_.erase()` 和对应的 `sessions_.size()` 同样在同一临界区内；
+- 日志输出使用锁内捕获的 `session_count`，不再在锁外访问 `sessions_`。
+
+- 位置：[lib/server/server_impl.cpp](lib/server/server_impl.cpp#L216)
+- 影响：~~多线程 executor 下未定义行为~~ 已消除
+- 建议：~~在同一临界区计算 count，或将 session 生命周期完整串行化到 strand~~ 已落实。
 
 #### CON-02：Session middleware 的请求状态被错误地放在共享实例中
 
-`session_middleware::impl::is_new_` 是所有请求共享的 bool。两个并发请求会互相覆盖该状态并发生数据竞争；同一个 Session 对象也可能被多个请求同时修改，而 Session 内部 map 和时间字段没有锁。
+> 状态：✅ **已修复**（复查 2026-09-09）
 
-- 位置：[lib/server/middleware/session_mw.cpp](lib/server/middleware/session_mw.cpp#L199)
-- 建议：将“是否新建”存入 request custom data；为共享 Session 提供同步策略、版本控制或 copy/update/store 事务语义。
+~~`session_middleware::impl::is_new_` 是所有请求共享的 bool。两个并发请求会互相覆盖该状态并发生数据竞争；同一个 Session 对象也可能被多个请求同时修改，而 Session 内部 map 和时间字段没有锁。~~
+
+现状（[lib/server/middleware/session_mw.cpp](lib/server/middleware/session_mw.cpp#L325)）：
+- `is_new_` 共享实例已移除，改为 `req.data().store<bool>(session_new_tag, ...)` 存入请求的 custom data，每次请求独立持有；
+- Session 对象同样通过 `req.data().store<value_type>(sess)` 按请求持有，不再共享；
+- `after()` 中通过 `req.data().fetch<bool>(session_new_tag)` 和 `req.data().fetch<value_type>()` 获取，无并发覆盖风险。
+
+- 位置：[lib/server/middleware/session_mw.cpp](lib/server/middleware/session_mw.cpp#L325)
+- 影响：~~并发请求下 is_new 状态数据竞争~~ 已消除
+- 建议：~~将"是否新建"存入 request custom data；为共享 Session 提供同步策略、版本控制或 copy/update/store 事务语义~~ 已落实。
 
 #### CL-01：HTTP 客户端的失败重试可能发送残缺请求
 
@@ -277,9 +293,19 @@ file_stream_.open(current_file_path_, std::ios::out | std::ios::binary | std::io
 
 #### HTTP-01：Range 解析边界不完整
 
-超大 suffix range 没有 clamp 到文件大小，`start > end` 未拒绝，部分单字节 range 被错误拒绝，也没有限制 multi-range 数量。可能产生负起点、无符号长度下溢、错误响应或 Range 放大。
+> 状态：✅ **已修复**（复查 2026-09-09，先写测试后修复）
 
-- 位置：[lib/html/http_ranges.cpp](lib/html/http_ranges.cpp#L8)
+~~超大 suffix range 没有 clamp 到文件大小，`start > end` 未拒绝，部分单字节 range 被错误拒绝，也没有限制 multi-range 数量。可能产生负起点、无符号长度下溢、错误响应或 Range 放大。~~
+
+现状（[lib/html/http_ranges.cpp](lib/html/http_ranges.cpp#L48)）：
+- suffix range 超过文件大小时 clamp 到 `[0, file_size-1]`，不再产生负起点；
+- 移除 `start == end` 拒绝，单字节 range（如 `bytes=5-5`）合法，`bytes=0-0` 原先因 `start > 0` guard 侥幸通过的不一致也随之统一；
+- 新增 `start > end` 拒绝（含 `end == 0` 边界，如 `bytes=10-0`）；
+- 新增 8 个回归用例（`tests/body_utils_test.cpp`），其中 4 个先暴露既有 bug 后修复。
+
+- 位置：[lib/html/http_ranges.cpp](lib/html/http_ranges.cpp#L48)
+- 影响：~~负起点、单字节误拒绝、start>end 错误响应~~ 已消除
+- 建议：~~clamp suffix、拒绝 start>end、放开单字节、限制 multi-range 数量~~ 边界已修复；multi-range 数量上限并入 SEC-03/DOS-01 统一资源限制处理。
 
 #### INFO-01：异常详情直接返回客户端
 
@@ -367,9 +393,11 @@ with any of the following names:
 
 ## 7. 整改优先级
 
-### P0：任何公网部署前必须完成（截至 2026-09-07 复查）
+### P0：任何公网部署前必须完成（截至 2026-09-09 复查）
 
 > 以下 1~2、4~6 项在复查提交上已修复并应补充回归测试；3 项为仍待处理的核心项。
+>
+> 2026-09-09：CON-01/CON-02 数据竞争项已修复，随 2026-09-07 复查中已修复项一并纳入回归范围。
 
 1. ~~默认禁用 CONNECT；接入认证、目标 ACL、IP/DNS 校验和流量限制~~ → 默认已拒绝（405），仍需接入认证与目标 ACL。
 2. ~~修复 multipart 文件名路径逃逸，服务端生成受控文件名并做目录 containment 校验~~ → 已修复（basename + weakly_canonical 校验）。
@@ -381,11 +409,13 @@ with any of the following names:
 ### P1：进入生产压测前完成
 
 1. 明确 executor/strand 模型，消除 server sessions、Session middleware、socket stop、client 并发读写等数据竞争。
+    - 2026-09-09 更新：server sessions（CON-01）与 Session middleware（CON-02）两项数据竞争已修复；socket stop 与 client 并发读写仍需明确 strand 约束。
 2. ~~修复客户端部分写入重试和 downloader 重定向连接复用~~ → 客户端重试已修复（仅零字节时允许重试）。
 3. ~~跨 origin 重定向删除敏感 header，禁止非授权协议降级~~ → 已修复（client + downloader，含回归测试）。
 4. 重构 cache key 和 HTTP cache policy。
 5. ~~完整实现代理 hop-by-hop、Cookie/Set-Cookie 和 Forwarded header 语义~~ → 已修复。
 6. 修复 Range、目录 HTML escaping、~~异常详情泄漏~~ 和长期容器淘汰。
+    - 2026-09-09 更新：Range 边界（HTTP-01）已修复并含回归测试；目录 HTML escaping 与长期容器淘汰待处理。
 
 ### P2：发布前完成
 
@@ -411,6 +441,6 @@ with any of the following names:
 
 httplib 的基础结构并不差：作者理解 Boost.Asio/Beast、协程、PIMPL、路由 Trie 和真实网络测试，项目也已超过简单示例库的规模。但当前最大问题不是代码风格，而是**安全边界、并发契约和发布工程没有跟上功能扩张速度**。
 
-截至 2026-09-07 复查：最初报告中的 17 项风险已有 6 项完全修复（SEC-01/04/05/06、INFO-01、PROXY-01），SEC-02/CONNECT 部分修复，SEC-03 部分修复（header 已限、body 仍无限）。剩余生产阻断项集中在 **body 默认上限缺失、跨域重定向敏感头、并发数据竞争（CON-01/02、API-01）、客户端部分写入重试、缓存 key 与 Range 边界**。
+截至 2026-09-09 复查：最初报告中的 17 项风险已有 **11 项完全修复**（SEC-01/04/05/06、CON-01/02、CL-01/02、INFO-01、PROXY-01、HTTP-01），其中 CL-01/02、CON-01/02、HTTP-01 均含回归或代码复核；SEC-02/CONNECT、SEC-03 部分修复（header/body/upload 已限，CONNECT 默认拒绝）。剩余生产阻断项集中在 **body 与 multipart/Range/WS 资源上限（SEC-03/DOS-01）、缓存 key（CACHE-01）、HTML 目录注入（WEB-01）与运行期配置并发保护（API-01）**。
 
-建议先冻结功能扩张，以 body 上限、线程模型收口和并发/重定向安全整改为主线，再补动态检测、fuzz 和构建发布工程；随后进入生产压测前再处理缓存与 Range 等健壮性项。
+建议先冻结功能扩张，以 body/资源上限收口为主线，再补动态检测、fuzz 和构建发布工程；随后进入生产压测前再处理缓存等健壮性项。

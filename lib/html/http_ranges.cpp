@@ -45,8 +45,12 @@ namespace httplib::html
                     ranges_.clear();
                     return false;
                 }
-                ranges_.push_back(
-                    range_type { static_cast<int64_t>(file_size) - count, static_cast<int64_t>(file_size) - 1 });
+                auto start = static_cast<int64_t>(file_size) - count;
+                if (start < 0)
+                {
+                    start = 0;
+                }
+                ranges_.push_back(range_type { start, static_cast<int64_t>(file_size) - 1 });
                 continue;
             }
 
@@ -92,7 +96,7 @@ namespace httplib::html
                 }
             }
 
-            if (start > 0 && (start >= file_size || start == end))
+            if (start >= static_cast<int64_t>(file_size) || (start != -1 && start > end))
             {
                 ranges_.clear();
                 return false;

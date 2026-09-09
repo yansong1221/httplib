@@ -292,6 +292,78 @@ TEST_CASE("http_ranges: suffix range small", "[body-utils]")
     REQUIRE(r.second == 9);
 }
 
+TEST_CASE("http_ranges: suffix range larger than file clamps to start", "[body-utils]")
+{
+    httplib::html::http_ranges ranges;
+    REQUIRE(ranges.parse("bytes=-2000", 1000));
+    REQUIRE(ranges.size() == 1);
+    auto r = ranges.front();
+    REQUIRE(r.first == 0);
+    REQUIRE(r.second == 999);
+}
+
+TEST_CASE("http_ranges: single-byte range at start", "[body-utils]")
+{
+    httplib::html::http_ranges ranges;
+    REQUIRE(ranges.parse("bytes=0-0", 1000));
+    REQUIRE(ranges.size() == 1);
+    auto r = ranges.front();
+    REQUIRE(r.first == 0);
+    REQUIRE(r.second == 0);
+}
+
+TEST_CASE("http_ranges: single-byte range at middle", "[body-utils]")
+{
+    httplib::html::http_ranges ranges;
+    REQUIRE(ranges.parse("bytes=5-5", 1000));
+    REQUIRE(ranges.size() == 1);
+    auto r = ranges.front();
+    REQUIRE(r.first == 5);
+    REQUIRE(r.second == 5);
+}
+
+TEST_CASE("http_ranges: single-byte range at end", "[body-utils]")
+{
+    httplib::html::http_ranges ranges;
+    REQUIRE(ranges.parse("bytes=999-999", 1000));
+    REQUIRE(ranges.size() == 1);
+    auto r = ranges.front();
+    REQUIRE(r.first == 999);
+    REQUIRE(r.second == 999);
+}
+
+TEST_CASE("http_ranges: end beyond EOF clamps to file size", "[body-utils]")
+{
+    httplib::html::http_ranges ranges;
+    REQUIRE(ranges.parse("bytes=800-2000", 1000));
+    REQUIRE(ranges.size() == 1);
+    auto r = ranges.front();
+    REQUIRE(r.first == 800);
+    REQUIRE(r.second == 999);
+}
+
+TEST_CASE("http_ranges: start greater than end is rejected", "[body-utils]")
+{
+    httplib::html::http_ranges ranges;
+    REQUIRE_FALSE(ranges.parse("bytes=10-5", 1000));
+    REQUIRE(ranges.empty());
+}
+
+TEST_CASE("http_ranges: multiple ranges with single-byte range", "[body-utils]")
+{
+    httplib::html::http_ranges ranges;
+    REQUIRE(ranges.parse("bytes=0-0,10-20", 1000));
+    REQUIRE(ranges.size() == 2);
+
+    auto r0 = ranges.at(0);
+    REQUIRE(r0.first == 0);
+    REQUIRE(r0.second == 0);
+
+    auto r1 = ranges.at(1);
+    REQUIRE(r1.first == 10);
+    REQUIRE(r1.second == 20);
+}
+
 TEST_CASE("http_ranges: empty check", "[body-utils]")
 {
     httplib::html::http_ranges ranges;
