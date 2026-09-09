@@ -5,6 +5,7 @@
 #include <boost/algorithm/string/trim.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/system/error_code.hpp>
+#include <cctype>
 #include <charconv>
 #include <chrono>
 #include <filesystem>
@@ -40,6 +41,73 @@ namespace httplib::html
 #else
             gmtime_r(_Time, _Tm);
 #endif
+        }
+
+        inline static std::string
+        html_escape(std::string_view s)
+        {
+            std::string out;
+            out.reserve(s.size());
+            for (char c : s)
+            {
+                switch (c)
+                {
+                    case '&':
+                        out += "&amp;";
+                        break;
+                    case '<':
+                        out += "&lt;";
+                        break;
+                    case '>':
+                        out += "&gt;";
+                        break;
+                    case '"':
+                        out += "&quot;";
+                        break;
+                    case '\'':
+                        out += "&#39;";
+                        break;
+                    default:
+                        out += c;
+                }
+            }
+            return out;
+        }
+
+        inline static std::string
+        href_encode(std::string_view s)
+        {
+            static constexpr char const* hex = "0123456789ABCDEF";
+            std::string out;
+            out.reserve(s.size() * 2);
+            for (char c : s)
+            {
+                unsigned char u = static_cast<unsigned char>(c);
+                if (std::isalnum(u) || c == '-' || c == '_' || c == '.' || c == '~' || c == '/')
+                {
+                    out += c;
+                }
+                else
+                {
+                    out += '%';
+                    out += hex[u >> 4];
+                    out += hex[u & 0xF];
+                }
+            }
+            return out;
+        }
+
+        // u8 字符串（目录/文件名）与 char 字符串（请求 target）共用字节级处理
+        inline static std::string
+        html_escape(std::u8string_view s)
+        {
+            return html_escape(std::string_view(reinterpret_cast<char const*>(s.data()), s.size()));
+        }
+
+        inline static std::string
+        href_encode(std::u8string_view s)
+        {
+            return href_encode(std::string_view(reinterpret_cast<char const*>(s.data()), s.size()));
         }
 
         static std::string
@@ -179,8 +247,8 @@ namespace httplib::html
                         show_path += u8"..&gt;";
                     }
                     auto str = fmt::format((char const*)body_fmt,
-                                           (char const*)rpath.c_str(),
-                                           (char const*)show_path.c_str(),
+                                           detail::href_encode(rpath),
+                                           detail::html_escape(show_path),
                                            space,
                                            time_string,
                                            "-");
@@ -212,8 +280,8 @@ namespace httplib::html
                         show_path += u8"..&gt;";
                     }
                     auto str = fmt::format((char const*)body_fmt,
-                                           (char const*)rpath.c_str(),
-                                           (char const*)show_path.c_str(),
+                                           detail::href_encode(rpath),
+                                           detail::html_escape(show_path),
                                            space,
                                            time_string,
                                            filesize);
@@ -239,7 +307,8 @@ namespace httplib::html
         }
 
         // auto target_path = detail::make_target_path(target);
-        std::string head = fmt::format((char const*)detail::head_fmt, target, target);
+        auto escaped_target = detail::html_escape(target);
+        std::string head = fmt::format((char const*)detail::head_fmt, escaped_target, escaped_target);
 
         std::string body = fmt::format((char const*)detail::body_fmt, "../", "../", "", "", "");
 

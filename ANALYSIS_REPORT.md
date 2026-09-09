@@ -4,14 +4,14 @@
 > 审查分支：`dev`  
 > 审查提交：`56f47cf811254b90057239360b499f9b2f09efca`（修复卡死bug）  
 > 上游仓库：<https://github.com/yansong1221/httplib>  
-> 复查日期：2026-09-07；2026-09-09 更新 CON-01/02、HTTP-01 修复状态  
+> 复查日期：2026-09-07；2026-09-09 更新 CON-01/02、HTTP-01、WEB-01 修复状态  
 > 复查提交：`6f8a602`（HEAD，逐一核对各风险项修复状态）
 
 ## 1. 执行摘要
 
 该项目是一套基于 Boost.Asio/Beast、面向 C++23 的异步 HTTP/1.1 与 WebSocket 客户端/服务端框架，同时包含路由、中间件、反向代理、文件服务、SSE、NDJSON、JWT、Session、下载器、磁盘缓存和可选数据库支持。
 
-总体判断：**架构方向合理、功能覆盖完整、测试投入较明显。截至 2026-09-09 复查，报告中的安全阻断项（上传路径逃逸、TLS/JWT 校验、URL 解码越界、Range 边界等）已大部分修复；端到端数据竞争（CON-01/02）也已收口；但 body/multipart/Range/WS 资源上限、缓存 key、HTML 目录注入和发布工程仍未收口，不建议未经整改直接暴露在公网或承担认证、上传、代理等关键业务。**
+总体判断：**架构方向合理、功能覆盖完整、测试投入较明显。截至 2026-09-09 复查，报告中的安全阻断项（上传路径逃逸、TLS/JWT 校验、URL 解码越界、Range 边界、目录列表注入、符号链接逃逸等）已大部分修复；端到端数据竞争（CON-01/02）也已收口；但 body/multipart/Range/WS 资源上限、缓存 key 和发布工程仍未收口，不建议未经整改直接暴露在公网或承担认证、上传、代理等关键业务。**
 
 | 维度 | 评分 | 结论 |
 |---|---:|---|
@@ -19,7 +19,7 @@
 | 模块化与可读性 | 6/10 | 目录清楚，部分中心文件过大、耦合偏重 |
 | 测试建设 | 7/10 | 273 个真实 TCP 测试，但安全和并发边界覆盖不足 |
 | 并发可靠性 | 5/10 | 端到端 session 数据竞争（CON-01/02）已修复；线程模型约束仍不清晰 |
-| 安全性 | 5/10 | 上传路径逃逸、TLS/JWT、URL 解码、重定向敏感头等已修复；body/multipart/Range/WS 资源上限、目录 HTML 注入仍待整改 |
+| 安全性 | 5/10 | 上传路径逃逸、TLS/JWT、URL 解码、重定向敏感头、目录注入等已修复；body/multipart/Range/WS 资源上限仍待整改 |
 | 构建与发布成熟度 | 3.5/10 | 缺依赖锁定、CI、许可证，安装配置不完整 |
 
 建议定位：当前版本适合作为个人项目、内部实验框架或二次开发基础；完成本报告 P0/P1 整改、动态检测和压力测试前，不应判定为生产就绪。
@@ -285,11 +285,20 @@ file_stream_.open(current_file_path_, std::ios::out | std::ios::binary | std::io
 
 #### WEB-01：HTML 目录列表存在注入风险
 
-请求路径和文件名未经 HTML escaping/URL encoding 就写入 `<title>`、文本和 `href`。当目录内容可被外部用户影响时，可形成存储型 XSS。
+> 状态：✅ **已修复**（复查 2026-09-09，先写测试后修复）
 
-- 位置：[lib/html/html.cpp](lib/html/html.cpp#L153)
+~~请求路径和文件名未经 HTML escaping/URL encoding 就写入 `<title>`、文本和 `href`。当目录内容可被外部用户影响时，可形成存储型 XSS。~~
 
-此外，静态文件路径只做词法 `..` 检查，没有校验符号链接的最终目标是否仍位于 mount root；是否允许跟随外部 symlink 应由显式配置决定。
+~~此外，静态文件路径只做词法 `..` 检查，没有校验符号链接的最终目标是否仍位于 mount root；是否允许跟随外部 symlink 应由显式配置决定。~~
+
+现状：
+- `format_dir_to_html`（[lib/html/html.cpp](lib/html/html.cpp#L290)）对请求 `target` 和目录/文件名统一处理：显示文本走 `html_escape`（`&` `<` `>` `"` `'`），`<a href>` 走 `href_encode`（RFC 3986 百分号编码，空格用 `%20`，仍保留 `/` 目录分隔）。Windows 文件名限制下可用 `<`/`>` 构造的注入无法落地，单元测试用合法字符 `&` 验证转义与编码，`target` 侧则直接用 `<script>` 注入字符串验证；
+- 静态挂载（[lib/server/mount_point_entry.cpp](lib/server/mount_point_entry.cpp#L157)）：`operator()` 在解析路径后新增 `detail::is_within()` canonical containment 校验，`weakly_canonical` 解析符号链接后校验最终目标仍在 `base_dir` 内，逃逸即返回 403；根挂载（尾带分隔符路径）边界已处理；
+- 新增回归测试：`format_dir_to_html` 转义单元测试（`body_utils_test.cpp`）+ symlink 逃逸 e2e 测试（`response_test.cpp`，无 symlink 权限的环境自动 SKIP）。
+
+- 位置：[lib/html/html.cpp](lib/html/html.cpp#L290)、[lib/server/mount_point_entry.cpp](lib/server/mount_point_entry.cpp#L157)
+- 影响：~~存储型 XSS、符号链接逃逸读取挂载根外文件~~ 已消除
+- 建议：~~HTML escaping/URL encoding、canonical containment 校验、显式 symlink 配置~~ 已落实（symlink 默认拒绝跟随逃逸，未提供放行开关，如需要可作为后续配置项）。
 
 #### HTTP-01：Range 解析边界不完整
 
@@ -415,7 +424,7 @@ with any of the following names:
 4. 重构 cache key 和 HTTP cache policy。
 5. ~~完整实现代理 hop-by-hop、Cookie/Set-Cookie 和 Forwarded header 语义~~ → 已修复。
 6. 修复 Range、目录 HTML escaping、~~异常详情泄漏~~ 和长期容器淘汰。
-    - 2026-09-09 更新：Range 边界（HTTP-01）已修复并含回归测试；目录 HTML escaping 与长期容器淘汰待处理。
+    - 2026-09-09 更新：Range 边界（HTTP-01）与目录 HTML escaping/symlink containment（WEB-01）已修复并含回归测试；长期容器淘汰待处理。
 
 ### P2：发布前完成
 
@@ -441,6 +450,6 @@ with any of the following names:
 
 httplib 的基础结构并不差：作者理解 Boost.Asio/Beast、协程、PIMPL、路由 Trie 和真实网络测试，项目也已超过简单示例库的规模。但当前最大问题不是代码风格，而是**安全边界、并发契约和发布工程没有跟上功能扩张速度**。
 
-截至 2026-09-09 复查：最初报告中的 17 项风险已有 **11 项完全修复**（SEC-01/04/05/06、CON-01/02、CL-01/02、INFO-01、PROXY-01、HTTP-01），其中 CL-01/02、CON-01/02、HTTP-01 均含回归或代码复核；SEC-02/CONNECT、SEC-03 部分修复（header/body/upload 已限，CONNECT 默认拒绝）。剩余生产阻断项集中在 **body 与 multipart/Range/WS 资源上限（SEC-03/DOS-01）、缓存 key（CACHE-01）、HTML 目录注入（WEB-01）与运行期配置并发保护（API-01）**。
+截至 2026-09-09 复查：最初报告中的 17 项风险已有 **12 项完全修复**（SEC-01/04/05/06、CON-01/02、CL-01/02、INFO-01、PROXY-01、HTTP-01、WEB-01），其中 CL-01/02、CON-01/02、HTTP-01、WEB-01 均含回归或代码复核；SEC-02/CONNECT、SEC-03 部分修复（header/body/upload 已限，CONNECT 默认拒绝）。剩余生产阻断项集中在 **body 与 multipart/Range/WS 资源上限（SEC-03/DOS-01）、缓存 key（CACHE-01）与运行期配置并发保护（API-01）**。
 
 建议先冻结功能扩张，以 body/资源上限收口为主线，再补动态检测、fuzz 和构建发布工程；随后进入生产压测前再处理缓存等健壮性项。

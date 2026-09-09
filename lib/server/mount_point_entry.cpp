@@ -77,6 +77,37 @@ namespace httplib::server
             return true;
         }
 
+        inline static bool
+        is_within(fs::path const& path, fs::path const& base_dir, std::error_code& ec)
+        {
+            auto canonical_base = fs::weakly_canonical(base_dir, ec);
+            if (ec)
+            {
+                return false;
+            }
+            auto canonical_path = fs::weakly_canonical(path, ec);
+            if (ec)
+            {
+                return false;
+            }
+            auto base = canonical_base.string();
+            auto resolved = canonical_path.string();
+            if (resolved.size() < base.size())
+            {
+                return false;
+            }
+            if (resolved.size() == base.size())
+            {
+                return resolved == base;
+            }
+            if (resolved[base.size()] == fs::path::preferred_separator)
+            {
+                return true;
+            }
+            // 尾带分隔符的根路径（如驱动器根 `C:\`），其下任意路径均在界内
+            return base.size() > 0 && base.back() == fs::path::preferred_separator && resolved.rfind(base, 0) == 0;
+        }
+
     } // namespace detail
 
     mount_point_entry::mount_point_entry(std::string const& mount_point, fs::path const& base_dir)
@@ -122,6 +153,11 @@ namespace httplib::server
         std::error_code ec;
         auto path = impl_->base_dir
                     / fs::path(std::u8string_view((char8_t const*)relative_path.data(), relative_path.size()));
+        if (!detail::is_within(path, impl_->base_dir, ec))
+        {
+            res.set_error_content(http::status::forbidden);
+            return;
+        }
         if (!fs::exists(path, ec))
         {
             res.set_error_content(http::status::not_found);

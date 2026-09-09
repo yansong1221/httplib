@@ -1,8 +1,11 @@
+#include "html/html.h"
 #include "httplib/html/form_data.hpp"
 #include "httplib/html/http_ranges.hpp"
 #include "httplib/html/query_params.hpp"
 #include "httplib/util/misc.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -378,4 +381,30 @@ TEST_CASE("http_ranges: append", "[body-utils]")
     ranges.add({ 0, 99 });
     ranges.add({ 200, 299 });
     REQUIRE(ranges.size() == 2);
+}
+
+TEST_CASE("html: format_dir_to_html escapes target and file names", "[body-utils]")
+{
+    auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_html_escape";
+    std::filesystem::create_directories(tmp_dir);
+    {
+        std::ofstream f(tmp_dir / "a&b.txt");
+        f << "x";
+    }
+
+    boost::system::error_code ec;
+    auto body = httplib::html::format_dir_to_html("<script>alert(1)</script>", tmp_dir, ec);
+    REQUIRE_FALSE(ec);
+
+    // target 不能原样进入 <title>/<h1>
+    REQUIRE_FALSE(body.find("<script>alert(1)</script>") != std::string::npos);
+    REQUIRE(body.find("&lt;script&gt;alert(1)&lt;/script&gt;") != std::string::npos);
+
+    // 文件名中的 '&' 必须 HTML 转义
+    REQUIRE(body.find("a&amp;b.txt") != std::string::npos);
+
+    // href 必须 URL 编码
+    REQUIRE(body.find("a%26b.txt") != std::string::npos);
+
+    std::filesystem::remove_all(tmp_dir);
 }
