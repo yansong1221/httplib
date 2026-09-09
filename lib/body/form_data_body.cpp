@@ -445,7 +445,7 @@ namespace httplib::body
                         is_final = true;
                     }
 
-                    bool save_to_file = !field_data_.filename.empty() && !body_.save_dir.empty();
+                    bool save_to_file = !field_data_.filename.empty() && !body_.params.save_dir.empty();
                     auto commit_content = [&](std::string_view data)
                     {
                         if (save_to_file)
@@ -475,6 +475,11 @@ namespace httplib::body
                         }
                         auto const delim_size = is_final ? delim_final_.size() : delim_field_.size();
                         sv.remove_prefix(pos + delim_size);
+                        if (body_.params.max_fields != 0 && body_.fields.size() >= body_.params.max_fields)
+                        {
+                            ec = http::error::body_limit;
+                            break;
+                        }
                         body_.fields.push_back(std::move(field_data_));
                         step_ = is_final ? step::eof : step::boundary_header;
                         continue;
@@ -545,8 +550,8 @@ namespace httplib::body
             {
                 safe_name = "upload";
             }
-            auto candidate = body_.save_dir / safe_name;
-            auto canonical_dir = fs::weakly_canonical(body_.save_dir);
+            auto candidate = body_.params.save_dir / safe_name;
+            auto canonical_dir = fs::weakly_canonical(body_.params.save_dir);
             auto canonical_file = fs::weakly_canonical(candidate);
             if (canonical_file.string().rfind(canonical_dir.string(), 0) != 0)
             {
@@ -557,10 +562,10 @@ namespace httplib::body
             file_bytes_written_ = 0;
             file_stream_.open(current_file_path_, std::ios::out | std::ios::binary | std::ios::trunc);
         }
-        if (body_.max_file_size)
+        if (body_.params.max_file_size)
         {
             file_bytes_written_ += data.size();
-            if (file_bytes_written_ > body_.max_file_size)
+            if (file_bytes_written_ > body_.params.max_file_size)
             {
                 file_stream_.close();
                 std::error_code rm_ec;

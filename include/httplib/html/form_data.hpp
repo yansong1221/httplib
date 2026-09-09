@@ -37,13 +37,26 @@ namespace httplib::html
         };
 
         /**
+         * The parsing configuration for a form. The default `max_fields =
+         * max_fields_default` caps the number of fields the parser accepts;
+         * `max_file_size = 0` means unlimited.
+         */
+        struct param
+        {
+            fs::path save_dir;
+            std::uint64_t max_file_size = 0;
+            std::size_t max_fields = max_fields_default;
+        };
+
+        /**
          * The data for each field.
          */
         std::vector<field> fields;
 
         std::string boundary;
-        fs::path save_dir;
-        std::uint64_t max_file_size = 0;
+        param params;
+
+        static constexpr std::size_t max_fields_default = 128;
 
         /**
          * Get a field by name.

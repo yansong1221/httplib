@@ -133,9 +133,8 @@ namespace httplib::server
             std::unique_ptr<http::request_parser<http::buffer_body>> resp_parser;
             // 解压流式读取专用：any_body 解析器，body 持有 buffer_body 值以走解压 reader。
             std::unique_ptr<http::request_parser<body::any_body>> dec_parser;
-            // multipart/form-data 落盘配置（默认关闭）。
-            fs::path upload_dir;
-            std::uint64_t upload_file_limit = 0;
+            // multipart/form-data 解析配置（默认关闭落盘）。
+            html::form_data::param form_data_params;
         };
 
         // 构造 lazy 请求（body 未读）：header 已解析完毕，保留 header_parser 供后续读取。
@@ -144,16 +143,14 @@ namespace httplib::server
                            beast::flat_buffer& buffer,
                            std::unique_ptr<http::request_parser<http::empty_body>> header_parser,
                            std::chrono::steady_clock::duration read_timeout,
-                           fs::path upload_dir = {},
-                           std::uint64_t upload_file_limit = 0)
+                           html::form_data::param form_data_params = html::form_data::param {})
         {
             lazy_ctx_ = std::make_unique<lazy_body_read_ctx>();
             lazy_ctx_->stream = &stream;
             lazy_ctx_->buffer = &buffer;
             lazy_ctx_->read_timeout = read_timeout;
             lazy_ctx_->header_parser = std::move(header_parser);
-            lazy_ctx_->upload_dir = std::move(upload_dir);
-            lazy_ctx_->upload_file_limit = upload_file_limit;
+            lazy_ctx_->form_data_params = std::move(form_data_params);
         }
 
         bool
@@ -206,7 +203,8 @@ namespace httplib::server
                 {
                     co_return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
                 }
-                ctx.resp_parser = std::make_unique<http::request_parser<http::buffer_body>>(std::move(*ctx.header_parser));
+                ctx.resp_parser
+                    = std::make_unique<http::request_parser<http::buffer_body>>(std::move(*ctx.header_parser));
                 ctx.resp_parser->eager(true);
                 ctx.header_parser.reset();
             }
@@ -348,20 +346,16 @@ namespace httplib::server
             {
                 body_setup(body_parser.get());
             }
-            if (!ctx.upload_dir.empty())
+            auto& msg = body_parser.get();
+            if (msg[http::field::content_type].starts_with("multipart/form-data"))
             {
-                auto& msg = body_parser.get();
-                if (msg[http::field::content_type].starts_with("multipart/form-data"))
+                auto& body = msg.body();
+                if (!std::holds_alternative<body::form_data_body::value_type>(body))
                 {
-                    auto& body = msg.body();
-                    if (!std::holds_alternative<body::form_data_body::value_type>(body))
-                    {
-                        body = body::form_data_body::value_type {};
-                    }
-                    auto& fd = std::get<body::form_data_body::value_type>(body);
-                    fd.save_dir = ctx.upload_dir;
-                    fd.max_file_size = ctx.upload_file_limit;
+                    body = body::form_data_body::value_type {};
                 }
+                auto& fd = std::get<body::form_data_body::value_type>(body);
+                fd.params = ctx.form_data_params;
             }
 
             while (!body_parser.is_done())

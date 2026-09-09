@@ -137,15 +137,9 @@ namespace httplib::server
     }
 
     void
-    http_server::set_upload_dir(fs::path const& dir)
+    http_server::set_form_data_config(html::form_data::param const& params)
     {
-        impl_->set_upload_dir(dir);
-    }
-
-    void
-    http_server::set_upload_file_limit(std::uint64_t max_bytes)
-    {
-        impl_->set_upload_file_limit(max_bytes);
+        impl_->set_form_data_params(params);
     }
 
     void

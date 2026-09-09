@@ -306,25 +306,20 @@ namespace httplib::server
                                                              buffer_,
                                                              std::move(header_parser),
                                                              server_impl_->read_timeout(),
-                                                             server_impl_->upload_dir(),
-                                                             server_impl_->upload_file_limit());
+                                                             server_impl_->form_data_params());
                         }
                         else
                         {
                             boost::system::error_code ec;
                             http::request_parser<body::any_body> body_parser(std::move(*header_parser));
 
-                            if (!server_impl_->upload_dir().empty())
+                            auto ct = body_parser.get()[http::field::content_type];
+                            if (ct.starts_with("multipart/form-data"))
                             {
-                                auto ct = body_parser.get()[http::field::content_type];
-                                if (ct.starts_with("multipart/form-data"))
-                                {
-                                    auto& body = body_parser.get().body();
-                                    body = body::form_data_body::value_type {};
-                                    auto& fd = std::get<body::form_data_body::value_type>(body);
-                                    fd.save_dir = (*server_impl_).upload_dir();
-                                    fd.max_file_size = (*server_impl_).upload_file_limit();
-                                }
+                                auto& body = body_parser.get().body();
+                                body = body::form_data_body::value_type {};
+                                auto& fd = std::get<body::form_data_body::value_type>(body);
+                                fd.params = (*server_impl_).form_data_params();
                             }
 
                             while (!body_parser.is_done())

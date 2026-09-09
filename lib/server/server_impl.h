@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include "httplib/html/form_data.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
 #include "router_impl.h"
@@ -64,24 +65,14 @@ namespace httplib::server
         bool should_compress_content_type(std::string_view content_type) const;
 
         void
-        set_upload_dir(fs::path const& dir)
+        set_form_data_params(html::form_data::param const& params)
         {
-            upload_dir_ = dir;
+            form_data_params_ = params;
         }
-        void
-        set_upload_file_limit(std::uint64_t max_bytes)
+        html::form_data::param const&
+        form_data_params() const
         {
-            upload_file_limit_ = max_bytes;
-        }
-        fs::path const&
-        upload_dir() const
-        {
-            return upload_dir_;
-        }
-        uint64_t
-        upload_file_limit() const
-        {
-            return upload_file_limit_;
+            return form_data_params_;
         }
 
         void
@@ -160,8 +151,7 @@ namespace httplib::server
 
         std::function<bool(std::string_view)> compress_content_type_predicate_;
 
-        fs::path upload_dir_;
-        std::uint64_t upload_file_limit_ = 10 * 1024 * 1024;
+        html::form_data::param form_data_params_ = { .max_file_size = 10 * 1024 * 1024 };
 
         std::uint32_t header_limit_ = 65536;
         std::uint64_t body_limit_ = 1024ULL * 1024 * 1024;

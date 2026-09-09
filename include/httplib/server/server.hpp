@@ -1,5 +1,6 @@
 #pragma once
 #include "httplib/config.hpp"
+#include "httplib/html/form_data.hpp"
 #include "httplib/server/proxy_interceptor.hpp"
 #include "httplib/server/proxy_strategy.hpp"
 #include "httplib/server/server_fwd.hpp"
@@ -61,8 +62,7 @@ namespace httplib::server
 
         void set_compress_content_types(std::function<bool(std::string_view)> predicate);
 
-        void set_upload_dir(fs::path const& dir);
-        void set_upload_file_limit(std::uint64_t max_bytes);
+        void set_form_data_config(html::form_data::param const& params);
 
         void set_header_limit(std::uint32_t limit);
         void set_body_limit(std::uint64_t limit);

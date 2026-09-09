@@ -551,6 +551,99 @@ TEST_CASE("Multipart form-data body parsing", "[http-methods]")
         });
 }
 
+TEST_CASE("Multipart field count is limited by default", "[http-methods][security]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::post>(
+                "/multipart-field-count",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("unreachable"sv, "text/plain"sv); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            std::string boundary = "----FieldCountBoundary";
+            auto constexpr nfields = 129;
+            std::string body;
+            for (std::size_t i = 0; i < nfields; ++i)
+            {
+                body += std::format("--{}\r\n"
+                                    "Content-Disposition: form-data; name=\"f{}\"\r\n"
+                                    "\r\n"
+                                    "x\r\n",
+                                    boundary,
+                                    i);
+            }
+            body += std::format("--{}--\r\n", boundary);
+
+            auto hdrs = httplib::http::fields();
+            hdrs.set(http::field::content_type, std::format("multipart/form-data; boundary={}", boundary));
+            auto req = httplib::client::request(http::verb::post, "/multipart-field-count", hdrs);
+            req.set_body(body);
+
+            auto resp = co_await client.async_send_request(std::move(req));
+            REQUIRE(!resp.has_value());
+            co_return;
+        });
+}
+
+TEST_CASE("Multipart field count limit is configurable", "[http-methods][security]")
+{
+    run(
+        [](auto& server)
+        {
+            server.set_form_data_config({ .max_fields = 2 });
+            server.router().template set_http_handler<http::verb::post>(
+                "/multipart-field-limit2",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            std::string boundary = "----FieldLimitBoundary";
+            std::string body_3;
+            for (int i = 0; i < 3; ++i)
+            {
+                body_3 += std::format("--{}\r\n"
+                                      "Content-Disposition: form-data; name=\"f{}\"\r\n"
+                                      "\r\n"
+                                      "x\r\n",
+                                      boundary,
+                                      i);
+            }
+            body_3 += std::format("--{}--\r\n", boundary);
+
+            auto hdrs_3 = httplib::http::fields();
+            hdrs_3.set(http::field::content_type, std::format("multipart/form-data; boundary={}", boundary));
+            auto req_3 = httplib::client::request(http::verb::post, "/multipart-field-limit2", hdrs_3);
+            req_3.set_body(body_3);
+            auto resp_3 = co_await client.async_send_request(std::move(req_3));
+            REQUIRE(!resp_3.has_value());
+
+            std::string body_2;
+            for (int i = 0; i < 2; ++i)
+            {
+                body_2 += std::format("--{}\r\n"
+                                      "Content-Disposition: form-data; name=\"f{}\"\r\n"
+                                      "\r\n"
+                                      "x\r\n",
+                                      boundary,
+                                      i);
+            }
+            body_2 += std::format("--{}--\r\n", boundary);
+
+            auto hdrs_2 = httplib::http::fields();
+            hdrs_2.set(http::field::content_type, std::format("multipart/form-data; boundary={}", boundary));
+            auto req_2 = httplib::client::request(http::verb::post, "/multipart-field-limit2", hdrs_2);
+            req_2.set_body(body_2);
+            auto resp_2 = UNWRAP(co_await client.async_send_request(std::move(req_2)));
+            REQUIRE(resp_2.result() == http::status::ok);
+            REQUIRE(resp_2.as_string() == "ok");
+            co_return;
+        });
+}
+
 TEST_CASE("Multipart file upload saved to disk", "[http-methods]")
 {
     auto upload_dir = std::filesystem::temp_directory_path() / "httplib_uploads";
@@ -559,7 +652,7 @@ TEST_CASE("Multipart file upload saved to disk", "[http-methods]")
     run(
         [&](auto& server)
         {
-            server.set_upload_dir(upload_dir);
+            server.set_form_data_config({ .save_dir = upload_dir });
             server.router().template set_http_handler<http::verb::post>(
                 "/upload-disk",
                 [](httplib::server::request& req, httplib::server::response& resp)
@@ -612,8 +705,7 @@ TEST_CASE("Multipart file upload exceeds size limit", "[http-methods]")
     run(
         [&](auto& server)
         {
-            server.set_upload_dir(upload_dir);
-            server.set_upload_file_limit(4);
+            server.set_form_data_config({ .save_dir = upload_dir, .max_file_size = 4 });
             server.router().template set_http_handler<http::verb::post>(
                 "/upload-limit",
                 [](httplib::server::request&, httplib::server::response& resp)
@@ -650,7 +742,7 @@ TEST_CASE("Multipart multiple files saved to disk", "[http-methods]")
     run(
         [&](auto& server)
         {
-            server.set_upload_dir(upload_dir);
+            server.set_form_data_config({ .save_dir = upload_dir });
             server.router().template set_http_handler<http::verb::post>(
                 "/upload-multi",
                 [](httplib::server::request& req, httplib::server::response& resp)
@@ -745,7 +837,7 @@ TEST_CASE("Multipart randomized round-trip", "[http-methods]")
         run(
             [&](auto& server)
             {
-                server.set_upload_dir(upload_dir);
+                server.set_form_data_config({ .save_dir = upload_dir });
                 server.router().template set_http_handler<http::verb::post>(
                     "/fuzz",
                     [&](httplib::server::request& req, httplib::server::response& resp)
@@ -800,7 +892,7 @@ TEST_CASE("Multipart upload rejects path traversal via parent dir", "[http-metho
     run(
         [&](auto& server)
         {
-            server.set_upload_dir(upload_dir);
+            server.set_form_data_config({ .save_dir = upload_dir });
             server.router().template set_http_handler<http::verb::post>(
                 "/upload-pt",
                 [&upload_dir](httplib::server::request& req, httplib::server::response& resp)
@@ -855,7 +947,7 @@ TEST_CASE("Multipart upload strips absolute path filename to basename", "[http-m
     run(
         [&](auto& server)
         {
-            server.set_upload_dir(upload_dir);
+            server.set_form_data_config({ .save_dir = upload_dir });
             server.router().template set_http_handler<http::verb::post>(
                 "/upload-abs",
                 [&upload_dir](httplib::server::request& req, httplib::server::response& resp)
@@ -904,7 +996,7 @@ TEST_CASE("Multipart upload basename-only safe filename", "[http-methods]")
     run(
         [&](auto& server)
         {
-            server.set_upload_dir(upload_dir);
+            server.set_form_data_config({ .save_dir = upload_dir });
             server.router().template set_http_handler<http::verb::post>(
                 "/upload-safe",
                 [&upload_dir](httplib::server::request& req, httplib::server::response& resp)

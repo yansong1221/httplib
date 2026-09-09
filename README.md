@@ -508,8 +508,7 @@ Global middleware applies to proxy routes automatically. Use `set_http_handler` 
 svr.set_read_timeout(std::chrono::seconds(10));
 svr.set_write_timeout(std::chrono::seconds(10));
 svr.set_acceptor_count(64);     // concurrent listen sockets (default 32)
-svr.set_upload_dir("/tmp/uploads");
-svr.set_upload_file_limit(10 * 1024 * 1024);  // 10MB
+svr.set_form_data_config({ .save_dir = "/tmp/uploads", .max_file_size = 10 * 1024 * 1024 });  // 10MB
 svr.set_compress_content_types([](std::string_view ct) {
     return ct.starts_with("text/") || ct.starts_with("application/json");
 });

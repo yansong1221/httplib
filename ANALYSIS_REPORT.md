@@ -4,7 +4,7 @@
 > 审查分支：`dev`  
 > 审查提交：`56f47cf811254b90057239360b499f9b2f09efca`（修复卡死bug）  
 > 上游仓库：<https://github.com/yansong1221/httplib>  
-> 复查日期：2026-09-07；2026-09-09 更新 CON-01/02、HTTP-01、WEB-01、Range 数量上限（SEC-03 部分）修复状态  
+> 复查日期：2026-09-07；2026-09-09 更新 CON-01/02、HTTP-01、WEB-01、Range 数量与 multipart 字段数上限（SEC-03 部分）修复状态
 > 复查提交：`6f8a602`（HEAD，逐一核对各风险项修复状态）
 
 ## 1. 执行摘要
@@ -138,7 +138,7 @@ file_stream_.open(current_file_path_, std::ios::out | std::ios::binary | std::io
 
 #### SEC-03：请求 Header/Body 基本不设上限
 
-> 状态：⚠️ **部分修复**（复查 2026-09-07；2026-09-09 更新 Range 数量上限）
+> 状态：⚠️ **部分修复**（复查 2026-09-07；2026-09-09 更新 Range 数量、multipart 字段数上限）
 
 ~~服务端将 header limit 设置为 `uint32_t` 最大值，body limit 设置为 `unsigned long long` 最大值。普通字符串、表单和 JSON 均可能消耗接近无限内存，且公共 server API 没有全局限制入口。~~
 
@@ -147,14 +147,16 @@ file_stream_.open(current_file_path_, std::ios::out | std::ios::binary | std::io
 - upload file limit 默认 10 MB，同样可配置；
 - `body_limit_` 原默认 `std::numeric_limits<std::uint64_t>::max()`（无限），存在内存耗尽风险；复查后已将服务端默认改为 **1 GiB**（`[lib/server/server_impl.h](lib/server/server_impl.h#L167)`）；
 - **Range 数量上限已落地**（2026-09-09）：`http_ranges` 默认最多 100 段，超限整组拒绝，新增 `max_ranges`/`set_max_ranges()` 可配置入口（[lib/html/http_ranges.cpp](lib/html/http_ranges.cpp#L35)），防 Range 放大；
-- 仍无上限：multipart 字段数/字段大小、解压后大小。
+- **multipart 字段数上限已落地**（2026-09-09）：`form_data` 默认最多 128 字段（`max_fields_default`），超限以 `http::error::body_limit` 拒绝，服务端经 `set_form_data_config()` 统一配置 `form_data::param { save_dir, max_file_size, max_fields }`，eager/lazy 解析路径均已接线；防文件字段数导致的磁盘/句柄耗尽与字段级 CPU 放大；
+- 仍无上限：解压后大小（单字段内容受 body limit 兜底）。
 
 - 请求解析：[lib/server/session.cpp](lib/server/session.cpp#L207)，默认值 [lib/server/server_impl.h](lib/server/server_impl.h#L166)
 - 公共 API：[lib/server/server.hpp](lib/server/server.hpp#L65)
 - JSON 分配：[lib/body/json_body.cpp](lib/body/json_body.cpp#L55)
 - Range 数量：[lib/html/http_ranges.hpp](lib/html/http_ranges.hpp#L16)
-- 影响：header/文件上传/body 已受限，Range 数量已受限；**multipart 字段数/字段大小、解压后大小**仍是 DoS 风险
-- 建议：~~为 header、总 body、各 body 类型、multipart 字段数/字段大小、单文件和总上传量设置安全默认值及可配置上限；限制解压后的大小~~ header/body/upload/Range 数量已落地；补齐 multipart 字段数/字段大小与解压后大小上限。
+- multipart 字段数：[include/httplib/html/form_data.hpp](include/httplib/html/form_data.hpp#L46)
+- 影响：header/文件上传/body/Range 数量/multipart 字段数已受限；**解压后大小**仍是 DoS 风险
+- 建议：~~为 header、总 body、各 body 类型、multipart 字段数/字段大小、单文件和总上传量设置安全默认值及可配置上限；限制解压后的大小~~ header/body/upload/Range 数量/multipart 字段数已落地；补齐解压后大小上限。
 
 #### SEC-04：HTTPS/WSS 身份校验不完整
 
@@ -336,9 +338,9 @@ file_stream_.open(current_file_path_, std::ios::out | std::ios::binary | std::io
 - 默认 Session store 只在命中特定 session 或手工 cleanup 时清理；
 - WebSocket/action queue 没有最大消息数和最大字节数；
 - Router 正则由 `std::regex` 执行，复杂表达式可能造成高 CPU；
-- Header、multipart 字段数没有合理上限（Range 数量上限已随 SEC-03 落地）。
+- Rate limit Session/WS 队列等长期容器缺容量与淘汰（header/multipart 字段数/Range 数量已随 SEC-03 落地）。
 
-> 2026-09-09 更新：Range 数量已限（`http_ranges` 默认 100 段，可配置）；剩余为 Rate limit/Session/WS 队列容量与淘汰、multipart 字段数。
+> 2026-09-09 更新：Range 数量已限（`http_ranges` 默认 100 段，可配置）；multipart 字段数已限（`form_data` 默认 128，`set_form_field_limit()` 可配置）。剩余为 Rate limit/Session/WS 队列容量与淘汰、multipart 单字段内容大小（受 body limit 兜底）、解压后大小。
 
 #### API-01：运行期可变配置缺少并发保护
 
@@ -415,7 +417,7 @@ with any of the following names:
 
 1. ~~默认禁用 CONNECT；接入认证、目标 ACL、IP/DNS 校验和流量限制~~ → 默认已拒绝（405），仍需接入认证与目标 ACL。
 2. ~~修复 multipart 文件名路径逃逸，服务端生成受控文件名并做目录 containment 校验~~ → 已修复（basename + weakly_canonical 校验）。
-3. **增加 Header、Body、解压后数据、multipart、Range、WS 队列等统一安全限制** → header 64KB、upload 10MB、body 1GiB、Range 数量（默认 100 段，可配置）等默认值已落地；multipart 字段数/字段大小、解压后大小、WS 队列上限仍缺失。
+3. **增加 Header、Body、解压后数据、multipart、Range、WS 队列等统一安全限制** → header 64KB、upload 10MB、body 1GiB、Range 数量（默认 100 段，可配置）、multipart 字段数（默认 128，`set_form_field_limit()` 可配置）已落地；multipart 单字段内容大小、解压后大小、WS 队列上限仍缺失。
 4. ~~修复 URL 解码越界和非法输入处理~~ → 已修复。
 5. ~~HTTPS/WSS 默认验证证书链及主机名~~ → 已修复。
 6. ~~JWT 强制校验算法、`exp`、`nbf`，使用常量时间签名比较~~ → 算法与时间戳校验已修复；常量时间比较仍可补充。
@@ -455,6 +457,6 @@ with any of the following names:
 
 httplib 的基础结构并不差：作者理解 Boost.Asio/Beast、协程、PIMPL、路由 Trie 和真实网络测试，项目也已超过简单示例库的规模。但当前最大问题不是代码风格，而是**安全边界、并发契约和发布工程没有跟上功能扩张速度**。
 
-截至 2026-09-09 复查：最初报告中的 17 项风险已有 **12 项完全修复**（SEC-01/04/05/06、CON-01/02、CL-01/02、INFO-01、PROXY-01、HTTP-01、WEB-01），其中 CL-01/02、CON-01/02、HTTP-01、WEB-01 均含回归或代码复核；SEC-02/CONNECT 部分修复（默认拒绝）、SEC-03 部分修复（header/body/upload/Range 数量已限）。剩余生产阻断项集中在 **multipart 字段数/字段大小与解压后大小、WS 队列上限（SEC-03/DOS-01）、缓存 key（CACHE-01）与运行期配置并发保护（API-01）**。
+截至 2026-09-09 复查：最初报告中的 17 项风险已有 **12 项完全修复**（SEC-01/04/05/06、CON-01/02、CL-01/02、INFO-01、PROXY-01、HTTP-01、WEB-01），其中 CL-01/02、CON-01/02、HTTP-01、WEB-01 均含回归或代码复核；SEC-02/CONNECT 部分修复（默认拒绝）、SEC-03 部分修复（header/body/upload/Range 数量/multipart 字段数已限）。剩余生产阻断项集中在 **multipart 单字段内容大小与解压后大小、WS 队列上限（SEC-03/DOS-01）、缓存 key（CACHE-01）与运行期配置并发保护（API-01）**。
 
 建议先冻结功能扩张，以 body/资源上限收口为主线，再补动态检测、fuzz 和构建发布工程；随后进入生产压测前再处理缓存等健壮性项。
