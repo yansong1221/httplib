@@ -1,6 +1,6 @@
 #pragma once
+#include "html/http_ranges.hpp"
 #include "httplib/config.hpp"
-#include "httplib/html/http_ranges.hpp"
 #include <boost/beast/core/file.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/message.hpp>

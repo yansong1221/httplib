@@ -6,7 +6,7 @@
 
 namespace httplib::html
 {
-    class HTTPLIB_API http_ranges
+    class http_ranges
     {
       public:
         using range_type = std::pair<int64_t, int64_t>;
