@@ -306,12 +306,14 @@ namespace httplib::server
                                                              buffer_,
                                                              std::move(header_parser),
                                                              server_impl_->read_timeout(),
+                                                             server_impl_->body_limit(),
                                                              server_impl_->form_data_params());
                         }
                         else
                         {
                             boost::system::error_code ec;
                             http::request_parser<body::any_body> body_parser(std::move(*header_parser));
+                            body_parser.get().body().decompressed_limit = server_impl_->body_limit();
 
                             auto ct = body_parser.get()[http::field::content_type];
                             if (ct.starts_with("multipart/form-data"))

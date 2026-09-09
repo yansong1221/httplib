@@ -287,6 +287,18 @@ namespace httplib::client
                 get_impl(req).prepare_payload();
             }
         }
+        else
+        {
+            // 请求带 Content-Encoding 时，any_body writer 在序列化阶段会压缩 body，set_body()
+            // 预先写入的 Content-Length 是明文长度，与压缩后的实际长度不一致。参照服务端压缩响应时
+            // 的处理（session::http_task::async_write 中 chunked(true)），改用 chunked 传输。
+            auto content_encoding = get_impl(req)[http::field::content_encoding];
+            if (!content_encoding.empty()
+                && compress::compressor_factory::instance().is_transform_encoding(content_encoding))
+            {
+                get_impl(req).chunked(true);
+            }
+        }
     }
     net::awaitable<boost::system::error_code>
     http_client::impl::co_connect()

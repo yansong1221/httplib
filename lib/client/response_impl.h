@@ -244,6 +244,7 @@ namespace httplib::client
                 dec_parser_ = std::make_unique<http::response_parser<body::any_body>>(std::move(*header_parser_));
                 header_parser_.reset();
                 dec_parser_->get().body() = body::buffer_body::value_type {};
+                dec_parser_->get().body().decompressed_limit = parent_->body_limit_;
             }
 
             for (;;)
@@ -301,6 +302,7 @@ namespace httplib::client
 
             http::response_parser<body::any_body> body_parser(std::move(*header_parser_));
             header_parser_.reset();
+            body_parser.get().body().decompressed_limit = parent_->body_limit_;
 
             if (body_setup)
             {

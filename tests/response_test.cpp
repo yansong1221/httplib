@@ -997,4 +997,33 @@ TEST_CASE("Response: is_body_done reflects decompressed pending overflow", "[res
             co_return;
         });
 }
+
+TEST_CASE("Response: decompressed body limit rejects compression bomb", "[response]")
+{
+    std::string big_original(10240, 'X');
+    bool handler_called = false;
+
+    test_common::run(
+        [&](auto& server) {
+            server.router().template set_http_handler<http::verb::post>(
+                "/bomb",
+                [&](httplib::server::request&, httplib::server::response& resp)
+                {
+                    handler_called = true;
+                    resp.set_string_content("ok"sv, "text/plain"sv);
+                });
+            server.set_body_limit(1024);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            httplib::http::fields headers;
+            headers.set(http::field::content_encoding, "gzip");
+            auto req = httplib::client::request(http::verb::post, "/bomb", headers);
+            req.set_body(big_original);
+            auto resp = co_await client.async_send_request(std::move(req));
+            REQUIRE_FALSE(resp.has_value());
+            REQUIRE_FALSE(handler_called);
+            co_return;
+        });
+}
 #endif

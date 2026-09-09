@@ -145,7 +145,7 @@ namespace httplib::compress
 
     compressor_factory::compressor_factory()
     {
-        register_compressor("identity", []() { return nullptr; });
+        register_compressor("identity", []() { return nullptr; }, false);
 #ifdef HTTPLIB_ENABLED_COMPRESS
         register_compressor("gzip", []() { return std::make_unique<gzip_compressor_adapter>(); });
         register_compressor("deflate", []() { return std::make_unique<zlib_compressor_adapter>(); });
@@ -176,9 +176,9 @@ namespace httplib::compress
     }
 
     void
-    compressor_factory::register_compressor(std::string const& encoding, create_function&& func)
+    compressor_factory::register_compressor(std::string const& encoding, create_function&& func, bool transforms)
     {
-        creators_[encoding] = std::move(func);
+        creators_[encoding] = entry { std::move(func), transforms };
     }
 
     compressor::ptr
@@ -189,7 +189,7 @@ namespace httplib::compress
         {
             return nullptr;
         }
-        return iter->second();
+        return iter->second.create();
     }
 
     bool
@@ -197,6 +197,13 @@ namespace httplib::compress
     {
         auto iter = creators_.find(encoding);
         return iter != creators_.end();
+    }
+
+    bool
+    compressor_factory::is_transform_encoding(std::string_view encoding) const
+    {
+        auto iter = creators_.find(encoding);
+        return iter != creators_.end() && iter->second.transforms;
     }
 
 } // namespace httplib::compress

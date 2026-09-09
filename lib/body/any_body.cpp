@@ -66,6 +66,9 @@ namespace httplib::body
     void
     any_body::reader::init(boost::optional<std::uint64_t> const& content_length, boost::system::error_code& ec)
     {
+        decompressed_limit_ = body_.decompressed_limit;
+        decompressed_bytes_ = 0;
+
         auto content_type = header_[http::field::content_type];
         auto content_encoding = header_[http::field::content_encoding];
 
@@ -93,6 +96,16 @@ namespace httplib::body
         if (compressor_)
         {
             compressor_->init(compressor::mode::decode);
+            if (decompressed_limit_ > 0 && content_length.has_value())
+            {
+                auto len = *content_length;
+                if (len >= decompressed_limit_)
+                {
+                    ec = http::error::body_limit;
+                    return;
+                }
+                decompressed_limit_ -= len;
+            }
         }
         proxy_.init(content_length, ec);
     }
@@ -118,6 +131,15 @@ namespace httplib::body
                 decoded_buffer = compressor_->buffer();
                 continue;
             }
+            if (decompressed_limit_ > 0)
+            {
+                decompressed_bytes_ += bytes;
+                if (decompressed_bytes_ > decompressed_limit_)
+                {
+                    ec = http::error::body_limit;
+                    return buffers.size();
+                }
+            }
             decoded_buffer = compressor_->buffer();
         }
         return buffers.size();
@@ -142,6 +164,15 @@ namespace httplib::body
                 decoded_buffer = net::const_buffer(static_cast<char const*>(decoded_buffer.data()) + bytes,
                                                    decoded_buffer.size() - bytes);
                 continue;
+            }
+            if (decompressed_limit_ > 0)
+            {
+                decompressed_bytes_ += bytes;
+                if (decompressed_bytes_ > decompressed_limit_)
+                {
+                    ec = http::error::body_limit;
+                    return;
+                }
             }
             decoded_buffer = net::const_buffer(static_cast<char const*>(decoded_buffer.data()) + bytes,
                                                decoded_buffer.size() - bytes);

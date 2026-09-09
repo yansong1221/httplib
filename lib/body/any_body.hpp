@@ -22,6 +22,8 @@ namespace httplib::body
           public:
             using std::variant<typename Bodies::value_type...>::variant;
 
+            std::uint64_t decompressed_limit = 0;
+
             template <typename Body>
             typename Body::value_type&
             as() &
@@ -284,6 +286,8 @@ namespace httplib::body
         value_type& body_;
         reader_holder proxy_;
         compress::compressor::ptr compressor_;
+        std::uint64_t decompressed_limit_ = 0;
+        std::uint64_t decompressed_bytes_ = 0;
     };
 
 } // namespace httplib::body

@@ -38,12 +38,21 @@ namespace httplib::compress
 
         bool is_supported_encoding(std::string_view encoding) const;
 
+        // 该编码是否会真实变换 body（create() 会返回非空实现）。
+        // 与 is_supported_encoding() 的区别：identity 等 no-op 编码虽被识别，但不会变换数据。
+        bool is_transform_encoding(std::string_view encoding) const;
+
       public:
         static compressor_factory& instance();
 
       private:
+        struct entry
+        {
+            create_function create;
+            bool transforms;
+        };
         compressor_factory();
-        void register_compressor(std::string const& encoding, create_function&& func);
-        util::string_map<create_function> creators_;
+        void register_compressor(std::string const& encoding, create_function&& func, bool transforms = true);
+        util::string_map<entry> creators_;
     };
 } // namespace httplib::compress

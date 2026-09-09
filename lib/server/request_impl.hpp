@@ -135,6 +135,7 @@ namespace httplib::server
             std::unique_ptr<http::request_parser<body::any_body>> dec_parser;
             // multipart/form-data 解析配置（默认关闭落盘）。
             html::form_data::param form_data_params;
+            std::uint64_t body_limit = 0;
         };
 
         // 构造 lazy 请求（body 未读）：header 已解析完毕，保留 header_parser 供后续读取。
@@ -143,6 +144,7 @@ namespace httplib::server
                            beast::flat_buffer& buffer,
                            std::unique_ptr<http::request_parser<http::empty_body>> header_parser,
                            std::chrono::steady_clock::duration read_timeout,
+                           std::uint64_t body_limit,
                            html::form_data::param form_data_params = html::form_data::param {})
         {
             lazy_ctx_ = std::make_unique<lazy_body_read_ctx>();
@@ -150,6 +152,7 @@ namespace httplib::server
             lazy_ctx_->buffer = &buffer;
             lazy_ctx_->read_timeout = read_timeout;
             lazy_ctx_->header_parser = std::move(header_parser);
+            lazy_ctx_->body_limit = body_limit;
             lazy_ctx_->form_data_params = std::move(form_data_params);
         }
 
@@ -269,6 +272,7 @@ namespace httplib::server
                 ctx.dec_parser = std::make_unique<http::request_parser<body::any_body>>(std::move(*ctx.header_parser));
                 ctx.dec_parser->eager(true);
                 ctx.header_parser.reset();
+                ctx.dec_parser->get().body().decompressed_limit = ctx.body_limit;
                 ctx.dec_parser->get().body() = body::buffer_body::value_type {};
             }
 
@@ -341,6 +345,7 @@ namespace httplib::server
             http::request_parser<body::any_body> body_parser(std::move(*ctx.header_parser));
             body_parser.eager(true);
             ctx.header_parser.reset();
+            body_parser.get().body().decompressed_limit = ctx.body_limit;
 
             if (body_setup)
             {
