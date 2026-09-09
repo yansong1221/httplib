@@ -3,17 +3,22 @@
 #include "body/json_body.hpp"
 #include "body/string_body.hpp"
 #include "common.hpp"
+#include "compress/compressor.hpp"
 #include "httplib/client/lazy_request.hpp"
 #include "httplib/server/mount_point_entry.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/server/stream_writer.hpp"
 #include <array>
+#include <boost/asio/redirect_error.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <boost/asio/write.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <string>
 
 namespace body = httplib::body;
 namespace http = httplib::http;
@@ -959,6 +964,36 @@ TEST_CASE("Response: read_some_decompressed passes through identity body", "[res
         });
 }
 
+TEST_CASE("Response: unsupported request content-encoding is dropped", "[response]")
+{
+    bool saw_encoding = false;
+    std::string got_body;
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::post>(
+                "/enc",
+                [&](httplib::server::request& req, httplib::server::response& resp)
+                {
+                    saw_encoding = !req[http::field::content_encoding].empty();
+                    got_body = req.as_string();
+                    resp.set_string_content("ok"sv, "text/plain"sv);
+                });
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            httplib::http::fields headers;
+            headers.set(http::field::content_encoding, "unsupported-encoding-xyz");
+            auto req = httplib::client::request(http::verb::post, "/enc", headers);
+            req.set_body(std::string("plain hello body"));
+            auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
+            REQUIRE(resp.result() == http::status::ok);
+            co_return;
+        });
+    REQUIRE_FALSE(saw_encoding);
+    REQUIRE(got_body == "plain hello body");
+}
+
 #ifdef HTTPLIB_ENABLED_COMPRESS
 TEST_CASE("Response: is_body_done reflects decompressed pending overflow", "[response]")
 {
@@ -1004,7 +1039,8 @@ TEST_CASE("Response: decompressed body limit rejects compression bomb", "[respon
     bool handler_called = false;
 
     test_common::run(
-        [&](auto& server) {
+        [&](auto& server)
+        {
             server.router().template set_http_handler<http::verb::post>(
                 "/bomb",
                 [&](httplib::server::request&, httplib::server::response& resp)
@@ -1025,5 +1061,90 @@ TEST_CASE("Response: decompressed body limit rejects compression bomb", "[respon
             REQUIRE_FALSE(handler_called);
             co_return;
         });
+}
+
+TEST_CASE("Response: malformed gzip request body errors cleanly, no exception", "[response]")
+{
+    std::string compressed;
+    {
+        auto& factory = httplib::compress::compressor_factory::instance();
+        auto encoder = factory.create("gzip");
+        REQUIRE(encoder);
+        boost::system::error_code ec;
+        encoder->init(httplib::compress::compressor::mode::encode, ec);
+        REQUIRE_FALSE(ec);
+        encoder->write(net::buffer(std::string(4096, 'X')), false, ec);
+        REQUIRE_FALSE(ec);
+        auto buf = encoder->buffer();
+        compressed.assign(static_cast<char const*>(buf.data()), buf.size());
+    }
+    std::string truncated(compressed.data(), compressed.size() / 2);
+    REQUIRE(!truncated.empty());
+    REQUIRE(truncated.size() < compressed.size());
+
+    bool handler_called = false;
+    net::thread_pool pool { 2 };
+    std::exception_ptr err;
+    net::co_spawn(
+        pool.get_executor(),
+        [&]() -> net::awaitable<void>
+        {
+            httplib::server::http_server server(pool.get_executor());
+            test_common::setup_logger(server);
+            server.router().template set_http_handler<http::verb::post>(
+                "/bomb",
+                [&](httplib::server::request&, httplib::server::response& resp)
+                {
+                    handler_called = true;
+                    resp.set_string_content("ok"sv, "text/plain"sv);
+                });
+            server.listen("127.0.0.1", 0);
+            auto ep = server.local_endpoint();
+            server.run();
+
+            try
+            {
+                // 直接用原始 socket 发送截断的 gzip 请求体，绕过客户端 writer。
+                net::ip::tcp::socket sock(pool.get_executor());
+                boost::system::error_code ec;
+                co_await sock.async_connect(ep, net::redirect_error(net::use_awaitable, ec));
+                REQUIRE_FALSE(ec);
+
+                std::string raw = "POST /bomb HTTP/1.1\r\n"
+                                  "Host: 127.0.0.1\r\n"
+                                  "Content-Encoding: gzip\r\n"
+                                  "Content-Length: "
+                                  + std::to_string(truncated.size()) + "\r\n\r\n" + truncated;
+                co_await net::async_write(sock, net::buffer(raw), net::redirect_error(net::use_awaitable, ec));
+                REQUIRE_FALSE(ec);
+
+                // 服务端在解压失败后应直接断开连接，而不是抛异常回 500。
+                std::array<char, 512> buf {};
+                std::string received;
+                boost::system::error_code re;
+                while (!re)
+                {
+                    auto n
+                        = co_await sock.async_read_some(net::buffer(buf), net::redirect_error(net::use_awaitable, re));
+                    received.append(buf.data(), n);
+                }
+                sock.close();
+                server.stop();
+
+                REQUIRE_FALSE(handler_called);
+                REQUIRE(received.empty());
+            }
+            catch (...)
+            {
+                server.stop();
+                throw;
+            }
+        },
+        [&](std::exception_ptr e) { err = e; });
+    pool.join();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
 }
 #endif

@@ -274,6 +274,16 @@ namespace httplib::client
         {
             get_impl(req).set(http::field::host, host_value_);
         }
+        // 声明了不支持的 Content-Encoding：any_body writer 不会真的压缩，头却留在线上会让对端误判，
+        // 这里删掉头并告警。
+        auto content_encoding = get_impl(req)[http::field::content_encoding];
+        if (!content_encoding.empty()
+            && !compress::compressor_factory::instance().is_supported_encoding(content_encoding))
+        {
+            logger()->warn("unsupported request content-encoding '{}', remove the header",
+                           std::string(content_encoding));
+            req.erase(http::field::content_encoding);
+        }
         if (!get_impl(req).has_content_length())
         {
             // any_body 不是 sized body，prepare_payload() 对空 body 也会设 Transfer-Encoding: chunked，

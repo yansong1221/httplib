@@ -16,7 +16,11 @@ namespace httplib::body
 
         if (compressor_)
         {
-            compressor_->init(compressor::mode::encode);
+            compressor_->init(compressor::mode::encode, ec);
+            if (ec)
+            {
+                return;
+            }
         }
         proxy_.init(ec);
     }
@@ -39,7 +43,11 @@ namespace httplib::body
             }
             if (!result)
             {
-                compressor_->finish();
+                compressor_->finish(ec);
+                if (ec)
+                {
+                    return boost::none;
+                }
                 auto buffer = compressor_->buffer();
                 if (buffer.size() != 0)
                 {
@@ -50,7 +58,11 @@ namespace httplib::body
                 return boost::none;
             }
 
-            compressor_->write(net::buffer(result->first), result->second);
+            compressor_->write(net::buffer(result->first), result->second, ec);
+            if (ec)
+            {
+                return boost::none;
+            }
             auto buffer = compressor_->buffer();
             if (buffer.size() != 0)
             {
@@ -95,7 +107,11 @@ namespace httplib::body
         compressor_ = compressor_factory::instance().create(content_encoding);
         if (compressor_)
         {
-            compressor_->init(compressor::mode::decode);
+            compressor_->init(compressor::mode::decode, ec);
+            if (ec)
+            {
+                return;
+            }
             if (decompressed_limit_ > 0 && content_length.has_value())
             {
                 auto len = *content_length;
@@ -118,7 +134,11 @@ namespace httplib::body
             return proxy_.put(buffers, ec);
         }
 
-        compressor_->write(buffers);
+        compressor_->write(buffers, true, ec);
+        if (ec)
+        {
+            return buffers.size();
+        }
 
         auto decoded_buffer = compressor_->buffer();
         while (decoded_buffer.size() != 0 && !ec)
@@ -153,7 +173,11 @@ namespace httplib::body
             return proxy_.finish(ec);
         }
 
-        compressor_->finish();
+        compressor_->finish(ec);
+        if (ec)
+        {
+            return;
+        }
         auto decoded_buffer = compressor_->buffer();
         while (decoded_buffer.size() != 0 && !ec)
         {

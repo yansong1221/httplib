@@ -1,4 +1,5 @@
 #pragma once
+#include "compress/compressor.hpp"
 #include <boost/iostreams/concepts.hpp>
 #include <boost/iostreams/filter/symmetric.hpp>
 #include <boost/iostreams/filtering_stream.hpp>
@@ -11,6 +12,21 @@
 
 namespace httplib::compress
 {
+    // brotli 解码错误：直接携带细分错误码，供 basic_compressor 转成 error_code。
+    class brotli_error : public std::runtime_error
+    {
+      public:
+        brotli_error(error code, std::string const& what) : std::runtime_error(what), code_(code) {}
+
+        error
+        code() const noexcept
+        {
+            return code_;
+        }
+
+      private:
+        error code_;
+    };
 
     namespace detail
     {
@@ -106,6 +122,7 @@ namespace httplib::compress
             {
                 uint8_t const* next_in = reinterpret_cast<uint8_t const*>(src_begin);
                 size_t available_in = src_end - src_begin;
+                char* out_start = dst_begin;
                 uint8_t* next_out = reinterpret_cast<uint8_t*>(dst_begin);
                 size_t available_out = dst_end - dst_begin;
 
@@ -118,6 +135,7 @@ namespace httplib::compress
 
                 src_begin = reinterpret_cast<char const*>(next_in);
                 dst_begin = reinterpret_cast<char*>(next_out);
+                decoded_total_ += static_cast<size_t>(next_out - reinterpret_cast<uint8_t*>(out_start));
 
                 switch (result)
                 {
@@ -128,23 +146,36 @@ namespace httplib::compress
                     case BROTLI_DECODER_RESULT_SUCCESS:
                         return false; // 解压完成
                     case BROTLI_DECODER_RESULT_ERROR:
-                        throw std::runtime_error("Brotli decompression error");
+                        throw brotli_error(classify_error(), "Brotli decompression error");
                     default:
-                        throw std::runtime_error("Unknown Brotli result");
+                        throw brotli_error(classify_error(), "Unknown Brotli result");
                 }
             }
             void
             close()
             { // 确保状态清理
                 BrotliDecoderErrorCode code = BrotliDecoderGetErrorCode(state_.get());
-                if (code != BROTLI_DECODER_RESULT_SUCCESS)
+                if (code == BROTLI_DECODER_NEEDS_MORE_INPUT)
                 {
-                    throw std::runtime_error("Brotli decompression closed with error");
+                    // 输入不完整就收尾：视为截断。
+                    throw brotli_error(error::incomplete, "Brotli stream truncated");
+                }
+                if (code < 0)
+                {
+                    throw brotli_error(classify_error(), "Brotli decompression error");
                 }
             }
 
           private:
+            error
+            classify_error() const noexcept
+            {
+                // 尚未解出任何字节说明开头就无效（头/魔数类），否则属于数据中段损坏。
+                return decoded_total_ == 0 ? error::bad_header : error::bad_data;
+            }
+
             std::unique_ptr<BrotliDecoderState, void (*)(BrotliDecoderState*)> state_;
+            std::size_t decoded_total_ = 0;
         };
 
     } // namespace detail
