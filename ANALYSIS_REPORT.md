@@ -11,7 +11,7 @@
 
 该项目是一套基于 Boost.Asio/Beast、面向 C++23 的异步 HTTP/1.1 与 WebSocket 客户端/服务端框架，同时包含路由、中间件、反向代理、文件服务、SSE、NDJSON、JWT、Session、下载器、磁盘缓存和可选数据库支持。
 
-总体判断：**架构方向合理、功能覆盖完整、测试投入较明显。截至 2026-09-09 复查，报告中的安全阻断项（上传路径逃逸、TLS/JWT 校验、URL 解码越界、Range 边界、目录列表注入、符号链接逃逸等）已大部分修复；端到端数据竞争（CON-01/02）也已收口；但 body/multipart/Range/WS 资源上限、缓存 key 和发布工程仍未收口，不建议未经整改直接暴露在公网或承担认证、上传、代理等关键业务。**
+总体判断：**架构方向合理、功能覆盖完整、测试投入较明显。截至 2026-09-09 复查，报告中的安全阻断项（上传路径逃逸、TLS/JWT 校验、URL 解码越界、Range 边界、目录列表注入、符号链接逃逸、CONNECT 开放代理等）已全部修复；端到端数据竞争（CON-01/02）也已收口；但 body/multipart/Range/WS 资源上限、缓存 key 和发布工程仍未收口，不建议未经整改直接暴露在公网或承担认证、上传、代理等关键业务。**
 
 | 维度 | 评分 | 结论 |
 |---|---:|---|
@@ -19,7 +19,7 @@
 | 模块化与可读性 | 6/10 | 目录清楚，部分中心文件过大、耦合偏重 |
 | 测试建设 | 7/10 | 273 个真实 TCP 测试，但安全和并发边界覆盖不足 |
 | 并发可靠性 | 5/10 | 端到端 session 数据竞争（CON-01/02）已修复；线程模型约束仍不清晰 |
-| 安全性 | 5/10 | 上传路径逃逸、TLS/JWT、URL 解码、重定向敏感头、目录注入等已修复；body/multipart/Range/WS 资源上限仍待整改 |
+| 安全性 | 5/10 | 上传路径逃逸、TLS/JWT、URL 解码、重定向敏感头、目录注入、CONNECT 开放代理等已修复；body/multipart/Range/WS 资源上限仍待整改 |
 | 构建与发布成熟度 | 3.5/10 | 缺依赖锁定、CI、许可证，安装配置不完整 |
 
 建议定位：当前版本适合作为个人项目、内部实验框架或二次开发基础；完成本报告 P0/P1 整改、动态检测和压力测试前，不应判定为生产就绪。
@@ -122,19 +122,19 @@ file_stream_.open(current_file_path_, std::ios::out | std::ios::binary | std::io
 
 #### SEC-02：所有 CONNECT 请求绕过路由和中间件，形成开放代理
 
-> 状态：⚠️ **部分修复**（复查 2026-09-07）
+> 状态：✅ **已修复**（复查 2026-09-09）
 
 ~~普通 HTTP 会话在执行 `router.pre_routing()` 前直接判断 `CONNECT`，随后解析目标并建立任意 TCP 连接。现有路由鉴权、JWT、Rate Limit 和自定义 ACL 均不会执行。~~
 
 现状：
 - CONNECT 默认被拒绝：未注册 `set_connect_handler` 时返回 `405 method_not_allowed`，不再是开放代理；
-- 已支持路径匹配（`query_connect_handler`）和全局中间件（`use()` 经 `wrap_global` 包装）；
-- 但仍绕过通用 `pre_routing`/`post_routing` 管线：路由级 `Aspects` 中间件、`not_found_handler`、`post_routing_handler` 均不执行，认证/ACL 仍需依赖 CONNECT handler 内自行实现。
+- CONNECT 走完整的 `pre_routing` → `post_routing` 管线，路由级中间件正常执行；
+- `set_connect_handler` 支持路径匹配（`query_connect_handler`）和全局中间件（`use()` 经 `wrap_global` 包装）。
 
-- 入口：[lib/server/session.cpp](lib/server/session.cpp#L234)
-- 转发实现：[lib/server/session.cpp](lib/server/session.cpp#L475)
-- 影响：开放代理已消除；但 CONNECT 与其他方法的鉴权、限流模型尚未统一
-- 建议：~~默认禁用 CONNECT；提供显式开关；必须经过认证、目标主机/端口 ACL、DNS/IP 二次校验和连接/流量限制~~ 让 CONNECT 走完整 pre/post-routing 管线或明确文档化其 handler 内的认证/ACL 责任。
+- 入口：[lib/server/session.cpp](lib/server/session.cpp#L260)
+- 转发实现：[lib/server/session.cpp](lib/server/session.cpp#L372)
+- 影响：~~开放代理~~ 已消除
+- 建议：~~默认禁用 CONNECT；提供显式开关；必须经过认证、目标主机/端口 ACL、DNS/IP 二次校验和连接/流量限制~~ 已落实。
 
 #### SEC-03：请求 Header/Body 基本不设上限
 
@@ -415,7 +415,7 @@ with any of the following names:
 >
 > 2026-09-09：CON-01/CON-02 数据竞争项已修复，随 2026-09-07 复查中已修复项一并纳入回归范围。
 
-1. ~~默认禁用 CONNECT；接入认证、目标 ACL、IP/DNS 校验和流量限制~~ → 默认已拒绝（405），仍需接入认证与目标 ACL。
+1. ~~默认禁用 CONNECT；接入认证、目标 ACL、IP/DNS 校验和流量限制~~ → 默认已拒绝（405），CONNECT 走完整 pre/post-routing 管线。
 2. ~~修复 multipart 文件名路径逃逸，服务端生成受控文件名并做目录 containment 校验~~ → 已修复（basename + weakly_canonical 校验）。
 3. **增加 Header、Body、解压后数据、multipart、Range、WS 队列等统一安全限制** → header 64KB、upload 10MB、body 1GiB、Range 数量（默认 100 段，可配置）、multipart 字段数（默认 128，`set_form_field_limit()` 可配置）已落地；multipart 单字段内容大小、解压后大小、WS 队列上限仍缺失。
 4. ~~修复 URL 解码越界和非法输入处理~~ → 已修复。
@@ -457,6 +457,6 @@ with any of the following names:
 
 httplib 的基础结构并不差：作者理解 Boost.Asio/Beast、协程、PIMPL、路由 Trie 和真实网络测试，项目也已超过简单示例库的规模。但当前最大问题不是代码风格，而是**安全边界、并发契约和发布工程没有跟上功能扩张速度**。
 
-截至 2026-09-09 复查：最初报告中的 17 项风险已有 **12 项完全修复**（SEC-01/04/05/06、CON-01/02、CL-01/02、INFO-01、PROXY-01、HTTP-01、WEB-01），其中 CL-01/02、CON-01/02、HTTP-01、WEB-01 均含回归或代码复核；SEC-02/CONNECT 部分修复（默认拒绝）、SEC-03 部分修复（header/body/upload/Range 数量/multipart 字段数已限）。剩余生产阻断项集中在 **multipart 单字段内容大小与解压后大小、WS 队列上限（SEC-03/DOS-01）、缓存 key（CACHE-01）与运行期配置并发保护（API-01）**。
+截至 2026-09-09 复查：最初报告中的 17 项风险已有 **13 项完全修复**（SEC-01/02/04/05/06、CON-01/02、CL-01/02、INFO-01、PROXY-01、HTTP-01、WEB-01），其中 CL-01/02、CON-01/02、HTTP-01、WEB-01 均含回归或代码复核；SEC-03 部分修复（header/body/upload/Range 数量/multipart 字段数已限）。剩余生产阻断项集中在 **multipart 单字段内容大小与解压后大小、WS 队列上限（SEC-03/DOS-01）、缓存 key（CACHE-01）与运行期配置并发保护（API-01）**。
 
 建议先冻结功能扩张，以 body/资源上限收口为主线，再补动态检测、fuzz 和构建发布工程；随后进入生产压测前再处理缓存等健壮性项。

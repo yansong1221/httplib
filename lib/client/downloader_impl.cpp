@@ -72,6 +72,22 @@ namespace httplib::client
         return ui;
     }
 
+    std::string
+    downloader::impl::make_cache_key(url_info const& ui)
+    {
+        std::string key;
+        key.reserve(ui.host.size() + ui.path.size() + 32);
+        key.append(ui.ssl ? "https://" : "http://");
+        key.append(ui.host);
+        if ((ui.ssl && ui.port != 443) || (!ui.ssl && ui.port != 80))
+        {
+            key.push_back(':');
+            key.append(std::to_string(ui.port));
+        }
+        key.append(ui.path);
+        return key;
+    }
+
     std::uint64_t
     downloader::impl::parse_content_range_total(http::fields const& headers)
     {
@@ -449,7 +465,7 @@ namespace httplib::client
         {
             co_return false;
         }
-        auto entry = cache_->get(ui.path);
+        auto entry = cache_->get(make_cache_key(ui));
         if (!entry.has_value())
         {
             co_return false;
@@ -717,7 +733,7 @@ namespace httplib::client
 
             if (cache_)
             {
-                cache_->put(ui.path, result.headers, save_path);
+                cache_->put(make_cache_key(ui), result.headers, save_path);
             }
 
             co_return boost::system::error_code {};
@@ -977,7 +993,7 @@ namespace httplib::client
 
         if (cache_)
         {
-            cache_->put(ui.path, probe_headers, save_path);
+            cache_->put(make_cache_key(ui), probe_headers, save_path);
         }
 
         co_return boost::system::error_code {};
@@ -1057,7 +1073,7 @@ namespace httplib::client
 
         if (cache_)
         {
-            auto entry = cache_->get(ui.path);
+            auto entry = cache_->get(make_cache_key(ui));
             if (entry.has_value())
             {
                 set_state(downloader::state::downloading);

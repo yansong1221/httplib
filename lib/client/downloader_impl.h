@@ -91,6 +91,7 @@ namespace httplib::client
 
       private:
         static url_info parse_url(std::string_view url);
+        static std::string make_cache_key(url_info const& ui);
         static std::uint64_t parse_content_range_total(http::fields const& headers);
         static std::string parse_content_disposition_filename(http::fields const& headers);
         static std::optional<redirect_target> parse_redirect(http::fields const& headers);

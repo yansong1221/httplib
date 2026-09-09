@@ -469,6 +469,82 @@ TEST_CASE("Downloader: disk cache hit on second download", "[downloader]")
     fs::remove_all(cache_dir);
 }
 
+TEST_CASE("Downloader: cache isolates different origins", "[downloader]")
+{
+    auto server_path_a = fs::temp_directory_path() / "httplib_dl_cache_origin_a.txt";
+    auto server_path_b = fs::temp_directory_path() / "httplib_dl_cache_origin_b.txt";
+    {
+        std::ofstream fa(server_path_a, std::ios::binary);
+        fa << "content from server A\n";
+    }
+    {
+        std::ofstream fb(server_path_b, std::ios::binary);
+        fb << "content from server B\n";
+    }
+
+    auto dl_path_a = fs::temp_directory_path() / "httplib_dl_cache_iso_a.bin";
+    auto dl_path_b = fs::temp_directory_path() / "httplib_dl_cache_iso_b.bin";
+    auto cache_dir = fs::temp_directory_path() / "httplib_test_cache_iso";
+
+    dl_test_scaffold ts_a;
+    ts_a.router().set_http_handler<http::verb::get>("/data",
+                                                    [&](httplib::server::request&, httplib::server::response& resp)
+                                                    {
+                                                        resp.set(http::field::etag, "\"aaa\"");
+                                                        resp.set_file_content(server_path_a);
+                                                    });
+    ts_a.router().set_http_handler<http::verb::head>("/data",
+                                                     [&](httplib::server::request&, httplib::server::response& resp)
+                                                     {
+                                                         resp.set(http::field::content_length, "22");
+                                                         resp.set(http::field::accept_ranges, "bytes");
+                                                     });
+    ts_a.start();
+
+    dl_test_scaffold ts_b;
+    ts_b.router().set_http_handler<http::verb::get>("/data",
+                                                    [&](httplib::server::request&, httplib::server::response& resp)
+                                                    {
+                                                        resp.set(http::field::etag, "\"bbb\"");
+                                                        resp.set_file_content(server_path_b);
+                                                    });
+    ts_b.router().set_http_handler<http::verb::head>("/data",
+                                                     [&](httplib::server::request&, httplib::server::response& resp)
+                                                     {
+                                                         resp.set(http::field::content_length, "22");
+                                                         resp.set(http::field::accept_ranges, "bytes");
+                                                     });
+    ts_b.start();
+
+    auto cache = std::make_shared<httplib::client::disk_cache>(cache_dir);
+
+    {
+        httplib::client::downloader dl(ts_a.ioc_, ts_a.pool);
+        dl.set_cache(cache);
+        auto ec = dl.download(ts_a.url_for_path("/data"), dl_path_a);
+        REQUIRE_FALSE(ec);
+        REQUIRE(read_file(dl_path_a) == "content from server A\n");
+    }
+
+    REQUIRE(cache->entry_count() >= 1);
+
+    {
+        httplib::client::downloader dl(ts_b.ioc_, ts_b.pool);
+        dl.set_cache(cache);
+        auto ec = dl.download(ts_b.url_for_path("/data"), dl_path_b);
+        REQUIRE_FALSE(ec);
+        REQUIRE(read_file(dl_path_b) == "content from server B\n");
+    }
+
+    REQUIRE(cache->entry_count() >= 2);
+
+    fs::remove(server_path_a);
+    fs::remove(server_path_b);
+    fs::remove(dl_path_a);
+    fs::remove(dl_path_b);
+    fs::remove_all(cache_dir);
+}
+
 TEST_CASE("Downloader: cancel stops download", "[downloader]")
 {
     auto server_path = fs::temp_directory_path() / "httplib_dl_cancel_srv.bin";
