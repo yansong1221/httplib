@@ -375,6 +375,40 @@ TEST_CASE("http_ranges: empty check", "[body-utils]")
     REQUIRE_FALSE(ranges.empty());
 }
 
+TEST_CASE("http_ranges: multi-range count is limited by default", "[body-utils]")
+{
+    std::string str = "bytes=";
+    for (int i = 0; i < 100; ++i)
+    {
+        if (i != 0)
+        {
+            str += ",";
+        }
+        str += std::to_string(i) + "-" + std::to_string(i);
+    }
+
+    httplib::html::http_ranges ranges;
+    REQUIRE(ranges.parse(str, 1000));
+    REQUIRE(ranges.size() == 100);
+
+    str += ",100-100";
+    httplib::html::http_ranges ranges2;
+    REQUIRE_FALSE(ranges2.parse(str, 1000));
+    REQUIRE(ranges2.empty());
+}
+
+TEST_CASE("http_ranges: max_ranges is configurable", "[body-utils]")
+{
+    httplib::html::http_ranges ranges;
+    ranges.set_max_ranges(2);
+
+    REQUIRE_FALSE(ranges.parse("bytes=0-0,1-1,2-2", 1000));
+    REQUIRE(ranges.empty());
+
+    REQUIRE(ranges.parse("bytes=0-0,1-1", 1000));
+    REQUIRE(ranges.size() == 2);
+}
+
 TEST_CASE("http_ranges: append", "[body-utils]")
 {
     httplib::html::http_ranges ranges;

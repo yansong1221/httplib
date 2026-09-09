@@ -13,6 +13,9 @@ namespace httplib::html
         using ranges_type = std::vector<range_type>;
 
       public:
+        static constexpr std::size_t max_ranges_default = 100;
+
+      public:
         std::size_t size() const;
         bool empty() const;
 
@@ -24,7 +27,11 @@ namespace httplib::html
         ranges_type const& ranges() const;
         bool parse(std::string_view range_str, size_t file_size);
 
+        std::size_t max_ranges() const;
+        void set_max_ranges(std::size_t n);
+
       private:
         ranges_type ranges_;
+        std::size_t max_ranges_ = max_ranges_default;
     };
 } // namespace httplib::html

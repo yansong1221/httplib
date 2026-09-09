@@ -34,6 +34,11 @@ namespace httplib::html
         auto ranges = util::split(range_str, ",");
         for (auto const& range : ranges)
         {
+            if (ranges_.size() >= max_ranges_)
+            {
+                ranges_.clear();
+                return false;
+            }
             // Handle suffix range: -N
             if (range.starts_with("-"))
             {
@@ -133,6 +138,18 @@ namespace httplib::html
     http_ranges::empty() const
     {
         return ranges_.empty();
+    }
+
+    std::size_t
+    http_ranges::max_ranges() const
+    {
+        return max_ranges_;
+    }
+
+    void
+    http_ranges::set_max_ranges(std::size_t n)
+    {
+        max_ranges_ = n;
     }
 
     http_ranges::range_type const&
