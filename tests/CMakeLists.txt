@@ -1,29 +1,79 @@
-set(MOUDLE httplib_tests)
-
 find_package(Catch2 CONFIG REQUIRED)
-
-file(GLOB_RECURSE MOUDLE_SOURCES *.h *.cpp *.hpp *.cxx)
-source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${MOUDLE_SOURCES})
-
-add_executable(${MOUDLE} ${MOUDLE_SOURCES})
-
-target_link_libraries(${MOUDLE}
-PRIVATE httplib
-PRIVATE Catch2::Catch2WithMain
-)
-
 find_package(jwt-cpp CONFIG REQUIRED)
-target_link_libraries(${MOUDLE} PRIVATE jwt-cpp::jwt-cpp)
+
+# Shared test support: common helper headers, Catch2 main, internal lib headers.
+add_library(httplib_test_support INTERFACE)
+set_target_properties(httplib_test_support PROPERTIES FOLDER "tests")
+target_link_libraries(httplib_test_support
+    INTERFACE
+        httplib
+        Catch2::Catch2WithMain
+)
+target_include_directories(httplib_test_support
+    INTERFACE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${HTTPLIB_LIB_DIR}
+)
 
 if(HTTPLIB_ENABLED_SSL)
     find_package(OpenSSL REQUIRED)
-    target_link_libraries(${MOUDLE} PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    target_link_libraries(httplib_test_support INTERFACE OpenSSL::SSL OpenSSL::Crypto)
 endif()
 
-target_include_directories(${MOUDLE} PRIVATE ${HTTPLIB_LIB_DIR})
-
-if (MSVC)
-    target_compile_options(${MOUDLE} PRIVATE /bigobj)
+if(MSVC)
+    target_compile_options(httplib_test_support INTERFACE /bigobj)
 endif()
 
-add_test(NAME ${MOUDLE} COMMAND ${MOUDLE})
+function(add_httplib_test name label)
+    add_executable(${name} ${ARGN})
+    source_group(TREE ${CMAKE_CURRENT_SOURCE_DIR} FILES ${ARGN})
+    target_link_libraries(${name} PRIVATE httplib_test_support)
+    set_target_properties(${name} PROPERTIES FOLDER "tests")
+
+    add_test(NAME ${name} COMMAND $<TARGET_FILE:${name}>)
+    set_tests_properties(${name} PROPERTIES LABELS "${label}" TIMEOUT 300)
+endfunction()
+
+add_httplib_test(httplib_test_core core
+    action_queue_test.cpp
+    aspect_test.cpp
+    body_utils_test.cpp
+    chunked_test.cpp
+    lazy_request_test.cpp
+    middleware_test.cpp
+    router_test.cpp
+    session_cookie_test.cpp
+)
+
+add_httplib_test(httplib_test_http http
+    compressor_test.cpp
+    http_methods_test.cpp
+    ndjson_test.cpp
+    response_test.cpp
+    sse_test.cpp
+    websocket_test.cpp
+)
+
+add_httplib_test(httplib_test_client client
+    client_pool_test.cpp
+    client_test.cpp
+    downloader_test.cpp
+)
+
+add_httplib_test(httplib_test_proxy proxy
+    proxy_strategy_test.cpp
+    proxy_test.cpp
+)
+
+add_httplib_test(httplib_test_jwt jwt
+    jwt_test.cpp
+)
+target_link_libraries(httplib_test_jwt PRIVATE jwt-cpp::jwt-cpp)
+
+add_httplib_test(httplib_test_db db
+    db_bug_test.cpp
+    db_regression_test.cpp
+    mysql_test.cpp
+    odbc_test.cpp
+    sqlite_test.cpp
+)

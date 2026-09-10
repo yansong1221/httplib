@@ -15,10 +15,10 @@ cmake --build .
 ## Test
 
 ```bash
-ctest --test-dir build          # or run build/bin/x64/Debug/httplib_tests directly
+ctest --test-dir build -C Debug   # add -L core|http|client|proxy|jwt|db to filter
 ```
 
-Tests use Catch2 via `Catch2::Catch2WithMain` (auto-generated main). Each test spins up a real server on `127.0.0.1:0` and hits it with a client over TCP — no mocks. Tests must link `httplib` + `Catch2::Catch2WithMain` and include the internal lib dir (`PRIVATE ${HTTPLIB_LIB_DIR}`) for access to impl headers.
+Tests use Catch2 via `Catch2::Catch2WithMain` (auto-generated main). Each test spins up a real server on `127.0.0.1:0` and hits it with a client over TCP — no mocks. Tests are split into 6 executables/targets (`httplib_test_core`, `_http`, `_client`, `_proxy`, `_jwt`, `_db`), each registered with a ctest label. New tests link the shared `httplib_test_support` INTERFACE target (carries `httplib`, `Catch2::Catch2WithMain`, OpenSSL, `/bigobj`, and the internal `${HTTPLIB_LIB_DIR}` include) via the `add_httplib_test(<target> <label> <sources...>)` helper, so no per-target boilerplate is needed.
 
 ## Architecture
 
