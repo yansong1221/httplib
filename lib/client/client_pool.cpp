@@ -1,6 +1,7 @@
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/util/misc.hpp"
+#include "httplib/util/ticker.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "util/logging.hpp"
 #include <atomic>
@@ -47,10 +48,10 @@ namespace httplib::client
 
     } // namespace
 
-    class http_client_pool::impl : public std::enable_shared_from_this<impl>
+    class http_client_pool::impl : public util::ticker
     {
       public:
-        impl(net::any_io_executor const& ex, pool_params cfg) : ex_(ex), cfg_(std::move(cfg))
+        impl(net::any_io_executor const& ex, pool_params cfg) : ex_(ex), cfg_(std::move(cfg)), ticker(ex)
         {
             default_logger_ = httplib::detail::make_console_logger("httplib.client_pool");
         }
@@ -70,49 +71,25 @@ namespace httplib::client
             custom_logger_.store(std::move(l));
         }
 
-        void
-        start()
+        net::awaitable<bool>
+        on_start() override
         {
-            std::lock_guard<std::mutex> lock(mutex_);
-            if (!stopped_.exchange(false))
-            {
-                return;
-            }
             logger()->debug("client pool started");
-
-            // Each maintenance loop owns a fresh timer. stop() cancels the timer it
-            // finds here, so a stop()/start() sequence can never make two co_maintain
-            // coroutines share a single steady_timer (which would be UB).
-            cleanup_timer_ = std::make_shared<net::steady_timer>(ex_);
-            auto timer = cleanup_timer_;
-
-            net::co_spawn(
-                ex_,
-                [this, self = shared_from_this(), timer]() -> net::awaitable<void> { co_await co_maintain(timer); },
-                [self = shared_from_this()](std::exception_ptr e)
-                {
-                    if (e)
-                    {
-                        try
-                        {
-                            std::rethrow_exception(e);
-                        }
-                        catch (std::exception const& ex)
-                        {
-                            self->logger()->error("client pool maintenance failed: {}", ex.what());
-                        }
-                        catch (...)
-                        {
-                            self->logger()->error("client pool maintenance failed: unknown error");
-                        }
-                    }
-                });
+            auto interval = cfg_.idle_check_interval.count() > 0 ? cfg_.idle_check_interval : std::chrono::seconds(60);
+            set_interval(interval);
+            co_return true;
+        }
+        net::awaitable<void>
+        on_stop() override
+        {
+            logger()->debug("client pool stopped");
+            co_return;
         }
 
         net::awaitable<client_handle>
         async_acquire(std::string_view host, uint16_t port, bool ssl, std::chrono::steady_clock::duration wait_timeout)
         {
-            if (stopped_)
+            if (!is_running())
             {
                 co_return client_handle(boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
             }
@@ -130,12 +107,12 @@ namespace httplib::client
 
             do
             {
-                std::unique_lock<std::mutex> lock(self->mutex_);
-                if (self->stopped_)
+                std::unique_lock<std::mutex> lock(mutex_);
+                if (!is_running())
                 {
                     if (in_queue)
                     {
-                        self->remove_waiter_locked(url, node);
+                        remove_waiter_locked(url, node);
                     }
                     co_return client_handle(
                         boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
@@ -143,7 +120,7 @@ namespace httplib::client
 
                 if (in_queue && deadline <= std::chrono::steady_clock::now())
                 {
-                    self->remove_waiter_locked(url, node);
+                    remove_waiter_locked(url, node);
                     logger()->debug("client pool: acquire timed out for {}", url);
                     co_return client_handle(boost::system::errc::make_error_code(boost::system::errc::timed_out));
                 }
@@ -153,7 +130,7 @@ namespace httplib::client
                 client_handle handle;
                 try
                 {
-                    handle = self->acquire_or_create(url, serving);
+                    handle = acquire_or_create(url, serving);
                 }
                 catch (...)
                 {
@@ -161,7 +138,7 @@ namespace httplib::client
                     // 否则后续 waiter 可能因队首失效而迟迟不被唤醒。
                     if (in_queue)
                     {
-                        self->remove_waiter_locked(url, node);
+                        remove_waiter_locked(url, node);
                     }
                     throw;
                 }
@@ -170,7 +147,7 @@ namespace httplib::client
                 {
                     if (in_queue)
                     {
-                        self->remove_waiter_locked(url, node);
+                        remove_waiter_locked(url, node);
                     }
                     co_return std::move(handle);
                 }
@@ -184,18 +161,18 @@ namespace httplib::client
                 {
                     if (in_queue)
                     {
-                        self->remove_waiter_locked(url, node);
+                        remove_waiter_locked(url, node);
                     }
                     logger()->debug("client pool: no available connection for {} (fail fast)", url);
                     co_return client_handle(boost::system::errc::make_error_code(boost::system::errc::timed_out));
                 }
 
-                auto& waiters = self->waiters_[url];
+                auto& waiters = waiters_[url];
                 std::erase_if(waiters, [](auto const& w) { return w.expired(); });
 
                 if (!in_queue)
                 {
-                    node = std::make_shared<waiter_node>(self->ex_);
+                    node = std::make_shared<waiter_node>(get_executor());
                     waiters.push_back(node);
                     in_queue = true;
                 }
@@ -215,7 +192,7 @@ namespace httplib::client
 
             std::lock_guard<std::mutex> lock(mutex_);
 
-            if (stopped_ || epoch != epoch_)
+            if (!is_running() || epoch != epoch_)
             {
                 return;
             }
@@ -244,21 +221,17 @@ namespace httplib::client
         }
 
         void
-        stop()
+        stop() override
         {
             std::unique_lock<std::mutex> lock(mutex_);
-            if (stopped_.exchange(true))
+            if (!is_running())
             {
                 return;
             }
+            ticker::stop();
+
             // 递增 epoch：stop 前借出的 handle 在 restart 后归还时不得污染新池计数。
             ++epoch_;
-            logger()->debug("client pool stopped");
-            if (cleanup_timer_)
-            {
-                cleanup_timer_->cancel();
-                cleanup_timer_.reset();
-            }
 
             std::vector<waiters_list> pending_waiters;
             pending_waiters.reserve(waiters_.size());
@@ -533,7 +506,7 @@ namespace httplib::client
                 {
                     // 校验期间连接不在 idle 里，但必须继续占 route 容量。
                     ++st.validating_count;
-                    auto epoch_at_check = epoch_;
+                    auto epoch_at_check = epoch_.load();
 
                     bool alive = false;
                     try
@@ -546,7 +519,7 @@ namespace httplib::client
                     }
 
                     // stop/restart 后不能再把旧连接塞回新池，也不能改新池计数。
-                    if (stopped_ || epoch_at_check != epoch_)
+                    if (!is_running() || epoch_at_check != epoch_)
                     {
                         return {};
                     }
@@ -572,11 +545,15 @@ namespace httplib::client
                     }
 
                     inc_active_locked(validated_st);
-                    return client_handle(shared_from_this(), std::move(conn), epoch_);
+                    return client_handle(std::static_pointer_cast<http_client_pool::impl>(shared_from_this()),
+                                         std::move(conn),
+                                         epoch_);
                 }
 
                 inc_active_locked(st);
-                return client_handle(shared_from_this(), std::move(conn), epoch_);
+                return client_handle(std::static_pointer_cast<http_client_pool::impl>(shared_from_this()),
+                                     std::move(conn),
+                                     epoch_);
             }
 
             // Only touch pools_ when actually creating a connection, so a failed
@@ -592,7 +569,9 @@ namespace httplib::client
                     auto client = std::make_unique<http_client>(ex_, url);
                     apply_client_settings(*client);
                     logger()->debug("client pool: created connection for {} (total={})", url, total_connections_);
-                    return client_handle(shared_from_this(), std::move(client), epoch_);
+                    return client_handle(std::static_pointer_cast<http_client_pool::impl>(shared_from_this()),
+                                         std::move(client),
+                                         epoch_);
                 }
                 catch (...)
                 {
@@ -606,67 +585,51 @@ namespace httplib::client
             return {};
         }
 
-        net::awaitable<void>
-        co_maintain(std::shared_ptr<net::steady_timer> timer)
+        net::awaitable<bool>
+        on_tick() override
         {
-            boost::system::error_code ec;
-            while (!stopped_)
+            auto now = std::chrono::steady_clock::now();
+            std::vector<std::unique_ptr<http_client>> to_close;
             {
-                auto interval
-                    = cfg_.idle_check_interval.count() > 0 ? cfg_.idle_check_interval : std::chrono::seconds(60);
+                std::lock_guard<std::mutex> lock(mutex_);
 
-                timer->expires_after(interval);
-                co_await timer->async_wait(util::net_awaitable[ec]);
-                if (ec || stopped_)
+                cleanup_waiters_locked();
+                for (auto it = pools_.begin(); it != pools_.end();)
                 {
-                    co_return;
-                }
-
-                auto now = std::chrono::steady_clock::now();
-                std::vector<std::unique_ptr<http_client>> to_close;
-                {
-                    std::lock_guard<std::mutex> lock(mutex_);
-                    if (stopped_)
+                    auto& st = it->second;
+                    auto it2 = st.idle.begin();
+                    while (it2 != st.idle.end())
                     {
-                        co_return;
-                    }
-                    cleanup_waiters_locked();
-                    for (auto it = pools_.begin(); it != pools_.end();)
-                    {
-                        auto& st = it->second;
-                        auto it2 = st.idle.begin();
-                        while (it2 != st.idle.end())
+                        if (cfg_.idle_timeout.count() > 0 && now - it2->idle_since > cfg_.idle_timeout)
                         {
-                            if (cfg_.idle_timeout.count() > 0 && now - it2->idle_since > cfg_.idle_timeout)
-                            {
-                                logger()->trace("client pool: evicting idle connection for {}", it->first);
-                                to_close.push_back(std::move(it2->client));
-                                it2 = st.idle.erase(it2);
-                                track_destroyed();
-                                wake_one_waiter(it->first); // 空闲回收释放了容量，唤醒等待者避免其睡到超时
-                            }
-                            else
-                            {
-                                ++it2;
-                            }
-                        }
-                        if (st.idle.empty() && st.active_count == 0 && st.validating_count == 0)
-                        {
-                            it = pools_.erase(it);
+                            logger()->trace("client pool: evicting idle connection for {}", it->first);
+                            to_close.push_back(std::move(it2->client));
+                            it2 = st.idle.erase(it2);
+                            track_destroyed();
+                            wake_one_waiter(it->first); // 空闲回收释放了容量，唤醒等待者避免其睡到超时
                         }
                         else
                         {
-                            ++it;
+                            ++it2;
                         }
                     }
-                }
-
-                // 锁外 close/析构，避免池锁内进入 http_client 内部锁。
-                for (auto& conn : to_close)
-                {
-                    conn->close();
+                    if (st.idle.empty() && st.active_count == 0 && st.validating_count == 0)
+                    {
+                        it = pools_.erase(it);
+                    }
+                    else
+                    {
+                        ++it;
+                    }
                 }
             }
+
+            // 锁外 close/析构，避免池锁内进入 http_client 内部锁。
+            for (auto& conn : to_close)
+            {
+                conn->close();
+            }
+            co_return true;
         }
 
       private:
@@ -677,7 +640,7 @@ namespace httplib::client
         size_t total_connections_ = 0;
         size_t total_active_ = 0;
         /// 受 mutex_ 保护；stop() 递增，使旧 handle 在 restart 后归还时失效。
-        uint64_t epoch_ = 0;
+        std::atomic<uint64_t> epoch_ = 0;
         pool_params cfg_;
 
         std::shared_ptr<spdlog::logger> default_logger_;
@@ -687,10 +650,6 @@ namespace httplib::client
 
       public:
         net::any_io_executor ex_;
-
-      private:
-        std::atomic<bool> stopped_ { true };
-        std::shared_ptr<net::steady_timer> cleanup_timer_;
     };
 
     // ---- client_handle ----
