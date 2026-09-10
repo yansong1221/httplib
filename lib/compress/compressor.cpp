@@ -2,136 +2,28 @@
 
 #ifdef HTTPLIB_ENABLED_COMPRESS
 #include "compress/brotli.hpp"
+#include "compress/compressor_error.hpp"
 #include <boost/asio/streambuf.hpp>
 #include <boost/iostreams/filter/gzip.hpp>
 #include <boost/iostreams/filter/zlib.hpp>
 #include <boost/iostreams/filter/zstd.hpp>
 #include <boost/iostreams/filtering_stream.hpp>
+#include <exception>
 #endif
 
 namespace httplib::compress
 {
-    namespace
-    {
-        struct compressor_error_category : boost::system::error_category
-        {
-            char const*
-            name() const noexcept override
-            {
-                return "httplib.compress";
-            }
-
-            std::string
-            message(int ev) const override
-            {
-                switch (static_cast<error>(ev))
-                {
-                    case error::encode_error:
-                        return "compression stream encode failure";
-                    case error::decode_error:
-                        return "compression stream decode failure";
-                    case error::bad_header:
-                        return "compression stream invalid or unsupported header";
-                    case error::bad_data:
-                        return "compression stream data corrupted";
-                    case error::bad_checksum:
-                        return "compression stream checksum mismatch";
-                    case error::incomplete:
-                        return "compression stream truncated or insufficient input";
-                    default:
-                        return "unknown compression error";
-                }
-            }
-        };
-    } // namespace
-
-    boost::system::error_code
-    make_error_code(error e)
-    {
-        static compressor_error_category category;
-        return { static_cast<int>(e), category };
-    }
-
 #ifdef HTTPLIB_ENABLED_COMPRESS
     namespace io = boost::iostreams;
 
-    // 把解码异常映射到细分错误码：gzip_error / zlib_error / zstd_error 携带各自的
-    // 细分码；brotli 为自家实现，直接抛携带 error 枚举的 brotli_error。
-    // 数值取自 zlib/gzip 错误码（稳定）：gzip: 1=zlib 错误, 2=bad_crc, 3=bad_length,
-    // 4=bad_header, 6=bad_method；zlib: -2=stream, -3=data, -5=buf。
-    boost::system::error_code
-    map_decode_error(std::exception const& e)
+    namespace detail
     {
-        auto const decode_generic = make_error_code(error::decode_error);
-        if (auto* gzip_e = dynamic_cast<io::gzip_error const*>(&e))
+        inline static boost::system::error_code
+        map_error(compressor::mode m, std::exception_ptr ep)
         {
-            switch (gzip_e->error())
-            {
-                case 2: // gzip::bad_crc
-                    return make_error_code(error::bad_checksum);
-                case 3: // gzip::bad_length
-                    return make_error_code(error::incomplete);
-                case 4: // gzip::bad_header
-                case 6: // gzip::bad_method
-                    return make_error_code(error::bad_header);
-                case 1: // gzip::zlib_error，具体原因在 zlib_error_code()
-                    switch (gzip_e->zlib_error_code())
-                    {
-                        case -3: // Z_DATA_ERROR
-                            return make_error_code(error::bad_data);
-                        case -5: // Z_BUF_ERROR
-                            return make_error_code(error::incomplete);
-                        default:
-                            return decode_generic;
-                    }
-                default:
-                    return decode_generic;
-            }
+            return m == compressor::mode::decode ? map_decode_error(ep) : map_encode_error(ep);
         }
-        if (auto* zlib_e = dynamic_cast<io::zlib_error const*>(&e))
-        {
-            switch (zlib_e->error())
-            {
-                case -3: // Z_DATA_ERROR
-                    return make_error_code(error::bad_data);
-                case -5: // Z_BUF_ERROR
-                    return make_error_code(error::incomplete);
-                case -2: // Z_STREAM_ERROR
-                    return make_error_code(error::bad_data);
-                default:
-                    return decode_generic;
-            }
-        }
-        if (auto* zstd_e = dynamic_cast<io::zstd_error const*>(&e))
-        {
-            // zstd_error::error() 即 ZSTD_ErrorCode 的负值（-prefix_unknown、-corruption_detected 等）。
-            switch (zstd_e->error())
-            {
-                case -10: // prefix_unknown（魔数错误）
-                case -12: // version_unsupported
-                case -14: // frameParameter_unsupported
-                case -16: // frameParameter_windowTooLarge
-                    return make_error_code(error::bad_header);
-                case -20: // corruption_detected
-                case -24: // literals_headerWrong
-                case -30: // dictionary_corrupted
-                    return make_error_code(error::bad_data);
-                case -22: // checksum_wrong
-                    return make_error_code(error::bad_checksum);
-                case -72: // srcSize_wrong
-                case -80: // noForwardProgress_destFull
-                case -82: // noForwardProgress_inputEmpty
-                    return make_error_code(error::incomplete);
-                default:
-                    return decode_generic;
-            }
-        }
-        if (auto* br_e = dynamic_cast<brotli_error const*>(&e))
-        {
-            return make_error_code(br_e->code());
-        }
-        return decode_generic;
-    }
+    } // namespace detail
 
     class basic_compressor : public compressor
     {
@@ -147,9 +39,10 @@ namespace httplib::compress
                 init_filtering_ostreambuf(m, stream_);
                 stream_.push(buffer_);
             }
-            catch (std::exception const& e)
+            catch (...)
             {
-                ec = m == mode::decode ? map_decode_error(e) : make_error_code(error::encode_error);
+                auto ep = std::current_exception();
+                ec = detail::map_error(m, ep);
             }
         }
 
@@ -169,9 +62,10 @@ namespace httplib::compress
                     io::close(stream_);
                 }
             }
-            catch (std::exception const& e)
+            catch (...)
             {
-                ec = mode_ == mode::decode ? map_decode_error(e) : make_error_code(error::encode_error);
+                auto ep = std::current_exception();
+                ec = detail::map_error(mode_, ep);
             }
         }
         void
@@ -181,9 +75,10 @@ namespace httplib::compress
             {
                 io::close(stream_);
             }
-            catch (std::exception const& e)
+            catch (...)
             {
-                ec = mode_ == mode::decode ? map_decode_error(e) : make_error_code(error::encode_error);
+                auto ep = std::current_exception();
+                ec = detail::map_error(mode_, ep);
             }
         }
         void
