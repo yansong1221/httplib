@@ -5,7 +5,6 @@
 #include <boost/asio/detached.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/steady_timer.hpp>
-#include <boost/asio/use_future.hpp>
 
 namespace httplib::util
 {
@@ -27,7 +26,7 @@ namespace httplib::util
             {
                 ec = e.code();
             }
-            catch (std::exception const& e)
+            catch (std::exception const&)
             {
                 ec = boost::system::errc::make_error_code(boost::system::errc::interrupted);
             }
@@ -37,6 +36,7 @@ namespace httplib::util
             }
         }
     } // namespace detail
+
     ticker::ticker(boost::asio::any_io_executor const& executor, std::chrono::steady_clock::duration const& interval)
         : executor_(executor)
         , strand_(executor)
@@ -49,43 +49,65 @@ namespace httplib::util
     void
     ticker::start()
     {
-        if (is_running_.exchange(true))
+        std::shared_ptr<boost::asio::cancellation_signal> cs;
+        uint64_t generation = 0;
+
         {
-            return;
-        }
-        auto cs = std::make_shared<boost::asio::cancellation_signal>();
-
-        boost::asio::co_spawn(
-            strand_,
-            [this, cs, self = shared_from_this()]() -> boost::asio::awaitable<boost::system::error_code>
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            if (is_running_.load(std::memory_order_acquire))
             {
-                boost::system::error_code ec;
+                return;
+            }
 
-                ec = co_await co_run();
-                is_running_ = false;
+            generation = ++run_id_;
+            cs = std::make_shared<boost::asio::cancellation_signal>();
+            cs_ = cs;
+            is_running_.store(true, std::memory_order_release);
 
-                co_return ec;
-            },
-            boost::asio::bind_cancellation_slot(cs->slot(), boost::asio::detached));
+            // co_spawn 必须在 state_mutex_ 内完成：确保 cancellation slot 已连接后，
+            // 并发的 stop() 才可能观察到 is_running_==true 并 emit，不会丢取消。
+            boost::asio::co_spawn(
+                strand_,
+                [this, cs, generation, self = shared_from_this()]() -> boost::asio::awaitable<boost::system::error_code>
+                {
+                    auto ec = co_await co_run();
 
-        cs_ = cs;
+                    // 仅当仍是当前轮时才清除运行标志，避免旧轮清掉重启后的新轮。
+                    if (run_id_.load(std::memory_order_acquire) == generation)
+                    {
+                        is_running_.store(false, std::memory_order_release);
+                    }
+
+                    co_return ec;
+                },
+                boost::asio::bind_cancellation_slot(cs->slot(), boost::asio::detached));
+        }
     }
 
     void
     ticker::stop()
     {
-        boost::asio::dispatch(strand_,
-                              [this, self = shared_from_this()]()
-                              {
-                                  if (!is_running_)
-                                  {
-                                      return;
-                                  }
-                                  if (auto cs = cs_; cs)
-                                  {
-                                      cs->emit(boost::asio::cancellation_type::all);
-                                  }
-                              });
+        std::shared_ptr<boost::asio::cancellation_signal> cs;
+
+        {
+            std::lock_guard<std::mutex> lock(state_mutex_);
+            if (!is_running_.load(std::memory_order_acquire))
+            {
+                return;
+            }
+
+            // 同步失效当前轮并清除运行标志，使 stop() 后可立即 start() 重启。
+            ++run_id_;
+            is_running_.store(false, std::memory_order_release);
+            cs = cs_;
+        }
+
+        if (cs)
+        {
+            // 锁外投递到 strand；post 不会 inline，避免在持锁路径上重入 on_stop。
+            // 捕获当轮 signal，而非执行时再读 cs_，不会误取消重启后的新一轮。
+            boost::asio::post(strand_, [cs]() { cs->emit(boost::asio::cancellation_type::all); });
+        }
     }
 
     boost::asio::any_io_executor
@@ -93,15 +115,17 @@ namespace httplib::util
     {
         return executor_;
     }
+
     void
     ticker::set_interval(std::chrono::steady_clock::duration const& interval)
     {
-        boost::asio::dispatch(strand_, [this, interval, self = shared_from_this()]() { interval_ = interval; });
+        interval_.store(interval, std::memory_order_release);
     }
+
     bool
     ticker::is_running() const
     {
-        return is_running_;
+        return is_running_.load(std::memory_order_acquire);
     }
 
     boost::asio::awaitable<boost::system::error_code>
@@ -114,37 +138,49 @@ namespace httplib::util
 
         auto cs = co_await boost::asio::this_coro::cancellation_state;
 
+        boost::system::error_code ec;
+        bool started = false;
+
         try
         {
-            if (!co_await on_start())
+            started = co_await on_start();
+            if (!started)
             {
-                co_return boost::system::errc::make_error_code(boost::system::errc::invalid_argument);
+                ec = boost::system::errc::make_error_code(boost::system::errc::invalid_argument);
             }
         }
         catch (...)
         {
-            boost::system::error_code ec;
             detail::set_error_code(std::current_exception(), ec);
-            co_return ec;
         }
 
-        boost::system::error_code ec;
-        boost::asio::steady_timer update_timer(co_await boost::asio::this_coro::executor);
-        for (; !cs.cancelled() && !ec; ec = co_await sleep(update_timer, interval_))
+        if (started && !static_cast<bool>(ec))
         {
-            try
+            boost::asio::steady_timer update_timer(co_await boost::asio::this_coro::executor);
+            while (!cs.cancelled() && !static_cast<bool>(ec))
             {
-                if (!co_await on_tick())
+                // 先等待一个周期，与旧的维护循环语义保持一致。
+                ec = co_await sleep(update_timer, interval_.load());
+                if (static_cast<bool>(ec) || static_cast<bool>(cs.cancelled()))
                 {
                     break;
                 }
-            }
-            catch (...)
-            {
-                detail::set_error_code(std::current_exception(), ec);
+
+                try
+                {
+                    if (!co_await on_tick())
+                    {
+                        break;
+                    }
+                }
+                catch (...)
+                {
+                    detail::set_error_code(std::current_exception(), ec);
+                }
             }
         }
 
+        // 统一的清理路径：无论 on_start 成功与否都调用 on_stop，子类需保证幂等。
         try
         {
             co_await on_stop();
@@ -153,6 +189,7 @@ namespace httplib::util
         {
             detail::set_error_code(std::current_exception(), ec);
         }
+
         co_return ec;
     }
 

@@ -2,6 +2,7 @@
 
 #include "httplib/db/connection_pool.hpp"
 #include "httplib/db/session.hpp"
+#include "httplib/util/ticker.hpp"
 #include <atomic>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -10,12 +11,13 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <utility>
 #include <vector>
 
 namespace httplib::db
 {
 
-    struct connection_pool::impl : public std::enable_shared_from_this<impl>
+    struct connection_pool::impl : public util::ticker
     {
         impl(net::any_io_executor ex, pool_params cfg, connection_pool::connect_fn connect);
         ~impl();
@@ -23,10 +25,9 @@ namespace httplib::db
         std::shared_ptr<spdlog::logger> logger() const;
         void set_logger(std::shared_ptr<spdlog::logger> l);
 
-        void start();
         net::awaitable<session_handle> async_acquire(std::chrono::steady_clock::duration wait_timeout);
-        void release_session(std::unique_ptr<session> sess);
-        void stop();
+        void release_session(std::unique_ptr<session> sess, uint64_t epoch);
+        void stop() override;
 
         size_t active_count() const;
         size_t idle_count() const;
@@ -38,16 +39,20 @@ namespace httplib::db
             return ex_;
         }
 
+      protected:
+        net::awaitable<bool> on_start() override;
+        net::awaitable<bool> on_tick() override;
+
       private:
         using waiters_list = std::deque<std::weak_ptr<net::steady_timer>>;
 
         std::unique_ptr<session> try_pop_idle(std::vector<std::unique_ptr<session>>& discarded);
-        net::awaitable<std::unique_ptr<session>> try_pop_validated();
+        /// 取出一条可借出的空闲连接；第二项为取用时刻的池轮次（与 inc_active 同临界区取样），
+        /// ping 校验后据此判断该连接是否已因 stop/重启过期。
+        net::awaitable<std::pair<std::unique_ptr<session>, uint64_t>> try_pop_validated();
         void wake_one_waiter();
-        void push_idle(std::unique_ptr<session> sess);
+        void push_idle(std::unique_ptr<session> sess, uint64_t epoch);
         net::awaitable<std::unique_ptr<session>> create_session();
-        net::awaitable<void> co_init_and_maintain(uint64_t epoch);
-        net::awaitable<void> co_maintain(uint64_t epoch);
 
         mutable std::mutex mutex_;
         std::vector<std::unique_ptr<session>> idle_;
@@ -57,16 +62,16 @@ namespace httplib::db
         size_t validating_ = 0;
         waiters_list waiters_;
 
+        /// 每轮生命周期标识：stop() 递增。维护协程在 on_start/on_tick 入口取样，
+        /// 在 await 之后比对，丢弃 stop/重启后旧轮的过期副作用。
+        std::atomic<uint64_t> epoch_ { 0 };
+
         net::any_io_executor ex_;
         pool_params cfg_;
         connection_pool::connect_fn connect_;
 
         std::shared_ptr<spdlog::logger> default_logger_;
         std::atomic<std::shared_ptr<spdlog::logger>> custom_logger_;
-
-        std::atomic<bool> stopped_ { true };
-        std::atomic<uint64_t> epoch_ { 0 };
-        net::steady_timer maintain_timer_;
 
         // ---- 持锁计数辅助（调用前必须已持有 mutex_）----
 

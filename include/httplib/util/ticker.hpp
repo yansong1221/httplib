@@ -1,7 +1,12 @@
 #pragma once
 #include "httplib/config.hpp"
+#include <atomic>
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/strand.hpp>
+#include <chrono>
+#include <memory>
+#include <mutex>
 
 namespace httplib::util
 {
@@ -48,9 +53,12 @@ namespace httplib::util
         boost::asio::any_io_executor executor_;
         boost::asio::strand<boost::asio::any_io_executor> strand_;
 
-        std::chrono::steady_clock::duration interval_;
+        std::atomic<std::chrono::steady_clock::duration> interval_;
         std::atomic<bool> is_running_ { false };
+        std::atomic<uint64_t> run_id_ { 0 };
 
+        /// 保护 cs_ 与 start/stop 的状态迁移；不跨越 strand 等待。
+        std::mutex state_mutex_;
         std::shared_ptr<boost::asio::cancellation_signal> cs_;
     };
 } // namespace httplib::util

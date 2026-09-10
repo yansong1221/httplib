@@ -6,6 +6,7 @@
 #include <boost/asio/awaitable.hpp>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string_view>
@@ -51,8 +52,10 @@ namespace httplib::db
 
             std::weak_ptr<impl> pool_;
             std::unique_ptr<session> sess_;
+            /// 借出时的 pool epoch：stop() 会递增 epoch，旧 handle 不能再改新池状态。
+            uint64_t epoch_ = 0;
 
-            session_handle(std::weak_ptr<impl> pool, std::unique_ptr<session> sess);
+            session_handle(std::weak_ptr<impl> pool, std::unique_ptr<session> sess, uint64_t epoch);
 
           public:
             session_handle();

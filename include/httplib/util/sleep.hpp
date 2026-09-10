@@ -2,6 +2,8 @@
 #include "httplib/util/use_awaitable.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <boost/system/error_code.hpp>
+#include <chrono>
 
 namespace httplib::util
 {

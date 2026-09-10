@@ -15,15 +15,19 @@ namespace httplib::db
 
     connection_pool::session_handle::session_handle() {}
 
-    connection_pool::session_handle::session_handle(std::weak_ptr<impl> pool, std::unique_ptr<session> sess)
+    connection_pool::session_handle::session_handle(std::weak_ptr<impl> pool,
+                                                    std::unique_ptr<session> sess,
+                                                    uint64_t epoch)
         : pool_(std::move(pool))
         , sess_(std::move(sess))
+        , epoch_(epoch)
     {
     }
 
     connection_pool::session_handle::session_handle(session_handle&& other) noexcept
         : pool_(std::move(other.pool_))
         , sess_(std::move(other.sess_))
+        , epoch_(other.epoch_)
     {
     }
 
@@ -35,6 +39,7 @@ namespace httplib::db
             release();
             pool_ = std::move(other.pool_);
             sess_ = std::move(other.sess_);
+            epoch_ = other.epoch_;
         }
         return *this;
     }
@@ -47,7 +52,7 @@ namespace httplib::db
         auto pool = pool_.lock();
         if (pool && sess_)
         {
-            pool->release_session(std::move(sess_));
+            pool->release_session(std::move(sess_), epoch_);
         }
     }
 

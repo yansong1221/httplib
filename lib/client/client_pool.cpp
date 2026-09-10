@@ -53,6 +53,9 @@ namespace httplib::client
       public:
         impl(net::any_io_executor const& ex, pool_params cfg) : ex_(ex), cfg_(std::move(cfg)), ticker(ex)
         {
+            auto interval = cfg_.idle_check_interval.count() > 0 ? cfg_.idle_check_interval : std::chrono::seconds(60);
+            set_interval(interval);
+
             default_logger_ = httplib::detail::make_console_logger("httplib.client_pool");
         }
 
@@ -75,8 +78,6 @@ namespace httplib::client
         on_start() override
         {
             logger()->debug("client pool started");
-            auto interval = cfg_.idle_check_interval.count() > 0 ? cfg_.idle_check_interval : std::chrono::seconds(60);
-            set_interval(interval);
             co_return true;
         }
         net::awaitable<void>
@@ -223,38 +224,42 @@ namespace httplib::client
         void
         stop() override
         {
-            std::unique_lock<std::mutex> lock(mutex_);
-            if (!is_running())
-            {
-                return;
-            }
-            ticker::stop();
-
-            // 递增 epoch：stop 前借出的 handle 在 restart 后归还时不得污染新池计数。
-            ++epoch_;
-
+            // 重入/并发安全依靠幂等而非 once 标志：
+            // 1) mutex_ 串行状态搬运，第二个 stop() 只会看到已清空的容器，不会二次释放；
+            // 2) epoch_ 单调递增，重复 stop 只是让更多旧 handle 失效（release 侧全部丢弃）；
+            // 3) ticker::stop() 在 state_mutex_ 下按 is_running_ 幂等，重复调用为 no-op；
+            // 4) ticker::stop() 用 post 投递（不 inline），on_stop 不会回到本函数栈上，故无递归。
             std::vector<waiters_list> pending_waiters;
-            pending_waiters.reserve(waiters_.size());
-            for (auto& [url, waiters] : waiters_)
-            {
-                pending_waiters.push_back(std::move(waiters));
-            }
-            waiters_.clear();
-
             std::vector<std::unique_ptr<http_client>> to_close;
-            for (auto& [info, st] : pools_)
-            {
-                for (auto& pc : st.idle)
-                {
-                    to_close.push_back(std::move(pc.client));
-                }
-                st.idle.clear();
-            }
-            pools_.clear();
-            total_connections_ = 0;
-            total_active_ = 0;
 
-            lock.unlock();
+            {
+                std::lock_guard<std::mutex> lock(mutex_);
+
+                // 递增 epoch：stop 前借出的 handle 在 restart 后归还时不得污染新池计数。
+                ++epoch_;
+
+                pending_waiters.reserve(waiters_.size());
+                for (auto& [url, waiters] : waiters_)
+                {
+                    pending_waiters.push_back(std::move(waiters));
+                }
+                waiters_.clear();
+
+                for (auto& [info, st] : pools_)
+                {
+                    for (auto& pc : st.idle)
+                    {
+                        to_close.push_back(std::move(pc.client));
+                    }
+                    st.idle.clear();
+                }
+                pools_.clear();
+                total_connections_ = 0;
+                total_active_ = 0;
+            }
+
+            // 锁外请求 ticker 取消：避免持 mutex_ 时 inline 驱动 on_stop 造成重入/死锁。
+            ticker::stop();
 
             // 锁外 close/析构 idle 连接。
             for (auto& conn : to_close)
