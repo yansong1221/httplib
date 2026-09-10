@@ -1,7 +1,6 @@
 #pragma once
 #include "compress/compressor_error.hpp"
 #include <boost/iostreams/concepts.hpp>
-#include <boost/iostreams/detail/ios.hpp>
 #include <boost/iostreams/filter/symmetric.hpp>
 #include <boost/iostreams/filtering_stream.hpp>
 #include <boost/iostreams/operations.hpp>
@@ -13,40 +12,6 @@
 
 namespace httplib::compress
 {
-    class brotli_error : public BOOST_IOSTREAMS_FAILURE
-    {
-      public:
-        explicit brotli_error(error code, std::string const& what = "Brotli decompression error")
-            : BOOST_IOSTREAMS_FAILURE(what)
-            , code_(code)
-            , detail_(0)
-        {
-        }
-
-        brotli_error(error code, int detail, std::string const& what = "Brotli decompression error")
-            : BOOST_IOSTREAMS_FAILURE(what)
-            , code_(code)
-            , detail_(detail)
-        {
-        }
-
-        error
-        code() const noexcept
-        {
-            return code_;
-        }
-
-        int
-        detail() const noexcept
-        {
-            return detail_;
-        }
-
-      private:
-        error code_;
-        int detail_;
-    };
-
     namespace detail
     {
 
@@ -59,11 +24,11 @@ namespace httplib::compress
                 state_.reset(BrotliEncoderCreateInstance(nullptr, nullptr, nullptr));
                 if (!state_)
                 {
-                    throw brotli_error(error::encode_error, "Failed to create Brotli encoder");
+                    throw brotli_error(brotli::encode_error);
                 }
                 if (!BrotliEncoderSetParameter(state_.get(), BROTLI_PARAM_QUALITY, static_cast<uint32_t>(quality)))
                 {
-                    throw brotli_error(error::invalid_parameter, "Invalid Brotli encoder parameter");
+                    throw brotli_error(brotli::invalid_parameter);
                 }
             }
 
@@ -85,7 +50,7 @@ namespace httplib::compress
                                                  &next_out,
                                                  nullptr))
                 {
-                    throw brotli_error(error::encode_error, "Brotli compression failed");
+                    throw brotli_error(brotli::encode_error);
                 }
 
                 src_begin = reinterpret_cast<char const*>(next_in);
@@ -116,7 +81,7 @@ namespace httplib::compress
                                                      &next_out,
                                                      nullptr))
                     {
-                        throw brotli_error(error::encode_error, "Brotli finalization failed");
+                        throw brotli_error(brotli::encode_error);
                     }
                 }
             }
@@ -167,11 +132,10 @@ namespace httplib::compress
                     case BROTLI_DECODER_RESULT_SUCCESS:
                         return false; // 解压完成
                     case BROTLI_DECODER_RESULT_ERROR:
-                        throw brotli_error(classify_error(),
-                                           BrotliDecoderGetErrorCode(state_.get()),
-                                           "Brotli decompression error");
+                        throw brotli_error(decoded_total_ == 0 ? brotli::bad_header : brotli::bad_data,
+                                           BrotliDecoderGetErrorCode(state_.get()));
                     default:
-                        throw brotli_error(classify_error(), "Unknown Brotli result");
+                        throw brotli_error(brotli::bad_data);
                 }
             }
             void
@@ -180,21 +144,15 @@ namespace httplib::compress
                 BrotliDecoderErrorCode code = BrotliDecoderGetErrorCode(state_.get());
                 if (code == BROTLI_DECODER_NEEDS_MORE_INPUT)
                 {
-                    throw brotli_error(error::incomplete, "Brotli stream truncated");
+                    throw brotli_error(brotli::incomplete, code);
                 }
                 if (code < 0)
                 {
-                    throw brotli_error(classify_error(), code, "Brotli decompression error");
+                    throw brotli_error(decoded_total_ == 0 ? brotli::bad_header : brotli::bad_data, code);
                 }
             }
 
           private:
-            error
-            classify_error() const noexcept
-            {
-                return decoded_total_ == 0 ? error::bad_header : error::bad_data;
-            }
-
             std::unique_ptr<BrotliDecoderState, void (*)(BrotliDecoderState*)> state_;
             std::size_t decoded_total_ = 0;
         };

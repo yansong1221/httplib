@@ -1,5 +1,5 @@
 #pragma once
-#include "httplib/config.hpp"
+#include "compress/compressor_error.hpp"
 #include "httplib/util/string_hash.hpp"
 #include <boost/asio/buffer.hpp>
 #include <boost/system/error_code.hpp>

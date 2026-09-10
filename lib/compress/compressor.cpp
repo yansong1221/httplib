@@ -14,16 +14,14 @@
 namespace httplib::compress
 {
 #ifdef HTTPLIB_ENABLED_COMPRESS
-    namespace io = boost::iostreams;
-
-    namespace detail
+    namespace
     {
         inline static boost::system::error_code
         map_error(compressor::mode m, std::exception_ptr ep)
         {
             return m == compressor::mode::decode ? map_decode_error(ep) : map_encode_error(ep);
         }
-    } // namespace detail
+    } // namespace
 
     class basic_compressor : public compressor
     {
@@ -42,7 +40,7 @@ namespace httplib::compress
             catch (...)
             {
                 auto ep = std::current_exception();
-                ec = detail::map_error(m, ep);
+                ec = map_error(m, ep);
             }
         }
 
@@ -65,7 +63,7 @@ namespace httplib::compress
             catch (...)
             {
                 auto ep = std::current_exception();
-                ec = detail::map_error(mode_, ep);
+                ec = map_error(mode_, ep);
             }
         }
         void
@@ -78,7 +76,7 @@ namespace httplib::compress
             catch (...)
             {
                 auto ep = std::current_exception();
-                ec = detail::map_error(mode_, ep);
+                ec = map_error(mode_, ep);
             }
         }
         void
