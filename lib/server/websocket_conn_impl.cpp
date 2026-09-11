@@ -30,25 +30,28 @@ namespace httplib::server
             return;
         }
 
-        ac_que_.push(
-            [this, msg = std::move(msg), binary, self = shared_from_this()]() -> net::awaitable<void>
-            {
-                if (binary)
+        if (auto ec = ac_que_.push(
+                [this, msg = std::move(msg), binary, self = shared_from_this()]() -> net::awaitable<void>
                 {
-                    ws_.binary(true);
-                }
-                else
-                {
-                    ws_.text(true);
-                }
+                    if (binary)
+                    {
+                        ws_.binary(true);
+                    }
+                    else
+                    {
+                        ws_.text(true);
+                    }
 
-                boost::system::error_code ec;
-                co_await ws_.async_write(net::buffer(msg), util::net_awaitable[ec]);
-                if (ec)
-                {
-                    abort();
-                }
-            });
+                    boost::system::error_code ec;
+                    co_await ws_.async_write(net::buffer(msg), util::net_awaitable[ec]);
+                    if (ec)
+                    {
+                        abort();
+                    }
+                }))
+        {
+            server_impl_->logger()->warn("websocket send dropped: {}", ec.message());
+        }
     };
     void
     websocket_conn_impl::ping(std::string&& msg)
@@ -58,20 +61,23 @@ namespace httplib::server
             return;
         }
 
-        ac_que_.push(
-            [this, msg = std::move(msg), self = shared_from_this()]() -> net::awaitable<void>
-            {
-                if (!is_open())
+        if (auto ec = ac_que_.push(
+                [this, msg = std::move(msg), self = shared_from_this()]() -> net::awaitable<void>
                 {
-                    co_return;
-                }
-                boost::system::error_code ec;
-                co_await ws_.async_ping(beast::websocket::ping_data(std::string_view(msg)), util::net_awaitable[ec]);
-                if (ec)
-                {
-                    abort();
-                }
-            });
+                    if (!is_open())
+                    {
+                        co_return;
+                    }
+                    boost::system::error_code ec;
+                    co_await ws_.async_ping(beast::websocket::ping_data(std::string_view(msg)), util::net_awaitable[ec]);
+                    if (ec)
+                    {
+                        abort();
+                    }
+                }))
+        {
+            server_impl_->logger()->warn("websocket ping dropped: {}", ec.message());
+        }
     }
 
     void
@@ -82,30 +88,34 @@ namespace httplib::server
             return;
         }
 
-        ac_que_.push(
-            [this, self = shared_from_this(), reason = std::string(reason)]() -> net::awaitable<void>
-            {
-                if (!is_open())
+        ac_que_.clear();
+        if (auto ec = ac_que_.push(
+                [this, self = shared_from_this(), reason = std::string(reason)]() -> net::awaitable<void>
                 {
-                    co_return;
-                }
-                using namespace boost::asio::experimental::awaitable_operators;
-                using namespace std::chrono_literals;
+                    if (!is_open())
+                    {
+                        co_return;
+                    }
+                    using namespace boost::asio::experimental::awaitable_operators;
+                    using namespace std::chrono_literals;
 
-                boost::asio::steady_timer timer(co_await boost::asio::this_coro::executor);
-                timer.expires_after(5s);
+                    boost::asio::steady_timer timer(co_await boost::asio::this_coro::executor);
+                    timer.expires_after(5s);
 
-                boost::system::error_code ec;
-                websocket::close_reason cr(std::move(reason));
-                co_await (ws_.async_close(cr, util::net_awaitable[ec]) || timer.async_wait(util::net_awaitable[ec]));
+                    boost::system::error_code ec;
+                    websocket::close_reason cr(std::move(reason));
+                    co_await (ws_.async_close(cr, util::net_awaitable[ec]) || timer.async_wait(util::net_awaitable[ec]));
 
-                if (ec && ec != boost::asio::error::operation_aborted)
-                {
-                    server_impl_->logger()->debug("websocket async_close failed: {}", ec.message());
-                }
+                    if (ec && ec != boost::asio::error::operation_aborted)
+                    {
+                        server_impl_->logger()->debug("websocket async_close failed: {}", ec.message());
+                    }
 
-                abort();
-            });
+                    abort();
+                }))
+        {
+            server_impl_->logger()->warn("websocket close dropped: {}", ec.message());
+        }
     }
 
     void

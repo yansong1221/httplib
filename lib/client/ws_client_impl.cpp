@@ -153,8 +153,11 @@ namespace httplib::client
         {
             return;
         }
-        ac_que_.push([this, self = shared_from_this(), data = std::move(data), binary]() mutable -> net::awaitable<void>
-                     { co_await async_send(std::move(data), binary); });
+        if (auto ec = ac_que_.push([this, self = shared_from_this(), data = std::move(data), binary]() mutable -> net::awaitable<void>
+                                   { co_await async_send(std::move(data), binary); }))
+        {
+            logger()->warn("ws send dropped: {}", ec.message());
+        }
     }
 
     void
@@ -164,8 +167,11 @@ namespace httplib::client
         {
             return;
         }
-        ac_que_.push([this, self = shared_from_this(), data = std::move(msg)]() mutable -> net::awaitable<void>
-                     { co_await async_ping(std::move(data)); });
+        if (auto ec = ac_que_.push([this, self = shared_from_this(), data = std::move(msg)]() mutable -> net::awaitable<void>
+                                   { co_await async_ping(std::move(data)); }))
+        {
+            logger()->warn("ws ping dropped: {}", ec.message());
+        }
     }
 
     void
@@ -175,8 +181,11 @@ namespace httplib::client
         {
             return;
         }
-        ac_que_.push([this, self = shared_from_this(), data = std::move(msg)]() mutable -> net::awaitable<void>
-                     { co_await async_pong(std::move(data)); });
+        if (auto ec = ac_que_.push([this, self = shared_from_this(), data = std::move(msg)]() mutable -> net::awaitable<void>
+                                   { co_await async_pong(std::move(data)); }))
+        {
+            logger()->warn("ws pong dropped: {}", ec.message());
+        }
     }
 
     void
@@ -187,7 +196,11 @@ namespace httplib::client
             return;
         }
 
-        ac_que_.push([this, self = shared_from_this()]() mutable -> net::awaitable<void> { co_await async_close(); });
+        ac_que_.clear();
+        if (auto ec = ac_que_.push([this, self = shared_from_this()]() mutable -> net::awaitable<void> { co_await async_close(); }))
+        {
+            logger()->warn("ws close dropped: {}", ec.message());
+        }
     }
 
     httplib::net::awaitable<boost::system::error_code>

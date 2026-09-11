@@ -2,32 +2,42 @@
 #include "httplib/config.hpp"
 #include "httplib/util/action_queue.hpp"
 #include "httplib/util/use_awaitable.hpp"
+#include <atomic>
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
-#include <boost/asio/dispatch.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/use_future.hpp>
+#include <cstddef>
 #include <functional>
+#include <future>
 #include <memory>
+#include <mutex>
 #include <queue>
-#include <spdlog/spdlog.h>
 
 namespace httplib::util
 {
     class action_queue::impl : public std::enable_shared_from_this<action_queue::impl>
     {
       public:
-        impl(net::any_io_executor const& executor) : executor_(executor) {}
+        impl(net::any_io_executor const& executor, std::size_t max_pending)
+            : executor_(executor)
+            , max_pending_(max_pending)
+        {
+        }
 
-        void
+        boost::system::error_code
         push(act_t&& handler)
         {
             std::unique_lock<std::mutex> lck(que_mutex_);
             if (shutting_down_)
             {
-                return;
+                return boost::system::errc::make_error_code(boost::system::errc::operation_canceled);
+            }
+            if (max_pending_ != 0 && que_.size() >= max_pending_)
+            {
+                return boost::system::errc::make_error_code(boost::system::errc::resource_unavailable_try_again);
             }
 
             que_.push(std::move(handler));
@@ -37,23 +47,37 @@ namespace httplib::util
                 running_ = true;
                 lck.unlock();
 
-                net::co_spawn(executor_,
-                              perform(),
-                              [](std::exception_ptr e)
-                              {
-                                  if (e)
-                                  {
-                                      std::rethrow_exception(e);
-                                  }
-                              });
+                net::co_spawn(
+                    executor_,
+                    [this, self = shared_from_this()]() -> net::awaitable<void>
+                    {
+                        try
+                        {
+                            co_await perform();
+                        }
+                        catch (...)
+                        {
+                            std::terminate();
+                        }
+                    },
+                    boost::asio::detached);
             }
+            return boost::system::error_code {};
         }
         void
         clear()
         {
-            std::unique_lock<std::mutex> lck(que_mutex_);
             std::queue<act_t> empty;
-            std::swap(que_, empty);
+            {
+                std::unique_lock<std::mutex> lck(que_mutex_);
+                std::swap(que_, empty);
+            }
+        }
+        std::size_t
+        pending() const
+        {
+            std::unique_lock<std::mutex> lck(que_mutex_);
+            return que_.size();
         }
         net::any_io_executor
         get_executor() const
@@ -64,16 +88,18 @@ namespace httplib::util
         net::awaitable<void>
         async_shutdown()
         {
-            std::unique_lock<std::mutex> lck(que_mutex_);
-            if (shutting_down_.exchange(true))
             {
-                co_return;
+                std::unique_lock<std::mutex> lck(que_mutex_);
+                shutting_down_ = true;
+                if (!running_)
+                {
+                    co_return;
+                }
             }
-            lck.unlock();
 
             boost::system::error_code ec;
             boost::asio::steady_timer wait_timer(executor_);
-            for (; running_;)
+            while (running_)
             {
                 wait_timer.expires_after(std::chrono::milliseconds(100));
                 co_await wait_timer.async_wait(util::net_awaitable[ec]);
@@ -83,6 +109,7 @@ namespace httplib::util
                 }
             }
         }
+
         std::shared_future<void>
         shutdown()
         {
@@ -92,7 +119,6 @@ namespace httplib::util
                 boost::asio::use_future);
         }
 
-      private:
         net::awaitable<void>
         perform()
         {
@@ -100,6 +126,8 @@ namespace httplib::util
 
             for (;;)
             {
+                co_await net::dispatch(executor_);
+
                 std::unique_lock<std::mutex> lck(que_mutex_);
                 if (que_.empty())
                 {
@@ -111,23 +139,13 @@ namespace httplib::util
                 que_.pop();
                 lck.unlock();
 
-                try
-                {
-                    co_await handler();
-                }
-                catch (std::exception const& e)
-                {
-                    spdlog::error("action_queue handler exception: {}", e.what());
-                }
-                catch (...)
-                {
-                    spdlog::error("action_queue handler unknown exception");
-                }
+                co_await handler();
             }
         }
 
       private:
         net::any_io_executor executor_;
+        std::size_t max_pending_;
 
         mutable std::mutex que_mutex_;
         std::queue<act_t> que_;
