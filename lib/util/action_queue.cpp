@@ -23,6 +23,12 @@ namespace httplib::util
         impl_->clear();
     }
 
+    void
+    action_queue::cancel()
+    {
+        impl_->cancel();
+    }
+
     std::size_t
     action_queue::pending() const
     {

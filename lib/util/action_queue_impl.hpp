@@ -5,6 +5,8 @@
 #include <atomic>
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -79,6 +81,18 @@ namespace httplib::util
             std::unique_lock<std::mutex> lck(que_mutex_);
             return que_.size();
         }
+        void
+        cancel()
+        {
+            std::queue<act_t> empty;
+            std::unique_lock<std::mutex> lck(que_mutex_);
+            shutting_down_ = true;
+            if (cur_sig_)
+            {
+                cur_sig_->emit(boost::asio::cancellation_type::all);
+            }
+            std::swap(que_, empty);
+        }
         net::any_io_executor
         get_executor() const
         {
@@ -132,14 +146,39 @@ namespace httplib::util
                 if (que_.empty())
                 {
                     running_ = false;
+                    cur_sig_.reset();
                     co_return;
                 }
 
                 auto handler = std::move(que_.front());
                 que_.pop();
+
+                auto sig = std::make_shared<boost::asio::cancellation_signal>();
+                cur_sig_ = sig;
                 lck.unlock();
 
-                co_await handler();
+                try
+                {
+                    co_await net::co_spawn(
+                        executor_,
+                        std::move(handler),
+                        net::bind_cancellation_slot(sig->slot(), net::use_awaitable));
+                }
+                catch (boost::system::system_error const& e)
+                {
+                    // The handler was cancelled: stop promptly.
+                    if (e.code() != boost::asio::error::operation_aborted)
+                    {
+                        throw;
+                    }
+                    std::unique_lock<std::mutex> stop_lck(que_mutex_);
+                    running_ = false;
+                    cur_sig_.reset();
+                    co_return;
+                }
+
+                std::unique_lock<std::mutex> done_lck(que_mutex_);
+                cur_sig_.reset();
             }
         }
 
@@ -149,6 +188,7 @@ namespace httplib::util
 
         mutable std::mutex que_mutex_;
         std::queue<act_t> que_;
+        std::shared_ptr<boost::asio::cancellation_signal> cur_sig_;
 
         std::atomic_bool running_ = false;
         std::atomic_bool shutting_down_ = false;

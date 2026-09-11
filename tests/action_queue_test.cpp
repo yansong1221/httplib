@@ -1,4 +1,5 @@
 #include "httplib/util/action_queue.hpp"
+#include "httplib/util/use_awaitable.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/io_context.hpp>
@@ -267,4 +268,101 @@ TEST_CASE("ActionQueue: push is rejected when the queue is full", "[action_queue
     REQUIRE(ec[2] == boost::system::errc::make_error_code(boost::system::errc::resource_unavailable_try_again));
     REQUIRE(count == 2);
     REQUIRE(aq.pending() == 0);
+}
+
+TEST_CASE("ActionQueue: cancel before drain drops queued handlers", "[action_queue]")
+{
+    boost::asio::io_context ioc;
+    httplib::util::action_queue aq(ioc.get_executor());
+
+    int count = 0;
+    REQUIRE_FALSE(aq.push([&]() -> httplib::net::awaitable<void>
+                          {
+                              ++count;
+                              co_return;
+                          }));
+    REQUIRE_FALSE(aq.push([&]() -> httplib::net::awaitable<void>
+                          {
+                              ++count;
+                              co_return;
+                          }));
+    aq.cancel();
+
+    REQUIRE(aq.pending() == 0);
+    REQUIRE(aq.push([&]() -> httplib::net::awaitable<void>
+                    {
+                        ++count;
+                        co_return;
+                    }) == boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
+
+    auto fut = aq.shutdown();
+    ioc.run();
+    REQUIRE(fut.wait_for(1s) == std::future_status::ready);
+    REQUIRE(count == 0);
+}
+
+TEST_CASE("ActionQueue: cancel aborts the running handler and drops pending", "[action_queue]")
+{
+    boost::asio::io_context ioc;
+    httplib::util::action_queue aq(ioc.get_executor());
+
+    bool parked = false;
+    int count = 0;
+    boost::system::error_code handler_ec;
+    boost::system::error_code push_ec;
+    std::size_t pending_after = 999;
+
+    boost::asio::co_spawn(
+        ioc,
+        [&]() -> httplib::net::awaitable<void>
+        {
+            REQUIRE_FALSE(aq.push([&]() -> httplib::net::awaitable<void>
+                                   {
+                                       parked = true;
+                                       for (;;)
+                                       {
+                                           boost::asio::steady_timer t(co_await boost::asio::this_coro::executor);
+                                           t.expires_after(std::chrono::milliseconds(1));
+                                           co_await t.async_wait(httplib::util::net_awaitable[handler_ec]);
+                                           if (handler_ec)
+                                           {
+                                               break;
+                                           }
+                                       }
+                                   }));
+            while (!parked)
+            {
+                boost::asio::steady_timer t(co_await boost::asio::this_coro::executor);
+                t.expires_after(std::chrono::milliseconds(1));
+                co_await t.async_wait(httplib::util::net_awaitable[handler_ec]);
+            }
+
+            REQUIRE_FALSE(aq.push([&]() -> httplib::net::awaitable<void>
+                                   {
+                                       ++count;
+                                       co_return;
+                                   }));
+            REQUIRE_FALSE(aq.push([&]() -> httplib::net::awaitable<void>
+                                   {
+                                       ++count;
+                                       co_return;
+                                   }));
+
+            aq.cancel();
+            push_ec = aq.push([&]() -> httplib::net::awaitable<void>
+                               {
+                                   ++count;
+                                   co_return;
+                               });
+            pending_after = aq.pending();
+            co_await aq.async_shutdown();
+        },
+        boost::asio::detached);
+
+    ioc.run();
+    REQUIRE(parked);
+    REQUIRE(handler_ec == boost::asio::error::operation_aborted);
+    REQUIRE(push_ec == boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
+    REQUIRE(pending_after == 0);
+    REQUIRE(count == 0);
 }

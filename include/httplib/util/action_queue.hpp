@@ -24,6 +24,11 @@ namespace httplib::util
         boost::system::error_code push(act_t&& handler);
         void clear();
 
+        /// Cancel all pending handlers, abort the handler currently running and
+        /// stop the queue permanently. Subsequent `push` calls fail with
+        /// `operation_canceled`.
+        void cancel();
+
         /// Number of handlers currently pending in the queue.
         std::size_t pending() const;
 
