@@ -57,7 +57,6 @@ namespace httplib::util
         std::atomic<bool> is_running_ { false };
         std::atomic<uint64_t> run_id_ { 0 };
 
-        /// 保护 cs_ 与 start/stop 的状态迁移；不跨越 strand 等待。
         std::mutex state_mutex_;
         std::shared_ptr<boost::asio::cancellation_signal> cs_;
     };

@@ -64,15 +64,12 @@ namespace httplib::util
             cs_ = cs;
             is_running_.store(true, std::memory_order_release);
 
-            // co_spawn 必须在 state_mutex_ 内完成：确保 cancellation slot 已连接后，
-            // 并发的 stop() 才可能观察到 is_running_==true 并 emit，不会丢取消。
             boost::asio::co_spawn(
                 strand_,
                 [this, cs, generation, self = shared_from_this()]() -> boost::asio::awaitable<boost::system::error_code>
                 {
                     auto ec = co_await co_run();
 
-                    // 仅当仍是当前轮时才清除运行标志，避免旧轮清掉重启后的新轮。
                     if (run_id_.load(std::memory_order_acquire) == generation)
                     {
                         is_running_.store(false, std::memory_order_release);
@@ -96,7 +93,6 @@ namespace httplib::util
                 return;
             }
 
-            // 同步失效当前轮并清除运行标志，使 stop() 后可立即 start() 重启。
             ++run_id_;
             is_running_.store(false, std::memory_order_release);
             cs = cs_;
@@ -104,9 +100,7 @@ namespace httplib::util
 
         if (cs)
         {
-            // 锁外投递到 strand；post 不会 inline，避免在持锁路径上重入 on_stop。
-            // 捕获当轮 signal，而非执行时再读 cs_，不会误取消重启后的新一轮。
-            boost::asio::post(strand_, [cs]() { cs->emit(boost::asio::cancellation_type::all); });
+            cs->emit(boost::asio::cancellation_type::all);
         }
     }
 
@@ -180,7 +174,6 @@ namespace httplib::util
             }
         }
 
-        // 统一的清理路径：无论 on_start 成功与否都调用 on_stop，子类需保证幂等。
         try
         {
             co_await on_stop();
