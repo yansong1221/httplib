@@ -137,8 +137,8 @@ namespace httplib::util
 
         try
         {
-            started = co_await on_start();
-            if (!started)
+
+            if (started = co_await on_start(); !started)
             {
                 ec = boost::system::errc::make_error_code(boost::system::errc::invalid_argument);
             }
@@ -150,7 +150,7 @@ namespace httplib::util
 
         if (started && !static_cast<bool>(ec))
         {
-            boost::asio::steady_timer update_timer(co_await boost::asio::this_coro::executor);
+            boost::asio::steady_timer update_timer(strand_);
             while (!cs.cancelled() && !static_cast<bool>(ec))
             {
                 // 先等待一个周期，与旧的维护循环语义保持一致。
