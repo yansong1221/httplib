@@ -85,13 +85,23 @@ namespace httplib::util
         cancel()
         {
             std::queue<act_t> empty;
-            std::unique_lock<std::mutex> lck(que_mutex_);
-            shutting_down_ = true;
-            if (cur_sig_)
+            std::shared_ptr<boost::asio::cancellation_signal> signal;
+
             {
-                cur_sig_->emit(boost::asio::cancellation_type::all);
+                std::unique_lock<std::mutex> lock(que_mutex_);
+                shutting_down_ = true;
+                if (!running_)
+                {
+                    return;
+                }
+                signal = cur_sig_;
+                std::swap(que_, empty);
             }
-            std::swap(que_, empty);
+
+            if (signal)
+            {
+                signal->emit(boost::asio::cancellation_type::all);
+            }
         }
         net::any_io_executor
         get_executor() const
@@ -159,10 +169,9 @@ namespace httplib::util
 
                 try
                 {
-                    co_await net::co_spawn(
-                        executor_,
-                        std::move(handler),
-                        net::bind_cancellation_slot(sig->slot(), net::use_awaitable));
+                    co_await net::co_spawn(executor_,
+                                           std::move(handler),
+                                           net::bind_cancellation_slot(sig->slot(), net::use_awaitable));
                 }
                 catch (boost::system::system_error const& e)
                 {
