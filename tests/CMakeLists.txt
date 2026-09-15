@@ -43,6 +43,7 @@ add_httplib_test(httplib_test_core core
     lazy_request_test.cpp
     middleware_test.cpp
     router_test.cpp
+    server_lifecycle_test.cpp
     session_cookie_test.cpp
     ticker_test.cpp
 )

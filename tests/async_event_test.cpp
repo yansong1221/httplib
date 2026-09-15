@@ -275,6 +275,58 @@ TEST_CASE("async_event: close is terminal for wait", "[async_event]")
     REQUIRE(result == wait_result::closed);
 }
 
+TEST_CASE("async_event: reset reopens a closed event", "[async_event]")
+{
+    net::io_context ioc;
+    async_event ev(ioc.get_executor());
+
+    ev.close();
+    REQUIRE(ev.is_closed());
+
+    ev.reset();
+    REQUIRE_FALSE(ev.is_closed());
+
+    // notify/wait work again after reset.
+    std::optional<wait_result> result;
+    net::co_spawn(ioc,
+                  ev.wait(),
+                  [&](std::exception_ptr, wait_result r)
+                  {
+                      result = r;
+                      ioc.stop();
+                  });
+
+    auto notifier = std::make_shared<net::steady_timer>(ioc);
+    notifier->expires_after(10ms);
+    notifier->async_wait(
+        [&ev](boost::system::error_code ec)
+        {
+            if (!ec)
+            {
+                ev.notify_one();
+            }
+        });
+
+    arm_watchdog(ioc);
+    ioc.run();
+
+    REQUIRE(result == wait_result::notified);
+}
+
+TEST_CASE("async_event: reset discards a latched notification", "[async_event]")
+{
+    net::io_context ioc;
+    async_event ev(ioc.get_executor());
+
+    REQUIRE(ev.notify_one() == notify_result::notified);
+    REQUIRE(ev.is_signaled());
+
+    ev.reset();
+
+    REQUIRE_FALSE(ev.is_signaled());
+    REQUIRE_FALSE(ev.try_wait());
+}
+
 TEST_CASE("async_event: wait can be cancelled", "[async_event]")
 {
     net::io_context ioc;

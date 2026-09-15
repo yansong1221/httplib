@@ -44,6 +44,11 @@ namespace httplib::util
      *       notify_result::closed
      *     - subsequent wait() calls return wait_result::closed
      *
+     * reset():
+     *     - clears any latched notification and reopens a closed event, so the
+     *       event can be reused
+     *     - intended to be called when no wait() is in flight
+     *
      * Important:
      *
      *     This is NOT a counting semaphore.
@@ -185,6 +190,18 @@ namespace httplib::util
          *     notify() == notify_result::closed
          */
         void close();
+
+        /**
+         * @brief Reopen a closed event so it can be reused.
+         *
+         * Clears any latched notification and returns the event to the
+         * NOT_SIGNALED state. Intended to be called when no wait() is in
+         * flight, e.g. between two runs of an owner object. Waiters that were
+         * already woken by a preceding close() keep their `closed` result.
+         *
+         * This function is thread-safe with respect to close() and notify().
+         */
+        void reset();
 
         /**
          * @brief Whether the event has been permanently closed.

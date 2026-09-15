@@ -2,6 +2,7 @@
 #include "httplib/html/form_data.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
+#include "httplib/util/async_event.hpp"
 #include "router_impl.h"
 #include "session.hpp"
 #include <boost/asio/co_spawn.hpp>
@@ -156,6 +157,9 @@ namespace httplib::server
         std::uint32_t header_limit_ = 65536;
         std::uint64_t body_limit_ = 1024ULL * 1024 * 1024;
         std::atomic<bool> running_ = false;
+
+        /// Closed by `async_run()` when it exits; awaited by `async_stop()`.
+        util::async_event stop_event_ { ex_ };
 
 #ifdef HTTPLIB_ENABLED_SSL
         std::shared_ptr<ssl::context> ssl_context_;

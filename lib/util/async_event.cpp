@@ -63,6 +63,12 @@ namespace httplib::util
         impl_->close();
     }
 
+    void
+    async_event::reset()
+    {
+        impl_->reset();
+    }
+
     bool
     async_event::is_closed() const noexcept
     {

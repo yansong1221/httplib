@@ -93,18 +93,14 @@ namespace httplib::server
     {
         stop();
 
-        boost::system::error_code ec;
-        boost::asio::steady_timer wait_timer(ex_);
-
-        while (running_)
+        if (!running_)
         {
-            wait_timer.expires_after(std::chrono::milliseconds(100));
-            co_await wait_timer.async_wait(util::net_awaitable[ec]);
-            if (ec)
-            {
-                break;
-            }
+            co_return;
         }
+
+        // `async_run()` closes `stop_event_` on exit, so every caller observes
+        // completion without polling.
+        (void)co_await stop_event_.wait();
     }
 
     router_impl&
@@ -116,6 +112,10 @@ namespace httplib::server
     net::awaitable<boost::system::error_code>
     http_server::impl::async_run()
     {
+        // Reopen the completion event so the instance can be run again after a
+        // previous stop()/async_stop() closed it.
+        stop_event_.reset();
+
         if (running_.exchange(true))
         {
             co_return boost::asio::error::make_error_code(boost::asio::error::already_started);
@@ -153,6 +153,7 @@ namespace httplib::server
 
         router_.reset();
         running_ = false;
+        stop_event_.close();
         for (auto const& ec : results)
         {
             if (ec)

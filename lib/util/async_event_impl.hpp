@@ -163,17 +163,17 @@ namespace httplib::util
         void
         close()
         {
-            bool expected = false;
-            if (!closed_.compare_exchange_strong(expected, true, std::memory_order_acq_rel, std::memory_order_acquire))
-            {
-                return;
-            }
-
             std::vector<std::shared_ptr<waiter>> targets;
 
             {
                 std::lock_guard<std::mutex> lock(mutex_);
 
+                if (closed_.load(std::memory_order_acquire))
+                {
+                    return;
+                }
+
+                closed_.store(true, std::memory_order_release);
                 signaled_ = false;
                 targets.reserve(waiters_.size());
                 while (!waiters_.empty())
@@ -190,6 +190,18 @@ namespace httplib::util
             {
                 w->channel.close();
             }
+        }
+
+        void
+        reset()
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+
+            // Reopen the event and drop any latched notification. Callers are
+            // expected to ensure no wait() is in flight; waiters already woken
+            // by close() keep their `closed` result.
+            signaled_ = false;
+            closed_.store(false, std::memory_order_release);
         }
 
         bool
