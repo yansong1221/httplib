@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "httplib/config.hpp"
 #include "httplib/util/action_queue.hpp"
+#include "httplib/util/async_event.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include <atomic>
 #include <boost/asio/any_io_executor.hpp>
@@ -9,7 +10,6 @@
 #include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
-#include <boost/asio/steady_timer.hpp>
 #include <boost/asio/use_future.hpp>
 #include <cstddef>
 #include <functional>
@@ -26,6 +26,7 @@ namespace httplib::util
         impl(net::any_io_executor const& executor, std::size_t max_pending)
             : executor_(executor)
             , max_pending_(max_pending)
+            , stopped_event_(executor)
         {
         }
 
@@ -121,15 +122,18 @@ namespace httplib::util
                 }
             }
 
-            boost::system::error_code ec;
-            boost::asio::steady_timer wait_timer(executor_);
-            while (running_)
+            // Wait for the worker to drain and stop. The event latches the
+            // stop transition (no polling), but a notification can be stale:
+            // a worker that is exiting may race with a push that had already
+            // spawned a replacement, so re-check `running_` after each wake.
+            for (;;)
             {
-                wait_timer.expires_after(std::chrono::milliseconds(100));
-                co_await wait_timer.async_wait(util::net_awaitable[ec]);
-                if (ec)
+                co_await stopped_event_.wait();
+
+                std::unique_lock<std::mutex> lck(que_mutex_);
+                if (!running_)
                 {
-                    break;
+                    co_return;
                 }
             }
         }
@@ -157,6 +161,8 @@ namespace httplib::util
                 {
                     running_ = false;
                     cur_sig_.reset();
+                    lck.unlock();
+                    stopped_event_.notify_all();
                     co_return;
                 }
 
@@ -183,6 +189,8 @@ namespace httplib::util
                     std::unique_lock<std::mutex> stop_lck(que_mutex_);
                     running_ = false;
                     cur_sig_.reset();
+                    stop_lck.unlock();
+                    stopped_event_.notify_all();
                     co_return;
                 }
 
@@ -201,5 +209,7 @@ namespace httplib::util
 
         std::atomic_bool running_ = false;
         std::atomic_bool shutting_down_ = false;
+
+        async_event stopped_event_;
     };
 } // namespace httplib::util
