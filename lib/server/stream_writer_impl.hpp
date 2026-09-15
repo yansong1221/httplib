@@ -38,12 +38,12 @@ namespace httplib::server
 
             for (auto const& f : headers)
             {
-                resp_->erase(f.name());
+                resp_->erase(f.name_string());
             }
             resp_->result(status);
             for (auto const& f : headers)
             {
-                resp_->insert(f.name(), f.value());
+                resp_->insert(f.name_string(), f.value());
             }
 
             boost::system::error_code ec;
