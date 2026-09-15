@@ -198,7 +198,8 @@ namespace httplib::client
     // =========================================================================
 
     downloader::impl::impl(net::any_io_executor ex, std::shared_ptr<http_client_pool> pool)
-        : executor_(std::move(ex))
+        : executor_(ex)
+        , pause_event_(ex)
         , pool_(std::move(pool))
     {
     }
@@ -264,6 +265,26 @@ namespace httplib::client
     downloader::impl::cancel()
     {
         cancelled_.store(true, std::memory_order_relaxed);
+        pause_event_.signal();
+    }
+
+    void
+    downloader::impl::pause()
+    {
+        paused_.store(true, std::memory_order_relaxed);
+    }
+
+    void
+    downloader::impl::resume()
+    {
+        paused_.store(false, std::memory_order_relaxed);
+        pause_event_.signal();
+    }
+
+    bool
+    downloader::impl::is_paused() const
+    {
+        return paused_.load(std::memory_order_relaxed);
     }
 
     std::string
@@ -415,6 +436,22 @@ namespace httplib::client
         {
             cb(st, msg);
         }
+    }
+
+    net::awaitable<boost::system::error_code>
+    downloader::impl::co_wait_if_paused()
+    {
+        while (paused_.load(std::memory_order_relaxed))
+        {
+            set_state(downloader::state::paused);
+            co_await pause_event_.wait();
+            if (cancelled_.load(std::memory_order_relaxed))
+            {
+                co_return boost::asio::error::operation_aborted;
+            }
+        }
+        set_state(downloader::state::downloading);
+        co_return boost::system::error_code {};
     }
 
     void
@@ -598,6 +635,12 @@ namespace httplib::client
                 co_return boost::asio::error::operation_aborted;
             }
 
+            auto pause_ec = co_await co_wait_if_paused();
+            if (pause_ec)
+            {
+                co_return pause_ec;
+            }
+
             std::uint64_t existing_size = 0;
             http::fields req_headers;
 
@@ -687,6 +730,12 @@ namespace httplib::client
                     co_return boost::asio::error::operation_aborted;
                 }
 
+                auto pause_ec = co_await co_wait_if_paused();
+                if (pause_ec)
+                {
+                    co_return pause_ec;
+                }
+
                 auto r = co_await resp.read_some_raw(net::buffer(buf));
                 if (r.has_error())
                 {
@@ -759,6 +808,12 @@ namespace httplib::client
                 co_return boost::asio::error::operation_aborted;
             }
 
+            auto pause_ec = co_await co_wait_if_paused();
+            if (pause_ec)
+            {
+                co_return pause_ec;
+            }
+
             std::uint64_t resume_at = start;
             std::ios_base::openmode open_mode = std::ios::out | std::ios::binary;
 
@@ -821,6 +876,12 @@ namespace httplib::client
                 if (cancelled_.load(std::memory_order_relaxed))
                 {
                     co_return boost::asio::error::operation_aborted;
+                }
+
+                auto pause_ec = co_await co_wait_if_paused();
+                if (pause_ec)
+                {
+                    co_return pause_ec;
                 }
 
                 auto r = co_await resp.read_some_raw(net::buffer(buf));
@@ -954,13 +1015,12 @@ namespace httplib::client
 
         std::vector<net::awaitable<boost::system::error_code>> ops;
         ops.reserve(seg_count);
-        std::vector<boost::system::error_code> errors(seg_count);
 
         for (auto& seg : segments_)
         {
             ops.emplace_back(co_download_segment(ui, seg.start_byte, seg.end_byte, seg.part_path));
         }
-        co_await util::when_all(std::move(ops));
+        auto errors = co_await util::when_all(std::move(ops));
         {
             std::lock_guard lk(progress_mutex_);
             active_segments_ = 0;
@@ -968,7 +1028,7 @@ namespace httplib::client
 
         save_state(save_path);
 
-        for (auto& ec : errors)
+        for (auto const& ec : errors)
         {
             if (ec)
             {
@@ -1198,6 +1258,24 @@ namespace httplib::client
     downloader::cancel()
     {
         impl_->cancel();
+    }
+
+    void
+    downloader::pause()
+    {
+        impl_->pause();
+    }
+
+    void
+    downloader::resume()
+    {
+        impl_->resume();
+    }
+
+    bool
+    downloader::is_paused() const
+    {
+        return impl_->is_paused();
     }
 
     std::string

@@ -34,6 +34,7 @@ namespace httplib::client
             idle,
             connecting,
             downloading,
+            paused,
             merging,
             completed,
             failed,
@@ -84,6 +85,9 @@ namespace httplib::client
                                            http::fields const& headers = {});
 
         void cancel();
+        void pause();
+        void resume();
+        bool is_paused() const;
 
         std::string suggested_filename() const;
         state current_state() const;

@@ -2,6 +2,7 @@
 #include "httplib/client/cache.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/downloader.hpp"
+#include "httplib/util/async_event.hpp"
 #include <atomic>
 #include <boost/system/error_code.hpp>
 #include <chrono>
@@ -83,6 +84,9 @@ namespace httplib::client
                                                                  fs::path const& save_path,
                                                                  http::fields const& headers = {});
         void cancel();
+        void pause();
+        void resume();
+        bool is_paused() const;
 
         std::string suggested_filename() const;
 
@@ -110,6 +114,8 @@ namespace httplib::client
         net::awaitable<request_result> send_request(url_info const& ui,
                                                     http::verb method,
                                                     http::fields const& req_headers = {});
+
+        net::awaitable<boost::system::error_code> co_wait_if_paused();
 
         net::awaitable<boost::system::error_code> co_download_single(url_info const& ui, fs::path const& save_path);
 
@@ -144,6 +150,8 @@ namespace httplib::client
         std::chrono::steady_clock::time_point progress_start_;
 
         std::atomic<bool> cancelled_ { false };
+        std::atomic<bool> paused_ { false };
+        util::async_event pause_event_;
 
         std::vector<segment_task> segments_;
 

@@ -59,6 +59,7 @@ add_httplib_test(httplib_test_client client
     client_pool_test.cpp
     client_test.cpp
     downloader_test.cpp
+    download_scheduler_test.cpp
 )
 
 add_httplib_test(httplib_test_proxy proxy
