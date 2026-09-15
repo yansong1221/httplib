@@ -278,7 +278,7 @@ while (paused_)
 void resume()
 {
     paused_ = false;
-    pause_event_.signal();
+    pause_event_.notify_all();
 }
 ```
 
@@ -293,7 +293,7 @@ void cancel()
 {
     cancelled_ = true;
 
-    pause_event_.signal();
+    pause_event_.notify_all();
 
     // 同时取消当前 HTTP operation
     cancellation_signal_.emit(...);

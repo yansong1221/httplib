@@ -158,7 +158,7 @@ namespace httplib::client
                       entry->status.state = downloader::state::idle;
 
                       promise.set_value(id);
-                      scheduler_event_.signal();
+                      scheduler_event_.notify_all();
                   });
 
         return future.get();
@@ -180,7 +180,7 @@ namespace httplib::client
                       if (entry->dl)
                       {
                           entry->dl->cancel();
-                          scheduler_event_.signal();
+                          scheduler_event_.notify_all();
                           return;
                       }
 
@@ -194,8 +194,8 @@ namespace httplib::client
                           entry->status.state = downloader::state::cancelled;
                           entry->status.message = "cancelled before start";
 completed_queue_.push_back(id);
-                           scheduler_event_.signal();
-                           completed_event_.signal();
+                           scheduler_event_.notify_all();
+                           completed_event_.notify_all();
                        }
                    });
     }
@@ -222,11 +222,11 @@ completed_queue_.push_back(id);
                                   entry->status.state = downloader::state::cancelled;
                                   entry->status.message = "cancelled before start";
                                   completed_queue_.push_back(id);
-                                  completed_event_.signal();
+                                  completed_event_.notify_all();
                               }
                           }
                       }
-                      scheduler_event_.signal();
+                      scheduler_event_.notify_all();
                   });
     }
 
@@ -244,7 +244,7 @@ completed_queue_.push_back(id);
                       {
                           entry->dl->pause();
                       }
-                      scheduler_event_.signal();
+                      scheduler_event_.notify_all();
                   });
     }
 
@@ -262,7 +262,7 @@ completed_queue_.push_back(id);
                       {
                           entry->dl->resume();
                       }
-                      scheduler_event_.signal();
+                      scheduler_event_.notify_all();
                   });
     }
 
@@ -289,7 +289,7 @@ completed_queue_.push_back(id);
                   [this, cfg]()
                   {
                       config_ = cfg;
-                      scheduler_event_.signal();
+                      scheduler_event_.notify_all();
                   });
     }
 
@@ -321,7 +321,7 @@ completed_queue_.push_back(id);
                 entry->status.state = downloader::state::cancelled;
                 entry->status.message = "cancelled before start";
                 completed_queue_.push_back(id);
-                completed_event_.signal();
+                completed_event_.notify_all();
                 continue;
             }
             if (entry->pause_requested)
@@ -463,8 +463,8 @@ completed_queue_.push_back(id);
         entry->status.message = ec ? ec.message() : "";
 
         completed_queue_.push_back(id);
-        scheduler_event_.signal();
-        completed_event_.signal();
+        scheduler_event_.notify_all();
+        completed_event_.notify_all();
 
         dispatch_pending();
     }
@@ -588,7 +588,7 @@ completed_queue_.push_back(id);
                 entry->dl->cancel();
         }
 
-        scheduler_event_.signal();
+        scheduler_event_.notify_all();
 
         // drain until everything settled
         for (;;)

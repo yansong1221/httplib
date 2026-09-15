@@ -265,7 +265,7 @@ namespace httplib::client
     downloader::impl::cancel()
     {
         cancelled_.store(true, std::memory_order_relaxed);
-        pause_event_.signal();
+        pause_event_.notify_all();
     }
 
     void
@@ -278,7 +278,7 @@ namespace httplib::client
     downloader::impl::resume()
     {
         paused_.store(false, std::memory_order_relaxed);
-        pause_event_.signal();
+        pause_event_.notify_all();
     }
 
     bool

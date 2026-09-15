@@ -2,6 +2,7 @@
 #include "httplib/config.hpp"
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
+#include <chrono>
 #include <memory>
 #include <utility>
 
@@ -15,28 +16,41 @@ namespace httplib::util
      *
      *     NOT_SIGNALED <----> SIGNALED
      *
-     * notify():
+     * notify_one():
      *     - changes NOT_SIGNALED -> SIGNALED
      *     - wakes one waiter if present
      *     - repeated notifications are coalesced
      *
+     * notify_all():
+     *     - wakes every currently waiting coroutine
+     *     - coalesces into the latched SIGNALED state when no waiter is present
+     *
      * wait():
      *     - consumes the SIGNALED state
      *     - suspends if the event is not signaled
+     *     - may return `cancelled` when the awaiting coroutine is cancelled
+     *
+     * wait_for():
+     *     - like wait(), but returns `timed_out` after the given duration
+     *
+     * try_wait():
+     *     - non-blocking consume; returns true iff a latched notification was
+     *       consumed
      *
      * close():
      *     - permanently closes the event
-     *     - wakes all pending waiters
-     *     - subsequent notify() calls are rejected
-     *     - subsequent wait() calls return operation_aborted
+     *     - wakes all pending waiters with wait_result::closed
+     *     - subsequent notify_one()/notify_all() calls return
+     *       notify_result::closed
+     *     - subsequent wait() calls return wait_result::closed
      *
      * Important:
      *
      *     This is NOT a counting semaphore.
      *
-     *     notify();
-     *     notify();
-     *     notify();
+     *     notify_one();
+     *     notify_one();
+     *     notify_one();
      *
      *     still represents only one pending notification.
      *
@@ -51,9 +65,15 @@ namespace httplib::util
      *
      * Thread safety:
      *
-     *     notify() and close() may be called from arbitrary threads.
+     *     notify_one(), notify_all(), try_wait(), close(), is_closed() and
+     *     is_signaled() may be called from arbitrary threads.
      *
-     * Waiters should normally be associated with the event's executor.
+     * Lifetime:
+     *
+     *     A wait()/wait_for() operation keeps the underlying state alive for
+     *     as long as the returned awaitable is running. Destroying the
+     *     async_event while a wait is in flight closes the event and wakes the
+     *     waiter with wait_result::closed; it will never access freed memory.
      */
     class HTTPLIB_API async_event
     {
@@ -70,6 +90,7 @@ namespace httplib::util
             notified,
             closed,
             cancelled,
+            timed_out,
             failed
         };
 
@@ -84,22 +105,29 @@ namespace httplib::util
         async_event& operator=(async_event&&) = delete;
 
         /**
-         * @brief Notify the event.
+         * @brief The executor associated with this event.
+         */
+        net::any_io_executor get_executor() const;
+
+        /**
+         * @brief Notify the event, waking at most one waiter.
          *
          * This function is thread-safe.
          *
          * If the event is already signaled, the notification is
          * coalesced and no additional wakeup is generated.
          */
-        notify_result notify();
+        notify_result notify_one();
 
         /**
-         * @brief Alias for notify().
+         * @brief Wake every currently waiting coroutine.
+         *
+         * If no waiter is present the notification is coalesced into the
+         * latched SIGNALED state, exactly like notify_one().
+         *
+         * This function is thread-safe.
          */
-        notify_result signal()
-        {
-            return notify();
-        }
+        notify_result notify_all();
 
         /**
          * @brief Wait for a notification.
@@ -127,12 +155,30 @@ namespace httplib::util
         net::awaitable<wait_result> wait();
 
         /**
+         * @brief Wait for a notification, or a timeout.
+         *
+         * Behaves like wait(), but returns wait_result::timed_out if no
+         * notification arrives within `timeout`.
+         */
+        net::awaitable<wait_result> wait_for(std::chrono::steady_clock::duration timeout);
+
+        /**
+         * @brief Non-blocking consume of a latched notification.
+         *
+         * Returns true iff the event was in the SIGNALED state, which is
+         * then consumed. Returns false when the event is not signaled or
+         * has been closed.
+         */
+        bool try_wait();
+
+        /**
          * @brief Close the event permanently.
          *
          * close() is idempotent and thread-safe.
          *
-         * All currently waiting coroutines are woken.
-         * Future wait() calls return wait_result::closed.
+         * All currently waiting coroutines are woken with
+         * wait_result::closed. Future wait() calls return
+         * wait_result::closed.
          *
          * After close():
          *
@@ -149,9 +195,18 @@ namespace httplib::util
          */
         bool is_closed() const noexcept;
 
+        /**
+         * @brief Whether a notification is currently latched.
+         *
+         * This is only a snapshot.
+         *
+         * Do not use this function for synchronization.
+         */
+        bool is_signaled() const;
+
       private:
         class impl;
-        std::unique_ptr<impl> impl_;
+        std::shared_ptr<impl> impl_;
     };
 
 } // namespace httplib::util
