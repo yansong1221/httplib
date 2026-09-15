@@ -459,3 +459,245 @@ TEST_CASE("async_event: notify is safe from another thread", "[async_event]")
 
     REQUIRE(woken.load());
 }
+
+TEST_CASE("async_event: get_executor returns the associated executor", "[async_event]")
+{
+    net::io_context ioc;
+    async_event ev(ioc.get_executor());
+
+    REQUIRE(ev.get_executor() == ioc.get_executor());
+}
+
+TEST_CASE("async_event: notify_all latches when there is no waiter", "[async_event]")
+{
+    net::io_context ioc;
+    async_event ev(ioc.get_executor());
+
+    REQUIRE(ev.notify_all() == notify_result::notified);
+    REQUIRE(ev.is_signaled());
+
+    std::optional<wait_result> result;
+    net::co_spawn(ioc,
+                  ev.wait(),
+                  [&](std::exception_ptr, wait_result r)
+                  {
+                      result = r;
+                      ioc.stop();
+                  });
+
+    arm_watchdog(ioc);
+    ioc.run();
+
+    REQUIRE(result == wait_result::notified);
+    REQUIRE_FALSE(ev.is_signaled());
+}
+
+TEST_CASE("async_event: wait_for consumes a latched notification immediately", "[async_event]")
+{
+    net::io_context ioc;
+    async_event ev(ioc.get_executor());
+
+    REQUIRE(ev.notify_one() == notify_result::notified);
+
+    std::optional<wait_result> result;
+    auto const begin = std::chrono::steady_clock::now();
+
+    net::co_spawn(ioc,
+                  ev.wait_for(5s),
+                  [&](std::exception_ptr, wait_result r)
+                  {
+                      result = r;
+                      ioc.stop();
+                  });
+
+    arm_watchdog(ioc);
+    ioc.run();
+    auto const elapsed = std::chrono::steady_clock::now() - begin;
+
+    REQUIRE(result == wait_result::notified);
+    REQUIRE(elapsed < 1s);
+}
+
+TEST_CASE("async_event: wait_for after close returns closed", "[async_event]")
+{
+    net::io_context ioc;
+    async_event ev(ioc.get_executor());
+
+    ev.close();
+
+    std::optional<wait_result> result;
+    net::co_spawn(ioc,
+                  ev.wait_for(5s),
+                  [&](std::exception_ptr, wait_result r)
+                  {
+                      result = r;
+                      ioc.stop();
+                  });
+
+    arm_watchdog(ioc);
+    ioc.run();
+
+    REQUIRE(result == wait_result::closed);
+}
+
+TEST_CASE("async_event: destruction wakes a pending wait_for with closed", "[async_event]")
+{
+    net::io_context ioc;
+    auto ev = std::make_shared<async_event>(ioc.get_executor());
+
+    std::optional<wait_result> result;
+    net::co_spawn(ioc,
+                  ev->wait_for(5s),
+                  [&](std::exception_ptr, wait_result r)
+                  {
+                      result = r;
+                      ioc.stop();
+                  });
+
+    auto destroyer = std::make_shared<net::steady_timer>(ioc);
+    destroyer->expires_after(20ms);
+    destroyer->async_wait(
+        [&ev](boost::system::error_code ec)
+        {
+            if (!ec)
+            {
+                ev.reset();
+            }
+        });
+
+    arm_watchdog(ioc);
+    ioc.run();
+
+    REQUIRE(result == wait_result::closed);
+}
+
+TEST_CASE("async_event: close discards a latched notification", "[async_event]")
+{
+    net::io_context ioc;
+    async_event ev(ioc.get_executor());
+
+    REQUIRE(ev.notify_one() == notify_result::notified);
+    ev.close();
+    REQUIRE_FALSE(ev.is_signaled());
+
+    std::optional<wait_result> result;
+    net::co_spawn(ioc,
+                  ev.wait(),
+                  [&](std::exception_ptr, wait_result r)
+                  {
+                      result = r;
+                      ioc.stop();
+                  });
+
+    arm_watchdog(ioc);
+    ioc.run();
+
+    REQUIRE(result == wait_result::closed);
+}
+
+TEST_CASE("async_event: successive notify_one wakes each waiter in turn", "[async_event]")
+{
+    net::io_context ioc;
+    async_event ev(ioc.get_executor());
+
+    std::atomic<int> woken { 0 };
+
+    for (int i = 0; i < 2; ++i)
+    {
+        net::co_spawn(ioc,
+                      ev.wait(),
+                      [&](std::exception_ptr, wait_result r)
+                      {
+                          if (r == wait_result::notified)
+                          {
+                              woken.fetch_add(1);
+                          }
+                      });
+    }
+
+    auto first = std::make_shared<net::steady_timer>(ioc);
+    first->expires_after(20ms);
+    first->async_wait(
+        [&ev](boost::system::error_code ec)
+        {
+            if (!ec)
+            {
+                REQUIRE(ev.notify_one() == notify_result::notified);
+            }
+        });
+
+    auto second = std::make_shared<net::steady_timer>(ioc);
+    second->expires_after(80ms);
+    second->async_wait(
+        [&ev](boost::system::error_code ec)
+        {
+            if (!ec)
+            {
+                REQUIRE(ev.notify_one() == notify_result::notified);
+            }
+        });
+
+    stop_after(ioc, 250ms);
+    arm_watchdog(ioc);
+    ioc.run();
+
+    REQUIRE(woken.load() == 2);
+}
+
+TEST_CASE("async_event: wait_for with zero timeout times out", "[async_event]")
+{
+    net::io_context ioc;
+    async_event ev(ioc.get_executor());
+
+    std::optional<wait_result> result;
+    net::co_spawn(ioc,
+                  ev.wait_for(0ms),
+                  [&](std::exception_ptr, wait_result r)
+                  {
+                      result = r;
+                      ioc.stop();
+                  });
+
+    arm_watchdog(ioc);
+    ioc.run();
+
+    REQUIRE(result == wait_result::timed_out);
+}
+
+TEST_CASE("async_event: notify_all wakes every wait_for waiter", "[async_event]")
+{
+    net::io_context ioc;
+    async_event ev(ioc.get_executor());
+
+    std::atomic<int> woken { 0 };
+
+    for (int i = 0; i < 3; ++i)
+    {
+        net::co_spawn(ioc,
+                      ev.wait_for(5s),
+                      [&](std::exception_ptr, wait_result r)
+                      {
+                          if (r == wait_result::notified)
+                          {
+                              woken.fetch_add(1);
+                          }
+                      });
+    }
+
+    auto notifier = std::make_shared<net::steady_timer>(ioc);
+    notifier->expires_after(30ms);
+    notifier->async_wait(
+        [&ev](boost::system::error_code ec)
+        {
+            if (!ec)
+            {
+                REQUIRE(ev.notify_all() == notify_result::notified);
+            }
+        });
+
+    stop_after(ioc, 200ms);
+    arm_watchdog(ioc);
+    ioc.run();
+
+    REQUIRE(woken.load() == 3);
+}

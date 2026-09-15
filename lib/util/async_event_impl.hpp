@@ -12,6 +12,7 @@
 #include <deque>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -26,13 +27,16 @@ namespace httplib::util
         /**
          * @brief One suspended wait() operation.
          *
-         * Each waiter owns a private capacity-1 channel. The channel is only
-         * ever used as a one-shot wakeup source, so `result` is the single
-         * source of truth for *why* the waiter was resumed:
+         * Each waiter owns a private capacity-1 channel used purely as a
+         * one-shot wakeup latch (waking simply closes it). `result` is the
+         * single source of truth for *why* the waiter was resumed, guarded by
+         * `pending`:
          *
-         *     armed == true   -> the waiter was removed by cancellation/abort
-         *     armed == false  -> the waiter was completed by notify/close and
-         *                        `result` holds the outcome
+         *     pending == true   -> still queued in waiters_; the event did not
+         *                          complete it, so it was resumed by
+         *                          cancellation and must remove itself
+         *     pending == false  -> the event completed it (notify/close/abort)
+         *                          and `result` holds the outcome
          */
         struct waiter
         {
@@ -43,7 +47,7 @@ namespace httplib::util
 
             channel_type channel;
             async_event::wait_result result = async_event::wait_result::failed;
-            bool armed = false;
+            bool pending = false;
         };
 
         explicit impl(net::any_io_executor ex) : executor_(std::move(ex)) {}
@@ -60,45 +64,38 @@ namespace httplib::util
         async_event::notify_result
         notify_one()
         {
-            for (;;)
+            std::shared_ptr<waiter> target;
+
             {
-                std::shared_ptr<waiter> target;
+                std::lock_guard<std::mutex> lock(mutex_);
 
+                if (closed_.load(std::memory_order_acquire))
                 {
-                    std::lock_guard<std::mutex> lock(mutex_);
-
-                    if (closed_.load(std::memory_order_acquire))
-                    {
-                        return async_event::notify_result::closed;
-                    }
-
-                    if (!waiters_.empty())
-                    {
-                        target = std::move(waiters_.front());
-                        waiters_.pop_front();
-                        target->armed = false;
-                        target->result = async_event::wait_result::notified;
-                    }
-                    else
-                    {
-                        if (signaled_)
-                        {
-                            return async_event::notify_result::coalesced;
-                        }
-
-                        signaled_ = true;
-                        return async_event::notify_result::notified;
-                    }
+                    return async_event::notify_result::closed;
                 }
 
-                if (target->channel.try_send(boost::system::error_code {}))
+                if (waiters_.empty())
                 {
+                    if (signaled_)
+                    {
+                        return async_event::notify_result::coalesced;
+                    }
+
+                    signaled_ = true;
                     return async_event::notify_result::notified;
                 }
 
-                // The waiter was aborted concurrently; do not lose the
-                // notification. Retry with the next waiter or latch it.
+                target = std::move(waiters_.front());
+                waiters_.pop_front();
+                target->pending = false;
+                target->result = async_event::wait_result::notified;
             }
+
+            // Closing the one-shot channel is an unconditional wake: a pending
+            // async_receive completes immediately, and one that has not been
+            // initiated yet completes as soon as it is. No payload is needed.
+            target->channel.close();
+            return async_event::notify_result::notified;
         }
 
         async_event::notify_result
@@ -130,7 +127,7 @@ namespace httplib::util
                 {
                     auto w = std::move(waiters_.front());
                     waiters_.pop_front();
-                    w->armed = false;
+                    w->pending = false;
                     w->result = async_event::wait_result::notified;
                     targets.push_back(std::move(w));
                 }
@@ -138,7 +135,7 @@ namespace httplib::util
 
             for (auto& w : targets)
             {
-                w->channel.try_send(boost::system::error_code {});
+                w->channel.close();
             }
 
             return async_event::notify_result::notified;
@@ -183,7 +180,7 @@ namespace httplib::util
                 {
                     auto w = std::move(waiters_.front());
                     waiters_.pop_front();
-                    w->armed = false;
+                    w->pending = false;
                     w->result = async_event::wait_result::closed;
                     targets.push_back(std::move(w));
                 }
@@ -214,6 +211,12 @@ namespace httplib::util
                                                                     std::chrono::steady_clock::duration timeout);
 
       private:
+        // Shared implementation: waits until notified/closed, or until the
+        // optional absolute `deadline` elapses (then `timed_out`).
+        static net::awaitable<async_event::wait_result> do_wait_until(
+            std::shared_ptr<impl> self,
+            std::optional<std::chrono::steady_clock::time_point> deadline);
+
         static bool
         is_cancellation_error(boost::system::error_code ec)
         {
@@ -241,10 +244,10 @@ namespace httplib::util
 
             {
                 std::lock_guard<std::mutex> lock(mutex_);
-                if (w->armed)
+                if (w->pending)
                 {
                     remove_locked(w.get());
-                    w->armed = false;
+                    w->pending = false;
                     w->result = result;
                     removed = true;
                 }
@@ -268,55 +271,18 @@ namespace httplib::util
     inline net::awaitable<async_event::wait_result>
     async_event::impl::do_wait(std::shared_ptr<impl> self)
     {
-        auto w = std::make_shared<waiter>(self->executor_);
-
-        {
-            std::lock_guard<std::mutex> lock(self->mutex_);
-
-            if (self->closed_.load(std::memory_order_acquire))
-            {
-                co_return async_event::wait_result::closed;
-            }
-
-            if (self->signaled_)
-            {
-                self->signaled_ = false;
-                co_return async_event::wait_result::notified;
-            }
-
-            w->armed = true;
-            self->waiters_.push_back(w);
-        }
-
-        boost::system::error_code ec;
-        co_await w->channel.async_receive(net::redirect_error(net::use_awaitable, ec));
-
-        std::lock_guard<std::mutex> lock(self->mutex_);
-
-        if (w->armed)
-        {
-            // The waiter was aborted; the event itself did not complete it.
-            self->remove_locked(w.get());
-            w->armed = false;
-
-            if (self->closed_.load(std::memory_order_acquire))
-            {
-                co_return async_event::wait_result::closed;
-            }
-
-            if (ec && !is_cancellation_error(ec))
-            {
-                co_return async_event::wait_result::failed;
-            }
-
-            co_return async_event::wait_result::cancelled;
-        }
-
-        co_return w->result;
+        return do_wait_until(std::move(self), std::nullopt);
     }
 
     inline net::awaitable<async_event::wait_result>
     async_event::impl::do_wait_for(std::shared_ptr<impl> self, std::chrono::steady_clock::duration timeout)
+    {
+        return do_wait_until(std::move(self), std::chrono::steady_clock::now() + timeout);
+    }
+
+    inline net::awaitable<async_event::wait_result>
+    async_event::impl::do_wait_until(std::shared_ptr<impl> self,
+                                     std::optional<std::chrono::steady_clock::time_point> deadline)
     {
         auto w = std::make_shared<waiter>(self->executor_);
 
@@ -334,38 +300,45 @@ namespace httplib::util
                 co_return async_event::wait_result::notified;
             }
 
-            w->armed = true;
+            w->pending = true;
             self->waiters_.push_back(w);
         }
 
-        // The timer's completion handler runs on the event's executor. On
-        // expiry it removes the waiter and closes its channel, which resumes
-        // the async_receive below with an abort and `result == timed_out`.
-        net::steady_timer timer(self->executor_);
-        timer.expires_after(timeout);
-        timer.async_wait(
-            [self, w](boost::system::error_code tec)
-            {
-                if (!tec)
+        // With a deadline, a timer on the event's executor removes the waiter
+        // and closes its channel on expiry, resuming the receive below with
+        // `result == timed_out`. Without one, we just wait indefinitely.
+        std::optional<net::steady_timer> timer;
+        if (deadline)
+        {
+            timer.emplace(self->executor_);
+            timer->expires_at(*deadline);
+            timer->async_wait(
+                [self, w](boost::system::error_code tec)
                 {
-                    self->abort_waiter(w, async_event::wait_result::timed_out);
-                }
-            });
+                    if (!tec)
+                    {
+                        self->abort_waiter(w, async_event::wait_result::timed_out);
+                    }
+                });
+        }
 
         boost::system::error_code ec;
         co_await w->channel.async_receive(net::redirect_error(net::use_awaitable, ec));
 
-        // No-op if the timer already fired; otherwise stop it.
-        timer.cancel();
+        if (timer)
+        {
+            // No-op if the timer already fired; otherwise stop it.
+            timer->cancel();
+        }
 
         std::lock_guard<std::mutex> lock(self->mutex_);
 
-        if (w->armed)
+        if (w->pending)
         {
-            // The event itself did not complete the waiter, so the receive was
-            // aborted by the caller's cancellation.
+            // Still queued: the event did not complete this waiter, so it was
+            // resumed by the caller's cancellation.
             self->remove_locked(w.get());
-            w->armed = false;
+            w->pending = false;
 
             if (self->closed_.load(std::memory_order_acquire))
             {
