@@ -189,6 +189,23 @@ namespace httplib::server
         set_http_handler<method...>(key, std::move(f), std::forward<Aspects>(asps)...);
     }
 
+    template <http::verb... method, typename Func, typename... Aspects>
+        requires std::is_member_function_pointer_v<Func>
+    void
+    router::set_lazy_http_handler(std::string_view key,
+                                  Func handler,
+                                  util::class_type_t<Func>& owner,
+                                  Aspects&&... asps)
+    {
+        using return_type = typename util::function_traits<Func>::return_type;
+
+        using handler_type
+            = std::conditional_t<util::is_awaitable_v<return_type>, coro_http_handler_type, http_handler_type>;
+
+        handler_type f = std::bind(handler, &owner, std::placeholders::_1, std::placeholders::_2);
+        set_lazy_http_handler<method...>(key, std::move(f), std::forward<Aspects>(asps)...);
+    }
+
     template <typename Func, typename... Aspects>
     void
     router::set_http_not_found_handler(Func&& handler, Aspects&&... asps)
@@ -255,10 +272,9 @@ namespace httplib::server
     void
     router::set_lazy_http_handler(http::verb method, std::string_view key, Func&& handler, Aspects... asps)
     {
-        set_lazy_http_handler_impl(
-            method,
-            key,
-            make_coro_http_handler(std::forward<Func>(handler), std::forward<Aspects>(asps)...));
+        set_lazy_http_handler_impl(method,
+                                   key,
+                                   make_coro_http_handler(std::forward<Func>(handler), std::forward<Aspects>(asps)...));
     }
 
 } // namespace httplib::server

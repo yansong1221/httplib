@@ -61,6 +61,12 @@ namespace httplib::server
             static_assert(sizeof...(method) >= 1, "must set method");
             (set_lazy_http_handler(method, key, handler, std::forward<Aspects>(asps)...), ...);
         }
+        template <http::verb... method, typename Func, typename... Aspects>
+            requires std::is_member_function_pointer_v<Func>
+        void set_lazy_http_handler(std::string_view key,
+                                   Func handler,
+                                   util::class_type_t<Func>& owner,
+                                   Aspects&&... asps);
 
         template <typename Func>
         void set_post_routing_handler(Func&& handler);
