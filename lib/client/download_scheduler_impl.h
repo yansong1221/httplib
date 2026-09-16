@@ -38,6 +38,7 @@ namespace httplib::client
         std::size_t active_count() const;
         std::size_t pending_count() const;
         std::size_t total_count() const;
+        std::size_t clear_finished();
 
         // -- config snapshot --
         scheduler_config get_scheduler_config() const;

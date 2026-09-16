@@ -53,6 +53,16 @@ namespace httplib::client
         void set_header_limit(std::uint32_t limit);
         void set_body_limit(std::uint64_t limit);
 
+        /// Cap the response-body (download) throughput for this connection, in
+        /// bytes per second. A value of 0 means unlimited. Backed by the stream's
+        /// Beast read rate limit.
+        void set_download_rate_limit(std::uint64_t bytes_per_second);
+
+        /// Cap the request-body (upload) throughput for this connection, in bytes
+        /// per second. A value of 0 means unlimited. Backed by the stream's Beast
+        /// write rate limit.
+        void set_upload_rate_limit(std::uint64_t bytes_per_second);
+
         net::any_io_executor get_executor() const;
 
       public:

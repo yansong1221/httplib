@@ -58,6 +58,9 @@ namespace httplib::client
             body_limit_ = limit;
         }
 
+        void set_download_rate_limit(std::uint64_t bytes_per_second);
+        void set_upload_rate_limit(std::uint64_t bytes_per_second);
+
       public:
         void close();
         bool is_open() const;
@@ -75,6 +78,10 @@ namespace httplib::client
 
         void prepare_request(http_client::request& req);
         net::awaitable<boost::system::error_code> co_connect();
+
+        /// Apply the stored read/write rate limits to `stream_`. Caller must hold
+        /// stream_mutex_.
+        void apply_rate_limits();
 
         void begin_io();
         void end_io();
@@ -184,6 +191,10 @@ namespace httplib::client
 
         std::uint32_t header_limit_ = 65536;
         std::uint64_t body_limit_ = 1024ULL * 1024 * 1024;
+        /// Response-body (download) throughput cap in bytes/sec; 0 means unlimited.
+        std::uint64_t download_rate_limit_ = 0;
+        /// Request-body (upload) throughput cap in bytes/sec; 0 means unlimited.
+        std::uint64_t upload_rate_limit_ = 0;
     };
 
 } // namespace httplib::client

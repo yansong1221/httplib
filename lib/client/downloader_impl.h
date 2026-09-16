@@ -97,11 +97,13 @@ namespace httplib::client
         static url_info parse_url(std::string_view url);
         static std::string make_cache_key(url_info const& ui);
         static std::uint64_t parse_content_range_total(http::fields const& headers);
+        static std::optional<std::uint64_t> parse_content_range_start(http::fields const& headers);
         static std::string parse_content_disposition_filename(http::fields const& headers);
         static std::optional<redirect_target> parse_redirect(http::fields const& headers);
 
         void set_state(downloader::state st, boost::system::error_code ec);
         void update_progress(std::uint64_t delta_bytes);
+        void store_suggested_filename(http::fields const& headers);
 
         void save_state(fs::path const& save_path);
         download_state load_state(fs::path const& save_path) const;
@@ -133,6 +135,13 @@ namespace httplib::client
 
       private:
         downloader::config config_;
+        mutable std::mutex config_mutex_;
+        /// Snapshot of `config_` captured when a download starts. Only touched by
+        /// the download coroutine, so it needs no locking once the run begins.
+        downloader::config active_config_;
+        /// Canonical URL of the current run, persisted in the sidecar state file
+        /// so a stale state from another URL is never reused.
+        std::string state_url_;
 
         mutable std::mutex callback_mutex_;
         downloader::progress_callback progress_cb_;
@@ -147,6 +156,11 @@ namespace httplib::client
         int active_segments_ = 0;
         int total_segments_ = 1;
         std::chrono::steady_clock::time_point progress_start_;
+
+        /// Per-connection throughput cap for the current run (bytes/sec, 0 =
+        /// unlimited). For multi-segment downloads this is the configured cap
+        /// divided across the concurrent connections.
+        std::uint64_t per_connection_rate_ = 0;
 
         std::atomic<bool> cancelled_ { false };
         std::atomic<bool> paused_ { false };

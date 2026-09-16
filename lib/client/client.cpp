@@ -304,6 +304,18 @@ namespace httplib::client
         impl_->set_body_limit(limit);
     }
 
+    void
+    http_client::set_download_rate_limit(std::uint64_t bytes_per_second)
+    {
+        impl_->set_download_rate_limit(bytes_per_second);
+    }
+
+    void
+    http_client::set_upload_rate_limit(std::uint64_t bytes_per_second)
+    {
+        impl_->set_upload_rate_limit(bytes_per_second);
+    }
+
     net::any_io_executor
     http_client::get_executor() const
     {

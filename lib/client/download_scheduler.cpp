@@ -78,6 +78,12 @@ namespace httplib::client
         return impl_->total_count();
     }
 
+    std::size_t
+    download_scheduler::clear_finished()
+    {
+        return impl_->clear_finished();
+    }
+
     void
     download_scheduler::set_progress_callback(progress_callback cb)
     {

@@ -4,6 +4,8 @@
 #include "httplib/client/lazy_request.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/when_all.hpp"
+#include "redirect_util.hpp"
+#include <algorithm>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/use_future.hpp>
 #include <boost/url.hpp>
@@ -117,6 +119,36 @@ namespace httplib::client
         }
     }
 
+    std::optional<std::uint64_t>
+    downloader::impl::parse_content_range_start(http::fields const& headers)
+    {
+        auto cr = headers[http::field::content_range];
+        if (cr.empty())
+        {
+            return std::nullopt;
+        }
+        std::string_view s(cr);
+        constexpr std::string_view prefix = "bytes ";
+        if (!s.starts_with(prefix))
+        {
+            return std::nullopt;
+        }
+        s.remove_prefix(prefix.size());
+        auto dash = s.find('-');
+        if (dash == std::string_view::npos)
+        {
+            return std::nullopt;
+        }
+        try
+        {
+            return std::stoull(std::string(s.substr(0, dash)));
+        }
+        catch (...)
+        {
+            return std::nullopt;
+        }
+    }
+
     std::string
     downloader::impl::parse_content_disposition_filename(http::fields const& headers)
     {
@@ -213,6 +245,7 @@ namespace httplib::client
     void
     downloader::impl::set_config(downloader::config const& cfg)
     {
+        std::lock_guard lk(config_mutex_);
         config_ = cfg;
     }
 
@@ -307,7 +340,7 @@ namespace httplib::client
     void
     downloader::impl::save_state(fs::path const& save_path)
     {
-        if (!config_.save_state)
+        if (!active_config_.save_state)
         {
             return;
         }
@@ -317,7 +350,7 @@ namespace httplib::client
         {
             return;
         }
-        f << "url=current\n";
+        f << "url=" << state_url_ << '\n';
         f << "content_length=" << total_bytes_ << '\n';
         f << "segments=" << segments_.size() << '\n';
         for (auto const& seg : segments_)
@@ -490,6 +523,18 @@ namespace httplib::client
         cb(info);
     }
 
+    void
+    downloader::impl::store_suggested_filename(http::fields const& headers)
+    {
+        auto fname = parse_content_disposition_filename(headers);
+        if (fname.empty())
+        {
+            return;
+        }
+        std::lock_guard lk(filename_mutex_);
+        suggested_filename_ = std::move(fname);
+    }
+
     // =========================================================================
     // cache helpers
     // =========================================================================
@@ -518,7 +563,7 @@ namespace httplib::client
         {
             req_headers.set(http::field::if_modified_since, last_mod);
         }
-        auto result = co_await send_request(ui, http::verb::get, req_headers);
+        auto result = co_await send_request(ui, http::verb::head, req_headers);
         co_return result.status == http::status::not_modified;
     }
 
@@ -557,7 +602,7 @@ namespace httplib::client
         auto s = ui.ssl;
         auto t = ui.path;
 
-        for (int redir = 0; redir <= config_.max_redirects; ++redir)
+        for (int redir = 0; redir <= active_config_.max_redirects; ++redir)
         {
             if (cancelled_.load(std::memory_order_relaxed))
             {
@@ -565,14 +610,15 @@ namespace httplib::client
             }
 
             assert(pool_);
-            auto handle = co_await pool_->async_acquire(h, p, s, config_.acquire_timeout);
+            auto handle = co_await pool_->async_acquire(h, p, s, active_config_.acquire_timeout);
             if (!handle)
             {
                 co_return request_result {};
             }
-            handle->set_timeout(config_.timeout);
+            handle->set_timeout(active_config_.timeout);
             handle->set_max_redirects(0);
-            handle->set_verify_ssl(config_.verify_ssl);
+            handle->set_verify_ssl(active_config_.verify_ssl);
+            handle->set_download_rate_limit(per_connection_rate_);
 
             auto req = httplib::client::request(method, t, merged);
             auto resp_result = co_await handle->async_send_request(std::move(req), http_client::body_mode::lazy);
@@ -587,24 +633,30 @@ namespace httplib::client
             if ((status == http::status::moved_permanently || status == http::status::found
                  || status == http::status::see_other || status == http::status::temporary_redirect
                  || status == http::status::permanent_redirect)
-                && redir < config_.max_redirects)
+                && redir < active_config_.max_redirects)
             {
                 auto rt = parse_redirect(resp.headers());
                 if (rt.has_value() && rt->valid)
                 {
-                    // CL-02: 仅当 Location 为绝对 URL 且 origin 变化时移除敏感头，避免凭据泄露；
-                    // 相对 Location 或同 origin 重定向保留原头。
-                    if (!rt->host.empty() && (rt->host != h || rt->port != p || rt->ssl != s))
+                    if (!rt->host.empty())
                     {
-                        merged.erase(http::field::authorization);
-                        merged.erase(http::field::proxy_authorization);
-                        merged.erase(http::field::cookie);
-                        merged.erase(http::field::cookie2);
+                        // CL-02: 仅当 Location 为绝对 URL 且 origin 变化时移除敏感头，避免凭据泄露；
+                        // 同 origin 重定向保留原头。
+                        if (rt->host != h || rt->port != p || rt->ssl != s)
+                        {
+                            redirect::strip_origin_bound_headers(merged);
+                        }
+                        h = rt->host;
+                        p = rt->port == 0 ? p : rt->port;
+                        s = rt->ssl;
+                        t = rt->path.empty() ? "/" : rt->path;
                     }
-                    h = rt->host.empty() ? h : rt->host;
-                    p = rt->port == 0 ? p : rt->port;
-                    s = rt->ssl;
-                    t = rt->path;
+                    else
+                    {
+                        // Relative reference: resolve against the current target so
+                        // Location values like "final" or "../a/b" work correctly.
+                        t = redirect::resolve_redirect_target(t, rt->path);
+                    }
                     continue;
                 }
             }
@@ -627,7 +679,7 @@ namespace httplib::client
     net::awaitable<boost::system::error_code>
     downloader::impl::co_download_single(url_info const& ui, fs::path const& save_path)
     {
-        for (int attempt = 0; attempt <= config_.max_retries; ++attempt)
+        for (int attempt = 0; attempt <= active_config_.max_retries; ++attempt)
         {
             if (cancelled_.load(std::memory_order_relaxed))
             {
@@ -643,7 +695,7 @@ namespace httplib::client
             std::uint64_t existing_size = 0;
             http::fields req_headers;
 
-            if (config_.resume && attempt == 0)
+            if (active_config_.resume && attempt == 0)
             {
                 std::error_code ec;
                 if (fs::exists(save_path, ec) && !ec)
@@ -664,7 +716,7 @@ namespace httplib::client
             auto result = co_await send_request(ui, http::verb::get, req_headers);
             if (!result.handle)
             {
-                if (attempt == config_.max_retries)
+                if (attempt == active_config_.max_retries)
                 {
                     co_return boost::system::errc::make_error_code(boost::system::errc::timed_out);
                 }
@@ -674,11 +726,11 @@ namespace httplib::client
             auto status = result.status;
             if (status != http::status::ok && status != http::status::partial_content)
             {
-                if (attempt == config_.max_retries)
+                if (attempt == active_config_.max_retries)
                 {
                     co_return boost::system::errc::make_error_code(boost::system::errc::protocol_error);
                 }
-                if (!config_.resume)
+                if (!active_config_.resume)
                 {
                     std::error_code ec;
                     fs::remove(save_path, ec);
@@ -691,6 +743,23 @@ namespace httplib::client
             if (status == http::status::ok && existing_size > 0)
             {
                 existing_size = 0;
+            }
+            else if (status == http::status::partial_content)
+            {
+                // Guard against a server that returns 206 with an unexpected
+                // starting offset, which would corrupt the appended data.
+                if (auto start = parse_content_range_start(result.headers);
+                    start.has_value() && *start != existing_size)
+                {
+                    if (attempt == active_config_.max_retries)
+                    {
+                        co_return boost::system::errc::make_error_code(boost::system::errc::protocol_error);
+                    }
+                    std::error_code ec;
+                    fs::remove(save_path, ec);
+                    existing_size = 0;
+                    continue;
+                }
             }
             auto file_total = content_range_total > 0 ? content_range_total : (content_length + existing_size);
 
@@ -757,14 +826,7 @@ namespace httplib::client
 
             out.close();
 
-            {
-                auto fname = parse_content_disposition_filename(result.headers);
-                if (!fname.empty())
-                {
-                    std::lock_guard lk(filename_mutex_);
-                    suggested_filename_ = std::move(fname);
-                }
-            }
+            store_suggested_filename(result.headers);
 
             {
                 downloader::progress_callback cb;
@@ -800,7 +862,7 @@ namespace httplib::client
                                           std::uint64_t end,
                                           fs::path const& part_path)
     {
-        for (int attempt = 0; attempt <= config_.max_retries; ++attempt)
+        for (int attempt = 0; attempt <= active_config_.max_retries; ++attempt)
         {
             if (cancelled_.load(std::memory_order_relaxed))
             {
@@ -816,7 +878,7 @@ namespace httplib::client
             std::uint64_t resume_at = start;
             std::ios_base::openmode open_mode = std::ios::out | std::ios::binary;
 
-            if (config_.resume)
+            if (active_config_.resume)
             {
                 std::error_code ec;
                 if (fs::exists(part_path, ec) && !ec)
@@ -824,12 +886,13 @@ namespace httplib::client
                     auto sz = fs::file_size(part_path, ec);
                     if (!ec && sz > 0)
                     {
-                        resume_at = start + sz;
-                        if (resume_at > end)
+                        auto seg_len = end - start + 1;
+                        if (sz >= seg_len)
                         {
+                            // Already fully downloaded in a previous run.
                             co_return boost::system::error_code {};
                         }
-                        open_mode |= std::ios::app;
+                        resume_at = start + sz;
                     }
                 }
             }
@@ -838,6 +901,10 @@ namespace httplib::client
             {
                 open_mode |= std::ios::trunc;
             }
+            else
+            {
+                open_mode |= std::ios::app;
+            }
 
             http::fields req_headers;
             req_headers.set(http::field::range, std::format("bytes={}-{}", resume_at, end));
@@ -845,21 +912,44 @@ namespace httplib::client
             auto result = co_await send_request(ui, http::verb::get, req_headers);
             if (!result.handle)
             {
-                if (attempt == config_.max_retries)
+                if (attempt == active_config_.max_retries)
                 {
                     co_return boost::system::errc::make_error_code(boost::system::errc::timed_out);
                 }
                 continue;
             }
 
+            if (result.status == http::status::ok)
+            {
+                // The server ignored the Range request: byte ranges are not
+                // supported, so segmented downloading cannot proceed. Signal the
+                // caller to fall back to a single-segment download.
+                co_return boost::system::errc::make_error_code(boost::system::errc::operation_not_supported);
+            }
             if (result.status != http::status::partial_content)
             {
-                if (attempt == config_.max_retries)
+                if (attempt == active_config_.max_retries)
                 {
                     co_return boost::system::errc::make_error_code(boost::system::errc::protocol_error);
                 }
                 continue;
             }
+
+            // Guard against a server returning a range that does not start where
+            // we asked; appending it would silently corrupt the merged output.
+            if (auto range_start = parse_content_range_start(result.headers);
+                range_start.has_value() && *range_start != resume_at)
+            {
+                if (attempt == active_config_.max_retries)
+                {
+                    co_return boost::system::errc::make_error_code(boost::system::errc::protocol_error);
+                }
+                std::error_code rm_ec;
+                fs::remove(part_path, rm_ec);
+                continue;
+            }
+
+            store_suggested_filename(result.headers);
 
             std::ofstream out(part_path, open_mode);
             if (!out.is_open())
@@ -920,7 +1010,7 @@ namespace httplib::client
                                                 std::uint64_t content_length,
                                                 http::fields const& probe_headers)
     {
-        int seg_count = config_.segments;
+        int seg_count = active_config_.segments;
         if (seg_count < 2)
         {
             seg_count = 2;
@@ -940,23 +1030,6 @@ namespace httplib::client
             remainder = 0;
         }
 
-        {
-            std::error_code ec;
-            for (auto const& de : fs::directory_iterator(save_path.parent_path(), ec))
-            {
-                if (ec)
-                {
-                    break;
-                }
-                auto stem = save_path.filename().string();
-                auto name = de.path().filename().string();
-                if (name.starts_with(stem + ".part"))
-                {
-                    fs::remove(de.path(), ec);
-                }
-            }
-        }
-
         segments_.clear();
         segments_.reserve(seg_count);
 
@@ -972,16 +1045,68 @@ namespace httplib::client
             segments_.push_back({ start_byte, end_byte, i, part_path });
         }
 
-        std::uint64_t already_downloaded = 0;
-        if (config_.resume && config_.save_state)
+        // Decide whether previously written part files can be reused. A sidecar
+        // state file pins down the layout (url + content length + segment count)
+        // so a stale state from an unrelated download is never resumed.
+        bool can_resume = false;
+        if (active_config_.resume && active_config_.save_state)
         {
             auto prev = load_state(save_path);
-            if (prev.content_length == content_length && prev.segments == seg_count
-                && prev.seg_downloaded.size() == static_cast<std::size_t>(seg_count))
+            if (prev.content_length == content_length && prev.segments == seg_count && prev.url == state_url_)
             {
-                for (int i = 0; i < seg_count; ++i)
+                can_resume = true;
+            }
+        }
+
+        // Drop part files that belong to an incompatible or unknown layout.
+        {
+            auto stem = save_path.filename().string();
+            std::error_code ec;
+            for (auto const& de : fs::directory_iterator(save_path.parent_path(), ec))
+            {
+                if (ec)
                 {
-                    already_downloaded += prev.seg_downloaded[i];
+                    break;
+                }
+                auto name = de.path().filename().string();
+                if (!name.starts_with(stem + ".part"))
+                {
+                    continue;
+                }
+                auto idx_str = name.substr(stem.size() + 5); // skip "<stem>.part"
+                int idx = -1;
+                try
+                {
+                    idx = std::stoi(idx_str);
+                }
+                catch (...)
+                {
+                    idx = -1;
+                }
+                if (!can_resume || idx < 0 || idx >= seg_count)
+                {
+                    std::error_code rm_ec;
+                    fs::remove(de.path(), rm_ec);
+                }
+            }
+        }
+        if (!can_resume)
+        {
+            del_state(save_path);
+        }
+
+        // Progress must be seeded from the bytes actually present on disk, not
+        // from the state file, otherwise resumed segments are double-counted.
+        std::uint64_t already_downloaded = 0;
+        if (can_resume)
+        {
+            for (auto const& seg : segments_)
+            {
+                std::error_code ec;
+                auto sz = fs::file_size(seg.part_path, ec);
+                if (!ec && sz > 0)
+                {
+                    already_downloaded += std::min<std::uint64_t>(sz, seg.end_byte - seg.start_byte + 1);
                 }
             }
         }
@@ -994,6 +1119,12 @@ namespace httplib::client
             active_segments_ = seg_count;
             progress_start_ = std::chrono::steady_clock::now();
         }
+
+        store_suggested_filename(probe_headers);
+
+        // Persist the layout up-front so an interrupted (e.g. crashed) run can be
+        // resumed on the next attempt.
+        save_state(save_path);
 
         {
             downloader::progress_callback cb;
@@ -1019,26 +1150,76 @@ namespace httplib::client
         {
             ops.emplace_back(co_download_segment(ui, seg.start_byte, seg.end_byte, seg.part_path));
         }
-        auto errors = co_await util::when_all(std::move(ops));
+
+        auto remove_all_parts = [&]
         {
-            std::lock_guard lk(progress_mutex_);
-            active_segments_ = 0;
+            for (auto& s : segments_)
+            {
+                std::error_code fs_ec;
+                fs::remove(s.part_path, fs_ec);
+            }
+        };
+
+        boost::system::error_code first_error;
+        boost::system::error_code aborted_error;
+        bool ranges_unsupported = false;
+
+        try
+        {
+            auto errors = co_await util::when_all(std::move(ops));
+            {
+                std::lock_guard lk(progress_mutex_);
+                active_segments_ = 0;
+            }
+            for (auto const& ec : errors)
+            {
+                if (!ec)
+                {
+                    continue;
+                }
+                if (ec == boost::system::errc::make_error_code(boost::system::errc::operation_not_supported))
+                {
+                    ranges_unsupported = true;
+                }
+                else if (ec == boost::asio::error::operation_aborted)
+                {
+                    if (!aborted_error)
+                    {
+                        aborted_error = ec;
+                    }
+                }
+                else if (!first_error)
+                {
+                    first_error = ec;
+                }
+            }
+        }
+        catch (...)
+        {
+            first_error = boost::system::errc::make_error_code(boost::system::errc::io_error);
         }
 
-        save_state(save_path);
-
-        for (auto const& ec : errors)
+        if (first_error)
         {
-            if (ec)
-            {
-                del_state(save_path);
-                for (auto& s : segments_)
-                {
-                    std::error_code fs_ec;
-                    fs::remove(s.part_path, fs_ec);
-                }
-                co_return ec;
-            }
+            del_state(save_path);
+            remove_all_parts();
+            co_return first_error;
+        }
+
+        if (ranges_unsupported)
+        {
+            // Byte ranges are unavailable; leave no partial artifacts behind and
+            // let the caller retry as a single stream.
+            del_state(save_path);
+            remove_all_parts();
+            co_return boost::system::errc::make_error_code(boost::system::errc::operation_not_supported);
+        }
+
+        if (aborted_error)
+        {
+            // Keep parts + state so a later run can resume where it stopped.
+            save_state(save_path);
+            co_return aborted_error;
         }
 
         set_state(downloader::state::merging, {});
@@ -1081,6 +1262,8 @@ namespace httplib::client
             if (!in.is_open())
             {
                 out.close();
+                std::error_code rm_ec;
+                fs::remove(save_path, rm_ec);
                 return boost::system::errc::make_error_code(boost::system::errc::no_such_file_or_directory);
             }
 
@@ -1096,6 +1279,8 @@ namespace httplib::client
                 if (!out)
                 {
                     out.close();
+                    std::error_code rm_ec;
+                    fs::remove(save_path, rm_ec);
                     return boost::system::errc::make_error_code(boost::system::errc::no_space_on_device);
                 }
             }
@@ -1126,6 +1311,12 @@ namespace httplib::client
             set_state(downloader::state::cancelled, ec);
             co_return ec;
         }
+
+        {
+            std::lock_guard lk(config_mutex_);
+            active_config_ = config_;
+        }
+        per_connection_rate_ = active_config_.max_speed_bytes_per_sec;
         custom_headers_ = headers;
 
         url_info ui;
@@ -1140,41 +1331,69 @@ namespace httplib::client
             co_return ec;
         }
 
+        state_url_ = make_cache_key(ui);
+
         set_state(downloader::state::connecting, {});
 
-        if (cache_)
+        boost::system::error_code ec;
+        try
         {
-            auto entry = cache_->get(make_cache_key(ui));
-            if (entry.has_value())
+            if (cache_)
             {
-                set_state(downloader::state::downloading, {});
-                if (co_await check_remote_cache(ui))
+                auto entry = cache_->get(state_url_);
+                if (entry.has_value())
                 {
-                    std::error_code ec;
-                    fs::copy_file(entry->body_path, save_path, fs::copy_options::overwrite_existing, ec);
-                    if (!ec)
+                    set_state(downloader::state::downloading, {});
+                    if (co_await check_remote_cache(ui))
                     {
-                        set_state(downloader::state::completed, {});
-                        co_return boost::system::error_code {};
+                        std::error_code copy_ec;
+                        fs::copy_file(entry->body_path, save_path, fs::copy_options::overwrite_existing, copy_ec);
+                        if (!copy_ec)
+                        {
+                            set_state(downloader::state::completed, {});
+                            co_return boost::system::error_code {};
+                        }
                     }
                 }
             }
+
+            auto probe = co_await probe_content_length(ui);
+            auto content_length = probe.content_length;
+
+            store_suggested_filename(probe.headers);
+
+            set_state(downloader::state::downloading, {});
+
+            if (content_length > 0 && active_config_.segments > 1)
+            {
+                // Spread the configured cap over the concurrent segment
+                // connections so the aggregate stays near the requested rate.
+                if (per_connection_rate_ > 0)
+                {
+                    auto segs = static_cast<std::uint64_t>(std::clamp(active_config_.segments, 2, 32));
+                    per_connection_rate_ = std::max<std::uint64_t>(1, per_connection_rate_ / segs);
+                }
+                ec = co_await co_download_multi_segment(ui, save_path, content_length, probe.headers);
+                if (ec == boost::system::errc::make_error_code(boost::system::errc::operation_not_supported))
+                {
+                    // Server does not honor Range requests; fall back to a plain
+                    // single-stream download.
+                    per_connection_rate_ = active_config_.max_speed_bytes_per_sec;
+                    ec = co_await co_download_single(ui, save_path);
+                }
+            }
+            else
+            {
+                ec = co_await co_download_single(ui, save_path);
+            }
         }
-
-        auto probe = co_await probe_content_length(ui);
-        auto content_length = probe.content_length;
-
-        set_state(downloader::state::downloading, {});
-
-        boost::system::error_code ec;
-
-        if (content_length > 0 && config_.segments > 1)
+        catch (std::exception const&)
         {
-            ec = co_await co_download_multi_segment(ui, save_path, content_length, probe.headers);
+            ec = boost::system::errc::make_error_code(boost::system::errc::io_error);
         }
-        else
+        catch (...)
         {
-            ec = co_await co_download_single(ui, save_path);
+            ec = boost::system::errc::make_error_code(boost::system::errc::io_error);
         }
 
         if (ec)

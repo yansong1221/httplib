@@ -96,6 +96,38 @@ namespace httplib::client
         return tasks_.size();
     }
 
+    std::size_t
+    download_scheduler::impl::clear_finished()
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+
+        std::vector<task_id> finished;
+        for (auto const& [id, entry] : tasks_)
+        {
+            auto st = entry->status.state;
+            if (st == downloader::state::completed || st == downloader::state::failed
+                || st == downloader::state::cancelled)
+            {
+                finished.push_back(id);
+            }
+        }
+        for (auto id : finished)
+        {
+            tasks_.erase(id);
+        }
+
+        if (!finished.empty())
+        {
+            completed_queue_.erase(
+                std::remove_if(completed_queue_.begin(),
+                               completed_queue_.end(),
+                               [&](task_id id)
+                               { return std::find(finished.begin(), finished.end(), id) != finished.end(); }),
+                completed_queue_.end());
+        }
+        return finished.size();
+    }
+
     download_scheduler::scheduler_config
     download_scheduler::impl::get_scheduler_config() const
     {
@@ -412,7 +444,17 @@ namespace httplib::client
                     co_return;
                 }
 
-                auto ec = co_await entry->dl->async_download(url, save_path, headers);
+                boost::system::error_code ec;
+                try
+                {
+                    ec = co_await entry->dl->async_download(url, save_path, headers);
+                }
+                catch (...)
+                {
+                    // A throwing downloader must still settle its task, otherwise
+                    // the concurrency slot is leaked forever.
+                    ec = boost::system::errc::make_error_code(boost::system::errc::io_error);
+                }
 
                 auto self2 = weak_self.lock();
                 if (self2)

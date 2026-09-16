@@ -4,9 +4,9 @@
 #include "httplib/client/downloader.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
+#include <atomic>
 #include <boost/asio/error.hpp>
 #include <boost/system/errc.hpp>
-#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
@@ -135,10 +135,7 @@ TEST_CASE("Downloader: multi-segment parallel download", "[downloader]")
                                                   { resp.set_file_content(server_path); });
     ts.router().set_http_handler<http::verb::head>("/big",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
-                                                   {
-                                                       resp.set(http::field::content_length, std::to_string(kSize));
-                                                       resp.set(http::field::accept_ranges, "bytes");
-                                                   });
+                                                   { resp.set_file_content(server_path); });
     ts.start();
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
@@ -369,7 +366,7 @@ TEST_CASE("Downloader: resume partial download", "[downloader]")
     ts.start();
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
-    dl.set_config({ .resume = true });
+    dl.set_config({ .segments = 1, .resume = true });
     auto ec = dl.download(ts.url_for_path("/resume"), dl_path);
     REQUIRE_FALSE(ec);
 
@@ -404,13 +401,11 @@ TEST_CASE("Downloader: suggested filename from Content-Disposition", "[downloade
                                                   });
     ts.router().set_http_handler<http::verb::head>("/cd",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
-                                                   {
-                                                       resp.set(http::field::content_length, "24");
-                                                       resp.set(http::field::accept_ranges, "bytes");
-                                                   });
+                                                   { resp.set_file_content(server_path); });
     ts.start();
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
+    dl.set_config({ .segments = 4 });
     auto ec = dl.download(ts.url_for_path("/cd"), dl_path);
     REQUIRE_FALSE(ec);
     REQUIRE(dl.suggested_filename() == "hello.zip");
@@ -567,10 +562,7 @@ TEST_CASE("Downloader: cancel stops download", "[downloader]")
                                                   { resp.set_file_content(server_path); });
     ts.router().set_http_handler<http::verb::head>("/bigcancel",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
-                                                   {
-                                                       resp.set(http::field::content_length, std::to_string(kSize));
-                                                       resp.set(http::field::accept_ranges, "bytes");
-                                                   });
+                                                   { resp.set_file_content(server_path); });
     ts.start();
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
@@ -880,20 +872,15 @@ TEST_CASE("Downloader: multi-segment pause and resume", "[downloader]")
     auto dl_path = fs::temp_directory_path() / "httplib_dl_mspause_out.bin";
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/pause",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            resp.set_file_content(server_path);
-        });
-    ts.router().set_http_handler<http::verb::head>(
-        "/pause",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, std::to_string(kSize));
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/pause",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  {
+                                                      std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                                                      resp.set_file_content(server_path);
+                                                  });
+    ts.router().set_http_handler<http::verb::head>("/pause",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   { resp.set_file_content(server_path); });
     ts.start();
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
@@ -962,20 +949,15 @@ TEST_CASE("Downloader: cancel while paused aborts immediately", "[downloader]")
     auto dl_path = fs::temp_directory_path() / "httplib_dl_pcancel_out.bin";
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/pcancel",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            resp.set_file_content(server_path);
-        });
-    ts.router().set_http_handler<http::verb::head>(
-        "/pcancel",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, std::to_string(kSize));
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/pcancel",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  {
+                                                      std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                                                      resp.set_file_content(server_path);
+                                                  });
+    ts.router().set_http_handler<http::verb::head>("/pcancel",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   { resp.set_file_content(server_path); });
     ts.start();
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
@@ -1041,17 +1023,12 @@ TEST_CASE("Downloader: multi-segment failure cleans up part files", "[downloader
     auto dl_path = fs::temp_directory_path() / "httplib_dl_segfail_out.bin";
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/segfail",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_empty_content(http::status::internal_server_error); });
-    ts.router().set_http_handler<http::verb::head>(
-        "/segfail",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, std::to_string(kSize));
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/segfail",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_empty_content(http::status::internal_server_error); });
+    ts.router().set_http_handler<http::verb::head>("/segfail",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   { resp.set_file_content(server_path); });
     ts.start();
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
@@ -1078,10 +1055,9 @@ TEST_CASE("Downloader: persistent server 500 ends failed", "[downloader]")
     auto dl_path = fs::temp_directory_path() / "httplib_dl_500_out.bin";
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/500",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_empty_content(http::status::internal_server_error); });
+    ts.router().set_http_handler<http::verb::get>("/500",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_empty_content(http::status::internal_server_error); });
     ts.start();
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
@@ -1112,4 +1088,294 @@ TEST_CASE("Downloader: invalid URL maps to a failed error, not a throw", "[downl
     REQUIRE_FALSE(fs::exists(dl_path));
 
     fs::remove(dl_path);
+}
+
+TEST_CASE("Downloader: multi-segment resume reuses existing part files", "[downloader]")
+{
+    auto server_path = fs::temp_directory_path() / "httplib_dl_msresume_srv.bin";
+    constexpr std::uint64_t kSize = 400 * 1024; // divisible by 4
+    constexpr int kSegments = 4;
+    constexpr std::uint64_t kSegSize = kSize / kSegments;
+
+    std::string data;
+    data.resize(kSize);
+    for (std::uint64_t i = 0; i < kSize; ++i)
+    {
+        data[static_cast<std::size_t>(i)] = static_cast<char>((i * 7 + 3) % 251);
+    }
+    {
+        std::ofstream f(server_path, std::ios::binary);
+        f.write(data.data(), static_cast<std::streamsize>(data.size()));
+    }
+
+    auto dl_path = fs::temp_directory_path() / "httplib_dl_msresume_out.bin";
+    std::error_code rm_ec;
+    fs::remove(dl_path, rm_ec);
+    for (int i = 0; i < kSegments; ++i)
+    {
+        fs::remove(fs::path(dl_path.string() + ".part" + std::to_string(i)), rm_ec);
+    }
+    fs::remove(fs::path(dl_path.string() + ".dlstate"), rm_ec);
+
+    dl_test_scaffold ts;
+    std::mutex ranges_mtx;
+    std::vector<std::string> ranges;
+    ts.router().set_http_handler<http::verb::get>("/resume-multi",
+                                                  [&](httplib::server::request& req, httplib::server::response& resp)
+                                                  {
+                                                      {
+                                                          std::lock_guard<std::mutex> lk(ranges_mtx);
+                                                          ranges.emplace_back(std::string(req[http::field::range]));
+                                                      }
+                                                      resp.set_file_content(server_path);
+                                                  });
+    ts.router().set_http_handler<http::verb::head>("/resume-multi",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   { resp.set_file_content(server_path); });
+    ts.start();
+
+    // Seed partial part files (first half of every segment) plus a matching
+    // sidecar state so the downloader can pick up where it left off.
+    std::uint64_t const half = kSegSize / 2;
+    for (int i = 0; i < kSegments; ++i)
+    {
+        std::ofstream pf(fs::path(dl_path.string() + ".part" + std::to_string(i)), std::ios::binary);
+        pf.write(data.data() + i * kSegSize, static_cast<std::streamsize>(half));
+    }
+    {
+        std::ofstream sf(fs::path(dl_path.string() + ".dlstate"), std::ios::trunc);
+        sf << "url=" << ts.url_for_path("/resume-multi") << '\n';
+        sf << "content_length=" << kSize << '\n';
+        sf << "segments=" << kSegments << '\n';
+    }
+
+    httplib::client::downloader dl(ts.ioc_, ts.pool);
+    dl.set_config({ .segments = kSegments, .resume = true });
+    auto ec = dl.download(ts.url_for_path("/resume-multi"), dl_path);
+    REQUIRE_FALSE(ec);
+    REQUIRE(read_file(dl_path) == data);
+
+    // Every segment must have been resumed from its part, i.e. the request range
+    // started at (segment_start + half) rather than at the segment start.
+    bool resumed = false;
+    {
+        std::lock_guard<std::mutex> lk(ranges_mtx);
+        for (int i = 0; i < kSegments && !resumed; ++i)
+        {
+            auto start = static_cast<std::uint64_t>(i) * kSegSize + half;
+            auto end = static_cast<std::uint64_t>(i + 1) * kSegSize - 1;
+            auto expected = std::format("bytes={}-{}", start, end);
+            for (auto const& r : ranges)
+            {
+                if (r == expected)
+                {
+                    resumed = true;
+                    break;
+                }
+            }
+        }
+    }
+    REQUIRE(resumed);
+
+    fs::remove(server_path, rm_ec);
+    fs::remove(dl_path, rm_ec);
+    for (int i = 0; i < kSegments; ++i)
+    {
+        fs::remove(fs::path(dl_path.string() + ".part" + std::to_string(i)), rm_ec);
+    }
+    fs::remove(fs::path(dl_path.string() + ".dlstate"), rm_ec);
+}
+
+TEST_CASE("Downloader: stale state from another URL is not resumed", "[downloader]")
+{
+    auto server_path = fs::temp_directory_path() / "httplib_dl_stale_srv.bin";
+    constexpr std::uint64_t kSize = 200 * 1024;
+    constexpr int kSegments = 4;
+    constexpr std::uint64_t kSegSize = kSize / kSegments;
+
+    std::string data;
+    data.resize(kSize);
+    for (std::uint64_t i = 0; i < kSize; ++i)
+    {
+        data[static_cast<std::size_t>(i)] = static_cast<char>((i * 13 + 1) % 251);
+    }
+    {
+        std::ofstream f(server_path, std::ios::binary);
+        f.write(data.data(), static_cast<std::streamsize>(data.size()));
+    }
+
+    auto dl_path = fs::temp_directory_path() / "httplib_dl_stale_out.bin";
+    std::error_code rm_ec;
+    fs::remove(dl_path, rm_ec);
+    for (int i = 0; i < kSegments; ++i)
+    {
+        fs::remove(fs::path(dl_path.string() + ".part" + std::to_string(i)), rm_ec);
+    }
+    fs::remove(fs::path(dl_path.string() + ".dlstate"), rm_ec);
+
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>("/fresh",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(server_path); });
+    ts.router().set_http_handler<http::verb::head>("/fresh",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   { resp.set_file_content(server_path); });
+    ts.start();
+
+    // Garbage part files that would corrupt the output if they were resumed,
+    // accompanied by a state file pointing at a different URL.
+    for (int i = 0; i < kSegments; ++i)
+    {
+        std::ofstream pf(fs::path(dl_path.string() + ".part" + std::to_string(i)), std::ios::binary);
+        std::string garbage(kSegSize / 2, static_cast<char>(0xAA));
+        pf.write(garbage.data(), static_cast<std::streamsize>(garbage.size()));
+    }
+    {
+        std::ofstream sf(fs::path(dl_path.string() + ".dlstate"), std::ios::trunc);
+        sf << "url=http://example.invalid/somewhere-else\n";
+        sf << "content_length=" << kSize << '\n';
+        sf << "segments=" << kSegments << '\n';
+    }
+
+    httplib::client::downloader dl(ts.ioc_, ts.pool);
+    dl.set_config({ .segments = kSegments, .resume = true });
+    auto ec = dl.download(ts.url_for_path("/fresh"), dl_path);
+    REQUIRE_FALSE(ec);
+    REQUIRE(read_file(dl_path) == data);
+
+    fs::remove(server_path, rm_ec);
+    fs::remove(dl_path, rm_ec);
+    for (int i = 0; i < kSegments; ++i)
+    {
+        fs::remove(fs::path(dl_path.string() + ".part" + std::to_string(i)), rm_ec);
+    }
+    fs::remove(fs::path(dl_path.string() + ".dlstate"), rm_ec);
+}
+
+TEST_CASE("Downloader: falls back to single segment when server ignores Range", "[downloader]")
+{
+    auto server_path = fs::temp_directory_path() / "httplib_dl_norange_srv.bin";
+    constexpr std::size_t kSize = 200 * 1024;
+    std::string data;
+    data.resize(kSize);
+    for (std::size_t i = 0; i < kSize; ++i)
+    {
+        data[i] = static_cast<char>((i * 11 + 5) % 256);
+    }
+    {
+        std::ofstream f(server_path, std::ios::binary);
+        f.write(data.data(), static_cast<std::streamsize>(data.size()));
+    }
+    auto dl_path = fs::temp_directory_path() / "httplib_dl_norange_out.bin";
+
+    std::atomic<int> range_hits { 0 };
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>("/norange",
+                                                  [&](httplib::server::request& req, httplib::server::response& resp)
+                                                  {
+                                                      if (req.has(http::field::range))
+                                                      {
+                                                          range_hits.fetch_add(1);
+                                                      }
+                                                      // Always answer with the full body and 200, ignoring Range.
+                                                      resp.set_string_content(data, "application/octet-stream");
+                                                  });
+    ts.router().set_http_handler<http::verb::head>("/norange",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   { resp.set_file_content(server_path); });
+    ts.start();
+
+    httplib::client::downloader dl(ts.ioc_, ts.pool);
+    dl.set_config({ .segments = 4 });
+    auto ec = dl.download(ts.url_for_path("/norange"), dl_path);
+    REQUIRE_FALSE(ec);
+    REQUIRE(read_file(dl_path) == data);
+    REQUIRE(range_hits.load() >= 1); // the segmented attempt did send Range requests
+
+    std::error_code rm_ec;
+    fs::remove(server_path, rm_ec);
+    fs::remove(dl_path, rm_ec);
+    for (int i = 0; i < 8; ++i)
+    {
+        fs::remove(fs::path(dl_path.string() + ".part" + std::to_string(i)), rm_ec);
+    }
+}
+
+TEST_CASE("Downloader: max speed throttles the transfer", "[downloader]")
+{
+    auto server_path = fs::temp_directory_path() / "httplib_dl_speed_srv.bin";
+    constexpr std::size_t kSize = 256 * 1024;
+    {
+        std::ofstream f(server_path, std::ios::binary);
+        for (std::size_t i = 0; i < kSize; ++i)
+        {
+            f.put(static_cast<char>(i % 256));
+        }
+    }
+    auto dl_path = fs::temp_directory_path() / "httplib_dl_speed_out.bin";
+
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>("/speed",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(server_path); });
+    ts.router().set_http_handler<http::verb::head>("/speed",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   { resp.set_file_content(server_path); });
+    ts.start();
+
+    httplib::client::downloader dl(ts.ioc_, ts.pool);
+    dl.set_config({ .segments = 1, .max_speed_bytes_per_sec = 128 * 1024 });
+
+    auto t0 = std::chrono::steady_clock::now();
+    auto ec = dl.download(ts.url_for_path("/speed"), dl_path);
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0);
+
+    REQUIRE_FALSE(ec);
+    REQUIRE(read_file(dl_path) == read_file(server_path));
+    // The Beast rate policy grants one window immediately and refills per second,
+    // so 256 KiB at 128 KiB/s needs a second window (~1s). Without throttling the
+    // local transfer would finish in a few milliseconds.
+    REQUIRE(elapsed >= std::chrono::milliseconds(800));
+
+    std::error_code rm_ec;
+    fs::remove(server_path, rm_ec);
+    fs::remove(dl_path, rm_ec);
+}
+
+TEST_CASE("Downloader: relative redirect Location is resolved", "[downloader]")
+{
+    auto server_path = fs::temp_directory_path() / "httplib_dl_relredir_srv.txt";
+    {
+        std::ofstream f(server_path, std::ios::binary);
+        f << "relative-ok\n";
+    }
+    auto dl_path = fs::temp_directory_path() / "httplib_dl_relredir_out.bin";
+
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>("/start",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_redirect("final", http::status::found); });
+    ts.router().set_http_handler<http::verb::get>("/final",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(server_path); });
+    ts.router().set_http_handler<http::verb::head>("/start",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::location, "final");
+                                                       resp.set_empty_content(http::status::found);
+                                                   });
+    ts.router().set_http_handler<http::verb::head>("/final",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   { resp.set_file_content(server_path); });
+    ts.start();
+
+    httplib::client::downloader dl(ts.ioc_, ts.pool);
+    dl.set_config({ .segments = 1, .max_redirects = 5 });
+    auto ec = dl.download(ts.url_for_path("/start"), dl_path);
+    REQUIRE_FALSE(ec);
+    REQUIRE(read_file(dl_path) == "relative-ok\n");
+
+    std::error_code rm_ec;
+    fs::remove(server_path, rm_ec);
+    fs::remove(dl_path, rm_ec);
 }

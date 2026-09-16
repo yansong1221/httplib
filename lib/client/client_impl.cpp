@@ -3,6 +3,7 @@
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "lazy_request_impl.hpp"
+#include "redirect_util.hpp"
 #include "request_impl.h"
 #include "response_impl.h"
 #include "util/logging.hpp"
@@ -52,6 +53,38 @@ namespace httplib::client
             stream_->close();
         }
         buffer_.clear();
+    }
+
+    void
+    http_client::impl::apply_rate_limits()
+    {
+        if (!stream_)
+        {
+            return;
+        }
+        auto to_limit = [](std::uint64_t bytes_per_second) -> std::size_t
+        {
+            return bytes_per_second == 0 ? (std::numeric_limits<std::size_t>::max)()
+                                         : static_cast<std::size_t>(bytes_per_second);
+        };
+        stream_->rate_policy().read_limit(to_limit(download_rate_limit_));
+        stream_->rate_policy().write_limit(to_limit(upload_rate_limit_));
+    }
+
+    void
+    http_client::impl::set_download_rate_limit(std::uint64_t bytes_per_second)
+    {
+        std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
+        download_rate_limit_ = bytes_per_second;
+        apply_rate_limits();
+    }
+
+    void
+    http_client::impl::set_upload_rate_limit(std::uint64_t bytes_per_second)
+    {
+        std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
+        upload_rate_limit_ = bytes_per_second;
+        apply_rate_limits();
     }
 
     bool
@@ -153,10 +186,7 @@ namespace httplib::client
                     if (new_host != host_ || new_port != port_ || new_ssl != use_ssl_)
                     {
                         // CL-02: 跨 origin 重定向时移除 origin-bound 敏感头，避免认证凭据泄露到新主机
-                        req.erase(http::field::authorization);
-                        req.erase(http::field::proxy_authorization);
-                        req.erase(http::field::cookie);
-                        req.erase(http::field::cookie2);
+                        redirect::strip_origin_bound_headers(req.base());
 
                         req.target(u.encoded_target().empty() ? "/" : u.encoded_target());
 
@@ -168,6 +198,8 @@ namespace httplib::client
                         new_impl->max_redirects_ = max_redirects_ - r - 1;
                         new_impl->header_limit_ = header_limit_;
                         new_impl->body_limit_ = body_limit_;
+                        new_impl->download_rate_limit_ = download_rate_limit_;
+                        new_impl->upload_rate_limit_ = upload_rate_limit_;
 
                         co_return co_await new_impl->async_send_request_lazy_with_redirect(req);
                     }
@@ -177,7 +209,10 @@ namespace httplib::client
                 }
                 else
                 {
-                    target = loc;
+                    // 相对 Location：按 RFC 3986 针对当前 target 解析，兼容
+                    // "final"、"../a/b"、"?q=1" 等形式。
+                    auto base = req.target();
+                    target = redirect::resolve_redirect_target(std::string_view(base.data(), base.size()), loc);
                 }
 
                 if (s == http::status::see_other
@@ -310,6 +345,7 @@ namespace httplib::client
                 co_return stream_result.error();
             }
             stream_ = std::make_unique<http_stream>(std::move(*stream_result));
+            apply_rate_limits();
             lck.unlock();
 
             boost::system::error_code ec;

@@ -79,6 +79,14 @@ namespace httplib::client
         std::size_t pending_count() const;
         std::size_t total_count() const;
 
+        /// Remove every task that has reached a terminal state (completed /
+        /// failed / cancelled) from the scheduler and drop any pending completion
+        /// notifications for them. Returns the number of tasks removed.
+        ///
+        /// Status snapshots for removed tasks are no longer queryable. Remaining
+        /// (idle/running/paused) tasks are unaffected.
+        std::size_t clear_finished();
+
         // -- callbacks --
 
         void set_progress_callback(progress_callback cb);

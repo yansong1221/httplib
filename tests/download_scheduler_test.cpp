@@ -1,8 +1,8 @@
 #include "common.hpp"
 #include "httplib/client/client_pool.hpp"
+#include "httplib/client/disk_cache.hpp"
 #include "httplib/client/download_scheduler.hpp"
 #include "httplib/client/downloader.hpp"
-#include "httplib/client/disk_cache.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include <algorithm>
@@ -334,7 +334,12 @@ TEST_CASE("Download scheduler: pause and resume", "[download_scheduler]")
     dl_sched_scaffold ts;
     ts.router().set_http_handler<http::verb::get>("/p",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
-                                                  { resp.set_file_content(server_path); });
+                                                  {
+                                                      // Keep the transfer in-flight long enough for the
+                                                      // pause/resume state to be observable.
+                                                      std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                                                      resp.set_file_content(server_path);
+                                                  });
     ts.router().set_http_handler<http::verb::head>("/p",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    {
@@ -1016,7 +1021,12 @@ TEST_CASE("Download scheduler: shutdown while a task is paused", "[download_sche
     dl_sched_scaffold ts;
     ts.router().set_http_handler<http::verb::get>("/p",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
-                                                  { resp.set_file_content(server_path); });
+                                                  {
+                                                      // Keep the transfer in-flight long enough for the
+                                                      // pause/resume state to be observable.
+                                                      std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                                                      resp.set_file_content(server_path);
+                                                  });
     ts.router().set_http_handler<http::verb::head>("/p",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    {
@@ -1621,4 +1631,39 @@ TEST_CASE("Download scheduler: shared cache reaches per-task downloaders", "[dow
     fs::remove(server_path);
     fs::remove(dl_path);
     fs::remove_all(cache_dir);
+}
+
+TEST_CASE("Download scheduler: clear_finished prunes terminal tasks", "[download_scheduler]")
+{
+    auto server_path = fs::temp_directory_path() / "sched_clear_srv.txt";
+    {
+        std::ofstream f(server_path, std::ios::binary);
+        f << "clear me\n";
+    }
+    auto dl_path = fs::temp_directory_path() / "sched_clear_out.bin";
+
+    dl_sched_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>("/c",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(server_path); });
+    ts.router().set_http_handler<http::verb::head>("/c",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   { resp.set_file_content(server_path); });
+    ts.start();
+
+    auto sched = std::make_shared<httplib::client::download_scheduler>(ts.ioc_.get_executor(), ts.pool);
+    auto id = sched->add(ts.url_for_path("/c"), dl_path);
+    start_scheduler(ts.ioc_, sched);
+
+    REQUIRE(wait_until([&] { return is_terminal(sched->get_status(id).state); }));
+    REQUIRE(sched->total_count() == 1);
+
+    REQUIRE(sched->clear_finished() == 1);
+    REQUIRE(sched->total_count() == 0);
+    REQUIRE(sched->clear_finished() == 0);
+
+    shutdown_scheduler(ts.ioc_, sched);
+
+    fs::remove(server_path);
+    fs::remove(dl_path);
 }
