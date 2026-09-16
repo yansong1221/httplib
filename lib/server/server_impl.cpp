@@ -112,14 +112,15 @@ namespace httplib::server
     net::awaitable<boost::system::error_code>
     http_server::impl::async_run()
     {
-        // Reopen the completion event so the instance can be run again after a
-        // previous stop()/async_stop() closed it.
-        stop_event_.reset();
 
         if (running_.exchange(true))
         {
             co_return boost::asio::error::make_error_code(boost::asio::error::already_started);
         }
+        // Reopen the completion event so the instance can be run again after a
+        // previous stop()/async_stop() closed it.
+        stop_event_.reset();
+        session_event_.reset();
 
         std::vector<net::awaitable<boost::system::error_code>> ops;
         for (int i = 0; i < acceptor_count_; ++i)
@@ -131,9 +132,10 @@ namespace httplib::server
 
         // stop();
 
-        boost::system::error_code ec;
-        boost::asio::steady_timer wait_timer(ex_);
-        while (true)
+        // Wait for every in-flight session to finish. `handle_accept()` notifies
+        // `session_event_` when the last session leaves `sessions_`, so no timer
+        // polling is needed.
+        for (;;)
         {
             {
                 std::lock_guard lck(session_mutex_);
@@ -143,9 +145,8 @@ namespace httplib::server
                 }
             }
 
-            wait_timer.expires_after(std::chrono::milliseconds(100));
-            co_await wait_timer.async_wait(util::net_awaitable[ec]);
-            if (ec)
+            auto result = co_await session_event_.wait();
+            if (result != util::async_event::wait_result::notified)
             {
                 break;
             }
@@ -153,6 +154,7 @@ namespace httplib::server
 
         router_.reset();
         running_ = false;
+        session_event_.close();
         stop_event_.close();
         for (auto const& ec : results)
         {
@@ -238,6 +240,11 @@ namespace httplib::server
             session_count = sessions_.size();
         }
         logger()->trace("[session] done, total={}", session_count);
+
+        if (session_count == 0)
+        {
+            session_event_.notify_all();
+        }
     }
 
     void

@@ -144,6 +144,10 @@ namespace httplib::server
         std::mutex session_mutex_;
         std::unordered_set<std::shared_ptr<session>> sessions_;
 
+        /// Notified when `sessions_` transitions to empty; awaited by
+        /// `async_run()` while draining in-flight sessions.
+        util::async_event session_event_ { ex_ };
+
         std::chrono::steady_clock::duration read_timeout_ = std::chrono::seconds(30);
         std::chrono::steady_clock::duration write_timeout_ = std::chrono::seconds(30);
 
