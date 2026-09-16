@@ -10,38 +10,44 @@ namespace httplib::client
     {
     }
 
-    download_scheduler::~download_scheduler() = default;
+    download_scheduler::~download_scheduler()
+    {
+        if (impl_)
+        {
+            impl_->request_stop();
+        }
+    }
 
     download_scheduler::task_id
     download_scheduler::add(std::string_view url,
                             fs::path const& save_path,
                             task_options opts)
     {
-        return impl_->post_add(url, save_path, std::move(opts));
+        return impl_->add(url, save_path, std::move(opts));
     }
 
     void
     download_scheduler::cancel(task_id id)
     {
-        impl_->post_cancel(id);
+        impl_->cancel(id);
     }
 
     void
     download_scheduler::cancel_all()
     {
-        impl_->post_cancel_all();
+        impl_->cancel_all();
     }
 
     void
     download_scheduler::pause(task_id id)
     {
-        impl_->post_pause(id);
+        impl_->pause(id);
     }
 
     void
     download_scheduler::resume(task_id id)
     {
-        impl_->post_resume(id);
+        impl_->resume(id);
     }
 
     download_scheduler::task_status
@@ -77,19 +83,19 @@ namespace httplib::client
     void
     download_scheduler::set_progress_callback(progress_callback cb)
     {
-        impl_->post_set_progress_callback(std::move(cb));
+        impl_->set_progress_callback(std::move(cb));
     }
 
     void
     download_scheduler::set_state_callback(state_callback cb)
     {
-        impl_->post_set_state_callback(std::move(cb));
+        impl_->set_state_callback(std::move(cb));
     }
 
     void
     download_scheduler::set_scheduler_config(scheduler_config const& cfg)
     {
-        impl_->post_set_scheduler_config(cfg);
+        impl_->set_scheduler_config(cfg);
     }
 
     download_scheduler::scheduler_config
@@ -102,13 +108,6 @@ namespace httplib::client
     download_scheduler::async_run()
     {
         co_await impl_->async_run();
-    }
-
-    net::awaitable<void>
-    download_scheduler::async_run_all(
-        std::vector<std::tuple<std::string, fs::path, task_options>> tasks)
-    {
-        co_await impl_->async_run_all(std::move(tasks));
     }
 
     net::awaitable<download_scheduler::task_status>

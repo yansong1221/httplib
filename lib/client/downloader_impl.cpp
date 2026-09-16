@@ -1127,7 +1127,17 @@ namespace httplib::client
             co_return boost::asio::error::operation_aborted;
         }
         custom_headers_ = headers;
-        auto ui = parse_url(url);
+
+        url_info ui;
+        try
+        {
+            ui = parse_url(url);
+        }
+        catch (std::invalid_argument const&)
+        {
+            set_state(downloader::state::failed, "invalid url");
+            co_return boost::system::errc::make_error_code(boost::system::errc::invalid_argument);
+        }
 
         set_state(downloader::state::connecting);
 

@@ -4,6 +4,8 @@
 #include "httplib/client/downloader.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
+#include <boost/asio/error.hpp>
+#include <boost/system/errc.hpp>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -858,4 +860,256 @@ TEST_CASE("Downloader: disk_cache basic put and get", "[downloader]")
     REQUIRE_FALSE(cache.get("http://a.com/1").has_value());
 
     fs::remove_all(tmp);
+}
+
+// ===========================================================================
+// additional downloader tests (plan §24)
+// ===========================================================================
+
+TEST_CASE("Downloader: multi-segment pause and resume", "[downloader]")
+{
+    auto server_path = fs::temp_directory_path() / "httplib_dl_mspause_srv.bin";
+    constexpr std::size_t kSize = 1024 * 1024;
+    {
+        std::ofstream f(server_path, std::ios::binary);
+        for (std::size_t i = 0; i < kSize; ++i)
+        {
+            f.put(static_cast<char>(i % 256));
+        }
+    }
+    auto dl_path = fs::temp_directory_path() / "httplib_dl_mspause_out.bin";
+
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/pause",
+        [&](httplib::server::request&, httplib::server::response& resp)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            resp.set_file_content(server_path);
+        });
+    ts.router().set_http_handler<http::verb::head>(
+        "/pause",
+        [&](httplib::server::request&, httplib::server::response& resp)
+        {
+            resp.set(http::field::content_length, std::to_string(kSize));
+            resp.set(http::field::accept_ranges, "bytes");
+        });
+    ts.start();
+
+    httplib::client::downloader dl(ts.ioc_, ts.pool);
+    dl.set_config({ .segments = 4 });
+
+    std::mutex cv_mtx;
+    std::condition_variable cv;
+    bool paused = false;
+    std::atomic<bool> paused_seen { false };
+
+    dl.set_state_callback(
+        [&](httplib::client::downloader::state st, std::string_view)
+        {
+            if (st == httplib::client::downloader::state::downloading && !paused)
+            {
+                {
+                    std::lock_guard<std::mutex> lk(cv_mtx);
+                    paused = true;
+                }
+                dl.pause();
+            }
+            if (st == httplib::client::downloader::state::paused)
+            {
+                paused_seen.store(true);
+                cv.notify_all();
+            }
+        });
+
+    std::thread control_thread(
+        [&]()
+        {
+            std::unique_lock<std::mutex> lk(cv_mtx);
+            cv.wait(lk, [&] { return paused_seen.load(); });
+            dl.resume();
+        });
+
+    auto ec = dl.download(ts.url_for_path("/pause"), dl_path);
+    control_thread.join();
+
+    REQUIRE_FALSE(ec);
+    REQUIRE(dl.current_state() == httplib::client::downloader::state::completed);
+    REQUIRE(fs::file_size(dl_path) == kSize);
+    REQUIRE(read_file(dl_path) == read_file(server_path));
+
+    std::error_code rm_ec;
+    fs::remove(server_path, rm_ec);
+    fs::remove(dl_path, rm_ec);
+    for (int i = 0; i < 8; ++i)
+    {
+        fs::remove(fs::path(dl_path.string() + ".part" + std::to_string(i)), rm_ec);
+    }
+    fs::remove(fs::path(dl_path.string() + ".dlstate"), rm_ec);
+}
+
+TEST_CASE("Downloader: cancel while paused aborts immediately", "[downloader]")
+{
+    auto server_path = fs::temp_directory_path() / "httplib_dl_pcancel_srv.bin";
+    constexpr std::size_t kSize = 1024 * 1024;
+    {
+        std::ofstream f(server_path, std::ios::binary);
+        for (std::size_t i = 0; i < kSize; ++i)
+        {
+            f.put(static_cast<char>(i % 256));
+        }
+    }
+    auto dl_path = fs::temp_directory_path() / "httplib_dl_pcancel_out.bin";
+
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/pcancel",
+        [&](httplib::server::request&, httplib::server::response& resp)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(300));
+            resp.set_file_content(server_path);
+        });
+    ts.router().set_http_handler<http::verb::head>(
+        "/pcancel",
+        [&](httplib::server::request&, httplib::server::response& resp)
+        {
+            resp.set(http::field::content_length, std::to_string(kSize));
+            resp.set(http::field::accept_ranges, "bytes");
+        });
+    ts.start();
+
+    httplib::client::downloader dl(ts.ioc_, ts.pool);
+    dl.set_config({ .segments = 2 });
+
+    std::mutex cv_mtx;
+    std::condition_variable cv;
+    std::atomic<bool> paused_seen { false };
+
+    dl.set_state_callback(
+        [&](httplib::client::downloader::state st, std::string_view)
+        {
+            if (st == httplib::client::downloader::state::downloading)
+            {
+                dl.pause();
+            }
+            if (st == httplib::client::downloader::state::paused)
+            {
+                paused_seen.store(true);
+                cv.notify_all();
+            }
+        });
+
+    std::thread control_thread(
+        [&]()
+        {
+            std::unique_lock<std::mutex> lk(cv_mtx);
+            cv.wait(lk, [&] { return paused_seen.load(); });
+            dl.cancel();
+        });
+
+    // A pause can land before the state callback observes it; cancel() must
+    // also wake a not-yet-notified paused coroutine, so issue it from a timer
+    // thread as well in case the transfer finished already.
+    auto ec = dl.download(ts.url_for_path("/pcancel"), dl_path);
+    control_thread.join();
+
+    REQUIRE(ec);
+    REQUIRE(ec == boost::asio::error::operation_aborted);
+    REQUIRE(dl.current_state() == httplib::client::downloader::state::cancelled);
+
+    std::error_code rm_ec;
+    fs::remove(server_path, rm_ec);
+    fs::remove(dl_path, rm_ec);
+    for (int i = 0; i < 8; ++i)
+    {
+        fs::remove(fs::path(dl_path.string() + ".part" + std::to_string(i)), rm_ec);
+    }
+    fs::remove(fs::path(dl_path.string() + ".dlstate"), rm_ec);
+}
+
+TEST_CASE("Downloader: multi-segment failure cleans up part files", "[downloader]")
+{
+    auto server_path = fs::temp_directory_path() / "httplib_dl_segfail_srv.bin";
+    constexpr std::size_t kSize = 200 * 1024;
+    {
+        std::ofstream f(server_path, std::ios::binary);
+        for (std::size_t i = 0; i < kSize; ++i)
+        {
+            f.put(static_cast<char>(i % 256));
+        }
+    }
+    auto dl_path = fs::temp_directory_path() / "httplib_dl_segfail_out.bin";
+
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/segfail",
+        [&](httplib::server::request&, httplib::server::response& resp)
+        { resp.set_empty_content(http::status::internal_server_error); });
+    ts.router().set_http_handler<http::verb::head>(
+        "/segfail",
+        [&](httplib::server::request&, httplib::server::response& resp)
+        {
+            resp.set(http::field::content_length, std::to_string(kSize));
+            resp.set(http::field::accept_ranges, "bytes");
+        });
+    ts.start();
+
+    httplib::client::downloader dl(ts.ioc_, ts.pool);
+    dl.set_config({ .segments = 4, .max_retries = 1 });
+
+    auto ec = dl.download(ts.url_for_path("/segfail"), dl_path);
+    REQUIRE(ec);
+    REQUIRE(dl.current_state() == httplib::client::downloader::state::failed);
+
+    // All temporary artifacts must be removed after a failed multi-segment run.
+    std::error_code rm_ec;
+    REQUIRE_FALSE(fs::exists(dl_path, rm_ec));
+    REQUIRE_FALSE(fs::exists(fs::path(dl_path.string() + ".dlstate"), rm_ec));
+    for (int i = 0; i < 4; ++i)
+    {
+        REQUIRE_FALSE(fs::exists(fs::path(dl_path.string() + ".part" + std::to_string(i)), rm_ec));
+    }
+
+    fs::remove(server_path, rm_ec);
+}
+
+TEST_CASE("Downloader: persistent server 500 ends failed", "[downloader]")
+{
+    auto dl_path = fs::temp_directory_path() / "httplib_dl_500_out.bin";
+
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/500",
+        [&](httplib::server::request&, httplib::server::response& resp)
+        { resp.set_empty_content(http::status::internal_server_error); });
+    ts.start();
+
+    httplib::client::downloader dl(ts.ioc_, ts.pool);
+    dl.set_config({ .max_retries = 1 });
+
+    auto ec = dl.download(ts.url_for_path("/500"), dl_path);
+    REQUIRE(ec);
+    REQUIRE(dl.current_state() == httplib::client::downloader::state::failed);
+    REQUIRE_FALSE(fs::exists(dl_path));
+
+    std::error_code rm_ec;
+    fs::remove(dl_path, rm_ec);
+}
+
+TEST_CASE("Downloader: invalid URL maps to a failed error, not a throw", "[downloader]")
+{
+    auto dl_path = fs::temp_directory_path() / "httplib_dl_badurl_out.bin";
+
+    dl_test_scaffold ts;
+    ts.start();
+
+    httplib::client::downloader dl(ts.ioc_, ts.pool);
+
+    auto ec = dl.download("not a url at all", dl_path);
+    REQUIRE(ec);
+    REQUIRE(ec == boost::system::errc::make_error_code(boost::system::errc::invalid_argument));
+    REQUIRE(dl.current_state() == httplib::client::downloader::state::failed);
+    REQUIRE_FALSE(fs::exists(dl_path));
+
+    fs::remove(dl_path);
 }

@@ -43,6 +43,7 @@ namespace httplib::client
             std::uint64_t speed_bytes_per_sec = 0;
 
             std::string message;
+            boost::system::error_code error;
         };
 
         using progress_callback = std::function<void(task_status const&)>;
@@ -97,10 +98,6 @@ namespace httplib::client
         /// (completed / failed / cancelled).  New tasks may be added while
         /// this coroutine is running.
         net::awaitable<void> async_run();
-
-        /// Submit a batch and run until all are done.
-        net::awaitable<void> async_run_all(
-            std::vector<std::tuple<std::string, fs::path, task_options>> tasks);
 
         /// Wait for the next task to reach a terminal state.
         net::awaitable<task_status> async_wait_any();
