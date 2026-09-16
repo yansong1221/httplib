@@ -3,6 +3,7 @@
 #include "httplib/db/connection_pool.hpp"
 #include "httplib/db/session.hpp"
 #include "httplib/util/ticker.hpp"
+#include "util/logging.hpp"
 #include <atomic>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -17,13 +18,12 @@
 namespace httplib::db
 {
 
-    struct connection_pool::impl : public util::ticker
+    struct connection_pool::impl
+        : public httplib::detail::logger
+        , public util::ticker
     {
         impl(net::any_io_executor ex, pool_params cfg, connection_pool::connect_fn connect);
         ~impl();
-
-        std::shared_ptr<spdlog::logger> logger() const;
-        void set_logger(std::shared_ptr<spdlog::logger> l);
 
         net::awaitable<session_handle> async_acquire(std::chrono::steady_clock::duration wait_timeout);
         void release_session(std::unique_ptr<session> sess, uint64_t epoch);
@@ -69,9 +69,6 @@ namespace httplib::db
         net::any_io_executor ex_;
         pool_params cfg_;
         connection_pool::connect_fn connect_;
-
-        std::shared_ptr<spdlog::logger> default_logger_;
-        std::atomic<std::shared_ptr<spdlog::logger>> custom_logger_;
 
         // ---- 持锁计数辅助（调用前必须已持有 mutex_）----
 

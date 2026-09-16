@@ -15,8 +15,8 @@ namespace httplib::client
         , port_(port)
         , use_ssl_(ssl)
         , ac_que_(ex)
+        , httplib::detail::logger("httplib.ws_client")
     {
-        default_logger_ = httplib::detail::make_console_logger("httplib.ws_client");
     }
 
     net::awaitable<boost::system::error_code>
@@ -32,7 +32,7 @@ namespace httplib::client
     net::awaitable<boost::system::error_code>
     ws_client::impl::_async_connect(std::string_view target, http::fields const& headers)
     {
-        logger()->trace("connecting ws://{}:{}{}", host_, port_, target);
+        get_logger()->trace("connecting ws://{}:{}{}", host_, port_, target);
         boost::system::error_code ec;
 
         if (!is_open())
@@ -40,21 +40,21 @@ namespace httplib::client
             auto stream_result = http_stream::create_stream(executor_, host_, use_ssl_, verify_ssl_, ca_cert_);
             if (!stream_result)
             {
-                logger()->error("ws connect failed {}:{}: {}", host_, port_, stream_result.error().message());
+                get_logger()->error("ws connect failed {}:{}: {}", host_, port_, stream_result.error().message());
                 co_return stream_result.error();
             }
             http_stream stream(std::move(*stream_result));
             auto endpoints = co_await resolver_.async_resolve(host_, std::to_string(port_), util::net_awaitable[ec]);
             if (ec)
             {
-                logger()->error("ws connect failed {}:{}: {}", host_, port_, ec.message());
+                get_logger()->error("ws connect failed {}:{}: {}", host_, port_, ec.message());
                 co_return ec;
             }
 
             ec = co_await stream.async_connect(endpoints);
             if (ec)
             {
-                logger()->error("ws connect failed {}:{}: {}", host_, port_, ec.message());
+                get_logger()->error("ws connect failed {}:{}: {}", host_, port_, ec.message());
                 co_return ec;
             }
             stream_ = std::make_shared<websocket_stream>(std::move(stream));
@@ -77,11 +77,11 @@ namespace httplib::client
         co_await stream_->async_handshake(host_, target, util::net_awaitable[ec]);
         if (ec)
         {
-            logger()->error("ws connect failed {}:{}: {}", host_, port_, ec.message());
+            get_logger()->error("ws connect failed {}:{}: {}", host_, port_, ec.message());
             co_return ec;
         }
 
-        logger()->debug("ws connected to {}:{}{}", host_, port_, target);
+        get_logger()->debug("ws connected to {}:{}{}", host_, port_, target);
         co_return boost::system::error_code {};
     }
 
@@ -89,22 +89,6 @@ namespace httplib::client
     ws_client::impl::is_open() const noexcept
     {
         return stream_ && stream_->is_open();
-    }
-
-    std::shared_ptr<spdlog::logger>
-    ws_client::impl::logger() const
-    {
-        if (custom_logger_)
-        {
-            return custom_logger_;
-        }
-        return default_logger_;
-    }
-
-    void
-    ws_client::impl::set_logger(std::shared_ptr<spdlog::logger> logger)
-    {
-        custom_logger_ = std::move(logger);
     }
 
     bool
@@ -140,7 +124,7 @@ namespace httplib::client
         co_await stream_->async_write(net::buffer(data), util::net_awaitable[ec]);
         if (ec)
         {
-            logger()->error("Failed to send message: {}", ec.message());
+            get_logger()->error("Failed to send message: {}", ec.message());
             abort();
         }
         co_return ec;
@@ -153,10 +137,11 @@ namespace httplib::client
         {
             return;
         }
-        if (auto ec = ac_que_.push([this, self = shared_from_this(), data = std::move(data), binary]() mutable -> net::awaitable<void>
-                                   { co_await async_send(std::move(data), binary); }))
+        if (auto ec = ac_que_.push(
+                [this, self = shared_from_this(), data = std::move(data), binary]() mutable -> net::awaitable<void>
+                { co_await async_send(std::move(data), binary); }))
         {
-            logger()->warn("ws send dropped: {}", ec.message());
+            get_logger()->warn("ws send dropped: {}", ec.message());
         }
     }
 
@@ -167,10 +152,11 @@ namespace httplib::client
         {
             return;
         }
-        if (auto ec = ac_que_.push([this, self = shared_from_this(), data = std::move(msg)]() mutable -> net::awaitable<void>
-                                   { co_await async_ping(std::move(data)); }))
+        if (auto ec
+            = ac_que_.push([this, self = shared_from_this(), data = std::move(msg)]() mutable -> net::awaitable<void>
+                           { co_await async_ping(std::move(data)); }))
         {
-            logger()->warn("ws ping dropped: {}", ec.message());
+            get_logger()->warn("ws ping dropped: {}", ec.message());
         }
     }
 
@@ -181,10 +167,11 @@ namespace httplib::client
         {
             return;
         }
-        if (auto ec = ac_que_.push([this, self = shared_from_this(), data = std::move(msg)]() mutable -> net::awaitable<void>
-                                   { co_await async_pong(std::move(data)); }))
+        if (auto ec
+            = ac_que_.push([this, self = shared_from_this(), data = std::move(msg)]() mutable -> net::awaitable<void>
+                           { co_await async_pong(std::move(data)); }))
         {
-            logger()->warn("ws pong dropped: {}", ec.message());
+            get_logger()->warn("ws pong dropped: {}", ec.message());
         }
     }
 
@@ -197,9 +184,10 @@ namespace httplib::client
         }
 
         ac_que_.clear();
-        if (auto ec = ac_que_.push([this, self = shared_from_this()]() mutable -> net::awaitable<void> { co_await async_close(); }))
+        if (auto ec = ac_que_.push([this, self = shared_from_this()]() mutable -> net::awaitable<void>
+                                   { co_await async_close(); }))
         {
-            logger()->warn("ws close dropped: {}", ec.message());
+            get_logger()->warn("ws close dropped: {}", ec.message());
         }
     }
 
@@ -221,7 +209,7 @@ namespace httplib::client
         co_await stream_->async_ping(beast::websocket::ping_data(std::string_view(msg)), util::net_awaitable[ec]);
         if (ec)
         {
-            logger()->error("Failed to send ping: {}", ec.message());
+            get_logger()->error("Failed to send ping: {}", ec.message());
             abort();
         }
         co_return ec;
@@ -239,7 +227,7 @@ namespace httplib::client
         co_await stream_->async_pong(beast::websocket::ping_data(std::string_view(msg)), util::net_awaitable[ec]);
         if (ec)
         {
-            logger()->error("Failed to send pong: {}", ec.message());
+            get_logger()->error("Failed to send pong: {}", ec.message());
             abort();
         }
         co_return ec;
@@ -264,7 +252,7 @@ namespace httplib::client
         co_await (stream_->async_close(reason, util::net_awaitable[ec]) || timer.async_wait(util::net_awaitable[ec]));
         if (ec)
         {
-            logger()->error("Failed to close: {}", ec.message());
+            get_logger()->error("Failed to close: {}", ec.message());
         }
         abort();
         co_return ec;
@@ -300,7 +288,7 @@ namespace httplib::client
                 }
                 catch (std::exception const& e)
                 {
-                    logger()->trace("ws open handler error: {}", e.what());
+                    get_logger()->trace("ws open handler error: {}", e.what());
                 }
             },
             [](std::exception_ptr e)
@@ -330,7 +318,7 @@ namespace httplib::client
             abort();
             if (ec != beast::websocket::error::closed)
             {
-                logger()->warn("ws read failed: {}", ec.message());
+                get_logger()->warn("ws read failed: {}", ec.message());
             }
         }
         co_return ec;
@@ -366,7 +354,7 @@ namespace httplib::client
                     }
                     catch (std::exception const& e)
                     {
-                        logger()->error("ws message handler error: {}", e.what());
+                        get_logger()->error("ws message handler error: {}", e.what());
                     }
                 }
                 try
@@ -375,9 +363,9 @@ namespace httplib::client
                 }
                 catch (std::exception const& e)
                 {
-                    logger()->error("ws close handler error: {}", e.what());
+                    get_logger()->error("ws close handler error: {}", e.what());
                 }
-                logger()->debug("ws connection closed");
+                get_logger()->debug("ws connection closed");
             },
             [](std::exception_ptr e)
             {

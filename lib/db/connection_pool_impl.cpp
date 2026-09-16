@@ -34,6 +34,7 @@ namespace httplib::db
         , ex_(ex)
         , cfg_(std::move(cfg))
         , connect_(std::move(connect))
+        , httplib::detail::logger("httplib.db_pool")
     {
         if (cfg_.min_connections > cfg_.max_connections)
         {
@@ -52,30 +53,15 @@ namespace httplib::db
             check_interval = std::min(check_interval, cfg_.health_check_interval);
         }
         set_interval(check_interval);
-
-        default_logger_ = httplib::detail::make_console_logger("httplib.db_pool");
     }
 
     connection_pool::impl::~impl() { stop(); }
-
-    std::shared_ptr<spdlog::logger>
-    connection_pool::impl::logger() const
-    {
-        auto l = custom_logger_.load();
-        return l ? l : default_logger_;
-    }
-
-    void
-    connection_pool::impl::set_logger(std::shared_ptr<spdlog::logger> l)
-    {
-        custom_logger_.store(std::move(l));
-    }
 
     net::awaitable<bool>
     connection_pool::impl::on_start()
     {
         auto const epoch = epoch_.load();
-        logger()->debug("db pool started");
+        get_logger()->debug("db pool started");
 
         std::vector<std::unique_ptr<session>> pre_created;
         for (size_t i = 0; i < cfg_.min_connections; ++i)
@@ -90,11 +76,11 @@ namespace httplib::db
             }
             catch (std::exception const& ex)
             {
-                logger()->warn("db pool pre-create connection failed: {}", ex.what());
+                get_logger()->warn("db pool pre-create connection failed: {}", ex.what());
             }
             catch (...)
             {
-                logger()->warn("db pool pre-create connection failed: unknown error");
+                get_logger()->warn("db pool pre-create connection failed: unknown error");
             }
         }
 
@@ -192,7 +178,7 @@ namespace httplib::db
 
         {
             std::lock_guard<std::mutex> lock(self->mutex_);
-            self->logger()->warn(
+            self->get_logger()->warn(
                 "db pool acquire timed out after {}ms: active={} idle={} validating={} total={} max={}",
                 std::chrono::duration_cast<std::chrono::milliseconds>(wait_timeout).count(),
                 self->active_count_,
@@ -542,11 +528,11 @@ namespace httplib::db
             }
             catch (std::exception const& ex)
             {
-                logger()->warn("db pool refill connection failed: {}", ex.what());
+                get_logger()->warn("db pool refill connection failed: {}", ex.what());
             }
             catch (...)
             {
-                logger()->warn("db pool refill connection failed: unknown error");
+                get_logger()->warn("db pool refill connection failed: unknown error");
             }
         }
 

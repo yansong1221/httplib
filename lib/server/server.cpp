@@ -122,7 +122,7 @@ namespace httplib::server
     std::shared_ptr<spdlog::logger>
     http_server::logger() const
     {
-        return impl_->logger();
+        return impl_->get_logger();
     }
     void
     http_server::set_logger(std::shared_ptr<spdlog::logger> logger)

@@ -82,7 +82,7 @@ namespace httplib::server
             beast::get_lowest_layer(stream_).expires_never();
             if (ec)
             {
-                server_impl_->logger()->trace("ssl handshake failed: {}", ec.message());
+                server_impl_->get_logger()->trace("ssl handshake failed: {}", ec.message());
                 co_return nullptr;
             }
             buffer_.consume(bytes_used);
@@ -158,7 +158,7 @@ namespace httplib::server
             stream_.expires_never();
             if (ec)
             {
-                server_impl_->logger()->trace("async_detect_ssl failed: {}", ec.message());
+                server_impl_->get_logger()->trace("async_detect_ssl failed: {}", ec.message());
                 co_return nullptr;
             }
             if (is_ssl)
@@ -223,7 +223,7 @@ namespace httplib::server
             stream_.expires_never();
             if (ec)
             {
-                server_impl_->logger()->trace("read http header failed: {}", ec.message());
+                server_impl_->get_logger()->trace("read http header failed: {}", ec.message());
                 co_return nullptr;
             }
 
@@ -233,7 +233,7 @@ namespace httplib::server
 
             if (websocket::is_upgrade(header.base()))
             {
-                server_impl_->logger()->trace("ws upgrade {}", req_target);
+                server_impl_->get_logger()->trace("ws upgrade {}", req_target);
                 auto req = request::impl::make_request(local_endp,
                                                        remote_endp,
                                                        std::move(header_parser->release()),
@@ -280,11 +280,11 @@ namespace httplib::server
                     {
                         resp.set_error_content(httplib::http::status::not_found);
                     }
-                    server_impl_->logger()->debug("{} {} {} {} not matched",
-                                                  header.method_string(),
-                                                  req_target,
-                                                  resp.result_int(),
-                                                  log_endp_format);
+                    server_impl_->get_logger()->debug("{} {} {} {} not matched",
+                                                      header.method_string(),
+                                                      req_target,
+                                                      resp.result_int(),
+                                                      log_endp_format);
                 }
                 else
                 {
@@ -331,7 +331,7 @@ namespace httplib::server
                                 stream_.expires_never();
                                 if (ec)
                                 {
-                                    server_impl_->logger()->trace("read http body failed: {}", ec.message());
+                                    server_impl_->get_logger()->trace("read http body failed: {}", ec.message());
                                     co_return nullptr;
                                 }
                             }
@@ -353,20 +353,20 @@ namespace httplib::server
             }
             catch (std::exception const& e)
             {
-                server_impl_->logger()->error("exception in handler for {} {} {}: {}",
-                                              req.method_string(),
-                                              req_target,
-                                              log_endp_format,
-                                              e.what());
+                server_impl_->get_logger()->error("exception in handler for {} {} {}: {}",
+                                                  req.method_string(),
+                                                  req_target,
+                                                  log_endp_format,
+                                                  e.what());
                 get_impl(resp).keep_alive(false);
                 resp.set_error_content(http::status::internal_server_error);
             }
             catch (...)
             {
-                server_impl_->logger()->error("unknown exception in handler for {} {} {}",
-                                              req.method_string(),
-                                              req_target,
-                                              log_endp_format);
+                server_impl_->get_logger()->error("unknown exception in handler for {} {} {}",
+                                                  req.method_string(),
+                                                  req_target,
+                                                  log_endp_format);
                 get_impl(resp).keep_alive(false);
                 resp.set_error_content(http::status::internal_server_error);
             }
@@ -389,13 +389,13 @@ namespace httplib::server
             auto total_ms
                 = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start_time);
             using namespace std::chrono_literals;
-            server_impl_->logger()->debug("{} {} {} {} handler={}ms total={}ms",
-                                          req.method_string(),
-                                          req_target,
-                                          resp.result_int(),
-                                          log_endp_format,
-                                          handler_ms.count(),
-                                          total_ms.count());
+            server_impl_->get_logger()->debug("{} {} {} {} handler={}ms total={}ms",
+                                              req.method_string(),
+                                              req_target,
+                                              resp.result_int(),
+                                              log_endp_format,
+                                              handler_ms.count(),
+                                              total_ms.count());
 
             if (!get_impl(resp).keep_alive())
             {
@@ -456,7 +456,7 @@ namespace httplib::server
             stream_.expires_never();
             if (ec)
             {
-                server_impl_->logger()->trace("write http body failed: {}", ec.message());
+                server_impl_->get_logger()->trace("write http body failed: {}", ec.message());
                 co_return false;
             }
         }
@@ -501,7 +501,7 @@ namespace httplib::server
         auto pos = target.find(":");
         if (pos == std::string_view::npos || pos == target.size() - 1)
         {
-            server_impl_->logger()->trace("http_proxy: invalid target: {}", target);
+            server_impl_->get_logger()->trace("http_proxy: invalid target: {}", target);
             co_return nullptr;
         }
 
@@ -512,14 +512,14 @@ namespace httplib::server
         auto results = co_await resolver_.async_resolve(host, port, util::net_awaitable[ec]);
         if (ec)
         {
-            server_impl_->logger()->trace("http_proxy: resolve failed {}: {}", host, ec.message());
+            server_impl_->get_logger()->trace("http_proxy: resolve failed {}: {}", host, ec.message());
             co_return nullptr;
         }
 
         co_await net::async_connect(proxy_socket_, results, util::net_awaitable[ec]);
         if (ec)
         {
-            server_impl_->logger()->trace("http_proxy: connect failed {}: {}", host, ec.message());
+            server_impl_->get_logger()->trace("http_proxy: connect failed {}: {}", host, ec.message());
             co_return nullptr;
         }
 
@@ -532,7 +532,7 @@ namespace httplib::server
         co_await http::async_write(stream_, (get_impl(resp)), util::net_awaitable[ec]);
         if (ec)
         {
-            server_impl_->logger()->trace("http_proxy: write response failed: {}", ec.message());
+            server_impl_->get_logger()->trace("http_proxy: write response failed: {}", ec.message());
             co_return nullptr;
         }
 

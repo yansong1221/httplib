@@ -35,9 +35,8 @@ namespace httplib::client
         , host_value_(util::make_host_value(host, port, ssl))
         , port_(port)
         , use_ssl_(ssl)
+        , detail::logger("httplib.client")
     {
-        default_logger_ = httplib::detail::make_console_logger("httplib.client");
-
         buffer_.reserve(io_buffer_size);
     }
 
@@ -78,22 +77,6 @@ namespace httplib::client
         }
         boost::system::error_code ec;
         return stream_->is_peer_alive(ec);
-    }
-
-    std::shared_ptr<spdlog::logger>
-    http_client::impl::logger() const
-    {
-        if (custom_logger_)
-        {
-            return custom_logger_;
-        }
-        return default_logger_;
-    }
-
-    void
-    http_client::impl::set_logger(std::shared_ptr<spdlog::logger> logger)
-    {
-        custom_logger_ = std::move(logger);
     }
 
     net::awaitable<http_client::response_result>
@@ -149,7 +132,7 @@ namespace httplib::client
                     co_return result;
                 }
 
-                logger()->trace("redirect {} -> {}", req.target(), std::string_view(loc));
+                get_logger()->trace("redirect {} -> {}", req.target(), std::string_view(loc));
 
                 // 读完并丢弃 redirect 响应的 body，保证连接可复用
                 if (auto drain_result = co_await resp.read_string(); drain_result.has_error())
@@ -181,7 +164,7 @@ namespace httplib::client
                         new_impl->timeout_policy_ = timeout_policy_;
                         new_impl->timeout_ = timeout_;
                         new_impl->verify_ssl_ = verify_ssl_;
-                        new_impl->set_logger(logger());
+                        new_impl->set_logger(get_logger());
                         new_impl->max_redirects_ = max_redirects_ - r - 1;
                         new_impl->header_limit_ = header_limit_;
                         new_impl->body_limit_ = body_limit_;
@@ -280,8 +263,8 @@ namespace httplib::client
         if (!content_encoding.empty()
             && !compress::compressor_factory::instance().is_supported_encoding(content_encoding))
         {
-            logger()->warn("unsupported request content-encoding '{}', remove the header",
-                           std::string(content_encoding));
+            get_logger()->warn("unsupported request content-encoding '{}', remove the header",
+                               std::string(content_encoding));
             req.erase(http::field::content_encoding);
         }
         if (!get_impl(req).has_content_length())
@@ -346,7 +329,7 @@ namespace httplib::client
             }
             if (ec)
             {
-                logger()->warn("connect [{}] error {}", util::make_url_value(host_, port_, use_ssl_), ec.message());
+                get_logger()->warn("connect [{}] error {}", util::make_url_value(host_, port_, use_ssl_), ec.message());
                 close();
                 co_return ec;
             }

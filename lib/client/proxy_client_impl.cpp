@@ -21,14 +21,14 @@ namespace httplib::client
         , host_(host)
         , port_(port)
         , use_ssl_(ssl)
+        , httplib::detail::logger("httplib.proxy_client")
     {
-        default_logger_ = httplib::detail::make_console_logger("httplib.proxy_client");
     }
 
     net::awaitable<boost::system::error_code>
     proxy_client::impl::async_connect(std::string_view target, http::fields const& headers)
     {
-        logger()->trace("connecting proxy {}:{} -> {}", host_, port_, target);
+        get_logger()->trace("connecting proxy {}:{} -> {}", host_, port_, target);
         boost::system::error_code ec;
 
         if (is_open())
@@ -39,7 +39,7 @@ namespace httplib::client
         auto stream_result = http_stream::create_stream(executor_, host_, use_ssl_, verify_ssl_, ca_cert_);
         if (!stream_result)
         {
-            logger()->error("proxy connect failed {}:{}: {}", host_, port_, stream_result.error().message());
+            get_logger()->error("proxy connect failed {}:{}: {}", host_, port_, stream_result.error().message());
             co_return stream_result.error();
         }
         auto stream = std::make_unique<http_stream>(std::move(*stream_result));
@@ -47,14 +47,14 @@ namespace httplib::client
         auto endpoints = co_await resolver_.async_resolve(host_, std::to_string(port_), util::net_awaitable[ec]);
         if (ec)
         {
-            logger()->error("proxy connect failed {}:{}: {}", host_, port_, ec.message());
+            get_logger()->error("proxy connect failed {}:{}: {}", host_, port_, ec.message());
             co_return ec;
         }
 
         ec = co_await stream->async_connect(endpoints);
         if (ec)
         {
-            logger()->error("proxy connect failed {}:{}: {}", host_, port_, ec.message());
+            get_logger()->error("proxy connect failed {}:{}: {}", host_, port_, ec.message());
             co_return ec;
         }
 
@@ -69,7 +69,7 @@ namespace httplib::client
         co_await http::async_write(*stream, ser, util::net_awaitable[ec]);
         if (ec)
         {
-            logger()->error("proxy write CONNECT failed {}:{}: {}", host_, port_, ec.message());
+            get_logger()->error("proxy write CONNECT failed {}:{}: {}", host_, port_, ec.message());
             co_return ec;
         }
 
@@ -78,7 +78,7 @@ namespace httplib::client
         co_await http::async_read_header(*stream, resp_buf, parser, util::net_awaitable[ec]);
         if (ec)
         {
-            logger()->error("proxy read CONNECT response failed {}:{}: {}", host_, port_, ec.message());
+            get_logger()->error("proxy read CONNECT response failed {}:{}: {}", host_, port_, ec.message());
             co_return ec;
         }
 
@@ -86,12 +86,12 @@ namespace httplib::client
         if (status < 200 || status >= 300)
         {
             ec = http::error::bad_status;
-            logger()->error("proxy CONNECT rejected {}:{}: status={}", host_, port_, status);
+            get_logger()->error("proxy CONNECT rejected {}:{}: status={}", host_, port_, status);
             co_return ec;
         }
 
         stream_ = std::move(stream);
-        logger()->trace("proxy connected {}:{} -> {}", host_, port_, target);
+        get_logger()->trace("proxy connected {}:{} -> {}", host_, port_, target);
         co_return boost::system::error_code {};
     }
 
@@ -145,18 +145,6 @@ namespace httplib::client
     proxy_client::impl::is_open() const noexcept
     {
         return stream_ && stream_->is_open();
-    }
-
-    std::shared_ptr<spdlog::logger>
-    proxy_client::impl::logger() const
-    {
-        return custom_logger_ ? custom_logger_ : default_logger_;
-    }
-
-    void
-    proxy_client::impl::set_logger(std::shared_ptr<spdlog::logger> logger)
-    {
-        custom_logger_ = std::move(logger);
     }
 
 } // namespace httplib::client

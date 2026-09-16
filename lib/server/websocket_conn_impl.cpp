@@ -50,7 +50,7 @@ namespace httplib::server
                     }
                 }))
         {
-            server_impl_->logger()->warn("websocket send dropped: {}", ec.message());
+            server_impl_->get_logger()->warn("websocket send dropped: {}", ec.message());
         }
     };
     void
@@ -69,14 +69,15 @@ namespace httplib::server
                         co_return;
                     }
                     boost::system::error_code ec;
-                    co_await ws_.async_ping(beast::websocket::ping_data(std::string_view(msg)), util::net_awaitable[ec]);
+                    co_await ws_.async_ping(beast::websocket::ping_data(std::string_view(msg)),
+                                            util::net_awaitable[ec]);
                     if (ec)
                     {
                         abort();
                     }
                 }))
         {
-            server_impl_->logger()->warn("websocket ping dropped: {}", ec.message());
+            server_impl_->get_logger()->warn("websocket ping dropped: {}", ec.message());
         }
     }
 
@@ -87,10 +88,11 @@ namespace httplib::server
         {
             return;
         }
+        auto logger = server_impl_->get_logger();
 
         ac_que_.clear();
         if (auto ec = ac_que_.push(
-                [this, self = shared_from_this(), reason = std::string(reason)]() -> net::awaitable<void>
+                [this, logger, self = shared_from_this(), reason = std::string(reason)]() -> net::awaitable<void>
                 {
                     if (!is_open())
                     {
@@ -104,17 +106,18 @@ namespace httplib::server
 
                     boost::system::error_code ec;
                     websocket::close_reason cr(std::move(reason));
-                    co_await (ws_.async_close(cr, util::net_awaitable[ec]) || timer.async_wait(util::net_awaitable[ec]));
+                    co_await (ws_.async_close(cr, util::net_awaitable[ec])
+                              || timer.async_wait(util::net_awaitable[ec]));
 
                     if (ec && ec != boost::asio::error::operation_aborted)
                     {
-                        server_impl_->logger()->debug("websocket async_close failed: {}", ec.message());
+                        logger->debug("websocket async_close failed: {}", ec.message());
                     }
 
                     abort();
                 }))
         {
-            server_impl_->logger()->warn("websocket close dropped: {}", ec.message());
+            logger->warn("websocket close dropped: {}", ec.message());
         }
     }
 
@@ -155,6 +158,7 @@ namespace httplib::server
         {
             co_return;
         }
+        auto logger = server_impl_->get_logger();
 
         boost::system::error_code ec;
         auto remote_endp = ws_.socket().remote_endpoint(ec);
@@ -164,13 +168,11 @@ namespace httplib::server
         co_await ws_.async_accept(get_impl(req_), util::net_awaitable[ec]);
         if (ec)
         {
-            server_impl_->logger()->error("websocket handshake failed: {}", ec.message());
+            logger->error("websocket handshake failed: {}", ec.message());
             co_return;
         }
 
-        server_impl_->logger()->debug("websocket new connection: [{}:{}]",
-                                      remote_endp.address().to_string(),
-                                      remote_endp.port());
+        logger->debug("websocket new connection: [{}:{}]", remote_endp.address().to_string(), remote_endp.port());
 
         try
         {
@@ -178,7 +180,7 @@ namespace httplib::server
         }
         catch (std::exception const& e)
         {
-            server_impl_->logger()->error("websocket open handler failed: {}", e.what());
+            logger->error("websocket open handler failed: {}", e.what());
             co_return;
         }
 
@@ -187,10 +189,10 @@ namespace httplib::server
             auto bytes = co_await ws_.async_read(buffer_, util::net_awaitable[ec]);
             if (ec)
             {
-                server_impl_->logger()->debug("websocket disconnect: [{}:{}] what: {}",
-                                              remote_endp.address().to_string(),
-                                              remote_endp.port(),
-                                              ec.message());
+                logger->debug("websocket disconnect: [{}:{}] what: {}",
+                              remote_endp.address().to_string(),
+                              remote_endp.port(),
+                              ec.message());
 
                 abort();
                 co_await ac_que_.async_shutdown();
@@ -200,7 +202,7 @@ namespace httplib::server
                 }
                 catch (std::exception const& e)
                 {
-                    server_impl_->logger()->error("websocket close handler failed: {}", e.what());
+                    logger->error("websocket close handler failed: {}", e.what());
                 }
                 co_return;
             }
@@ -212,7 +214,7 @@ namespace httplib::server
             }
             catch (std::exception const& e)
             {
-                server_impl_->logger()->error("websocket message handler failed: {}", e.what());
+                logger->error("websocket message handler failed: {}", e.what());
             }
             buffer_.consume(bytes);
         }

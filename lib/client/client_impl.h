@@ -4,6 +4,7 @@
 #include "httplib/client/client.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "stream/http_stream.hpp"
+#include "util/logging.hpp"
 #include <boost/asio/strand.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/read.hpp>
@@ -16,7 +17,9 @@
 namespace httplib::client
 {
 
-    class http_client::impl : public std::enable_shared_from_this<http_client::impl>
+    class http_client::impl
+        : public detail::logger
+        , public std::enable_shared_from_this<http_client::impl>
     {
       public:
         class lazy_request_impl;
@@ -60,9 +63,6 @@ namespace httplib::client
         bool is_open() const;
         bool has_active_session() const;
         bool is_alive() const;
-
-        std::shared_ptr<spdlog::logger> logger() const;
-        void set_logger(std::shared_ptr<spdlog::logger> logger);
 
         net::awaitable<http_client::response_result> async_send_request_lazy(http_client::request& req);
 
@@ -120,7 +120,7 @@ namespace httplib::client
             if (is_retryable(ec) && retry && !bytes_written)
             {
                 close();
-                logger()->trace("retrying request...");
+                get_logger()->trace("retrying request...");
                 co_return co_await async_write(serializer, headers_only, false);
             }
             co_return ec;
@@ -184,9 +184,6 @@ namespace httplib::client
 
         std::uint32_t header_limit_ = 65536;
         std::uint64_t body_limit_ = 1024ULL * 1024 * 1024;
-
-        std::shared_ptr<spdlog::logger> default_logger_;
-        std::shared_ptr<spdlog::logger> custom_logger_;
     };
 
 } // namespace httplib::client

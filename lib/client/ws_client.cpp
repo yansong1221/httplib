@@ -71,7 +71,7 @@ namespace httplib::client
     std::shared_ptr<spdlog::logger>
     ws_client::logger() const
     {
-        return impl_->logger();
+        return impl_->get_logger();
     }
 
     void

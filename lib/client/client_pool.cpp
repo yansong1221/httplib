@@ -1,12 +1,11 @@
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/client.hpp"
+#include "httplib/util/async_event.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/ticker.hpp"
-#include "httplib/util/use_awaitable.hpp"
 #include "util/logging.hpp"
 #include <atomic>
 #include <boost/asio/co_spawn.hpp>
-#include <boost/asio/steady_timer.hpp>
 #include <boost/system/system_error.hpp>
 #include <boost/url.hpp>
 #include <deque>
@@ -39,51 +38,42 @@ namespace httplib::client
 
         struct waiter_node
         {
-            net::steady_timer timer;
-            /// 被池唤醒后保持等待者留在队首，直到它借出/超时/取消，保证先到先服务。
-            std::atomic<bool> woken { false };
+            /// 被池唤醒（notify_one）或到达等待截止时间（wait_for 超时）。被唤醒者
+            /// 保留在队首直到借出/超时/取消，保证先到先服务。
+            util::async_event event;
 
-            explicit waiter_node(net::any_io_executor const& ex) : timer(ex) {}
+            explicit waiter_node(net::any_io_executor const& ex) : event(ex) {}
         };
 
     } // namespace
 
-    class http_client_pool::impl : public util::ticker
+    class http_client_pool::impl
+        : public detail::logger
+        , public util::ticker
     {
       public:
-        impl(net::any_io_executor const& ex, pool_params cfg) : ex_(ex), cfg_(std::move(cfg)), ticker(ex)
+        impl(net::any_io_executor const& ex, pool_params cfg)
+            : detail::logger("httplib.client_pool")
+            , ex_(ex)
+            , cfg_(std::move(cfg))
+            , ticker(ex)
         {
             auto interval = cfg_.idle_check_interval.count() > 0 ? cfg_.idle_check_interval : std::chrono::seconds(60);
             set_interval(interval);
-
-            default_logger_ = httplib::detail::make_console_logger("httplib.client_pool");
         }
 
         ~impl() { stop(); }
 
-        std::shared_ptr<spdlog::logger>
-        logger() const
-        {
-            auto l = custom_logger_.load();
-            return l ? l : default_logger_;
-        }
-
-        void
-        set_logger(std::shared_ptr<spdlog::logger> l)
-        {
-            custom_logger_.store(std::move(l));
-        }
-
         net::awaitable<bool>
         on_start() override
         {
-            logger()->debug("client pool started");
+            get_logger()->debug("client pool started");
             co_return true;
         }
         net::awaitable<void>
         on_stop() override
         {
-            logger()->debug("client pool stopped");
+            get_logger()->debug("client pool stopped");
             co_return;
         }
 
@@ -105,6 +95,8 @@ namespace httplib::client
 
             std::shared_ptr<waiter_node> node;
             bool in_queue = false;
+            /// 上一轮等待是否被池唤醒（而非超时）；被唤醒者即队首，可绕过公平性检查。
+            bool serving = false;
 
             do
             {
@@ -122,12 +114,11 @@ namespace httplib::client
                 if (in_queue && deadline <= std::chrono::steady_clock::now())
                 {
                     remove_waiter_locked(url, node);
-                    logger()->debug("client pool: acquire timed out for {}", url);
+                    get_logger()->debug("client pool: acquire timed out for {}", url);
                     co_return client_handle(boost::system::errc::make_error_code(boost::system::errc::timed_out));
                 }
 
                 // 被唤醒的等待者保留在队首；只有它自己能绕过“已有等待者”的公平性检查。
-                bool serving = in_queue && node->woken.load(std::memory_order_acquire);
                 client_handle handle;
                 try
                 {
@@ -153,10 +144,7 @@ namespace httplib::client
                     co_return std::move(handle);
                 }
 
-                if (serving)
-                {
-                    node->woken.store(false, std::memory_order_release);
-                }
+                serving = false;
 
                 if (wait_timeout <= std::chrono::steady_clock::duration::zero())
                 {
@@ -164,7 +152,7 @@ namespace httplib::client
                     {
                         remove_waiter_locked(url, node);
                     }
-                    logger()->debug("client pool: no available connection for {} (fail fast)", url);
+                    get_logger()->debug("client pool: no available connection for {} (fail fast)", url);
                     co_return client_handle(boost::system::errc::make_error_code(boost::system::errc::timed_out));
                 }
 
@@ -177,11 +165,18 @@ namespace httplib::client
                     waiters.push_back(node);
                     in_queue = true;
                 }
-                node->timer.expires_at(deadline);
+
+                auto remaining = deadline - std::chrono::steady_clock::now();
                 lock.unlock();
 
-                boost::system::error_code ec;
-                co_await node->timer.async_wait(util::net_awaitable[ec]);
+                if (remaining <= std::chrono::steady_clock::duration::zero())
+                {
+                    // 截止时间已到，交给下一轮循环顶部的超时判断处理。
+                    continue;
+                }
+
+                auto result = co_await node->event.wait_for(remaining);
+                serving = (result == util::async_event::wait_result::notified);
 
             } while (true);
         }
@@ -210,12 +205,12 @@ namespace httplib::client
                 // 归池前重置为 pool 配置，避免上一个 borrower 的 timeout/redirect/SSL/logger/CA 设置污染下一次借出。
                 apply_client_settings(*conn);
                 st_it->second.idle.push_back({ std::move(conn), std::chrono::steady_clock::now() });
-                logger()->trace("client pool: returned connection to idle for {}", url);
+                get_logger()->trace("client pool: returned connection to idle for {}", url);
             }
             else
             {
                 track_destroyed();
-                logger()->trace("client pool: closed connection for {}", url);
+                get_logger()->trace("client pool: closed connection for {}", url);
             }
 
             wake_one_waiter(url);
@@ -275,7 +270,7 @@ namespace httplib::client
                     waiters.pop_front();
                     if (auto waiter = w.lock(); waiter)
                     {
-                        waiter->timer.cancel();
+                        waiter->event.close();
                     }
                 }
             }
@@ -378,7 +373,7 @@ namespace httplib::client
             c.set_verify_ssl(cfg_.verify_ssl);
             // 复用连接必须清掉上一个 borrower 可能设置的 CA cert；空字符串表示回退系统默认。
             c.set_ca_cert(cfg_.ca_cert);
-            c.set_logger(logger());
+            c.set_logger(get_logger());
         }
 
         bool
@@ -424,8 +419,7 @@ namespace httplib::client
                 {
                     // 不弹出等待者：被唤醒的协程保留在队首，直到它借出、超时或被取消，
                     // 新到的 acquire 会看到 live waiter 并排队，而不是插队。
-                    waiter->woken.store(true, std::memory_order_release);
-                    waiter->timer.cancel();
+                    waiter->event.notify_one();
                     return;
                 }
                 waiters.pop_front();
@@ -544,7 +538,7 @@ namespace httplib::client
                     if (!alive)
                     {
                         track_destroyed();
-                        logger()->warn("client pool: discarding dead idle connection for {}", url);
+                        get_logger()->warn("client pool: discarding dead idle connection for {}", url);
                         wake_one_waiter(url); // 死连接释放了容量，唤醒等待者接手
                         continue;
                     }
@@ -573,7 +567,7 @@ namespace httplib::client
                     // 用 host/port/ssl 构造，避免 URL 二次 parse 失败把异常抛进 acquire 路径。
                     auto client = std::make_unique<http_client>(ex_, url);
                     apply_client_settings(*client);
-                    logger()->debug("client pool: created connection for {} (total={})", url, total_connections_);
+                    get_logger()->debug("client pool: created connection for {} (total={})", url, total_connections_);
                     return client_handle(std::static_pointer_cast<http_client_pool::impl>(shared_from_this()),
                                          std::move(client),
                                          epoch_);
@@ -607,7 +601,7 @@ namespace httplib::client
                     {
                         if (cfg_.idle_timeout.count() > 0 && now - it2->idle_since > cfg_.idle_timeout)
                         {
-                            logger()->trace("client pool: evicting idle connection for {}", it->first);
+                            get_logger()->trace("client pool: evicting idle connection for {}", it->first);
                             to_close.push_back(std::move(it2->client));
                             it2 = st.idle.erase(it2);
                             track_destroyed();
@@ -647,9 +641,6 @@ namespace httplib::client
         /// 受 mutex_ 保护；stop() 递增，使旧 handle 在 restart 后归还时失效。
         std::atomic<uint64_t> epoch_ = 0;
         pool_params cfg_;
-
-        std::shared_ptr<spdlog::logger> default_logger_;
-        std::atomic<std::shared_ptr<spdlog::logger>> custom_logger_;
 
         std::unordered_map<std::string, waiters_list> waiters_;
 
@@ -840,7 +831,7 @@ namespace httplib::client
     std::shared_ptr<spdlog::logger>
     http_client_pool::logger() const
     {
-        return impl_->logger();
+        return impl_->get_logger();
     }
 
     void

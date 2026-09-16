@@ -1,14 +1,16 @@
 #pragma once
 #include "httplib/client/proxy_client.hpp"
 #include "stream/http_stream.hpp"
+#include "util/logging.hpp"
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
-#include <spdlog/spdlog.h>
 
 namespace httplib::client
 {
 
-    class proxy_client::impl : public std::enable_shared_from_this<impl>
+    class proxy_client::impl
+        : public httplib::detail::logger
+        , public std::enable_shared_from_this<impl>
     {
       public:
         impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl);
@@ -23,9 +25,6 @@ namespace httplib::client
         void close();
         void abort();
         bool is_open() const noexcept;
-
-        std::shared_ptr<spdlog::logger> logger() const;
-        void set_logger(std::shared_ptr<spdlog::logger> logger);
 
         void
         set_verify_ssl(bool verify)
@@ -49,9 +48,6 @@ namespace httplib::client
 
         std::unique_ptr<http_stream> stream_;
         beast::flat_buffer buffer_;
-
-        std::shared_ptr<spdlog::logger> default_logger_;
-        std::shared_ptr<spdlog::logger> custom_logger_;
     };
 
 } // namespace httplib::client

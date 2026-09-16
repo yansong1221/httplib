@@ -26,9 +26,11 @@
 
 namespace httplib::server
 {
-    http_server::impl::impl(net::any_io_executor const& ex) : ex_(ex), acceptor_(ex)
+    http_server::impl::impl(net::any_io_executor const& ex)
+        : ex_(ex)
+        , acceptor_(ex)
+        , httplib::detail::logger("httplib.server")
     {
-        default_logger_ = httplib::detail::make_console_logger("httplib.server");
     }
 
     http_server::impl::~impl() = default;
@@ -50,7 +52,7 @@ namespace httplib::server
         acceptor_.listen(backlog);
 
         auto listen_endp = local_endpoint();
-        logger()->info("Http Server Listen on: [{}:{}]", listen_endp.address().to_string(), listen_endp.port());
+        get_logger()->info("Http Server Listen on: [{}:{}]", listen_endp.address().to_string(), listen_endp.port());
     }
 
     net::any_io_executor
@@ -81,7 +83,7 @@ namespace httplib::server
         {
             std::lock_guard lck(session_mutex_);
             auto count = sessions_.size();
-            logger()->trace("[server] stopping, {} sessions remaining", count);
+            get_logger()->trace("[server] stopping, {} sessions remaining", count);
             for (auto const& v : sessions_)
             {
                 v->abort();
@@ -200,7 +202,7 @@ namespace httplib::server
                               }
                           });
         }
-        logger()->trace("async_accept: {}", ec.message());
+        get_logger()->trace("async_accept: {}", ec.message());
         co_return ec;
     }
     net::awaitable<void>
@@ -212,7 +214,7 @@ namespace httplib::server
             boost::system::error_code ec;
             sock.set_option(net::ip::tcp::no_delay(true), ec);
         }
-        logger()->trace("accept new connection [{}:{}]", remote_endp.address().to_string(), remote_endp.port());
+        get_logger()->trace("accept new connection [{}:{}]", remote_endp.address().to_string(), remote_endp.port());
 
         auto conn = std::make_shared<session>(std::move(sock), shared_from_this());
         std::size_t session_count = 0;
@@ -221,25 +223,25 @@ namespace httplib::server
             sessions_.insert(conn);
             session_count = sessions_.size();
         }
-        logger()->trace("[session] running, total={}", session_count);
+        get_logger()->trace("[session] running, total={}", session_count);
         try
         {
             co_await conn->run();
         }
         catch (std::exception const& e)
         {
-            logger()->error("session::run() exception: {}", e.what());
+            get_logger()->error("session::run() exception: {}", e.what());
         }
         catch (...)
         {
-            logger()->error("session::run() unknown exception");
+            get_logger()->error("session::run() unknown exception");
         }
         {
             std::lock_guard lck(session_mutex_);
             sessions_.erase(conn);
             session_count = sessions_.size();
         }
-        logger()->trace("[session] done, total={}", session_count);
+        get_logger()->trace("[session] done, total={}", session_count);
 
         if (session_count == 0)
         {
@@ -297,22 +299,6 @@ namespace httplib::server
     {
         boost::system::error_code ec;
         return acceptor_.local_endpoint(ec);
-    }
-
-    std::shared_ptr<spdlog::logger>
-    http_server::impl::logger() const
-    {
-        if (custom_logger_)
-        {
-            return custom_logger_;
-        }
-        return default_logger_;
-    }
-
-    void
-    http_server::impl::set_logger(std::shared_ptr<spdlog::logger> logger)
-    {
-        custom_logger_ = logger;
     }
 
     void
@@ -419,7 +405,7 @@ namespace httplib::server
              provider = std::move(provider),
              factory = std::move(factory)](request& req, response& resp) -> net::awaitable<void>
             {
-                detail::reverse_proxy_context ctx(proxy_pool, prefix, provider, factory, logger());
+                detail::reverse_proxy_context ctx(proxy_pool, prefix, provider, factory, get_logger());
                 co_await ctx.run(req, resp);
             });
     }
@@ -450,7 +436,7 @@ namespace httplib::server
                                       http_server::ws_interceptor_factory factory)
     {
         std::string prefix = detail::strip_proxy_prefix(location);
-        auto logger = this->logger();
+        auto logger = this->get_logger();
 
         router_.set_ws_handler(
             location,

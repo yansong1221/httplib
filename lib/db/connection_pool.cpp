@@ -152,7 +152,7 @@ namespace httplib::db
     std::shared_ptr<spdlog::logger>
     connection_pool::logger() const
     {
-        return impl_->logger();
+        return impl_->get_logger();
     }
 
     void

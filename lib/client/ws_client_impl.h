@@ -2,14 +2,16 @@
 #include "httplib/client/ws_client.hpp"
 #include "httplib/util/action_queue.hpp"
 #include "stream/websocket_stream.hpp"
+#include "util/logging.hpp"
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/system/result.hpp>
-#include <spdlog/spdlog.h>
 
 namespace httplib::client
 {
-    class ws_client::impl : public std::enable_shared_from_this<impl>
+    class ws_client::impl
+        : public httplib::detail::logger
+        , public std::enable_shared_from_this<impl>
     {
       public:
         impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl);
@@ -36,9 +38,6 @@ namespace httplib::client
 
         bool is_open() const noexcept;
         void abort();
-
-        std::shared_ptr<spdlog::logger> logger() const;
-        void set_logger(std::shared_ptr<spdlog::logger> logger);
 
         void
         set_verify_ssl(bool verify)
@@ -80,8 +79,5 @@ namespace httplib::client
 
         beast::flat_buffer buffer_;
         util::action_queue ac_que_;
-
-        std::shared_ptr<spdlog::logger> default_logger_;
-        std::shared_ptr<spdlog::logger> custom_logger_;
     };
 } // namespace httplib::client

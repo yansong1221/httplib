@@ -30,4 +30,27 @@ namespace httplib::detail
         return logger;
     }
 
+    class logger
+    {
+      public:
+        logger(std::string_view name) : default_logger_(make_console_logger(name)) {}
+
+        std::shared_ptr<spdlog::logger>
+        get_logger() const
+        {
+            auto l = custom_logger_.load();
+            return l ? l : default_logger_;
+        }
+
+        void
+        set_logger(std::shared_ptr<spdlog::logger> logger)
+        {
+            custom_logger_.store(std::move(logger));
+        }
+
+      private:
+        std::shared_ptr<spdlog::logger> default_logger_;
+        std::atomic<std::shared_ptr<spdlog::logger>> custom_logger_;
+    };
+
 } // namespace httplib::detail

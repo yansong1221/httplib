@@ -5,6 +5,7 @@
 #include "httplib/util/async_event.hpp"
 #include "router_impl.h"
 #include "session.hpp"
+#include "util/logging.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/strand.hpp>
@@ -26,7 +27,9 @@ namespace httplib::client
 
 namespace httplib::server
 {
-    class http_server::impl : public std::enable_shared_from_this<http_server::impl>
+    class http_server::impl
+        : public httplib::detail::logger
+        , public std::enable_shared_from_this<http_server::impl>
     {
       public:
         explicit impl(net::any_io_executor const& ex);
@@ -58,9 +61,6 @@ namespace httplib::server
         void set_proxy_buffer_size(int sz);
 
         tcp::endpoint local_endpoint() const;
-
-        std::shared_ptr<spdlog::logger> logger() const;
-        void set_logger(std::shared_ptr<spdlog::logger> logger);
 
         void set_compress_content_types(std::function<bool(std::string_view)> predicate);
         bool should_compress_content_type(std::string_view content_type) const;
@@ -150,9 +150,6 @@ namespace httplib::server
 
         std::chrono::steady_clock::duration read_timeout_ = std::chrono::seconds(30);
         std::chrono::steady_clock::duration write_timeout_ = std::chrono::seconds(30);
-
-        std::shared_ptr<spdlog::logger> default_logger_;
-        std::shared_ptr<spdlog::logger> custom_logger_;
 
         std::function<bool(std::string_view)> compress_content_type_predicate_;
 
