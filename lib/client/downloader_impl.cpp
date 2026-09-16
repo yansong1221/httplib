@@ -420,13 +420,12 @@ namespace httplib::client
     // =========================================================================
 
     void
-    downloader::impl::set_state(downloader::state st, std::string_view msg)
+    downloader::impl::set_state(downloader::state st, boost::system::error_code ec)
     {
         downloader::state_callback cb;
         {
             std::lock_guard lk(state_mutex_);
             state_ = st;
-            state_msg_ = msg;
         }
         {
             std::lock_guard lk(callback_mutex_);
@@ -434,7 +433,7 @@ namespace httplib::client
         }
         if (cb)
         {
-            cb(st, msg);
+            cb(st, ec);
         }
     }
 
@@ -443,14 +442,14 @@ namespace httplib::client
     {
         while (paused_.load(std::memory_order_relaxed))
         {
-            set_state(downloader::state::paused);
+            set_state(downloader::state::paused, {});
             co_await pause_event_.wait();
             if (cancelled_.load(std::memory_order_relaxed))
             {
                 co_return boost::asio::error::operation_aborted;
             }
         }
-        set_state(downloader::state::downloading);
+        set_state(downloader::state::downloading, {});
         co_return boost::system::error_code {};
     }
 
@@ -1042,7 +1041,7 @@ namespace httplib::client
             }
         }
 
-        set_state(downloader::state::merging);
+        set_state(downloader::state::merging, {});
         auto merge_ec = merge_parts_sync(save_path, seg_count);
         if (merge_ec)
         {
@@ -1123,8 +1122,9 @@ namespace httplib::client
     {
         if (cancelled_.exchange(false, std::memory_order_relaxed))
         {
-            set_state(downloader::state::cancelled);
-            co_return boost::asio::error::operation_aborted;
+            auto ec = boost::asio::error::operation_aborted;
+            set_state(downloader::state::cancelled, ec);
+            co_return ec;
         }
         custom_headers_ = headers;
 
@@ -1135,25 +1135,26 @@ namespace httplib::client
         }
         catch (std::invalid_argument const&)
         {
-            set_state(downloader::state::failed, "invalid url");
-            co_return boost::system::errc::make_error_code(boost::system::errc::invalid_argument);
+            auto ec = boost::system::errc::make_error_code(boost::system::errc::invalid_argument);
+            set_state(downloader::state::failed, ec);
+            co_return ec;
         }
 
-        set_state(downloader::state::connecting);
+        set_state(downloader::state::connecting, {});
 
         if (cache_)
         {
             auto entry = cache_->get(make_cache_key(ui));
             if (entry.has_value())
             {
-                set_state(downloader::state::downloading);
+                set_state(downloader::state::downloading, {});
                 if (co_await check_remote_cache(ui))
                 {
                     std::error_code ec;
                     fs::copy_file(entry->body_path, save_path, fs::copy_options::overwrite_existing, ec);
                     if (!ec)
                     {
-                        set_state(downloader::state::completed);
+                        set_state(downloader::state::completed, {});
                         co_return boost::system::error_code {};
                     }
                 }
@@ -1163,7 +1164,7 @@ namespace httplib::client
         auto probe = co_await probe_content_length(ui);
         auto content_length = probe.content_length;
 
-        set_state(downloader::state::downloading);
+        set_state(downloader::state::downloading, {});
 
         boost::system::error_code ec;
 
@@ -1180,16 +1181,16 @@ namespace httplib::client
         {
             if (ec == boost::asio::error::operation_aborted)
             {
-                set_state(downloader::state::cancelled);
+                set_state(downloader::state::cancelled, ec);
             }
             else
             {
-                set_state(downloader::state::failed, ec.message());
+                set_state(downloader::state::failed, ec);
             }
             co_return ec;
         }
 
-        set_state(downloader::state::completed);
+        set_state(downloader::state::completed, {});
         co_return boost::system::error_code {};
     }
 

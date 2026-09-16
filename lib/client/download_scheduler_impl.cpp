@@ -1,9 +1,10 @@
 #include "download_scheduler_impl.h"
+#include <algorithm>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/post.hpp>
+#include <boost/asio/use_future.hpp>
 #include <boost/system/errc.hpp>
-#include <algorithm>
 #include <optional>
 
 namespace httplib::client
@@ -107,9 +108,7 @@ namespace httplib::client
     // =========================================================================
 
     download_scheduler::task_id
-    download_scheduler::impl::add(std::string_view url,
-                                       fs::path const& save_path,
-                                       task_options opts)
+    download_scheduler::impl::add(std::string_view url, fs::path const& save_path, task_options opts)
     {
         auto id = id_counter_.fetch_add(1, std::memory_order_relaxed);
 
@@ -146,7 +145,9 @@ namespace httplib::client
             std::lock_guard<std::mutex> lk(mtx_);
             auto entry = find_task(id);
             if (!entry)
+            {
                 return;
+            }
             entry->cancel_requested = true;
 
             // If the task is running or about to run, cancel the underlying
@@ -165,7 +166,6 @@ namespace httplib::client
                 {
                     pending_queue_.erase(it);
                     entry->status.state = downloader::state::cancelled;
-                    entry->status.message = "cancelled before start";
                     completed_queue_.push_back(id);
                     completed_changed = true;
                 }
@@ -198,7 +198,6 @@ namespace httplib::client
                     {
                         pending_queue_.erase(it);
                         entry->status.state = downloader::state::cancelled;
-                        entry->status.message = "cancelled before start";
                         completed_queue_.push_back(id);
                         completed_changed = true;
                     }
@@ -219,7 +218,9 @@ namespace httplib::client
             std::lock_guard<std::mutex> lk(mtx_);
             auto entry = find_task(id);
             if (!entry)
+            {
                 return;
+            }
             entry->pause_requested = true;
             if (entry->dl)
             {
@@ -236,7 +237,9 @@ namespace httplib::client
             std::lock_guard<std::mutex> lk(mtx_);
             auto entry = find_task(id);
             if (!entry)
+            {
                 return;
+            }
             entry->pause_requested = false;
             if (entry->dl)
             {
@@ -271,6 +274,20 @@ namespace httplib::client
     }
 
     void
+    download_scheduler::impl::set_cache(std::shared_ptr<cache> c)
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        cache_ = std::move(c);
+    }
+
+    std::shared_ptr<cache>
+    download_scheduler::impl::get_cache() const
+    {
+        std::lock_guard<std::mutex> lk(mtx_);
+        return cache_;
+    }
+
+    void
     download_scheduler::impl::request_stop()
     {
         {
@@ -301,9 +318,8 @@ namespace httplib::client
     void
     download_scheduler::impl::dispatch_pending_locked()
     {
-        std::size_t to_dispatch = (config_.max_concurrent > running_count_)
-                                      ? (config_.max_concurrent - running_count_)
-                                      : 0;
+        std::size_t to_dispatch
+            = (config_.max_concurrent > running_count_) ? (config_.max_concurrent - running_count_) : 0;
 
         std::deque<task_id> skipped;
         std::size_t dispatched = 0;
@@ -314,12 +330,13 @@ namespace httplib::client
             pending_queue_.pop_front();
             auto it = tasks_.find(id);
             if (it == tasks_.end())
+            {
                 continue;
+            }
             auto& entry = it->second;
             if (entry->cancel_requested)
             {
                 entry->status.state = downloader::state::cancelled;
-                entry->status.message = "cancelled before start";
                 completed_queue_.push_back(id);
                 completed_event_.notify_all();
                 continue;
@@ -355,27 +372,34 @@ namespace httplib::client
 
         auto dl = std::make_unique<downloader>(ex, pool_);
         dl->set_config(dl_config);
+        if (cache_)
+        {
+            dl->set_cache(cache_);
+        }
         dl->set_progress_callback(
             [weak_self, id](downloader::progress_info const& info)
             {
                 auto self = weak_self.lock();
                 if (self)
+                {
                     self->on_progress(id, info);
+                }
             });
         dl->set_state_callback(
-            [weak_self, id](downloader::state st, std::string_view msg)
+            [weak_self, id](downloader::state st, boost::system::error_code ec)
             {
                 auto self = weak_self.lock();
                 if (self)
-                    self->on_state(id, st, msg);
+                {
+                    self->on_state(id, st, ec);
+                }
             });
         entry->dl = std::move(dl);
         entry->status.state = downloader::state::connecting;
 
         net::co_spawn(
             ex,
-            [weak_self, entry, url, save_path, headers, id, ex]() mutable
-                -> net::awaitable<void>
+            [weak_self, entry, url, save_path, headers, id, ex]() mutable -> net::awaitable<void>
             {
                 // Hop off the caller's stack first: dispatch_task runs while the
                 // scheduler mutex is held, so we must not touch scheduler state
@@ -384,13 +408,17 @@ namespace httplib::client
 
                 auto self = weak_self.lock();
                 if (!self)
+                {
                     co_return;
+                }
 
                 auto ec = co_await entry->dl->async_download(url, save_path, headers);
 
                 auto self2 = weak_self.lock();
                 if (self2)
+                {
                     self2->on_completion(id, ec);
+                }
             },
             net::detached);
     }
@@ -400,8 +428,7 @@ namespace httplib::client
     // =========================================================================
 
     void
-    download_scheduler::impl::on_progress(task_id id,
-                                          downloader::progress_info const& info)
+    download_scheduler::impl::on_progress(task_id id, downloader::progress_info const& info)
     {
         progress_callback cb;
         task_status ts;
@@ -409,7 +436,9 @@ namespace httplib::client
             std::lock_guard<std::mutex> lk(mtx_);
             auto entry = find_task(id);
             if (!entry)
+            {
                 return;
+            }
             cb = progress_cb_;
             ts = entry->status;
             ts.total_bytes = info.total_bytes;
@@ -429,9 +458,7 @@ namespace httplib::client
     }
 
     void
-    download_scheduler::impl::on_state(task_id id,
-                                       downloader::state st,
-                                       std::string_view msg)
+    download_scheduler::impl::on_state(task_id id, downloader::state st, boost::system::error_code ec)
     {
         state_callback cb;
         task_status ts;
@@ -439,17 +466,18 @@ namespace httplib::client
             std::lock_guard<std::mutex> lk(mtx_);
             auto entry = find_task(id);
             if (!entry)
+            {
                 return;
+            }
             cb = state_cb_;
             entry->status.state = st;
-            entry->status.message = std::string(msg);
             ts = entry->status;
         }
         if (cb)
         {
             try
             {
-                cb(ts);
+                cb(ts, ec);
             }
             catch (...)
             {
@@ -458,20 +486,19 @@ namespace httplib::client
     }
 
     void
-    download_scheduler::impl::on_completion(task_id id,
-                                            boost::system::error_code ec)
+    download_scheduler::impl::on_completion(task_id id, boost::system::error_code ec)
     {
         {
             std::lock_guard<std::mutex> lk(mtx_);
             auto entry = find_task(id);
             if (!entry)
+            {
                 return;
+            }
 
             running_count_--;
 
             entry->status.error = ec;
-            entry->status.message = ec ? ec.message() : "";
-
             completed_queue_.push_back(id);
             dispatch_pending_locked();
         }
@@ -502,10 +529,24 @@ namespace httplib::client
                 }
             }
             if (done)
+            {
                 co_return;
+            }
 
             co_await scheduler_event_.wait();
         }
+    }
+    std::future<void>
+    download_scheduler::impl::run()
+    {
+        return net::co_spawn(
+            ex_,
+            [self = shared_from_this()]() -> net::awaitable<void>
+            {
+                co_await self->async_run();
+                co_return;
+            },
+            net::use_future);
     }
 
     // =========================================================================
@@ -530,7 +571,9 @@ namespace httplib::client
                 }
             }
             if (result)
+            {
                 co_return *result;
+            }
 
             co_await completed_event_.wait();
         }
@@ -565,9 +608,7 @@ namespace httplib::client
                         task_status ts {};
                         ts.id = id;
                         ts.state = downloader::state::cancelled;
-                        ts.message = "task not found";
-                        ts.error
-                            = boost::system::errc::make_error_code(boost::system::errc::no_such_file_or_directory);
+                        ts.error = boost::system::errc::make_error_code(boost::system::errc::no_such_file_or_directory);
                         result = ts;
                     }
                     else if (entry->status.state == downloader::state::completed
@@ -579,7 +620,9 @@ namespace httplib::client
                 }
             }
             if (result)
+            {
                 co_return *result;
+            }
 
             co_await completed_event_.wait();
         }
@@ -625,7 +668,9 @@ namespace httplib::client
                 drained = pending_queue_.empty() && running_count_ == 0;
             }
             if (drained)
+            {
                 co_return;
+            }
 
             co_await scheduler_event_.wait();
         }

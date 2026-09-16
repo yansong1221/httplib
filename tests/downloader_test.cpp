@@ -581,7 +581,7 @@ TEST_CASE("Downloader: cancel stops download", "[downloader]")
     bool download_started = false;
 
     dl.set_state_callback(
-        [&](httplib::client::downloader::state st, std::string_view)
+        [&](httplib::client::downloader::state st, boost::system::error_code ec)
         {
             if (st == httplib::client::downloader::state::downloading)
             {
@@ -905,7 +905,7 @@ TEST_CASE("Downloader: multi-segment pause and resume", "[downloader]")
     std::atomic<bool> paused_seen { false };
 
     dl.set_state_callback(
-        [&](httplib::client::downloader::state st, std::string_view)
+        [&](httplib::client::downloader::state st, boost::system::error_code ec)
         {
             if (st == httplib::client::downloader::state::downloading && !paused)
             {
@@ -986,7 +986,7 @@ TEST_CASE("Downloader: cancel while paused aborts immediately", "[downloader]")
     std::atomic<bool> paused_seen { false };
 
     dl.set_state_callback(
-        [&](httplib::client::downloader::state st, std::string_view)
+        [&](httplib::client::downloader::state st, boost::system::error_code ec)
         {
             if (st == httplib::client::downloader::state::downloading)
             {

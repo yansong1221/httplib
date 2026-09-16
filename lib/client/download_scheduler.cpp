@@ -19,9 +19,7 @@ namespace httplib::client
     }
 
     download_scheduler::task_id
-    download_scheduler::add(std::string_view url,
-                            fs::path const& save_path,
-                            task_options opts)
+    download_scheduler::add(std::string_view url, fs::path const& save_path, task_options opts)
     {
         return impl_->add(url, save_path, std::move(opts));
     }
@@ -104,12 +102,28 @@ namespace httplib::client
         return impl_->get_scheduler_config();
     }
 
+    void
+    download_scheduler::set_cache(std::shared_ptr<cache> c)
+    {
+        impl_->set_cache(std::move(c));
+    }
+
+    std::shared_ptr<cache>
+    download_scheduler::get_cache() const
+    {
+        return impl_->get_cache();
+    }
+
     net::awaitable<void>
     download_scheduler::async_run()
     {
         co_await impl_->async_run();
     }
-
+    void
+    download_scheduler::run()
+    {
+        impl_->run();
+    }
     net::awaitable<download_scheduler::task_status>
     download_scheduler::async_wait_any()
     {

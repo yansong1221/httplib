@@ -1,9 +1,10 @@
 #pragma once
 #include "httplib/client/download_scheduler.hpp"
 #include "httplib/util/async_event.hpp"
-#include <boost/asio/any_io_executor.hpp>
 #include <atomic>
+#include <boost/asio/any_io_executor.hpp>
 #include <deque>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -28,9 +29,7 @@ namespace httplib::client
         };
 
       public:
-        impl(net::any_io_executor ex,
-             std::shared_ptr<http_client_pool> pool,
-             scheduler_config cfg);
+        impl(net::any_io_executor ex, std::shared_ptr<http_client_pool> pool, scheduler_config cfg);
         ~impl();
 
         // -- sync queries (lock + snapshot) --
@@ -43,6 +42,8 @@ namespace httplib::client
         // -- config snapshot --
         scheduler_config get_scheduler_config() const;
 
+        std::future<void> run();
+
         // -- awaitable --
         net::awaitable<void> async_run();
         net::awaitable<task_status> async_wait_any();
@@ -50,9 +51,7 @@ namespace httplib::client
         net::awaitable<void> async_shutdown();
 
         // -- thread-safe entry points (non-blocking) --
-        task_id add(std::string_view url,
-                         fs::path const& save_path,
-                         task_options opts);
+        task_id add(std::string_view url, fs::path const& save_path, task_options opts);
         void cancel(task_id id);
         void cancel_all();
         void pause(task_id id);
@@ -60,6 +59,9 @@ namespace httplib::client
         void set_progress_callback(progress_callback cb);
         void set_state_callback(state_callback cb);
         void set_scheduler_config(scheduler_config const& cfg);
+
+        void set_cache(std::shared_ptr<cache> c);
+        std::shared_ptr<cache> get_cache() const;
 
         // -- non-blocking stop (used by ~download_scheduler) --
         void request_stop();
@@ -71,7 +73,7 @@ namespace httplib::client
 
         // Take mtx_ internally; downloader callbacks may arrive on any thread.
         void on_progress(task_id id, downloader::progress_info const& info);
-        void on_state(task_id id, downloader::state st, std::string_view msg);
+        void on_state(task_id id, downloader::state st, boost::system::error_code ec);
         void on_completion(task_id id, boost::system::error_code ec);
 
         std::shared_ptr<task_entry> find_task(task_id id) const;
@@ -81,6 +83,7 @@ namespace httplib::client
       private:
         net::any_io_executor ex_;
         std::shared_ptr<http_client_pool> pool_;
+        std::shared_ptr<cache> cache_;
         scheduler_config config_;
 
         std::atomic<task_id> id_counter_ { 1 };

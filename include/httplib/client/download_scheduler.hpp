@@ -42,12 +42,11 @@ namespace httplib::client
             std::uint64_t downloaded_bytes = 0;
             std::uint64_t speed_bytes_per_sec = 0;
 
-            std::string message;
             boost::system::error_code error;
         };
 
         using progress_callback = std::function<void(task_status const&)>;
-        using state_callback = std::function<void(task_status const&)>;
+        using state_callback = std::function<void(task_status const&, boost::system::error_code)>;
 
       public:
         explicit download_scheduler(net::any_io_executor ex,
@@ -63,9 +62,7 @@ namespace httplib::client
 
         // -- task lifecycle --
 
-        task_id add(std::string_view url,
-                    fs::path const& save_path,
-                    task_options opts = {});
+        task_id add(std::string_view url, fs::path const& save_path, task_options opts = {});
 
         void cancel(task_id id);
         void cancel_all();
@@ -91,6 +88,15 @@ namespace httplib::client
 
         void set_scheduler_config(scheduler_config const& cfg);
         scheduler_config get_scheduler_config() const;
+
+        // -- cache --
+
+        /// Attach a shared cache that every task's downloader will use.
+        /// Tasks scheduled after this point share the same cache instance.
+        void set_cache(std::shared_ptr<cache> c);
+        std::shared_ptr<cache> get_cache() const;
+
+        void run();
 
         // -- awaitable --
 

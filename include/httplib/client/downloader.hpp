@@ -41,7 +41,7 @@ namespace httplib::client
             cancelled
         };
 
-        using state_callback = std::function<void(state st, std::string_view msg)>;
+        using state_callback = std::function<void(state st, boost::system::error_code ec)>;
 
         struct config
         {

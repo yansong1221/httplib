@@ -100,7 +100,7 @@ namespace httplib::client
         static std::string parse_content_disposition_filename(http::fields const& headers);
         static std::optional<redirect_target> parse_redirect(http::fields const& headers);
 
-        void set_state(downloader::state st, std::string_view msg = {});
+        void set_state(downloader::state st, boost::system::error_code ec);
         void update_progress(std::uint64_t delta_bytes);
 
         void save_state(fs::path const& save_path);
@@ -140,7 +140,6 @@ namespace httplib::client
 
         mutable std::mutex state_mutex_;
         downloader::state state_ = downloader::state::idle;
-        std::string state_msg_;
 
         mutable std::mutex progress_mutex_;
         std::uint64_t total_bytes_ = 0;

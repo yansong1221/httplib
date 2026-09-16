@@ -2,12 +2,13 @@
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/download_scheduler.hpp"
 #include "httplib/client/downloader.hpp"
+#include "httplib/client/disk_cache.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
-#include <boost/asio/co_spawn.hpp>
-#include <boost/asio/detached.hpp>
 #include <algorithm>
 #include <atomic>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -93,10 +94,7 @@ namespace
     void
     start_scheduler(net::io_context& ioc, sched_ptr sched)
     {
-        net::co_spawn(
-            ioc,
-            [sched]() -> net::awaitable<void> { co_await sched->async_run(); },
-            net::detached);
+        net::co_spawn(ioc, [sched]() -> net::awaitable<void> { co_await sched->async_run(); }, net::detached);
     }
 
     // Gracefully stop the scheduler and block until fully drained.
@@ -135,9 +133,8 @@ namespace
     bool
     is_terminal(httplib::client::downloader::state st)
     {
-        return st == httplib::client::downloader::state::completed ||
-               st == httplib::client::downloader::state::failed ||
-               st == httplib::client::downloader::state::cancelled;
+        return st == httplib::client::downloader::state::completed || st == httplib::client::downloader::state::failed
+               || st == httplib::client::downloader::state::cancelled;
     }
 } // namespace
 
@@ -151,17 +148,15 @@ TEST_CASE("Download scheduler: basic single task", "[download_scheduler]")
     auto dl_path = fs::temp_directory_path() / "sched_basic_out.bin";
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/file",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>(
-        "/file",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, "16");
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/file",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(server_path); });
+    ts.router().set_http_handler<http::verb::head>("/file",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, "16");
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(ts.ioc_.get_executor(), ts.pool);
@@ -197,29 +192,29 @@ TEST_CASE("Download scheduler: max_concurrent limits tasks", "[download_schedule
     std::atomic<int> max_seen { 0 };
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/slow",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            int cur = active.fetch_add(1) + 1;
-            int prev = max_seen.load();
-            while (cur > prev && !max_seen.compare_exchange_weak(prev, cur))
-            {
-            }
-            resp.set_file_content(server_path);
-            active.fetch_sub(1);
-        });
-    ts.router().set_http_handler<http::verb::head>(
-        "/slow",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, std::to_string(kSize));
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/slow",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  {
+                                                      int cur = active.fetch_add(1) + 1;
+                                                      int prev = max_seen.load();
+                                                      while (cur > prev && !max_seen.compare_exchange_weak(prev, cur))
+                                                      {
+                                                      }
+                                                      resp.set_file_content(server_path);
+                                                      active.fetch_sub(1);
+                                                  });
+    ts.router().set_http_handler<http::verb::head>("/slow",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, std::to_string(kSize));
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(
-        ts.ioc_.get_executor(), ts.pool, httplib::client::download_scheduler::scheduler_config { .max_concurrent = 2 });
+        ts.ioc_.get_executor(),
+        ts.pool,
+        httplib::client::download_scheduler::scheduler_config { .max_concurrent = 2 });
 
     std::vector<fs::path> outs;
     for (int i = 0; i < 3; ++i)
@@ -267,20 +262,18 @@ TEST_CASE("Download scheduler: cancel all tasks", "[download_scheduler]")
     }
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/big",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            resp.set_file_content(server_path);
-        });
-    ts.router().set_http_handler<http::verb::head>(
-        "/big",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, std::to_string(kSize));
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/big",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  {
+                                                      std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                                                      resp.set_file_content(server_path);
+                                                  });
+    ts.router().set_http_handler<http::verb::head>("/big",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, std::to_string(kSize));
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(ts.ioc_.get_executor(), ts.pool);
@@ -339,17 +332,15 @@ TEST_CASE("Download scheduler: pause and resume", "[download_scheduler]")
     }
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/p",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>(
-        "/p",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, std::to_string(kSize));
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/p",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(server_path); });
+    ts.router().set_http_handler<http::verb::head>("/p",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, std::to_string(kSize));
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(ts.ioc_.get_executor(), ts.pool);
@@ -362,8 +353,8 @@ TEST_CASE("Download scheduler: pause and resume", "[download_scheduler]")
         [&]
         {
             auto st = sched->get_status(id).state;
-            return st == httplib::client::downloader::state::downloading ||
-                   st == httplib::client::downloader::state::connecting;
+            return st == httplib::client::downloader::state::downloading
+                   || st == httplib::client::downloader::state::connecting;
         }));
 
     sched->pause(id);
@@ -405,17 +396,15 @@ TEST_CASE("Download scheduler: state callback fires", "[download_scheduler]")
     auto dl_path = fs::temp_directory_path() / "sched_cb_out.bin";
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/cb",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>(
-        "/cb",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, "8");
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/cb",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(server_path); });
+    ts.router().set_http_handler<http::verb::head>("/cb",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, "8");
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(ts.ioc_.get_executor(), ts.pool);
@@ -424,7 +413,7 @@ TEST_CASE("Download scheduler: state callback fires", "[download_scheduler]")
     bool saw_completed = false;
     std::atomic<int> cb_count { 0 };
     sched->set_state_callback(
-        [&](httplib::client::download_scheduler::task_status const& s)
+        [&](httplib::client::download_scheduler::task_status const& s, boost::system::error_code ec)
         {
             cb_count.fetch_add(1);
             std::lock_guard<std::mutex> lk(mtx);
@@ -467,28 +456,24 @@ TEST_CASE("Download scheduler: dynamic add while running", "[download_scheduler]
     auto out_b = fs::temp_directory_path() / "sched_dyn_out_b.bin";
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/a",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_file_content(srv_a); });
-    ts.router().set_http_handler<http::verb::head>(
-        "/a",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, "7");
-            resp.set(http::field::accept_ranges, "bytes");
-        });
-    ts.router().set_http_handler<http::verb::get>(
-        "/b",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_file_content(srv_b); });
-    ts.router().set_http_handler<http::verb::head>(
-        "/b",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, "7");
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/a",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(srv_a); });
+    ts.router().set_http_handler<http::verb::head>("/a",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, "7");
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
+    ts.router().set_http_handler<http::verb::get>("/b",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(srv_b); });
+    ts.router().set_http_handler<http::verb::head>("/b",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, "7");
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(ts.ioc_.get_executor(), ts.pool);
@@ -529,24 +514,24 @@ TEST_CASE("Download scheduler: pending task cancel before dispatch", "[download_
     }
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/slow",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            resp.set_file_content(server_path);
-        });
-    ts.router().set_http_handler<http::verb::head>(
-        "/slow",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, std::to_string(kSize));
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/slow",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  {
+                                                      std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                                                      resp.set_file_content(server_path);
+                                                  });
+    ts.router().set_http_handler<http::verb::head>("/slow",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, std::to_string(kSize));
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(
-        ts.ioc_.get_executor(), ts.pool, httplib::client::download_scheduler::scheduler_config { .max_concurrent = 1 });
+        ts.ioc_.get_executor(),
+        ts.pool,
+        httplib::client::download_scheduler::scheduler_config { .max_concurrent = 1 });
 
     auto out1 = fs::temp_directory_path() / "sched_pend_out1.bin";
     auto out2 = fs::temp_directory_path() / "sched_pend_out2.bin";
@@ -591,17 +576,15 @@ TEST_CASE("Download scheduler: shutdown drains running tasks", "[download_schedu
     auto dl_path = fs::temp_directory_path() / "sched_shutdown_out.bin";
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/done",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>(
-        "/done",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, "12");
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/done",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(server_path); });
+    ts.router().set_http_handler<http::verb::head>("/done",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, "12");
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(ts.ioc_.get_executor(), ts.pool);
@@ -637,20 +620,18 @@ TEST_CASE("Download scheduler: cancel a single running task", "[download_schedul
     auto dl_path = fs::temp_directory_path() / "sched_single_cancel_out.bin";
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/big",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            resp.set_file_content(server_path);
-        });
-    ts.router().set_http_handler<http::verb::head>(
-        "/big",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, std::to_string(kSize));
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/big",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  {
+                                                      std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                                                      resp.set_file_content(server_path);
+                                                  });
+    ts.router().set_http_handler<http::verb::head>("/big",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, std::to_string(kSize));
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(ts.ioc_.get_executor(), ts.pool);
@@ -689,17 +670,15 @@ TEST_CASE("Download scheduler: progress callback carries id and url", "[download
     auto dl_path = fs::temp_directory_path() / "sched_prog_out.bin";
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/prog",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>(
-        "/prog",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, "262144");
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/prog",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(server_path); });
+    ts.router().set_http_handler<http::verb::head>("/prog",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, "262144");
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(ts.ioc_.get_executor(), ts.pool);
@@ -783,24 +762,24 @@ TEST_CASE("Download scheduler: pending pause blocks dispatch until resume", "[do
     }
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/slow",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            resp.set_file_content(server_path);
-        });
-    ts.router().set_http_handler<http::verb::head>(
-        "/slow",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, std::to_string(kSize));
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/slow",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  {
+                                                      std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                                                      resp.set_file_content(server_path);
+                                                  });
+    ts.router().set_http_handler<http::verb::head>("/slow",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, std::to_string(kSize));
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(
-        ts.ioc_.get_executor(), ts.pool, httplib::client::download_scheduler::scheduler_config { .max_concurrent = 1 });
+        ts.ioc_.get_executor(),
+        ts.pool,
+        httplib::client::download_scheduler::scheduler_config { .max_concurrent = 1 });
 
     auto out1 = fs::temp_directory_path() / "sched_ppause_out1.bin";
     auto out2 = fs::temp_directory_path() / "sched_ppause_out2.bin";
@@ -844,24 +823,24 @@ TEST_CASE("Download scheduler: cancel a paused-pending task", "[download_schedul
     }
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/slow",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            resp.set_file_content(server_path);
-        });
-    ts.router().set_http_handler<http::verb::head>(
-        "/slow",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, std::to_string(kSize));
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/slow",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  {
+                                                      std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                                                      resp.set_file_content(server_path);
+                                                  });
+    ts.router().set_http_handler<http::verb::head>("/slow",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, std::to_string(kSize));
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(
-        ts.ioc_.get_executor(), ts.pool, httplib::client::download_scheduler::scheduler_config { .max_concurrent = 1 });
+        ts.ioc_.get_executor(),
+        ts.pool,
+        httplib::client::download_scheduler::scheduler_config { .max_concurrent = 1 });
 
     auto out1 = fs::temp_directory_path() / "sched_ppcancel_out1.bin";
     auto out2 = fs::temp_directory_path() / "sched_ppcancel_out2.bin";
@@ -897,17 +876,15 @@ TEST_CASE("Download scheduler: async_wait_any consumes one completion each", "[d
     }
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/w",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>(
-        "/w",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, "9");
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/w",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(server_path); });
+    ts.router().set_http_handler<http::verb::head>("/w",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, "9");
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(ts.ioc_.get_executor(), ts.pool);
@@ -961,17 +938,15 @@ TEST_CASE("Download scheduler: async_wait_one returns immediately for done/missi
     auto dl_path = fs::temp_directory_path() / "sched_wone_out.bin";
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/o",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>(
-        "/o",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, "9");
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/o",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(server_path); });
+    ts.router().set_http_handler<http::verb::head>("/o",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, "9");
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(ts.ioc_.get_executor(), ts.pool);
@@ -992,7 +967,6 @@ TEST_CASE("Download scheduler: async_wait_one returns immediately for done/missi
         REQUIRE(st.id == std::numeric_limits<std::uint64_t>::max());
         REQUIRE(st.state == httplib::client::downloader::state::cancelled);
         REQUIRE(st.error == boost::system::errc::make_error_code(boost::system::errc::no_such_file_or_directory));
-        REQUIRE(st.message == "task not found");
     }
 
     // Submit the task before starting the driver so async_run does not see an
@@ -1040,20 +1014,18 @@ TEST_CASE("Download scheduler: shutdown while a task is paused", "[download_sche
     auto dl_path = fs::temp_directory_path() / "sched_spause_out.bin";
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/p",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>(
-        "/p",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, std::to_string(kSize));
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/p",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(server_path); });
+    ts.router().set_http_handler<http::verb::head>("/p",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, std::to_string(kSize));
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
-        auto sched = std::make_shared<httplib::client::download_scheduler>(ts.ioc_.get_executor(), ts.pool);
+    auto sched = std::make_shared<httplib::client::download_scheduler>(ts.ioc_.get_executor(), ts.pool);
     auto id = sched->add(ts.url_for_path("/p"), dl_path);
     start_scheduler(ts.ioc_, sched);
 
@@ -1096,24 +1068,24 @@ TEST_CASE("Download scheduler: shutdown while a task is pending", "[download_sch
     }
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/slow",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            resp.set_file_content(server_path);
-        });
-    ts.router().set_http_handler<http::verb::head>(
-        "/slow",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, std::to_string(kSize));
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/slow",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  {
+                                                      std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                                                      resp.set_file_content(server_path);
+                                                  });
+    ts.router().set_http_handler<http::verb::head>("/slow",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, std::to_string(kSize));
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(
-        ts.ioc_.get_executor(), ts.pool, httplib::client::download_scheduler::scheduler_config { .max_concurrent = 1 });
+        ts.ioc_.get_executor(),
+        ts.pool,
+        httplib::client::download_scheduler::scheduler_config { .max_concurrent = 1 });
 
     auto out1 = fs::temp_directory_path() / "sched_spend_out1.bin";
     auto out2 = fs::temp_directory_path() / "sched_spend_out2.bin";
@@ -1148,17 +1120,15 @@ TEST_CASE("Download scheduler: add is rejected after shutdown", "[download_sched
     auto dl_path = fs::temp_directory_path() / "sched_after_out.bin";
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/a",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>(
-        "/a",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, "15");
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/a",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(server_path); });
+    ts.router().set_http_handler<http::verb::head>("/a",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, "15");
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(ts.ioc_.get_executor(), ts.pool);
@@ -1229,30 +1199,30 @@ TEST_CASE("Download scheduler: dynamic config change wakes dispatch", "[download
     std::atomic<int> max_seen { 0 };
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/slow",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            int cur = active.fetch_add(1) + 1;
-            int prev = max_seen.load();
-            while (cur > prev && !max_seen.compare_exchange_weak(prev, cur))
-            {
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(300));
-            resp.set_file_content(server_path);
-            active.fetch_sub(1);
-        });
-    ts.router().set_http_handler<http::verb::head>(
-        "/slow",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, std::to_string(kSize));
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/slow",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  {
+                                                      int cur = active.fetch_add(1) + 1;
+                                                      int prev = max_seen.load();
+                                                      while (cur > prev && !max_seen.compare_exchange_weak(prev, cur))
+                                                      {
+                                                      }
+                                                      std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                                                      resp.set_file_content(server_path);
+                                                      active.fetch_sub(1);
+                                                  });
+    ts.router().set_http_handler<http::verb::head>("/slow",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, std::to_string(kSize));
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(
-        ts.ioc_.get_executor(), ts.pool, httplib::client::download_scheduler::scheduler_config { .max_concurrent = 1 });
+        ts.ioc_.get_executor(),
+        ts.pool,
+        httplib::client::download_scheduler::scheduler_config { .max_concurrent = 1 });
 
     auto out1 = fs::temp_directory_path() / "sched_cfg_out1.bin";
     auto out2 = fs::temp_directory_path() / "sched_cfg_out2.bin";
@@ -1295,28 +1265,24 @@ TEST_CASE("Download scheduler: state callback may re-enter add", "[download_sche
     auto out_b = fs::temp_directory_path() / "sched_rentry_out_b.bin";
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/a",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_file_content(srv_a); });
-    ts.router().set_http_handler<http::verb::head>(
-        "/a",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, "6");
-            resp.set(http::field::accept_ranges, "bytes");
-        });
-    ts.router().set_http_handler<http::verb::get>(
-        "/b",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_file_content(srv_b); });
-    ts.router().set_http_handler<http::verb::head>(
-        "/b",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, "7");
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/a",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(srv_a); });
+    ts.router().set_http_handler<http::verb::head>("/a",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, "6");
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
+    ts.router().set_http_handler<http::verb::get>("/b",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(srv_b); });
+    ts.router().set_http_handler<http::verb::head>("/b",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, "7");
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(ts.ioc_.get_executor(), ts.pool);
@@ -1324,7 +1290,7 @@ TEST_CASE("Download scheduler: state callback may re-enter add", "[download_sche
     std::atomic<httplib::client::download_scheduler::task_id> second_id { 0 };
     std::atomic<bool> first_completed { false };
     sched->set_state_callback(
-        [&](httplib::client::download_scheduler::task_status const& s)
+        [&](httplib::client::download_scheduler::task_status const& s, boost::system::error_code ec)
         {
             if (s.state == httplib::client::downloader::state::completed && s.save_path == out_a
                 && !first_completed.exchange(true))
@@ -1363,26 +1329,21 @@ TEST_CASE("Download scheduler: callback exception does not kill the run", "[down
     auto dl_path = fs::temp_directory_path() / "sched_chex_out.bin";
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/e",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>(
-        "/e",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, "4");
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/e",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(server_path); });
+    ts.router().set_http_handler<http::verb::head>("/e",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, "4");
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(ts.ioc_.get_executor(), ts.pool);
 
-    sched->set_state_callback(
-        [](httplib::client::download_scheduler::task_status const&)
-        {
-            throw std::runtime_error("boom");
-        });
+    sched->set_state_callback([](httplib::client::download_scheduler::task_status const&, boost::system::error_code ec)
+                              { throw std::runtime_error("boom"); });
 
     auto id = sched->add(ts.url_for_path("/e"), dl_path);
     start_scheduler(ts.ioc_, sched);
@@ -1407,24 +1368,22 @@ TEST_CASE("Download scheduler: callback may trigger shutdown", "[download_schedu
     auto dl_path = fs::temp_directory_path() / "sched_ctor_out.bin";
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/g",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>(
-        "/g",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, "5");
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/g",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(server_path); });
+    ts.router().set_http_handler<http::verb::head>("/g",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, "5");
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(ts.ioc_.get_executor(), ts.pool);
 
     std::atomic<bool> shutdown_started { false };
     sched->set_state_callback(
-        [&](httplib::client::download_scheduler::task_status const& s)
+        [&](httplib::client::download_scheduler::task_status const& s, boost::system::error_code ec)
         {
             if (s.state == httplib::client::downloader::state::completed && !shutdown_started.exchange(true))
             {
@@ -1469,21 +1428,21 @@ TEST_CASE("Download scheduler: concurrent API calls from many threads", "[downlo
     }
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/m",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>(
-        "/m",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, std::to_string(kSize));
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/m",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(server_path); });
+    ts.router().set_http_handler<http::verb::head>("/m",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, std::to_string(kSize));
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(
-        ts.ioc_.get_executor(), ts.pool, httplib::client::download_scheduler::scheduler_config { .max_concurrent = 4 });
+        ts.ioc_.get_executor(),
+        ts.pool,
+        httplib::client::download_scheduler::scheduler_config { .max_concurrent = 4 });
 
     // Seed a task first so async_run never observes an empty task set and
     // exits before the worker threads start submitting.
@@ -1575,17 +1534,15 @@ TEST_CASE("Download scheduler: sync queries are safe from inside a state callbac
     auto dl_path = fs::temp_directory_path() / "sched_rq_out.bin";
 
     dl_sched_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
-        "/q",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>(
-        "/q",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            resp.set(http::field::content_length, "18");
-            resp.set(http::field::accept_ranges, "bytes");
-        });
+    ts.router().set_http_handler<http::verb::get>("/q",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(server_path); });
+    ts.router().set_http_handler<http::verb::head>("/q",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, "18");
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(ts.ioc_.get_executor(), ts.pool);
@@ -1593,7 +1550,7 @@ TEST_CASE("Download scheduler: sync queries are safe from inside a state callbac
 
     std::atomic<bool> queried_ok { false };
     sched->set_state_callback(
-        [&](httplib::client::download_scheduler::task_status const& s)
+        [&](httplib::client::download_scheduler::task_status const& s, boost::system::error_code ec)
         {
             if (s.state != httplib::client::downloader::state::completed)
             {
@@ -1605,9 +1562,8 @@ TEST_CASE("Download scheduler: sync queries are safe from inside a state callbac
             (void)sched->pending_count();
             auto total = sched->total_count();
             auto cfg = sched->get_scheduler_config();
-            queried_ok.store(
-                st.id == id && all.size() == 1 && total == 1 && cfg.max_concurrent >= 1,
-                std::memory_order_relaxed);
+            queried_ok.store(st.id == id && all.size() == 1 && total == 1 && cfg.max_concurrent >= 1,
+                             std::memory_order_relaxed);
         });
     start_scheduler(ts.ioc_, sched);
 
@@ -1620,4 +1576,49 @@ TEST_CASE("Download scheduler: sync queries are safe from inside a state callbac
 
     fs::remove(server_path);
     fs::remove(dl_path);
+}
+
+TEST_CASE("Download scheduler: shared cache reaches per-task downloaders", "[download_scheduler][cache]")
+{
+    auto server_path = fs::temp_directory_path() / "sched_cache_srv.bin";
+    {
+        std::ofstream f(server_path, std::ios::binary);
+        f << "scheduler cached payload\n";
+    }
+    auto dl_path = fs::temp_directory_path() / "sched_cache_out.bin";
+    auto cache_dir = fs::temp_directory_path() / "httplib_sched_cache_dir";
+
+    dl_sched_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>("/cached",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  {
+                                                      resp.set(http::field::etag, "\"sched-123\"");
+                                                      resp.set_file_content(server_path);
+                                                  });
+    ts.router().set_http_handler<http::verb::head>("/cached",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::etag, "\"sched-123\"");
+                                                       resp.set(http::field::content_length, "23");
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
+    ts.start();
+
+    auto cache = std::make_shared<httplib::client::disk_cache>(cache_dir);
+    auto sched = std::make_shared<httplib::client::download_scheduler>(ts.ioc_.get_executor(), ts.pool);
+    sched->set_cache(cache);
+    auto id = sched->add(ts.url_for_path("/cached"), dl_path);
+    start_scheduler(ts.ioc_, sched);
+
+    REQUIRE(wait_until([&] { return is_terminal(sched->get_status(id).state); }));
+    REQUIRE(sched->get_status(id).state == httplib::client::downloader::state::completed);
+    REQUIRE(read_file(dl_path) == "scheduler cached payload\n");
+    REQUIRE(cache->entry_count() >= 1);
+    REQUIRE(sched->get_cache() == cache);
+
+    shutdown_scheduler(ts.ioc_, sched);
+
+    fs::remove(server_path);
+    fs::remove(dl_path);
+    fs::remove_all(cache_dir);
 }
