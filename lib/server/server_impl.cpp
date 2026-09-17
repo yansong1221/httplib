@@ -386,7 +386,6 @@ namespace httplib::server
                                          http_server::proxy_interceptor_factory factory)
     {
         auto proxy_pool = std::make_shared<client::http_client_pool>(ex_);
-        proxy_pool->start();
 
         std::string prefix = detail::strip_proxy_prefix(location);
 

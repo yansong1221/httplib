@@ -4,7 +4,6 @@
 #include "httplib/util/misc.hpp"
 #include "httplib/util/ticker.hpp"
 #include "util/logging.hpp"
-#include <atomic>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/system/system_error.hpp>
 #include <boost/url.hpp>
@@ -182,13 +181,13 @@ namespace httplib::client
         }
 
         void
-        release(std::unique_ptr<http_client> conn, uint64_t epoch)
+        release(std::unique_ptr<http_client> conn)
         {
             auto url = util::make_url_value(conn->host(), conn->port(), conn->is_use_ssl());
 
             std::lock_guard<std::mutex> lock(mutex_);
 
-            if (!is_running() || epoch != epoch_)
+            if (!is_running())
             {
                 return;
             }
@@ -221,17 +220,14 @@ namespace httplib::client
         {
             // 重入/并发安全依靠幂等而非 once 标志：
             // 1) mutex_ 串行状态搬运，第二个 stop() 只会看到已清空的容器，不会二次释放；
-            // 2) epoch_ 单调递增，重复 stop 只是让更多旧 handle 失效（release 侧全部丢弃）；
-            // 3) ticker::stop() 在 state_mutex_ 下按 is_running_ 幂等，重复调用为 no-op；
-            // 4) ticker::stop() 用 post 投递（不 inline），on_stop 不会回到本函数栈上，故无递归。
+            // 2) ticker::stop() 在 state_mutex_ 下按 is_running_ 幂等，重复调用为 no-op；
+            // 3) ticker::stop() 用 post 投递（不 inline），on_stop 不会回到本函数栈上，故无递归。
+            // stop() 是终态：is_running() 此后恒为 false，池不再接受借出。
             std::vector<waiters_list> pending_waiters;
             std::vector<std::unique_ptr<http_client>> to_close;
 
             {
                 std::lock_guard<std::mutex> lock(mutex_);
-
-                // 递增 epoch：stop 前借出的 handle 在 restart 后归还时不得污染新池计数。
-                ++epoch_;
 
                 pending_waiters.reserve(waiters_.size());
                 for (auto& [url, waiters] : waiters_)
@@ -505,7 +501,6 @@ namespace httplib::client
                 {
                     // 校验期间连接不在 idle 里，但必须继续占 route 容量。
                     ++st.validating_count;
-                    auto epoch_at_check = epoch_.load();
 
                     bool alive = false;
                     try
@@ -517,8 +512,8 @@ namespace httplib::client
                         alive = false;
                     }
 
-                    // stop/restart 后不能再把旧连接塞回新池，也不能改新池计数。
-                    if (!is_running() || epoch_at_check != epoch_)
+                    // stop() 后不能再把旧连接塞回池，也不能改池计数。
+                    if (!is_running())
                     {
                         return {};
                     }
@@ -545,14 +540,12 @@ namespace httplib::client
 
                     inc_active_locked(validated_st);
                     return client_handle(std::static_pointer_cast<http_client_pool::impl>(shared_from_this()),
-                                         std::move(conn),
-                                         epoch_);
+                                         std::move(conn));
                 }
 
                 inc_active_locked(st);
                 return client_handle(std::static_pointer_cast<http_client_pool::impl>(shared_from_this()),
-                                     std::move(conn),
-                                     epoch_);
+                                     std::move(conn));
             }
 
             // Only touch pools_ when actually creating a connection, so a failed
@@ -569,8 +562,7 @@ namespace httplib::client
                     apply_client_settings(*client);
                     get_logger()->debug("client pool: created connection for {} (total={})", url, total_connections_);
                     return client_handle(std::static_pointer_cast<http_client_pool::impl>(shared_from_this()),
-                                         std::move(client),
-                                         epoch_);
+                                         std::move(client));
                 }
                 catch (...)
                 {
@@ -638,8 +630,6 @@ namespace httplib::client
         std::unordered_map<std::string, pool_state> pools_;
         size_t total_connections_ = 0;
         size_t total_active_ = 0;
-        /// 受 mutex_ 保护；stop() 递增，使旧 handle 在 restart 后归还时失效。
-        std::atomic<uint64_t> epoch_ = 0;
         pool_params cfg_;
 
         std::unordered_map<std::string, waiters_list> waiters_;
@@ -655,12 +645,9 @@ namespace httplib::client
     {
     }
 
-    http_client_pool::client_handle::client_handle(std::weak_ptr<impl> pool,
-                                                   std::unique_ptr<http_client> conn,
-                                                   uint64_t epoch)
+    http_client_pool::client_handle::client_handle(std::weak_ptr<impl> pool, std::unique_ptr<http_client> conn)
         : pool_(std::move(pool))
         , conn_(std::move(conn))
-        , epoch_(epoch)
     {
     }
 
@@ -670,7 +657,6 @@ namespace httplib::client
         : pool_(std::move(other.pool_))
         , conn_(std::move(other.conn_))
         , error_(other.error_)
-        , epoch_(other.epoch_)
     {
         // 成功 handle 被 move 后源对象变为 expired；失败 handle 保留原错误码。
         if (!other.error_ && other.conn_ == nullptr)
@@ -689,7 +675,6 @@ namespace httplib::client
             pool_ = std::move(other.pool_);
             conn_ = std::move(other.conn_);
             error_ = other.error_;
-            epoch_ = other.epoch_;
             if (other_was_live && !other.error_)
             {
                 other.error_ = boost::system::errc::make_error_code(boost::system::errc::not_connected);
@@ -706,7 +691,7 @@ namespace httplib::client
         auto pool = pool_.lock();
         if (pool && conn_)
         {
-            pool->release(std::move(conn_), epoch_);
+            pool->release(std::move(conn_));
             if (!error_)
             {
                 error_ = boost::system::errc::make_error_code(boost::system::errc::not_connected);
@@ -777,6 +762,7 @@ namespace httplib::client
     http_client_pool::http_client_pool(net::any_io_executor const& ex, pool_params params)
         : impl_(std::make_shared<impl>(ex, params))
     {
+        impl_->start();
     }
 
     http_client_pool::~http_client_pool()
@@ -790,12 +776,6 @@ namespace httplib::client
     http_client_pool::http_client_pool(http_client_pool&& other) noexcept = default;
 
     http_client_pool& http_client_pool::operator=(http_client_pool&& other) noexcept = default;
-
-    void
-    http_client_pool::start()
-    {
-        impl_->start();
-    }
 
     net::awaitable<http_client_pool::client_handle>
     http_client_pool::async_acquire(std::string_view host,

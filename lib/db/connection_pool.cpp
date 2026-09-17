@@ -16,18 +16,15 @@ namespace httplib::db
     connection_pool::session_handle::session_handle() {}
 
     connection_pool::session_handle::session_handle(std::weak_ptr<impl> pool,
-                                                    std::unique_ptr<session> sess,
-                                                    uint64_t epoch)
+                                                    std::unique_ptr<session> sess)
         : pool_(std::move(pool))
         , sess_(std::move(sess))
-        , epoch_(epoch)
     {
     }
 
     connection_pool::session_handle::session_handle(session_handle&& other) noexcept
         : pool_(std::move(other.pool_))
         , sess_(std::move(other.sess_))
-        , epoch_(other.epoch_)
     {
     }
 
@@ -39,7 +36,6 @@ namespace httplib::db
             release();
             pool_ = std::move(other.pool_);
             sess_ = std::move(other.sess_);
-            epoch_ = other.epoch_;
         }
         return *this;
     }
@@ -52,7 +48,7 @@ namespace httplib::db
         auto pool = pool_.lock();
         if (pool && sess_)
         {
-            pool->release_session(std::move(sess_), epoch_);
+            pool->release_session(std::move(sess_));
         }
     }
 
@@ -97,18 +93,13 @@ namespace httplib::db
     connection_pool::connection_pool(net::any_io_executor ex, pool_params c, connect_fn connect)
         : impl_(std::make_shared<impl>(ex, std::move(c), std::move(connect)))
     {
+        impl_->start();
     }
 
     connection_pool::~connection_pool() { stop(); }
 
     connection_pool::connection_pool(connection_pool&&) noexcept = default;
     connection_pool& connection_pool::operator=(connection_pool&&) noexcept = default;
-
-    void
-    connection_pool::start()
-    {
-        impl_->start();
-    }
 
     net::awaitable<connection_pool::session_handle>
     connection_pool::async_acquire(std::chrono::steady_clock::duration wait_timeout)

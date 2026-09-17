@@ -63,7 +63,7 @@ namespace
             [&]() -> net::awaitable<void>
             {
                 db::connection_pool pool = make_pool(ioc.get_executor());
-                pool.start();
+
                 auto handle = co_await pool.async_acquire();
                 co_await handle->query("CREATE DATABASE IF NOT EXISTS test");
                 co_await handle->query("USE test");
@@ -88,7 +88,6 @@ namespace
             [&]() -> net::awaitable<void>
             {
                 db::connection_pool pool = make_pool(ioc.get_executor());
-                pool.start();
                 co_await f(pool);
             },
             [&](std::exception_ptr e) { err = e; });
@@ -448,7 +447,7 @@ TEST_CASE("db(mysql): connection_pool concurrent acquire", "[db][mysql]")
         [&]() -> net::awaitable<void>
         {
             db::connection_pool pool = make_pool(ioc.get_executor(), cfg);
-            pool.start();
+
             auto s1 = co_await pool.async_acquire();
             auto s2 = co_await pool.async_acquire();
             auto r1 = co_await s1->query("SELECT 'one' AS v");
@@ -478,7 +477,6 @@ TEST_CASE("db(mysql): pool honors max_connections over min_connections", "[db][m
         [&]() -> net::awaitable<void>
         {
             db::connection_pool pool = make_pool(ioc.get_executor(), cfg);
-            pool.start();
 
             // 等待后台预建完成（最多 3s；DB 不可用则 total_count 保持 0，测试不误报）
             auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
@@ -517,7 +515,6 @@ TEST_CASE("db(mysql): idle connections are reaped by idle_timeout", "[db][mysql]
         [&]() -> net::awaitable<void>
         {
             db::connection_pool pool = make_pool(ioc.get_executor(), cfg);
-            pool.start();
 
             {
                 std::vector<db::connection_pool::session_handle> handles;
@@ -564,7 +561,6 @@ TEST_CASE("db(mysql): pool survives unreachable server", "[db][mysql]")
         [&]() -> net::awaitable<void>
         {
             db::connection_pool pool = make_pool(ioc.get_executor(), cfg, mc);
-            pool.start();
 
             // 给 pre-create 失败 + maintenance refill 失败留时间
             net::steady_timer settle(ioc.get_executor());
@@ -1310,7 +1306,7 @@ TEST_CASE("db(mysql): async_acquire honors wait_timeout", "[db][mysql]")
         [&]() -> net::awaitable<void>
         {
             db::connection_pool pool = make_pool(ioc.get_executor(), cfg);
-            pool.start();
+
             auto h1 = co_await pool.async_acquire(); // holds the only connection
 
             auto t0 = std::chrono::steady_clock::now();
@@ -1340,7 +1336,7 @@ TEST_CASE("db(mysql): async_acquire zero wait_timeout fails fast", "[db][mysql]"
         [&]() -> net::awaitable<void>
         {
             db::connection_pool pool = make_pool(ioc.get_executor(), cfg);
-            pool.start();
+
             auto h1 = co_await pool.async_acquire(); // holds the only connection
 
             auto t0 = std::chrono::steady_clock::now();
@@ -1370,7 +1366,6 @@ TEST_CASE("db(mysql): transport error marks connection dead", "[db][mysql]")
         [&]() -> net::awaitable<void>
         {
             db::connection_pool pool = make_pool(ioc.get_executor(), cfg);
-            pool.start();
 
             {
                 auto h1 = co_await pool.async_acquire();
@@ -1413,7 +1408,6 @@ TEST_CASE("db(mysql): borrow ping drops stale connection", "[db][mysql]")
         [&]() -> net::awaitable<void>
         {
             db::connection_pool pool = make_pool(ioc.get_executor(), cfg);
-            pool.start();
 
             {
                 auto h1 = co_await pool.async_acquire();
@@ -2278,7 +2272,7 @@ TEST_CASE("db(mysql): with_transaction keeps original error", "[db][mysql]")
         [&]() -> net::awaitable<void>
         {
             db::connection_pool pool = make_pool(ioc.get_executor());
-            pool.start();
+
             auto handle = co_await pool.async_acquire();
 
             db::mysql_config kcfg;
@@ -2325,7 +2319,6 @@ TEST_CASE("db(mysql): dead connection release wakes waiter", "[db][mysql]")
         [&]() -> net::awaitable<void>
         {
             db::connection_pool pool = make_pool(ioc.get_executor(), cfg);
-            pool.start();
 
             auto h1 = co_await pool.async_acquire();
             auto r = co_await h1->query("SELECT CONNECTION_ID() AS id");

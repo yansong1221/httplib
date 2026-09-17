@@ -94,7 +94,6 @@ namespace
                 server.run();
 
                 httplib::client::http_client_pool client_pool(pool.get_executor(), { .max_size = 4 });
-                client_pool.start();
 
                 co_await test(client_pool, ep);
 

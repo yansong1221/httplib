@@ -266,7 +266,6 @@ TEST_CASE("db: pool wakes waiters when connection creation fails", "[db][regress
             cfg.idle_timeout = std::chrono::seconds(0);
 
             db::connection_pool pool = db::make_pool(ex, backend_name, "", cfg);
-            pool.start();
 
             auto h1 = co_await pool.async_acquire();
             auto h2 = co_await pool.async_acquire(); // 池满：active=2
@@ -352,7 +351,6 @@ TEST_CASE("db: pool stays within max_connections during health checks", "[db][re
             cfg.idle_timeout = std::chrono::seconds(0);
 
             db::connection_pool pool = db::make_pool(ex, backend_name, "", cfg);
-            pool.start();
 
             // 1) 预建 min 条连接。
             bool pre = co_await co_wait_for(ex, std::chrono::seconds(3), [&] { return pool.total_count() == 2; });
@@ -420,7 +418,6 @@ TEST_CASE("db: pool wakes waiter when health check discards a connection", "[db]
             cfg.idle_timeout = std::chrono::seconds(0);
 
             db::connection_pool pool = db::make_pool(ex, backend_name, "", cfg);
-            pool.start();
 
             // 1) 借出再归还，得到一条空闲连接。
             {
@@ -481,7 +478,7 @@ TEST_CASE("db: pool wakes waiter when health check discards a connection", "[db]
         });
 }
 
-// ---- 增强：acquire 失败按 db_exception::code 分类（timed_out / operation_canceled）----
+// ---- 增强：acquire 失败按 db_exception::code 分类（timed_out）----
 
 TEST_CASE("db: pool acquire errors are typed db_exceptions", "[db][regression]")
 {
@@ -500,20 +497,6 @@ TEST_CASE("db: pool acquire errors are typed db_exceptions", "[db][regression]")
             cfg.idle_timeout = std::chrono::seconds(0);
 
             db::connection_pool pool = db::make_pool(ex, backend_name, "", cfg);
-
-            // 未启动 → operation_canceled。
-            try
-            {
-                auto h = co_await pool.async_acquire(std::chrono::milliseconds(50));
-                (void)h;
-                FAIL("expected pool_closed");
-            }
-            catch (db::db_exception const& e)
-            {
-                CHECK(e.code() == boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
-            }
-
-            pool.start();
 
             // 池满 + 等待超时 → timed_out。
             {

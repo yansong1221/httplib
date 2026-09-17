@@ -60,7 +60,7 @@ namespace httplib::util
 
         /// Blocking variant of `async_shutdown()`; the returned future becomes
         /// ready once the queue has drained and shut down.
-        std::shared_future<void> shutdown();
+        std::future<void> shutdown();
 
       private:
         action_queue(action_queue const&) = delete;

@@ -133,7 +133,6 @@ TEST_CASE("db(sqlite): connection pool round-trip", "[db][sqlite]")
             p.min_connections = 1;
             p.max_connections = 2;
             db::connection_pool pool = db::make_pool(ioc.get_executor(), "sqlite", "db=" + path, p);
-            pool.start();
 
             auto h1 = co_await pool.async_acquire();
             co_await h1->query("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT)");

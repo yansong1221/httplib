@@ -42,7 +42,6 @@ namespace
             server.set_logger(std::make_shared<spdlog::logger>("httplib.tests", null_sink));
             pool = std::make_shared<httplib::client::http_client_pool>(ioc_.get_executor(),
                                                                        httplib::client::pool_params { .max_size = 8 });
-            pool->start();
         }
 
         ~dl_sched_scaffold()
@@ -1172,7 +1171,6 @@ TEST_CASE("Download scheduler: destructor without async_shutdown is safe", "[dow
 
     auto pool = std::make_shared<httplib::client::http_client_pool>(ioc.get_executor(),
                                                                     httplib::client::pool_params { .max_size = 4 });
-    pool->start();
 
     {
         auto sched = std::make_shared<httplib::client::download_scheduler>(ioc.get_executor(), pool);

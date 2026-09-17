@@ -61,13 +61,12 @@ namespace
     }
 } // namespace
 
-TEST_CASE("client_pool: start/stop lifecycle", "[client_pool]")
+TEST_CASE("client_pool: stop lifecycle", "[client_pool]")
 {
     run(
         [](net::io_context& ioc) -> net::awaitable<void>
         {
             httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 4 });
-            p.start();
             auto h = co_await p.async_acquire("127.0.0.1", 80, false, std::chrono::milliseconds(50));
             REQUIRE(h);
             REQUIRE_FALSE(h.has_error());
@@ -83,7 +82,6 @@ TEST_CASE("client_pool: max_size enforced", "[client_pool]")
         [](net::io_context& ioc) -> net::awaitable<void>
         {
             httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 1 });
-            p.start();
 
             auto h1 = co_await p.async_acquire("127.0.0.1", 80, false);
             REQUIRE(h1);
@@ -102,7 +100,6 @@ TEST_CASE("client_pool: per-host isolation", "[client_pool]")
         [](net::io_context& ioc) -> net::awaitable<void>
         {
             httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 1 });
-            p.start();
 
             auto h_a = co_await p.async_acquire("127.0.0.1", 80, false);
             REQUIRE(h_a);
@@ -122,7 +119,6 @@ TEST_CASE("client_pool: stats reflect correct counts", "[client_pool]")
         [](net::io_context& ioc) -> net::awaitable<void>
         {
             httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 4 });
-            p.start();
 
             {
                 auto s0 = p.stats("127.0.0.1", 80, false);
@@ -162,7 +158,6 @@ TEST_CASE("client_pool: global stats reflect counts", "[client_pool]")
         [](net::io_context& ioc) -> net::awaitable<void>
         {
             httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 4 });
-            p.start();
 
             CHECK(p.active_count() == 0);
             CHECK(p.idle_count() == 0);
@@ -199,7 +194,6 @@ TEST_CASE("client_pool: idle timeout evicts connection", "[client_pool]")
                                                 { .max_size = 4,
                                                   .idle_timeout = std::chrono::milliseconds(100),
                                                   .idle_check_interval = std::chrono::milliseconds(100) });
-            p.start();
 
             {
                 auto h = co_await p.async_acquire("127.0.0.1", 80, false, std::chrono::milliseconds(50));
@@ -226,7 +220,6 @@ TEST_CASE("client_pool: acquire via url string", "[client_pool]")
         [](net::io_context& ioc) -> net::awaitable<void>
         {
             httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 4 });
-            p.start();
 
             auto h = co_await p.async_acquire("http://127.0.0.1:80");
             REQUIRE(h);
@@ -236,24 +229,12 @@ TEST_CASE("client_pool: acquire via url string", "[client_pool]")
         });
 }
 
-TEST_CASE("client_pool: not started returns error", "[client_pool]")
-{
-    run(
-        [](net::io_context& ioc) -> net::awaitable<void>
-        {
-            httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 4 });
-            auto h = co_await p.async_acquire("127.0.0.1", 80, false, std::chrono::milliseconds(50));
-            REQUIRE(h.has_error());
-        });
-}
-
 TEST_CASE("client_pool: acquire timeout", "[client_pool]")
 {
     run(
         [](net::io_context& ioc) -> net::awaitable<void>
         {
             httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 1 });
-            p.start();
 
             auto h1 = co_await p.async_acquire("127.0.0.1", 80, false);
             REQUIRE(h1);
@@ -274,7 +255,6 @@ TEST_CASE("client_pool: wait_timeout zero fails fast", "[client_pool]")
         [](net::io_context& ioc) -> net::awaitable<void>
         {
             httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 1 });
-            p.start();
 
             auto h1 = co_await p.async_acquire("127.0.0.1", 80, false);
             REQUIRE(h1);
@@ -293,46 +273,12 @@ TEST_CASE("client_pool: wait_timeout zero fails fast", "[client_pool]")
         });
 }
 
-TEST_CASE("client_pool: restart re-arms maintenance", "[client_pool]")
-{
-    run(
-        [](net::io_context& ioc) -> net::awaitable<void>
-        {
-            httplib::client::http_client_pool p(ioc.get_executor(),
-                                                { .max_size = 4,
-                                                  .idle_timeout = std::chrono::milliseconds(100),
-                                                  .idle_check_interval = std::chrono::milliseconds(100) });
-            p.start();
-
-            // stop()/start() in quick succession: the maintenance loop must be
-            // re-armed with a fresh timer, and idle eviction must keep working.
-            p.stop();
-            p.start();
-
-            {
-                auto h = co_await p.async_acquire("127.0.0.1", 80, false, std::chrono::milliseconds(50));
-                REQUIRE(h);
-            }
-            CHECK(p.stats("127.0.0.1", 80, false).idle == 1);
-
-            net::steady_timer timer(ioc.get_executor());
-            timer.expires_after(std::chrono::milliseconds(300));
-            boost::system::error_code ec;
-            co_await timer.async_wait(httplib::util::net_awaitable[ec]);
-
-            CHECK(p.stats("127.0.0.1", 80, false).idle == 0);
-
-            p.stop();
-        });
-}
-
 TEST_CASE("client_pool: waiter wakes up on release", "[client_pool]")
 {
     run(
         [](net::io_context& ioc) -> net::awaitable<void>
         {
             httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 1 });
-            p.start();
 
             auto h1 = co_await p.async_acquire("127.0.0.1", 80, false);
             REQUIRE(h1);
@@ -368,7 +314,6 @@ TEST_CASE("client_pool: stats for non-existent host returns zeros", "[client_poo
         [](net::io_context& ioc) -> net::awaitable<void>
         {
             httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 4 });
-            p.start();
 
             auto s = p.stats("10.0.0.1", 9999, false);
             REQUIRE(s.active == 0);
@@ -385,7 +330,6 @@ TEST_CASE("client_pool: waiter only wakes for matching host", "[client_pool]")
         [](net::io_context& ioc) -> net::awaitable<void>
         {
             httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 1 });
-            p.start();
 
             auto h_a = co_await p.async_acquire("127.0.0.1", 80, false);
             REQUIRE(h_a);
@@ -424,7 +368,6 @@ TEST_CASE("client_pool: idle reuse cycles", "[client_pool]")
         [](net::io_context& ioc) -> net::awaitable<void>
         {
             httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 2 });
-            p.start();
 
             for (int i = 0; i < 5; ++i)
             {
@@ -446,7 +389,6 @@ TEST_CASE("client_pool: release with unmatched url is safe", "[client_pool]")
         [](net::io_context& ioc) -> net::awaitable<void>
         {
             httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 4 });
-            p.start();
 
             auto h_a = co_await p.async_acquire("127.0.0.1", 80, false);
             REQUIRE(h_a);
@@ -475,7 +417,6 @@ TEST_CASE("client_pool: stats(url) should match acquire(url) normalization", "[c
         [](net::io_context& ioc) -> net::awaitable<void>
         {
             httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 4 });
-            p.start();
 
             auto h = co_await p.async_acquire("http://127.0.0.1:80");
             REQUIRE(h);
@@ -498,7 +439,6 @@ TEST_CASE("client_pool: stats(url) with path/query does not resolve to pool key"
         [](net::io_context& ioc) -> net::awaitable<void>
         {
             httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 4 });
-            p.start();
 
             auto h = co_await p.async_acquire("http://127.0.0.1:9999");
             REQUIRE(h);
@@ -507,19 +447,6 @@ TEST_CASE("client_pool: stats(url) with path/query does not resolve to pool key"
             auto s = p.stats("http://127.0.0.1:9999/some/path?x=1");
             CHECK(s.active == 1);
 
-            p.stop();
-        });
-}
-
-TEST_CASE("client_pool: acquire before start reports operation_canceled", "[client_pool]")
-{
-    run(
-        [](net::io_context& ioc) -> net::awaitable<void>
-        {
-            httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 4 });
-            auto h = co_await p.async_acquire("127.0.0.1", 80, false, std::chrono::milliseconds(50));
-            REQUIRE(h.has_error());
-            CHECK(h.error() == boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
             p.stop();
         });
 }
@@ -536,7 +463,6 @@ TEST_CASE("client_pool: max_size is enforced per host", "[client_pool]")
         [](net::io_context& ioc) -> net::awaitable<void>
         {
             httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 1 });
-            p.start();
 
             auto ha = co_await p.async_acquire("127.0.0.1", 80, false);
             auto hb = co_await p.async_acquire("192.168.0.1", 80, false);
@@ -557,7 +483,6 @@ TEST_CASE("client_pool: max_total caps total across hosts", "[client_pool]")
             httplib::client::http_client_pool p(
                 ioc.get_executor(),
                 { .max_size = 2, .max_total = 2, .idle_timeout = std::chrono::seconds(60) });
-            p.start();
 
             auto ha = co_await p.async_acquire("127.0.0.1", 80, false);
             auto hb = co_await p.async_acquire("192.168.0.1", 80, false);
@@ -580,7 +505,6 @@ TEST_CASE("client_pool: concurrent acquire/release under multithreaded executor"
         [&]() -> net::awaitable<void>
         {
             httplib::client::http_client_pool p(pool.get_executor(), { .max_size = 8 });
-            p.start();
 
             constexpr int kWorkers = 8;
             constexpr int kIterations = 50;
@@ -658,7 +582,6 @@ TEST_CASE("client_pool: reuses a server-closed connection transparently", "[clie
         [](net::any_io_executor ex, httplib::tcp::endpoint const& ep) -> net::awaitable<void>
         {
             httplib::client::http_client_pool p(ex, { .max_size = 1, .idle_timeout = std::chrono::seconds(30) });
-            p.start();
 
             auto host = ep.address().to_string();
             auto port = ep.port();
@@ -704,7 +627,6 @@ TEST_CASE("client_pool: validate_on_borrow discards dead idle connection", "[cli
             httplib::client::http_client_pool p(
                 ex,
                 { .max_size = 1, .idle_timeout = std::chrono::seconds(30), .validate_on_borrow = true });
-            p.start();
 
             auto host = ep.address().to_string();
             auto port = ep.port();
@@ -748,7 +670,6 @@ TEST_CASE("http_client: is_alive detects peer close", "[client_pool]")
         [](net::any_io_executor ex, httplib::tcp::endpoint const& ep) -> net::awaitable<void>
         {
             httplib::client::http_client_pool p(ex, { .max_size = 1, .idle_timeout = std::chrono::seconds(30) });
-            p.start();
 
             auto host = ep.address().to_string();
             auto port = ep.port();
@@ -790,7 +711,6 @@ TEST_CASE("client_pool: reader survives handle destruction", "[client_pool]")
         [](net::any_io_executor ex, httplib::tcp::endpoint const& ep) -> net::awaitable<void>
         {
             httplib::client::http_client_pool p(ex, { .max_size = 1, .idle_timeout = std::chrono::seconds(30) });
-            p.start();
 
             auto host = ep.address().to_string();
             auto port = ep.port();
@@ -848,7 +768,6 @@ TEST_CASE("client_pool: idle eviction wakes a waiting acquire", "[client_pool]")
                                                 { .max_size = 2,
                                                   .idle_timeout = std::chrono::milliseconds(100),
                                                   .idle_check_interval = std::chrono::milliseconds(100) });
-            p.start();
 
             auto host = ep.address().to_string();
             auto port = ep.port();
@@ -909,13 +828,12 @@ TEST_CASE("client_pool: idle eviction wakes a waiting acquire", "[client_pool]")
         });
 }
 
-TEST_CASE("client_pool: stop/start isolates old handles from new pool counts", "[client_pool]")
+TEST_CASE("client_pool: stop is terminal", "[client_pool]")
 {
     run(
         [](net::io_context& ioc) -> net::awaitable<void>
         {
             httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 2 });
-            p.start();
 
             constexpr char const* host = "127.0.0.1";
             uint16_t port = 80;
@@ -924,28 +842,16 @@ TEST_CASE("client_pool: stop/start isolates old handles from new pool counts", "
             REQUIRE(old);
 
             p.stop();
-            p.start();
 
-            auto f1 = co_await p.async_acquire(host, port, false);
-            REQUIRE(f1);
-            auto f2 = co_await p.async_acquire(host, port, false);
-            REQUIRE(f2);
+            // stop() 之后池不再接受借出。
+            auto h = co_await p.async_acquire(host, port, false);
+            REQUIRE(h.has_error());
+            CHECK(h.error() == boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
 
-            CHECK(p.stats(host, port, false).active == 2);
-            CHECK(p.total_count() == 2);
-
-            // �?epoch �?handle 不能再递减新池计数，也不能把旧连接塞回新池�?
+            // 旧 handle 归还不得复活计数，也不得崩溃。
             old.release();
-            CHECK(p.stats(host, port, false).active == 2);
-            CHECK(p.total_count() == 2);
-
-            f1.release();
-            CHECK(p.stats(host, port, false).active == 1);
-            CHECK(p.stats(host, port, false).idle == 1);
-            CHECK(p.total_count() == 2);
-
-            f2.release();
-            p.stop();
+            CHECK(p.active_count() == 0);
+            CHECK(p.total_count() == 0);
         });
 }
 
@@ -958,7 +864,6 @@ TEST_CASE("client_pool: idle_check_interval decouples eviction tick from idle_ti
                                                 { .max_size = 4,
                                                   .idle_timeout = std::chrono::milliseconds(100),
                                                   .idle_check_interval = std::chrono::milliseconds(500) });
-            p.start();
 
             constexpr char const* host = "127.0.0.1";
             uint16_t port = 80;

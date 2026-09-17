@@ -55,7 +55,7 @@ namespace httplib::util
         co_return co_await self->async_shutdown();
     }
 
-    std::shared_future<void>
+    std::future<void>
     action_queue::shutdown()
     {
         auto self = impl_;

@@ -11,7 +11,7 @@ namespace httplib::db
 {
     namespace
     {
-        /// 池已停止（或从未启动）。与 client::http_client_pool 的 operation_canceled 语义一致，
+        /// 池已停止。与 client::http_client_pool 的 operation_canceled 语义一致，
         /// 便于调用方按 code() 统一分流，而不必匹配错误消息。
         db_exception
         pool_closed_error()
@@ -60,7 +60,6 @@ namespace httplib::db
     net::awaitable<bool>
     connection_pool::impl::on_start()
     {
-        auto const epoch = epoch_.load();
         get_logger()->debug("db pool started");
 
         std::vector<std::unique_ptr<session>> pre_created;
@@ -86,7 +85,7 @@ namespace httplib::db
 
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            if (!is_running() || epoch_ != epoch)
+            if (!is_running())
             {
                 co_return false;
             }
@@ -117,9 +116,9 @@ namespace httplib::db
 
         do
         {
-            if (auto [sess, epoch] = co_await self->try_pop_validated(); sess)
+            if (auto sess = co_await self->try_pop_validated(); sess)
             {
-                co_return session_handle(self, std::move(sess), epoch);
+                co_return session_handle(self, std::move(sess));
             }
 
             std::unique_lock<std::mutex> lock(self->mutex_);
@@ -131,8 +130,7 @@ namespace httplib::db
             if (has_capacity_locked())
             {
                 inc_active_locked();
-                // 与计数同临界区取轮次样本：stop/重启期间建连成功后按旧轮丢弃。
-                auto epoch = self->epoch_.load();
+
                 lock.unlock();
 
                 try
@@ -145,12 +143,12 @@ namespace httplib::db
                             boost::system::errc::make_error_code(boost::system::errc::connection_aborted),
                             "connection_pool: session factory returned an empty session");
                     }
-                    co_return session_handle(self, std::move(sess), epoch);
+                    co_return session_handle(self, std::move(sess));
                 }
                 catch (...)
                 {
                     std::lock_guard<std::mutex> lk(self->mutex_);
-                    if (self->is_running() && self->epoch_.load() == epoch)
+                    if (self->is_running())
                     {
                         dec_active_locked();
                         // 本协程建连失败后槽位已释放，唤醒下一个等待者接手，避免其睡到超时。
@@ -191,7 +189,7 @@ namespace httplib::db
     }
 
     void
-    connection_pool::impl::release_session(std::unique_ptr<session> sess, uint64_t epoch)
+    connection_pool::impl::release_session(std::unique_ptr<session> sess)
     {
         if (!sess)
         {
@@ -203,7 +201,7 @@ namespace httplib::db
         if (!sess->is_live())
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            if (is_running() && epoch == epoch_)
+            if (is_running())
             {
                 dec_active_locked();
                 wake_one_waiter();
@@ -213,14 +211,14 @@ namespace httplib::db
 
         if (!sess->in_transaction())
         {
-            push_idle(std::move(sess), epoch);
+            push_idle(std::move(sess));
             return;
         }
 
         auto self = std::static_pointer_cast<impl>(shared_from_this());
         net::co_spawn(
             ex_,
-            [self, sess = std::move(sess), epoch]() mutable -> net::awaitable<void>
+            [self, sess = std::move(sess)]() mutable -> net::awaitable<void>
             {
                 try
                 {
@@ -229,7 +227,7 @@ namespace httplib::db
                 catch (...)
                 {
                     std::lock_guard<std::mutex> lk(self->mutex_);
-                    if (self->is_running() && epoch == self->epoch_)
+                    if (self->is_running())
                     {
                         self->dec_active_locked();
                         self->wake_one_waiter();
@@ -237,7 +235,7 @@ namespace httplib::db
                     co_return;
                 }
 
-                self->push_idle(std::move(sess), epoch);
+                self->push_idle(std::move(sess));
             },
             [](std::exception_ptr) {});
     }
@@ -250,14 +248,10 @@ namespace httplib::db
         {
             std::lock_guard<std::mutex> lock(mutex_);
 
-            // 递增 epoch：让 stop 前已在跑的维护协程在 await 之后识别出自己已过期。
-            ++epoch_;
-
             waiters.swap(waiters_);
             to_close = std::move(idle_);
 
-            // 与 http_client_pool 对齐：停止即清零计数；旧 handle 归还时因 epoch 不符被丢弃，
-            // 不再改动重启后新池的计数。
+            // 与 http_client_pool 对齐：停止即清零计数；旧 handle 归还时因 !is_running() 被丢弃。
             active_count_ = 0;
             validating_ = 0;
         }
@@ -321,15 +315,13 @@ namespace httplib::db
         return nullptr;
     }
 
-    net::awaitable<std::pair<std::unique_ptr<session>, uint64_t>>
+    net::awaitable<std::unique_ptr<session>>
     connection_pool::impl::try_pop_validated()
     {
         std::unique_ptr<session> sess;
-        uint64_t epoch = 0;
         std::vector<std::unique_ptr<session>> discarded;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            epoch = epoch_.load();
             sess = try_pop_idle(discarded);
         }
         // 锁外析构被丢弃的死连接，避免池锁内进入后端 close。
@@ -337,26 +329,26 @@ namespace httplib::db
 
         if (!sess)
         {
-            co_return std::make_pair(std::move(sess), epoch);
+            co_return std::move(sess);
         }
 
         if (!cfg_.validate_on_borrow || co_await sess->ping())
         {
-            // stop/重启后不能再把旧连接塞回新池，也不能改新池计数。
-            if (!is_running() || epoch != epoch_)
+            // stop() 后不能再把旧连接塞回池，也不能改计数。
+            if (!is_running())
             {
                 sess.reset();
             }
-            co_return std::make_pair(std::move(sess), epoch);
+            co_return std::move(sess);
         }
 
         std::lock_guard<std::mutex> lock(mutex_);
-        if (is_running() && epoch == epoch_)
+        if (is_running())
         {
             dec_active_locked();
             wake_one_waiter(); // 校验剔除死连接释放了槽位，唤醒等待者接手
         }
-        co_return std::make_pair(std::unique_ptr<session> {}, epoch);
+        co_return nullptr;
     }
 
     void
@@ -375,11 +367,11 @@ namespace httplib::db
     }
 
     void
-    connection_pool::impl::push_idle(std::unique_ptr<session> sess, uint64_t epoch)
+    connection_pool::impl::push_idle(std::unique_ptr<session> sess)
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        // stop/重启后旧 handle 归还：直接丢弃会话，不改动新池计数。
-        if (!is_running() || epoch != epoch_)
+        // stop() 后旧 handle 归还：直接丢弃会话，不改动计数。
+        if (!is_running())
         {
             return;
         }
@@ -401,17 +393,13 @@ namespace httplib::db
     net::awaitable<bool>
     connection_pool::impl::on_tick()
     {
-        // 本轮取样；stop()/重启后 epoch_ 变化，await 之后即可判定本 tick 已过期。
-        auto const epoch = epoch_.load();
-        auto active = [this, epoch]() noexcept { return is_running() && epoch_ == epoch; };
-
         auto now = std::chrono::steady_clock::now();
 
         std::vector<std::unique_ptr<session>> to_ping;
         std::vector<std::unique_ptr<session>> to_close;
         {
             std::lock_guard<std::mutex> lock(mutex_);
-            if (!active())
+            if (!is_running())
             {
                 co_return false;
             }
@@ -456,10 +444,10 @@ namespace httplib::db
 
         for (auto& sess : to_ping)
         {
-            // stop()/重启期间不再发 ping，但仍要走下面的归还/剔除记账，
+            // stop() 后不再发 ping，但仍要走下面的归还/剔除记账，
             // 保证 validating_ 无论何种退出路径都精确归零。
             bool alive = false;
-            if (sess && active())
+            if (sess && is_running())
             {
                 try
                 {
@@ -480,18 +468,18 @@ namespace httplib::db
             }
             // 健康检查期间池子可能已被新连接补满：超容量时直接关闭刚检查完的连接，
             // 避免总连接数短暂突破 max_connections 后迟迟不回收。
-            if (alive && active() && has_capacity_locked())
+            if (alive && is_running() && has_capacity_locked())
             {
                 idle_.push_back(std::move(sess));
                 wake_one_waiter();
             }
-            else if (active())
+            else if (is_running())
             {
                 wake_one_waiter(); // 剔除死连接释放了槽位，唤醒等待者接手
             }
         }
 
-        if (!active())
+        if (!is_running())
         {
             co_return false;
         }
@@ -508,7 +496,7 @@ namespace httplib::db
 
         for (size_t i = 0; i < deficit; ++i)
         {
-            if (!active())
+            if (!is_running())
             {
                 co_return false;
             }
@@ -519,7 +507,7 @@ namespace httplib::db
                 {
                     std::lock_guard<std::mutex> lock(mutex_);
                     // 建连期间 acquire 侧可能已把池补满：超容量时丢弃，避免总连接数突破 max_connections。
-                    if (active() && has_capacity_locked())
+                    if (is_running() && has_capacity_locked())
                     {
                         idle_.push_back(std::move(sess));
                         wake_one_waiter();

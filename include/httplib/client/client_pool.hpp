@@ -47,10 +47,8 @@ namespace httplib::client
             std::weak_ptr<impl> pool_;
             std::unique_ptr<http_client> conn_;
             boost::system::error_code error_;
-            /// 借出时的 pool epoch：stop() 会递增 epoch，旧 handle 不能再改新池计数。
-            uint64_t epoch_ = 0;
 
-            client_handle(std::weak_ptr<impl> pool, std::unique_ptr<http_client> conn, uint64_t epoch);
+            client_handle(std::weak_ptr<impl> pool, std::unique_ptr<http_client> conn);
 
           public:
             client_handle();
@@ -120,7 +118,7 @@ namespace httplib::client
         size_t idle_count() const;
         size_t total_count() const;
 
-        void start();
+        /// 关闭池（终态，不可重启），唤醒所有等待者。
         void stop();
 
         pool_stats stats(std::string_view host, uint16_t port, bool ssl) const;

@@ -4,11 +4,9 @@
 #include "httplib/db/session.hpp"
 #include "httplib/util/ticker.hpp"
 #include "util/logging.hpp"
-#include <atomic>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <cstddef>
-#include <cstdint>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -26,7 +24,7 @@ namespace httplib::db
         ~impl();
 
         net::awaitable<session_handle> async_acquire(std::chrono::steady_clock::duration wait_timeout);
-        void release_session(std::unique_ptr<session> sess, uint64_t epoch);
+        void release_session(std::unique_ptr<session> sess);
         void stop() override;
 
         size_t active_count() const;
@@ -47,11 +45,11 @@ namespace httplib::db
         using waiters_list = std::deque<std::weak_ptr<net::steady_timer>>;
 
         std::unique_ptr<session> try_pop_idle(std::vector<std::unique_ptr<session>>& discarded);
-        /// 取出一条可借出的空闲连接；第二项为取用时刻的池轮次（与 inc_active 同临界区取样），
-        /// ping 校验后据此判断该连接是否已因 stop/重启过期。
-        net::awaitable<std::pair<std::unique_ptr<session>, uint64_t>> try_pop_validated();
+        /// 取出一条可借出的空闲连接，并在 validate_on_borrow 时 ping 校验；
+        /// 校验期间连接已移出 idle_，但仍占容量。返回 nullptr 表示无可用连接。
+        net::awaitable<std::unique_ptr<session>> try_pop_validated();
         void wake_one_waiter();
-        void push_idle(std::unique_ptr<session> sess, uint64_t epoch);
+        void push_idle(std::unique_ptr<session> sess);
         net::awaitable<std::unique_ptr<session>> create_session();
 
         mutable std::mutex mutex_;
@@ -61,10 +59,6 @@ namespace httplib::db
         /// 否则借出侧会在验证窗口内误判有空位而超建连接（且 total_count 少报）。
         size_t validating_ = 0;
         waiters_list waiters_;
-
-        /// 每轮生命周期标识：stop() 递增。维护协程在 on_start/on_tick 入口取样，
-        /// 在 await 之后比对，丢弃 stop/重启后旧轮的过期副作用。
-        std::atomic<uint64_t> epoch_ { 0 };
 
         net::any_io_executor ex_;
         pool_params cfg_;
