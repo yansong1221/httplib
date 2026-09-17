@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstdint>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -63,6 +64,27 @@ namespace httplib::client
             client::response response;
             http::fields headers;
             http::status status = http::status::unknown;
+            /// Origin/target actually reached after following redirects. Used as
+            /// the cache identity so a URL that redirects elsewhere cannot serve
+            /// stale cached content.
+            url_info final_ui;
+        };
+
+        /// HTTP-specific cache bookkeeping. The downloader serializes this into
+        /// the cache's opaque metadata blob; the cache itself never interprets
+        /// it.
+        struct http_meta
+        {
+            std::string final_url;
+            std::string etag;
+            std::string last_modified;
+            std::string content_type;
+            std::string content_disposition;
+            /// Time until which the response is fresh (Cache-Control max-age).
+            /// Within this window the cached body may be served without network.
+            std::optional<std::chrono::system_clock::time_point> fresh_until;
+            /// Cache-Control: no-cache -> must revalidate even if fresh.
+            bool must_revalidate = false;
         };
 
       public:
@@ -95,7 +117,16 @@ namespace httplib::client
 
       private:
         static url_info parse_url(std::string_view url);
-        static std::string make_cache_key(url_info const& ui);
+        static std::string make_url_string(url_info const& ui);
+        std::string make_cache_key(url_info const& ui) const;
+        static std::string cache_auth_scope(http::fields const& headers);
+        static bool response_is_cacheable(http::fields const& headers);
+        static http_meta make_http_meta(http::fields const& response,
+                                        http::fields const& probe,
+                                        url_info const& final_ui,
+                                        bool has_final_ui);
+        static std::string serialize_http_meta(http_meta const& meta);
+        static std::optional<http_meta> parse_http_meta(std::string_view blob);
         static std::uint64_t parse_content_range_total(http::fields const& headers);
         static std::optional<std::uint64_t> parse_content_range_start(http::fields const& headers);
         static std::string parse_content_disposition_filename(http::fields const& headers);
@@ -104,13 +135,15 @@ namespace httplib::client
         void set_state(downloader::state st, boost::system::error_code ec);
         void update_progress(std::uint64_t delta_bytes);
         void store_suggested_filename(http::fields const& headers);
+        void record_final_ui(url_info const& ui);
+        void record_resource_headers(http::fields const& headers);
 
         void save_state(fs::path const& save_path);
         download_state load_state(fs::path const& save_path) const;
         void del_state(fs::path const& save_path) const;
         static fs::path state_path(fs::path const& save_path);
 
-        net::awaitable<bool> check_remote_cache(url_info const& ui);
+        net::awaitable<bool> check_remote_cache(url_info const& ui, http_meta const& meta);
         net::awaitable<probe_result> probe_content_length(url_info const& ui);
 
         net::awaitable<request_result> send_request(url_info const& ui,
@@ -171,6 +204,17 @@ namespace httplib::client
         std::shared_ptr<cache> cache_;
         std::shared_ptr<http_client_pool> pool_;
         http::fields custom_headers_;
+        /// Hash of credential-bearing request headers folded into the cache key
+        /// so two callers with different credentials never share an entry.
+        std::string auth_scope_;
+
+        /// Captured from the concurrent segment/GET coroutines so the completed
+        /// transfer's real response headers (and final origin after redirects)
+        /// can be written to the cache.
+        mutable std::mutex resource_mutex_;
+        http::fields resource_headers_;
+        url_info final_ui_;
+        bool has_final_ui_ = false;
 
         mutable std::mutex filename_mutex_;
         std::string suggested_filename_;

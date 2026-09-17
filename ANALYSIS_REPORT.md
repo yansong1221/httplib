@@ -263,14 +263,24 @@ file_stream_.open(current_file_path_, std::ios::out | std::ios::binary | std::io
 - 回归测试：`client_test.cpp` + `downloader_test.cpp` 新增跨 origin 重定向凭据隔离测试（两服务器方案，验证 Auth/Cookie 不到达目标）
 - 建议：~~跨 origin 自动删除敏感头；完整解析 RFC 3986 Location；重定向前 drain body 或关闭连接；限制 HTTPS 到 HTTP 降级~~ 核心头清除已落实，HTTPS→HTTP 降级限制作为产品化决策另行讨论。
 
-#### CACHE-01：下载缓存 key 不包含 origin 和认证上下文
+#### CACHE-01：下载缓存 key 缺少认证上下文，且忽略 HTTP 缓存语义
 
-虽然 cache 接口参数名为 URL，下载器实际只用 `ui.path` 查询和写入缓存。不同 scheme、host、port 的相同路径会共享缓存；缓存也不区分 Authorization/Cookie/Vary。
+> 状态：✅ **已修复**（复查 2026-09-17）
 
-- 查询：[lib/client/downloader_impl.cpp](lib/client/downloader_impl.cpp#L444)
-- 主入口：[lib/client/downloader_impl.cpp](lib/client/downloader_impl.cpp#L1048)
-- 影响：跨域缓存污染、错误文件返回、潜在用户间数据泄漏。
-- 建议：key 至少包含规范化 scheme/host/port/path/query；正确处理 `Cache-Control`、`Vary`、认证请求和重定向最终 URL；避免使用 FNV-1a 作为不可信隔离边界。
+~~下载缓存 key 不包含认证上下文，缓存也不区分重定向最终 URL，且未处理 `Cache-Control`/`Vary`。不同凭据的相同 URL 会共享缓存条目，可能造成用户间数据泄漏。~~
+
+现状（2026-09-17 已按"通用存储 / HTTP 语义"分层重构）：
+- **cache 接口去 HTTP 化**：`cache` 只认不透明 key、字节 body、不透明 metadata blob 与 `expires_at`，不再 include 任何 Beast/Boost 头，也不再解析 HTTP（[include/httplib/client/cache.hpp](include/httplib/client/cache.hpp)）；对齐 Chromium `disk_cache::Backend`/`OkHttp DiskLruCache` 的通用存储边界。
+- **HTTP 语义上移到 downloader**：key 构造、`no-store`/`Vary: *`、`max-age` freshness、ETag/Last-Modified 验证器、重定向最终 URL 全部由 downloader 负责，并序列化成不透明 metadata blob（[lib/client/downloader_impl.cpp](lib/client/downloader_impl.cpp)）。
+- **缓存 key 含认证上下文**：`Authorization`/`Proxy-Authorization`/`Cookie`/`Cookie2` 折叠为稳定摘要拼入 key，原始凭据不落盘。
+- **新鲜度与保留分离**：`fresh_until` 存在 metadata 内决定是否免网络命中；缓存保留期由 `expires_at`/`max_age` 决定，使过期条目仍可用于条件 revalidate。新增"新鲜即命中、免网络"与"304 复用 body"两条路径。
+- **disk_cache 生产化**：分片目录（前两位十六进制）、临时目录 + rename 原子替换、`update_metadata` 只刷新元数据不重写 body（对齐 Qt `updateMetaData`）、每项 `expires_at` + LRU + 默认 `max_age` 淘汰、目录级 advisory 文件锁（Qt 文档明确不支持多实例共享，这里显式加锁）。
+- 同步修复 `disk_cache::get()` 在持有非递归锁时调用 `remove()` 的自死锁，以及 `thread_local` 清理节流在多线程下失效的问题。
+
+- 通用存储：[include/httplib/client/cache.hpp](include/httplib/client/cache.hpp)、[lib/client/disk_cache_impl.cpp](lib/client/disk_cache_impl.cpp)
+- HTTP 语义：[lib/client/downloader_impl.cpp](lib/client/downloader_impl.cpp)
+- 影响：~~跨域缓存污染、错误文件返回、潜在用户间数据泄漏~~ 已消除；缓存与下载器边界清晰，可被非 HTTP 场景复用。
+- 建议：FNV-1a 仍作为磁盘目录名散列；如需更强隔离可替换为加密散列。流式写入（边下边存）与读取 pin 句柄列为后续增强。
 
 #### PROXY-01：反向代理的 Header 语义不完整
 
@@ -428,7 +438,7 @@ with any of the following names:
     - 2026-09-09 更新：server sessions（CON-01）与 Session middleware（CON-02）两项数据竞争已修复；socket stop 与 client 并发读写仍需明确 strand 约束。
 2. ~~修复客户端部分写入重试和 downloader 重定向连接复用~~ → 客户端重试已修复（仅零字节时允许重试）。
 3. ~~跨 origin 重定向删除敏感 header，禁止非授权协议降级~~ → 已修复（client + downloader，含回归测试）。
-4. 重构 cache key 和 HTTP cache policy。
+4. ~~重构 cache key 和 HTTP cache policy~~ → 已修复（key 含认证上下文与最终 URL 校验，尊重 `no-store`/`Vary: *`，元数据白名单）。
 5. ~~完整实现代理 hop-by-hop、Cookie/Set-Cookie 和 Forwarded header 语义~~ → 已修复。
 6. 修复 Range、目录 HTML escaping、~~异常详情泄漏~~ 和长期容器淘汰。
     - 2026-09-09 更新：Range 边界（HTTP-01）与目录 HTML escaping/symlink containment（WEB-01）已修复并含回归测试；长期容器淘汰待处理。
@@ -457,6 +467,6 @@ with any of the following names:
 
 httplib 的基础结构并不差：作者理解 Boost.Asio/Beast、协程、PIMPL、路由 Trie 和真实网络测试，项目也已超过简单示例库的规模。但当前最大问题不是代码风格，而是**安全边界、并发契约和发布工程没有跟上功能扩张速度**。
 
-截至 2026-09-09 复查：最初报告中的 17 项风险已有 **13 项完全修复**（SEC-01/02/04/05/06、CON-01/02、CL-01/02、INFO-01、PROXY-01、HTTP-01、WEB-01），其中 CL-01/02、CON-01/02、HTTP-01、WEB-01 均含回归或代码复核；SEC-03 部分修复（header/body/upload/Range 数量/multipart 字段数已限）。剩余生产阻断项集中在 **multipart 单字段内容大小与解压后大小、WS 队列上限（SEC-03/DOS-01）、缓存 key（CACHE-01）与运行期配置并发保护（API-01）**。
+截至 2026-09-17 复查：最初报告中的 17 项风险已有 **14 项完全修复**（SEC-01/02/04/05/06、CON-01/02、CL-01/02、INFO-01、PROXY-01、HTTP-01、WEB-01、CACHE-01），其中 CL-01/02、CON-01/02、HTTP-01、WEB-01、CACHE-01 均含回归或代码复核；SEC-03 部分修复（header/body/upload/Range 数量/multipart 字段数已限）。剩余生产阻断项集中在 **multipart 单字段内容大小与解压后大小、WS 队列上限（SEC-03/DOS-01）与运行期配置并发保护（API-01）**。
 
 建议先冻结功能扩张，以 body/资源上限收口为主线，再补动态检测、fuzz 和构建发布工程；随后进入生产压测前再处理缓存等健壮性项。

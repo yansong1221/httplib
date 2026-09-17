@@ -824,16 +824,14 @@ TEST_CASE("Downloader: disk_cache basic put and get", "[downloader]")
 
     httplib::client::disk_cache cache(tmp);
 
-    http::fields headers;
-    headers.set(http::field::etag, "\"abc\"");
-    headers.set(http::field::content_type, "text/plain");
-    cache.put("http://example.com/test.txt", headers, src);
+    // The cache stores the metadata blob verbatim; it never parses it.
+    cache.put("http://example.com/test.txt", src, "etag=abc;content_type=text/plain");
 
     auto entry = cache.get("http://example.com/test.txt");
     REQUIRE(entry.has_value());
     REQUIRE(entry->body_size > 0);
-    REQUIRE(entry->headers[http::field::etag] == "\"abc\"");
-    REQUIRE(entry->headers[http::field::content_type] == "text/plain");
+    REQUIRE(entry->metadata == "etag=abc;content_type=text/plain");
+    REQUIRE(read_file(entry->body_path) == "hello cache\n");
 
     auto miss = cache.get("http://example.com/other.txt");
     REQUIRE_FALSE(miss.has_value());
@@ -841,15 +839,406 @@ TEST_CASE("Downloader: disk_cache basic put and get", "[downloader]")
     cache.remove("http://example.com/test.txt");
     REQUIRE_FALSE(cache.get("http://example.com/test.txt").has_value());
 
-    cache.put("http://a.com/1", headers, src);
-    cache.put("http://a.com/2", headers, src);
+    cache.put("http://a.com/1", src, "m");
+    cache.put("http://a.com/2", src, "m");
     REQUIRE(cache.get("http://a.com/1").has_value());
     REQUIRE(cache.get("http://a.com/2").has_value());
+    REQUIRE(cache.entry_count() == 2);
 
     cache.clear();
     REQUIRE_FALSE(cache.get("http://a.com/1").has_value());
+    REQUIRE(cache.entry_count() == 0);
 
     fs::remove_all(tmp);
+}
+
+TEST_CASE("disk_cache: update_metadata keeps the body", "[downloader]")
+{
+    auto tmp = fs::temp_directory_path() / "httplib_dl_cache_updmeta";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp);
+
+    auto src = tmp / "src.bin";
+    {
+        std::ofstream f(src, std::ios::binary);
+        std::string data = "body stays\n";
+        f.write(data.data(), data.size());
+    }
+
+    httplib::client::disk_cache cache(tmp);
+    cache.put("http://example.com/m", src, "v1");
+
+    auto before = cache.get("http://example.com/m");
+    REQUIRE(before.has_value());
+    REQUIRE(before->metadata == "v1");
+
+    auto future = std::chrono::system_clock::now() + std::chrono::hours(1);
+    REQUIRE(cache.update_metadata("http://example.com/m", "v2", future));
+
+    auto after = cache.get("http://example.com/m");
+    REQUIRE(after.has_value());
+    REQUIRE(after->metadata == "v2");
+    REQUIRE(after->expires_at.has_value());
+    REQUIRE(after->body_size == before->body_size);
+    REQUIRE(read_file(after->body_path) == "body stays\n");
+
+    // update_metadata on a missing key is a no-op that reports failure.
+    REQUIRE_FALSE(cache.update_metadata("http://example.com/missing", "x", std::nullopt));
+
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("disk_cache: entry from another format version is treated as a miss", "[downloader]")
+{
+    auto tmp = fs::temp_directory_path() / "httplib_dl_cache_version";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp);
+
+    auto src = tmp / "src.bin";
+    {
+        std::ofstream f(src, std::ios::binary);
+        std::string data = "versioned payload\n";
+        f.write(data.data(), data.size());
+    }
+
+    httplib::client::disk_cache cache(tmp);
+    cache.put("http://example.com/v", src, "m");
+
+    auto entry = cache.get("http://example.com/v");
+    REQUIRE(entry.has_value());
+
+    auto edir = entry->body_path.parent_path();
+    {
+        std::ifstream f(edir / "version", std::ios::binary);
+        std::string v;
+        f >> v;
+        REQUIRE_FALSE(v.empty());
+    }
+
+    // Roll the entry back to an unknown layout version: it must never be
+    // served, and get() must evict it.
+    {
+        std::ofstream f(edir / "version", std::ios::binary | std::ios::trunc);
+        f << "0";
+    }
+    REQUIRE_FALSE(cache.get("http://example.com/v").has_value());
+    REQUIRE_FALSE(fs::exists(edir));
+
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("disk_cache: missing source does not clobber existing entry", "[downloader]")
+{
+    auto tmp = fs::temp_directory_path() / "httplib_dl_cache_preserve";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp);
+
+    auto src = tmp / "src.bin";
+    {
+        std::ofstream f(src, std::ios::binary);
+        std::string data = "original payload\n";
+        f.write(data.data(), data.size());
+    }
+
+    httplib::client::disk_cache cache(tmp);
+
+    cache.put("http://example.com/x", src, "etag=orig");
+
+    auto before = cache.get("http://example.com/x");
+    REQUIRE(before.has_value());
+    auto size_before = before->body_size;
+    REQUIRE(size_before > 0);
+
+    // A put whose source vanished must leave the existing entry untouched
+    // instead of deleting it.
+    cache.put("http://example.com/x", tmp / "does-not-exist.bin", "etag=orig");
+
+    auto after = cache.get("http://example.com/x");
+    REQUIRE(after.has_value());
+    REQUIRE(after->body_size == size_before);
+    REQUIRE(read_file(after->body_path) == "original payload\n");
+
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("disk_cache: expired entry is evicted on get without deadlock", "[downloader]")
+{
+    auto tmp = fs::temp_directory_path() / "httplib_dl_cache_expiry";
+    fs::remove_all(tmp);
+    fs::create_directories(tmp);
+
+    auto src = tmp / "src.bin";
+    {
+        std::ofstream f(src, std::ios::binary);
+        std::string data = "aged payload\n";
+        f.write(data.data(), data.size());
+    }
+
+    httplib::client::disk_cache cache(tmp);
+    cache.set_max_age(std::chrono::seconds(1));
+
+    cache.put("http://example.com/aged", src, "content_type=text/plain");
+
+    auto entry = cache.get("http://example.com/aged");
+    REQUIRE(entry.has_value());
+
+    // Backdate the body so it exceeds max_age, then get() must evict it and
+    // return nullopt (regression: it used to call remove() under the lock and
+    // self-deadlock on the non-recursive mutex).
+    std::error_code ec;
+    fs::last_write_time(entry->body_path, fs::file_time_type::clock::now() - std::chrono::hours(1), ec);
+    REQUIRE_FALSE(ec);
+
+    auto expired = cache.get("http://example.com/aged");
+    REQUIRE_FALSE(expired.has_value());
+
+    fs::remove_all(tmp);
+}
+
+TEST_CASE("Downloader: cache is isolated by request credentials", "[downloader]")
+{
+    auto server_path = fs::temp_directory_path() / "httplib_dl_authcache_srv.txt";
+    {
+        std::ofstream f(server_path, std::ios::binary);
+        f << "shared payload\n";
+    }
+
+    auto dl_path_a = fs::temp_directory_path() / "httplib_dl_authcache_a.bin";
+    auto dl_path_b = fs::temp_directory_path() / "httplib_dl_authcache_b.bin";
+    auto cache_dir = fs::temp_directory_path() / "httplib_dl_authcache_dir";
+    fs::remove_all(cache_dir);
+
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>("/secret",
+                                                  [&](httplib::server::request& req, httplib::server::response& resp)
+                                                  {
+                                                      auto auth = std::string(req[http::field::authorization]);
+                                                      resp.set(http::field::etag, "\"" + auth + "\"");
+                                                      resp.set_file_content(server_path);
+                                                  });
+    ts.router().set_http_handler<http::verb::head>("/secret",
+                                                   [&](httplib::server::request& req, httplib::server::response& resp)
+                                                   {
+                                                       auto auth = std::string(req[http::field::authorization]);
+                                                       resp.set(http::field::etag, "\"" + auth + "\"");
+                                                       resp.set_file_content(server_path);
+                                                   });
+    ts.start();
+
+    auto cache = std::make_shared<httplib::client::disk_cache>(cache_dir);
+
+    http::fields headers_a;
+    headers_a.set(http::field::authorization, "Bearer user-a");
+    http::fields headers_b;
+    headers_b.set(http::field::authorization, "Bearer user-b");
+
+    {
+        httplib::client::downloader dl(ts.ioc_, ts.pool);
+        dl.set_cache(cache);
+        dl.set_config({ .segments = 1 });
+        auto ec = dl.download(ts.url_for_path("/secret"), dl_path_a, headers_a);
+        REQUIRE_FALSE(ec);
+        REQUIRE(read_file(dl_path_a) == "shared payload\n");
+    }
+    {
+        httplib::client::downloader dl(ts.ioc_, ts.pool);
+        dl.set_cache(cache);
+        dl.set_config({ .segments = 1 });
+        auto ec = dl.download(ts.url_for_path("/secret"), dl_path_b, headers_b);
+        REQUIRE_FALSE(ec);
+        REQUIRE(read_file(dl_path_b) == "shared payload\n");
+    }
+
+    // Different credentials must never share a single cache entry.
+    REQUIRE(cache->entry_count() >= 2);
+
+    std::error_code rm_ec;
+    fs::remove(server_path, rm_ec);
+    fs::remove(dl_path_a, rm_ec);
+    fs::remove(dl_path_b, rm_ec);
+    fs::remove_all(cache_dir, rm_ec);
+}
+
+TEST_CASE("Downloader: no-store responses are not cached", "[downloader]")
+{
+    auto server_path = fs::temp_directory_path() / "httplib_dl_nostore_srv.txt";
+    {
+        std::ofstream f(server_path, std::ios::binary);
+        f << "no-store payload\n";
+    }
+
+    auto dl_path = fs::temp_directory_path() / "httplib_dl_nostore_out.bin";
+    auto cache_dir = fs::temp_directory_path() / "httplib_dl_nostore_dir";
+    fs::remove_all(cache_dir);
+
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>("/nostore",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  {
+                                                      resp.set(http::field::cache_control, "no-store");
+                                                      resp.set(http::field::etag, "\"ns\"");
+                                                      resp.set_file_content(server_path);
+                                                  });
+    ts.router().set_http_handler<http::verb::head>("/nostore",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   { resp.set_file_content(server_path); });
+    ts.start();
+
+    auto cache = std::make_shared<httplib::client::disk_cache>(cache_dir);
+
+    httplib::client::downloader dl(ts.ioc_, ts.pool);
+    dl.set_cache(cache);
+    dl.set_config({ .segments = 1 });
+    auto ec = dl.download(ts.url_for_path("/nostore"), dl_path);
+    REQUIRE_FALSE(ec);
+    REQUIRE(read_file(dl_path) == "no-store payload\n");
+
+    REQUIRE(cache->entry_count() == 0);
+
+    std::error_code rm_ec;
+    fs::remove(server_path, rm_ec);
+    fs::remove(dl_path, rm_ec);
+    fs::remove_all(cache_dir, rm_ec);
+}
+
+TEST_CASE("Downloader: fresh cache entry is served without network", "[downloader]")
+{
+    auto server_path = fs::temp_directory_path() / "httplib_dl_fresh_srv.txt";
+    {
+        std::ofstream f(server_path, std::ios::binary);
+        f << "fresh payload\n";
+    }
+
+    auto dl_path1 = fs::temp_directory_path() / "httplib_dl_fresh_out1.bin";
+    auto dl_path2 = fs::temp_directory_path() / "httplib_dl_fresh_out2.bin";
+    auto cache_dir = fs::temp_directory_path() / "httplib_dl_fresh_dir";
+    fs::remove_all(cache_dir);
+
+    std::atomic<int> get_hits { 0 };
+    std::atomic<int> head_hits { 0 };
+
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>("/fresh",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  {
+                                                      get_hits.fetch_add(1);
+                                                      resp.set(http::field::etag, "\"f1\"");
+                                                      resp.set(http::field::cache_control, "max-age=3600");
+                                                      resp.set_file_content(server_path);
+                                                  });
+    ts.router().set_http_handler<http::verb::head>("/fresh",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       head_hits.fetch_add(1);
+                                                       resp.set(http::field::etag, "\"f1\"");
+                                                       resp.set(http::field::cache_control, "max-age=3600");
+                                                       resp.set_file_content(server_path);
+                                                   });
+    ts.start();
+
+    auto cache = std::make_shared<httplib::client::disk_cache>(cache_dir);
+
+    {
+        httplib::client::downloader dl(ts.ioc_, ts.pool);
+        dl.set_cache(cache);
+        dl.set_config({ .segments = 1 });
+        auto ec = dl.download(ts.url_for_path("/fresh"), dl_path1);
+        REQUIRE_FALSE(ec);
+        REQUIRE(read_file(dl_path1) == "fresh payload\n");
+    }
+
+    auto gets_after_first = get_hits.load();
+    auto heads_after_first = head_hits.load();
+    REQUIRE(gets_after_first == 1);
+
+    {
+        httplib::client::downloader dl(ts.ioc_, ts.pool);
+        dl.set_cache(cache);
+        dl.set_config({ .segments = 1 });
+        auto ec = dl.download(ts.url_for_path("/fresh"), dl_path2);
+        REQUIRE_FALSE(ec);
+        REQUIRE(read_file(dl_path2) == "fresh payload\n");
+    }
+
+    // The second download is still fresh, so it must not touch the network.
+    REQUIRE(get_hits.load() == gets_after_first);
+    REQUIRE(head_hits.load() == heads_after_first);
+
+    std::error_code rm_ec;
+    fs::remove(server_path, rm_ec);
+    fs::remove(dl_path1, rm_ec);
+    fs::remove(dl_path2, rm_ec);
+    fs::remove_all(cache_dir, rm_ec);
+}
+
+TEST_CASE("Downloader: stale entry is revalidated with 304 and keeps its body", "[downloader]")
+{
+    auto dl_path1 = fs::temp_directory_path() / "httplib_dl_reval_out1.bin";
+    auto dl_path2 = fs::temp_directory_path() / "httplib_dl_reval_out2.bin";
+    auto cache_dir = fs::temp_directory_path() / "httplib_dl_reval_dir";
+    fs::remove_all(cache_dir);
+
+    std::atomic<int> get_hits { 0 };
+    std::atomic<int> head_hits { 0 };
+
+    std::string const payload = "revalidated payload\n";
+
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>("/reval",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  {
+                                                      get_hits.fetch_add(1);
+                                                      resp.set(http::field::etag, "\"r1\"");
+                                                      resp.set(http::field::cache_control, "no-cache");
+                                                      resp.set_string_content(payload, "text/plain");
+                                                  });
+    ts.router().set_http_handler<http::verb::head>("/reval",
+                                                   [&](httplib::server::request& req, httplib::server::response& resp)
+                                                   {
+                                                       head_hits.fetch_add(1);
+                                                       if (req[http::field::if_none_match] == "\"r1\"")
+                                                       {
+                                                           resp.set_empty_content(http::status::not_modified);
+                                                           return;
+                                                       }
+                                                       resp.set(http::field::etag, "\"r1\"");
+                                                       resp.set(http::field::cache_control, "no-cache");
+                                                       resp.set_string_content(payload, "text/plain");
+                                                   });
+    ts.start();
+
+    auto cache = std::make_shared<httplib::client::disk_cache>(cache_dir);
+
+    {
+        httplib::client::downloader dl(ts.ioc_, ts.pool);
+        dl.set_cache(cache);
+        dl.set_config({ .segments = 1 });
+        auto ec = dl.download(ts.url_for_path("/reval"), dl_path1);
+        REQUIRE_FALSE(ec);
+        REQUIRE(read_file(dl_path1) == "revalidated payload\n");
+    }
+
+    auto gets_after_first = get_hits.load();
+    REQUIRE(gets_after_first == 1);
+
+    {
+        httplib::client::downloader dl(ts.ioc_, ts.pool);
+        dl.set_cache(cache);
+        dl.set_config({ .segments = 1 });
+        auto ec = dl.download(ts.url_for_path("/reval"), dl_path2);
+        REQUIRE_FALSE(ec);
+        REQUIRE(read_file(dl_path2) == "revalidated payload\n");
+    }
+
+    // no-cache forces a conditional HEAD; the 304 must reuse the cached body
+    // without a second GET.
+    REQUIRE(get_hits.load() == gets_after_first);
+    REQUIRE(head_hits.load() >= 2);
+
+    std::error_code rm_ec;
+    fs::remove(dl_path1, rm_ec);
+    fs::remove(dl_path2, rm_ec);
+    fs::remove_all(cache_dir, rm_ec);
 }
 
 // ===========================================================================

@@ -21,9 +21,15 @@ namespace httplib::client
         disk_cache(disk_cache&&) noexcept;
         disk_cache& operator=(disk_cache&&) noexcept;
 
-        std::optional<entry> get(std::string_view url) override;
-        void put(std::string_view url, http::fields const& headers, fs::path const& src_body) override;
-        void remove(std::string_view url) override;
+        std::optional<entry> get(std::string_view key) override;
+        void put(std::string_view key,
+                 fs::path const& src_body,
+                 std::string_view metadata = {},
+                 std::optional<time_point> expires_at = std::nullopt) override;
+        bool update_metadata(std::string_view key,
+                             std::string_view metadata,
+                             std::optional<time_point> expires_at) override;
+        void remove(std::string_view key) override;
 
         void clear();
         void cleanup();

@@ -20,6 +20,138 @@ namespace httplib::client
     {
         constexpr std::size_t kReadBufSize = 64 * 1024;
 
+        std::string
+        fnv1a_hex(std::string_view s)
+        {
+            std::uint64_t h = 14695981039346656037ULL;
+            for (auto c : s)
+            {
+                h ^= static_cast<std::uint64_t>(static_cast<unsigned char>(c));
+                h *= 1099511628211ULL;
+            }
+            return std::format("{:016x}", h);
+        }
+
+        bool
+        ascii_iequals(std::string_view a, std::string_view b)
+        {
+            if (a.size() != b.size())
+            {
+                return false;
+            }
+            for (std::size_t i = 0; i < a.size(); ++i)
+            {
+                auto ca = static_cast<unsigned char>(a[i]);
+                auto cb = static_cast<unsigned char>(b[i]);
+                if (ca >= 'A' && ca <= 'Z')
+                {
+                    ca = static_cast<unsigned char>(ca - 'A' + 'a');
+                }
+                if (cb >= 'A' && cb <= 'Z')
+                {
+                    cb = static_cast<unsigned char>(cb - 'A' + 'a');
+                }
+                if (ca != cb)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        /// True if the comma-separated `value` contains `token` as a directive
+        /// name, case-insensitively (ignoring any `=value` suffix).
+        bool
+        header_has_token(std::string_view value, std::string_view token)
+        {
+            std::size_t i = 0;
+            while (i <= value.size())
+            {
+                auto next = value.find(',', i);
+                auto end = (next == std::string_view::npos) ? value.size() : next;
+                auto part = value.substr(i, end - i);
+                while (!part.empty() && (part.front() == ' ' || part.front() == '\t'))
+                {
+                    part.remove_prefix(1);
+                }
+                while (!part.empty() && (part.back() == ' ' || part.back() == '\t'))
+                {
+                    part.remove_suffix(1);
+                }
+                if (auto eq = part.find('='); eq != std::string_view::npos)
+                {
+                    part = part.substr(0, eq);
+                    while (!part.empty() && (part.back() == ' ' || part.back() == '\t'))
+                    {
+                        part.remove_suffix(1);
+                    }
+                }
+                if (ascii_iequals(part, token))
+                {
+                    return true;
+                }
+                if (next == std::string_view::npos)
+                {
+                    break;
+                }
+                i = next + 1;
+            }
+            return false;
+        }
+
+        /// Extract the integer value of a `name=value` directive from a
+        /// comma-separated Cache-Control value (e.g. max-age=3600).
+        std::optional<std::int64_t>
+        header_directive_int(std::string_view value, std::string_view name)
+        {
+            std::size_t i = 0;
+            while (i <= value.size())
+            {
+                auto next = value.find(',', i);
+                auto end = (next == std::string_view::npos) ? value.size() : next;
+                auto part = value.substr(i, end - i);
+                while (!part.empty() && (part.front() == ' ' || part.front() == '\t'))
+                {
+                    part.remove_prefix(1);
+                }
+                auto eq = part.find('=');
+                if (eq != std::string_view::npos)
+                {
+                    auto key = part.substr(0, eq);
+                    while (!key.empty() && (key.back() == ' ' || key.back() == '\t'))
+                    {
+                        key.remove_suffix(1);
+                    }
+                    if (ascii_iequals(key, name))
+                    {
+                        auto val = part.substr(eq + 1);
+                        while (!val.empty() && (val.front() == ' ' || val.front() == '\t'))
+                        {
+                            val.remove_prefix(1);
+                        }
+                        while (!val.empty() && (val.back() == ' ' || val.back() == '\t'))
+                        {
+                            val.remove_suffix(1);
+                        }
+                        try
+                        {
+                            return std::stoll(std::string(val));
+                        }
+                        catch (...)
+                        {
+                            return std::nullopt;
+                        }
+                    }
+                }
+                if (next == std::string_view::npos)
+                {
+                    break;
+                }
+                i = next + 1;
+            }
+            return std::nullopt;
+        }
+
         std::uint64_t
         parse_content_length(http::fields const& headers)
         {
@@ -75,7 +207,7 @@ namespace httplib::client
     }
 
     std::string
-    downloader::impl::make_cache_key(url_info const& ui)
+    downloader::impl::make_url_string(url_info const& ui)
     {
         std::string key;
         key.reserve(ui.host.size() + ui.path.size() + 32);
@@ -88,6 +220,212 @@ namespace httplib::client
         }
         key.append(ui.path);
         return key;
+    }
+
+    std::string
+    downloader::impl::cache_auth_scope(http::fields const& headers)
+    {
+        // Fold the credential-bearing headers into a stable digest. Raw secrets
+        // are never stored on disk (the digest is what lands in cache keys and
+        // sidecar state files).
+        std::string material;
+        auto append = [&](http::field f)
+        {
+            auto v = headers[f];
+            if (!v.empty())
+            {
+                material.append(http::to_string(f).data(), http::to_string(f).size());
+                material.push_back(':');
+                material.append(v.data(), v.size());
+                material.push_back('\n');
+            }
+        };
+        append(http::field::authorization);
+        append(http::field::proxy_authorization);
+        append(http::field::cookie);
+        append(http::field::cookie2);
+        if (material.empty())
+        {
+            return {};
+        }
+        return fnv1a_hex(material);
+    }
+
+    std::string
+    downloader::impl::make_cache_key(url_info const& ui) const
+    {
+        auto key = make_url_string(ui);
+        if (!auth_scope_.empty())
+        {
+            key.append("|auth=");
+            key.append(auth_scope_);
+        }
+        return key;
+    }
+
+    bool
+    downloader::impl::response_is_cacheable(http::fields const& headers)
+    {
+        // `no-store` forbids persisting the response; `Vary: *` means the
+        // response cannot be selected by request, so caching it is unsafe.
+        if (header_has_token(headers[http::field::cache_control], "no-store"))
+        {
+            return false;
+        }
+        if (header_has_token(headers[http::field::vary], "*"))
+        {
+            return false;
+        }
+        return true;
+    }
+
+    downloader::impl::http_meta
+    downloader::impl::make_http_meta(http::fields const& response,
+                                     http::fields const& probe,
+                                     url_info const& final_ui,
+                                     bool has_final_ui)
+    {
+        // Explicit whitelist of HTTP bookkeeping the downloader needs; the rest
+        // (hop-by-hop headers, partial-response framing) is discarded.
+        http_meta meta;
+        auto take = [&](http::field f) -> std::string
+        {
+            auto v = response[f];
+            if (v.empty())
+            {
+                v = probe[f];
+            }
+            return std::string(v);
+        };
+        meta.content_type = take(http::field::content_type);
+        meta.content_disposition = take(http::field::content_disposition);
+        meta.etag = take(http::field::etag);
+        meta.last_modified = take(http::field::last_modified);
+        if (has_final_ui)
+        {
+            meta.final_url = make_url_string(final_ui);
+        }
+
+        std::string cache_control = take(http::field::cache_control);
+        meta.must_revalidate = header_has_token(cache_control, "no-cache");
+
+        if (auto max_age = header_directive_int(cache_control, "max-age"); max_age && *max_age >= 0)
+        {
+            std::int64_t age = 0;
+            if (auto age_header = response[http::field::age]; !age_header.empty())
+            {
+                try
+                {
+                    age = std::stoll(std::string(age_header));
+                }
+                catch (...)
+                {
+                    age = 0;
+                }
+            }
+            auto lifetime = std::chrono::seconds(std::max<std::int64_t>(0, *max_age - age));
+            meta.fresh_until = std::chrono::system_clock::now() + lifetime;
+        }
+        return meta;
+    }
+
+    std::string
+    downloader::impl::serialize_http_meta(http_meta const& meta)
+    {
+        std::string out;
+        auto put = [&](std::string_view key, std::string const& value)
+        {
+            if (!value.empty())
+            {
+                out.append(key);
+                out.push_back('=');
+                out.append(value);
+                out.push_back('\n');
+            }
+        };
+        put("final_url", meta.final_url);
+        put("etag", meta.etag);
+        put("last_modified", meta.last_modified);
+        put("content_type", meta.content_type);
+        put("content_disposition", meta.content_disposition);
+        if (meta.fresh_until.has_value())
+        {
+            auto secs = std::chrono::duration_cast<std::chrono::seconds>(meta.fresh_until->time_since_epoch());
+            out.append("fresh_until=");
+            out.append(std::to_string(secs.count()));
+            out.push_back('\n');
+        }
+        if (meta.must_revalidate)
+        {
+            out.append("must_revalidate=1\n");
+        }
+        return out;
+    }
+
+    std::optional<downloader::impl::http_meta>
+    downloader::impl::parse_http_meta(std::string_view blob)
+    {
+        if (blob.empty())
+        {
+            return std::nullopt;
+        }
+        http_meta meta;
+        std::size_t pos = 0;
+        while (pos < blob.size())
+        {
+            auto nl = blob.find('\n', pos);
+            auto end = (nl == std::string_view::npos) ? blob.size() : nl;
+            std::string line(blob.substr(pos, end - pos));
+            pos = (nl == std::string_view::npos) ? blob.size() : nl + 1;
+
+            trim(line);
+            if (line.empty())
+            {
+                continue;
+            }
+            auto eq = line.find('=');
+            if (eq == std::string::npos)
+            {
+                continue;
+            }
+            auto key = line.substr(0, eq);
+            auto val = line.substr(eq + 1);
+            if (key == "final_url")
+            {
+                meta.final_url = val;
+            }
+            else if (key == "etag")
+            {
+                meta.etag = val;
+            }
+            else if (key == "last_modified")
+            {
+                meta.last_modified = val;
+            }
+            else if (key == "content_type")
+            {
+                meta.content_type = val;
+            }
+            else if (key == "content_disposition")
+            {
+                meta.content_disposition = val;
+            }
+            else if (key == "fresh_until")
+            {
+                try
+                {
+                    meta.fresh_until = std::chrono::system_clock::time_point(std::chrono::seconds(std::stoll(val)));
+                }
+                catch (...)
+                {
+                }
+            }
+            else if (key == "must_revalidate")
+            {
+                meta.must_revalidate = (val == "1");
+            }
+        }
+        return meta;
     }
 
     std::uint64_t
@@ -535,36 +873,59 @@ namespace httplib::client
         suggested_filename_ = std::move(fname);
     }
 
+    void
+    downloader::impl::record_final_ui(url_info const& ui)
+    {
+        std::lock_guard lk(resource_mutex_);
+        final_ui_ = ui;
+        has_final_ui_ = true;
+    }
+
+    void
+    downloader::impl::record_resource_headers(http::fields const& headers)
+    {
+        std::lock_guard lk(resource_mutex_);
+        resource_headers_ = headers;
+    }
+
     // =========================================================================
     // cache helpers
     // =========================================================================
 
     net::awaitable<bool>
-    downloader::impl::check_remote_cache(url_info const& ui)
+    downloader::impl::check_remote_cache(url_info const& ui, http_meta const& meta)
     {
         if (!cache_)
         {
             co_return false;
         }
-        auto entry = cache_->get(make_cache_key(ui));
-        if (!entry.has_value())
+        http::fields req_headers;
+        if (meta.etag.empty() && meta.last_modified.empty())
+        {
+            // No validator: there is no way to prove the cached body is still
+            // current, so never serve it.
+            co_return false;
+        }
+        if (!meta.etag.empty())
+        {
+            req_headers.set(http::field::if_none_match, meta.etag);
+        }
+        if (!meta.last_modified.empty())
+        {
+            req_headers.set(http::field::if_modified_since, meta.last_modified);
+        }
+        auto result = co_await send_request(ui, http::verb::head, req_headers);
+        if (result.status != http::status::not_modified)
         {
             co_return false;
         }
-        auto& cached = entry.value();
-        http::fields req_headers;
-        auto etag = cached.headers[http::field::etag];
-        auto last_mod = cached.headers[http::field::last_modified];
-        if (!etag.empty())
+        // Revalidate the final origin too: a URL that now redirects elsewhere
+        // must not be served from an entry recorded against the old target.
+        if (!meta.final_url.empty() && make_url_string(result.final_ui) != meta.final_url)
         {
-            req_headers.set(http::field::if_none_match, etag);
+            co_return false;
         }
-        if (!last_mod.empty())
-        {
-            req_headers.set(http::field::if_modified_since, last_mod);
-        }
-        auto result = co_await send_request(ui, http::verb::head, req_headers);
-        co_return result.status == http::status::not_modified;
+        co_return true;
     }
 
     // =========================================================================
@@ -668,6 +1029,8 @@ namespace httplib::client
             rr.response = std::move(resp);
             rr.headers = rr.response.headers();
             rr.status = status;
+            rr.final_ui = url_info { h, p, s, t };
+            record_final_ui(rr.final_ui);
             co_return rr;
         }
 
@@ -829,6 +1192,7 @@ namespace httplib::client
             out.close();
 
             store_suggested_filename(result.headers);
+            record_resource_headers(result.headers);
 
             {
                 downloader::progress_callback cb;
@@ -841,11 +1205,6 @@ namespace httplib::client
                     auto final_sz = file_total > 0 ? file_total : existing_size;
                     cb(downloader::progress_info { final_sz, final_sz, 0, std::chrono::seconds(0), 0, 1 });
                 }
-            }
-
-            if (cache_)
-            {
-                cache_->put(make_cache_key(ui), result.headers, save_path);
             }
 
             co_return boost::system::error_code {};
@@ -952,6 +1311,7 @@ namespace httplib::client
             }
 
             store_suggested_filename(result.headers);
+            record_resource_headers(result.headers);
 
             std::ofstream out(part_path, open_mode);
             if (!out.is_open())
@@ -1233,11 +1593,6 @@ namespace httplib::client
 
         del_state(save_path);
 
-        if (cache_)
-        {
-            cache_->put(make_cache_key(ui), probe_headers, save_path);
-        }
-
         co_return boost::system::error_code {};
     }
 
@@ -1320,6 +1675,13 @@ namespace httplib::client
         }
         per_connection_rate_ = active_config_.max_speed_bytes_per_sec;
         custom_headers_ = headers;
+        auth_scope_ = cache_auth_scope(custom_headers_);
+        {
+            std::lock_guard lk(resource_mutex_);
+            resource_headers_.clear();
+            final_ui_ = {};
+            has_final_ui_ = false;
+        }
 
         url_info ui;
         try
@@ -1345,15 +1707,41 @@ namespace httplib::client
                 auto entry = cache_->get(state_url_);
                 if (entry.has_value())
                 {
-                    set_state(downloader::state::downloading, {});
-                    if (co_await check_remote_cache(ui))
+                    auto meta = parse_http_meta(entry->metadata);
+                    if (meta.has_value())
                     {
-                        std::error_code copy_ec;
-                        fs::copy_file(entry->body_path, save_path, fs::copy_options::overwrite_existing, copy_ec);
-                        if (!copy_ec)
+                        set_state(downloader::state::downloading, {});
+                        bool usable = false;
+                        if (!meta->must_revalidate && meta->fresh_until.has_value()
+                            && std::chrono::system_clock::now() < *meta->fresh_until)
                         {
-                            set_state(downloader::state::completed, {});
-                            co_return boost::system::error_code {};
+                            // Still fresh: serve the cached body without any
+                            // network round-trip.
+                            usable = true;
+                        }
+                        else
+                        {
+                            usable = co_await check_remote_cache(ui, *meta);
+                        }
+                        if (usable)
+                        {
+                            // Re-fetch immediately before copying so a concurrent
+                            // cleanup cannot evict the entry between validation
+                            // and use (narrowing the TOCTOU window).
+                            auto fresh = cache_->get(state_url_);
+                            if (fresh.has_value())
+                            {
+                                std::error_code copy_ec;
+                                fs::copy_file(fresh->body_path,
+                                              save_path,
+                                              fs::copy_options::overwrite_existing,
+                                              copy_ec);
+                                if (!copy_ec)
+                                {
+                                    set_state(downloader::state::completed, {});
+                                    co_return boost::system::error_code {};
+                                }
+                            }
                         }
                     }
                 }
@@ -1387,6 +1775,32 @@ namespace httplib::client
             else
             {
                 ec = co_await co_download_single(ui, save_path);
+            }
+
+            if (!ec && cache_ && !save_path.empty())
+            {
+                http::fields response_headers;
+                url_info final_ui;
+                bool has_final = false;
+                {
+                    std::lock_guard lk(resource_mutex_);
+                    response_headers = resource_headers_;
+                    final_ui = final_ui_;
+                    has_final = has_final_ui_;
+                }
+                bool cacheable = response_is_cacheable(probe.headers);
+                if (response_headers.begin() != response_headers.end())
+                {
+                    cacheable = cacheable && response_is_cacheable(response_headers);
+                }
+                if (cacheable)
+                {
+                    auto meta = make_http_meta(response_headers, probe.headers, final_ui, has_final);
+                    // Retention is governed by the cache's max_age (so stale
+                    // entries stay available for revalidation); HTTP freshness
+                    // travels inside the opaque metadata blob.
+                    cache_->put(state_url_, save_path, serialize_http_meta(meta), std::nullopt);
+                }
             }
         }
         catch (std::exception const&)
@@ -1431,8 +1845,7 @@ namespace httplib::client
 
     downloader::downloader(downloader&&) noexcept = default;
 
-    downloader&
-    downloader::operator=(downloader&&) noexcept = default;
+    downloader& downloader::operator=(downloader&&) noexcept = default;
 
     downloader::~downloader() {}
 
