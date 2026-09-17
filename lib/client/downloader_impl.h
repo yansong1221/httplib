@@ -64,6 +64,11 @@ namespace httplib::client
             client::response response;
             http::fields headers;
             http::status status = http::status::unknown;
+            /// Set when no usable response was obtained (connection/acquire/
+            /// send failure, cancellation, redirect exhaustion). Callers
+            /// propagate this instead of collapsing every failure into a
+            /// generic timeout.
+            boost::system::error_code error;
             /// Origin/target actually reached after following redirects. Used as
             /// the cache identity so a URL that redirects elsewhere cannot serve
             /// stale cached content.
@@ -99,7 +104,7 @@ namespace httplib::client
         std::shared_ptr<cache> get_cache() const;
         std::shared_ptr<http_client_pool> get_http_pool() const;
 
-        downloader::config const& get_config() const;
+        downloader::config get_config() const;
         downloader::state current_state() const;
 
         net::awaitable<boost::system::error_code> async_download(std::string_view url,
@@ -164,7 +169,9 @@ namespace httplib::client
                                                                             std::uint64_t content_length,
                                                                             http::fields const& probe_headers);
 
-        boost::system::error_code merge_parts_sync(fs::path const& save_path, int total_segments);
+        boost::system::error_code merge_parts_sync(fs::path const& save_path,
+                                                   int total_segments,
+                                                   std::uint64_t expected_total);
 
       private:
         downloader::config config_;

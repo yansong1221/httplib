@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <future>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -54,6 +55,10 @@ namespace httplib::client
             bool verify_ssl = true;
             std::uint64_t max_speed_bytes_per_sec = 0;
             bool save_state = true;
+            /// Delay before a retry attempt after a transient failure. Scaled by
+            /// the attempt number so repeated failures back off instead of
+            /// hammering the server. `0` disables the backoff.
+            std::chrono::milliseconds retry_backoff = std::chrono::milliseconds(200);
         };
 
       public:
@@ -74,15 +79,15 @@ namespace httplib::client
         std::shared_ptr<cache> get_cache() const;
         std::shared_ptr<http_client_pool> get_http_pool() const;
 
-        config const& get_config() const;
+        config get_config() const;
 
         net::awaitable<boost::system::error_code> async_download(std::string_view url,
                                                                  fs::path const& save_path,
                                                                  http::fields const& headers = {});
 
-        boost::system::error_code download(std::string_view url,
-                                           fs::path const& save_path,
-                                           http::fields const& headers = {});
+        std::future<boost::system::error_code> download(std::string_view url,
+                                                        fs::path const& save_path,
+                                                        http::fields const& headers = {});
 
         void cancel();
         void pause();

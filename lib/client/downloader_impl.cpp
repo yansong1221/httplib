@@ -7,6 +7,8 @@
 #include "redirect_util.hpp"
 #include <algorithm>
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/redirect_error.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/asio/use_future.hpp>
 #include <boost/url.hpp>
 #include <format>
@@ -169,6 +171,20 @@ namespace httplib::client
             return 0;
         }
 
+        /// True when the body is content-encoded (e.g. gzip). The decompressed
+        /// byte count then differs from Content-Length, so size validation must
+        /// be skipped for such responses.
+        bool
+        response_is_encoded(http::fields const& headers)
+        {
+            auto ce = headers[http::field::content_encoding];
+            if (ce.empty())
+            {
+                return false;
+            }
+            return !ascii_iequals(ce, "identity");
+        }
+
         void
         trim(std::string& s)
         {
@@ -180,6 +196,21 @@ namespace httplib::client
             {
                 s.pop_back();
             }
+        }
+
+        /// Suspend the current coroutine for `delay`. Used between retry attempts
+        /// so a flapping server is not hammered in a tight loop.
+        net::awaitable<void>
+        co_backoff(net::any_io_executor ex, std::chrono::milliseconds delay)
+        {
+            if (delay.count() <= 0)
+            {
+                co_return;
+            }
+            net::steady_timer timer(ex);
+            timer.expires_after(delay);
+            boost::system::error_code ec;
+            co_await timer.async_wait(net::redirect_error(net::use_awaitable, ec));
         }
     } // namespace
 
@@ -619,9 +650,10 @@ namespace httplib::client
         return pool_;
     }
 
-    downloader::config const&
+    downloader::config
     downloader::impl::get_config() const
     {
+        std::lock_guard lk(config_mutex_);
         return config_;
     }
 
@@ -969,14 +1001,18 @@ namespace httplib::client
         {
             if (cancelled_.load(std::memory_order_relaxed))
             {
-                co_return request_result {};
+                request_result rr;
+                rr.error = boost::asio::error::operation_aborted;
+                co_return rr;
             }
 
             assert(pool_);
             auto handle = co_await pool_->async_acquire(h, p, s, active_config_.acquire_timeout);
             if (!handle)
             {
-                co_return request_result {};
+                request_result rr;
+                rr.error = handle.error();
+                co_return rr;
             }
             handle->set_timeout(active_config_.timeout);
             handle->set_max_redirects(0);
@@ -987,7 +1023,9 @@ namespace httplib::client
             auto resp_result = co_await handle->async_send_request(std::move(req), http_client::body_mode::lazy);
             if (!resp_result.has_value())
             {
-                co_return request_result {};
+                request_result rr;
+                rr.error = resp_result.error();
+                co_return rr;
             }
             auto resp = std::move(resp_result).value();
 
@@ -1001,6 +1039,15 @@ namespace httplib::client
                 auto rt = parse_redirect(resp.headers());
                 if (rt.has_value() && rt->valid)
                 {
+                    // Drain the redirect body before the handle returns to the
+                    // pool; otherwise the leftover bytes corrupt the next
+                    // request that reuses this connection. A failed drain means
+                    // the connection is unusable, so close it explicitly.
+                    if (auto drain_ec = co_await resp.read_body(); drain_ec)
+                    {
+                        handle->close();
+                    }
+
                     if (!rt->host.empty())
                     {
                         // CL-02: 仅当 Location 为绝对 URL 且 origin 变化时移除敏感头，避免凭据泄露；
@@ -1034,7 +1081,9 @@ namespace httplib::client
             co_return rr;
         }
 
-        co_return request_result {};
+        request_result rr;
+        rr.error = boost::system::errc::make_error_code(boost::system::errc::protocol_error);
+        co_return rr;
     }
 
     // =========================================================================
@@ -1083,8 +1132,10 @@ namespace httplib::client
             {
                 if (attempt == active_config_.max_retries)
                 {
-                    co_return boost::system::errc::make_error_code(boost::system::errc::timed_out);
+                    co_return result.error ? result.error
+                                           : boost::system::errc::make_error_code(boost::system::errc::timed_out);
                 }
+                co_await co_backoff(executor_, active_config_.retry_backoff * (attempt + 1));
                 continue;
             }
 
@@ -1100,6 +1151,7 @@ namespace httplib::client
                     std::error_code ec;
                     fs::remove(save_path, ec);
                 }
+                co_await co_backoff(executor_, active_config_.retry_backoff * (attempt + 1));
                 continue;
             }
 
@@ -1123,6 +1175,7 @@ namespace httplib::client
                     std::error_code ec;
                     fs::remove(save_path, ec);
                     existing_size = 0;
+                    co_await co_backoff(executor_, active_config_.retry_backoff * (attempt + 1));
                     continue;
                 }
             }
@@ -1155,6 +1208,7 @@ namespace httplib::client
 
             auto& resp = result.response;
             std::vector<char> buf(kReadBufSize);
+            std::uint64_t session_bytes = 0;
 
             while (!resp.is_body_done())
             {
@@ -1186,10 +1240,26 @@ namespace httplib::client
                     co_return boost::system::errc::make_error_code(boost::system::errc::no_space_on_device);
                 }
 
+                session_bytes += n;
                 update_progress(n);
             }
 
             out.close();
+
+            // A response that stops short of its declared size must not be
+            // reported as a successful download: the file would be silently
+            // truncated. Retry (resuming from what we kept), and only fail once
+            // the retry budget is exhausted.
+            bool const validate_size = !response_is_encoded(result.headers);
+            if (validate_size && file_total > existing_size && session_bytes != file_total - existing_size)
+            {
+                if (attempt == active_config_.max_retries)
+                {
+                    co_return boost::system::errc::make_error_code(boost::system::errc::message_size);
+                }
+                co_await co_backoff(executor_, active_config_.retry_backoff * (attempt + 1));
+                continue;
+            }
 
             store_suggested_filename(result.headers);
             record_resource_headers(result.headers);
@@ -1275,8 +1345,10 @@ namespace httplib::client
             {
                 if (attempt == active_config_.max_retries)
                 {
-                    co_return boost::system::errc::make_error_code(boost::system::errc::timed_out);
+                    co_return result.error ? result.error
+                                           : boost::system::errc::make_error_code(boost::system::errc::timed_out);
                 }
+                co_await co_backoff(executor_, active_config_.retry_backoff * (attempt + 1));
                 continue;
             }
 
@@ -1293,6 +1365,7 @@ namespace httplib::client
                 {
                     co_return boost::system::errc::make_error_code(boost::system::errc::protocol_error);
                 }
+                co_await co_backoff(executor_, active_config_.retry_backoff * (attempt + 1));
                 continue;
             }
 
@@ -1307,6 +1380,7 @@ namespace httplib::client
                 }
                 std::error_code rm_ec;
                 fs::remove(part_path, rm_ec);
+                co_await co_backoff(executor_, active_config_.retry_backoff * (attempt + 1));
                 continue;
             }
 
@@ -1321,6 +1395,7 @@ namespace httplib::client
 
             auto& resp = result.response;
             std::vector<char> buf(kReadBufSize);
+            std::uint64_t session_bytes = 0;
 
             while (!resp.is_body_done())
             {
@@ -1352,9 +1427,24 @@ namespace httplib::client
                     co_return boost::system::errc::make_error_code(boost::system::errc::no_space_on_device);
                 }
 
+                session_bytes += n;
                 update_progress(n);
             }
             out.close();
+
+            // The segment must have received exactly the bytes it asked for.
+            // A short read (server closed early or lied about the range) would
+            // otherwise be appended and merged as if complete.
+            auto expected = end - resume_at + 1;
+            if (!response_is_encoded(result.headers) && session_bytes != expected)
+            {
+                if (attempt == active_config_.max_retries)
+                {
+                    co_return boost::system::errc::make_error_code(boost::system::errc::message_size);
+                }
+                co_await co_backoff(executor_, active_config_.retry_backoff * (attempt + 1));
+                continue;
+            }
 
             co_return boost::system::error_code {};
         }
@@ -1585,9 +1675,13 @@ namespace httplib::client
         }
 
         set_state(downloader::state::merging, {});
-        auto merge_ec = merge_parts_sync(save_path, seg_count);
+        auto merge_ec = merge_parts_sync(save_path, seg_count, content_length);
         if (merge_ec)
         {
+            // A failed merge means the parts are missing/corrupt; drop them and
+            // the state so the next run starts over instead of failing forever.
+            remove_all_parts();
+            del_state(save_path);
             co_return merge_ec;
         }
 
@@ -1601,7 +1695,7 @@ namespace httplib::client
     // =========================================================================
 
     boost::system::error_code
-    downloader::impl::merge_parts_sync(fs::path const& save_path, int total_segments)
+    downloader::impl::merge_parts_sync(fs::path const& save_path, int total_segments, std::uint64_t expected_total)
     {
         std::ofstream out(save_path, std::ios::binary | std::ios::trunc);
         if (!out.is_open())
@@ -1611,6 +1705,7 @@ namespace httplib::client
 
         constexpr std::size_t kBufSize = 1024 * 1024;
         auto buf = std::make_unique<char[]>(kBufSize);
+        std::uint64_t written_total = 0;
 
         for (int i = 0; i < total_segments; ++i)
         {
@@ -1640,10 +1735,21 @@ namespace httplib::client
                     fs::remove(save_path, rm_ec);
                     return boost::system::errc::make_error_code(boost::system::errc::no_space_on_device);
                 }
+                written_total += n;
             }
             in.close();
         }
         out.close();
+
+        // If the parts do not add up to the expected total, the merged file is
+        // incomplete/corrupt; discard it rather than leave a bad artifact that
+        // looks like a successful download.
+        if (expected_total > 0 && written_total != expected_total)
+        {
+            std::error_code rm_ec;
+            fs::remove(save_path, rm_ec);
+            return boost::system::errc::make_error_code(boost::system::errc::message_size);
+        }
 
         for (int i = 0; i < total_segments; ++i)
         {
@@ -1662,12 +1768,10 @@ namespace httplib::client
     net::awaitable<boost::system::error_code>
     downloader::impl::async_download(std::string_view url, fs::path const& save_path, http::fields const& headers)
     {
-        if (cancelled_.exchange(false, std::memory_order_relaxed))
-        {
-            auto ec = boost::asio::error::operation_aborted;
-            set_state(downloader::state::cancelled, ec);
-            co_return ec;
-        }
+        // A prior cancel()/permanent failure only terminates the run it
+        // interrupted. A fresh run starts from a clean slate so callers do not
+        // have to "clear" the downloader with a throwaway call first.
+        cancelled_.store(false, std::memory_order_relaxed);
 
         {
             std::lock_guard lk(config_mutex_);
@@ -1738,6 +1842,19 @@ namespace httplib::client
                                               copy_ec);
                                 if (!copy_ec)
                                 {
+                                    // Mirror the normal path: report a final
+                                    // 100% progress tick before completing so
+                                    // observers see a consistent terminal update.
+                                    downloader::progress_callback cb;
+                                    {
+                                        std::lock_guard lk(callback_mutex_);
+                                        cb = progress_cb_;
+                                    }
+                                    if (cb)
+                                    {
+                                        auto sz = fresh->body_size;
+                                        cb(downloader::progress_info { sz, sz, 0, std::chrono::seconds(0), 0, 1 });
+                                    }
                                     set_state(downloader::state::completed, {});
                                     co_return boost::system::error_code {};
                                 }
@@ -1885,7 +2002,7 @@ namespace httplib::client
         return impl_->get_http_pool();
     }
 
-    downloader::config const&
+    downloader::config
     downloader::get_config() const
     {
         return impl_->get_config();
@@ -1897,11 +2014,10 @@ namespace httplib::client
         co_return co_await impl_->async_download(url, save_path, headers);
     }
 
-    boost::system::error_code
+    std::future<boost::system::error_code>
     downloader::download(std::string_view url, fs::path const& save_path, http::fields const& headers)
     {
-        auto future = net::co_spawn(impl_->executor_, impl_->async_download(url, save_path, headers), net::use_future);
-        return future.get();
+        return net::co_spawn(impl_->executor_, impl_->async_download(url, save_path, headers), net::use_future);
     }
 
     void

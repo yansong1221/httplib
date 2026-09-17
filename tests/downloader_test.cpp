@@ -6,6 +6,7 @@
 #include "httplib/server/response.hpp"
 #include <atomic>
 #include <boost/asio/error.hpp>
+#include <boost/asio/ip/tcp.hpp>
 #include <boost/system/errc.hpp>
 #include <chrono>
 #include <condition_variable>
@@ -106,7 +107,7 @@ TEST_CASE("Downloader: basic download to file", "[downloader]")
     ts.start();
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
-    auto ec = dl.download(ts.url_for_path("/file"), dl_path);
+    auto ec = dl.download(ts.url_for_path("/file"), dl_path).get();
     REQUIRE_FALSE(ec);
     REQUIRE(read_file(dl_path) == "hello downloader\n");
 
@@ -139,7 +140,7 @@ TEST_CASE("Downloader: multi-segment parallel download", "[downloader]")
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
     dl.set_config({ .segments = 4 });
-    auto ec = dl.download(ts.url_for_path("/big"), dl_path);
+    auto ec = dl.download(ts.url_for_path("/big"), dl_path).get();
     REQUIRE_FALSE(ec);
 
     auto content = read_file(dl_path);
@@ -197,7 +198,7 @@ TEST_CASE("Downloader: progress callback", "[downloader]")
             REQUIRE(info.downloaded_bytes >= last_downloaded.load());
             last_downloaded.store(info.downloaded_bytes);
         });
-    auto ec = dl.download(ts.url_for_path("/prog"), dl_path);
+    auto ec = dl.download(ts.url_for_path("/prog"), dl_path).get();
     REQUIRE_FALSE(ec);
     REQUIRE(call_count.load() >= 1);
     REQUIRE(last_downloaded.load() == kSize);
@@ -239,7 +240,7 @@ TEST_CASE("Downloader: redirect follow", "[downloader]")
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
     dl.set_config({ .max_redirects = 5 });
-    auto ec = dl.download(ts.url_for_path("/start"), dl_path);
+    auto ec = dl.download(ts.url_for_path("/start"), dl_path).get();
     REQUIRE_FALSE(ec);
     REQUIRE(read_file(dl_path) == "redirected\n");
 
@@ -313,7 +314,8 @@ TEST_CASE("Downloader: strips sensitive headers on cross-origin redirect", "[dow
     headers.set(http::field::authorization, "Bearer secret");
     headers.set(http::field::cookie, "session=abc");
     dl.set_config({ .max_redirects = 5 });
-    auto ec = dl.download(std::format("http://127.0.0.1:{}/start", origin.local_endpoint().port()), dl_path, headers);
+    auto ec
+        = dl.download(std::format("http://127.0.0.1:{}/start", origin.local_endpoint().port()), dl_path, headers).get();
     REQUIRE_FALSE(ec);
     REQUIRE(read_file(dl_path) == "cross-origin-ok\n");
     REQUIRE(target_hits.load() >= 1);
@@ -366,7 +368,7 @@ TEST_CASE("Downloader: resume partial download", "[downloader]")
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
     dl.set_config({ .segments = 1, .resume = true });
-    auto ec = dl.download(ts.url_for_path("/resume"), dl_path);
+    auto ec = dl.download(ts.url_for_path("/resume"), dl_path).get();
     REQUIRE_FALSE(ec);
 
     auto content = read_file(dl_path);
@@ -405,7 +407,7 @@ TEST_CASE("Downloader: suggested filename from Content-Disposition", "[downloade
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
     dl.set_config({ .segments = 4 });
-    auto ec = dl.download(ts.url_for_path("/cd"), dl_path);
+    auto ec = dl.download(ts.url_for_path("/cd"), dl_path).get();
     REQUIRE_FALSE(ec);
     REQUIRE(dl.suggested_filename() == "hello.zip");
 
@@ -445,14 +447,14 @@ TEST_CASE("Downloader: disk cache hit on second download", "[downloader]")
     {
         httplib::client::downloader dl(ts.ioc_, ts.pool);
         dl.set_cache(cache);
-        auto ec = dl.download(ts.url_for_path("/cached"), dl_path1);
+        auto ec = dl.download(ts.url_for_path("/cached"), dl_path1).get();
         REQUIRE_FALSE(ec);
         REQUIRE(read_file(dl_path1) == "cached content\n");
     }
     {
         httplib::client::downloader dl(ts.ioc_, ts.pool);
         dl.set_cache(cache);
-        auto ec = dl.download(ts.url_for_path("/cached"), dl_path2);
+        auto ec = dl.download(ts.url_for_path("/cached"), dl_path2).get();
         REQUIRE_FALSE(ec);
         REQUIRE(read_file(dl_path2) == "cached content\n");
     }
@@ -517,7 +519,7 @@ TEST_CASE("Downloader: cache isolates different origins", "[downloader]")
     {
         httplib::client::downloader dl(ts_a.ioc_, ts_a.pool);
         dl.set_cache(cache);
-        auto ec = dl.download(ts_a.url_for_path("/data"), dl_path_a);
+        auto ec = dl.download(ts_a.url_for_path("/data"), dl_path_a).get();
         REQUIRE_FALSE(ec);
         REQUIRE(read_file(dl_path_a) == "content from server A\n");
     }
@@ -527,7 +529,7 @@ TEST_CASE("Downloader: cache isolates different origins", "[downloader]")
     {
         httplib::client::downloader dl(ts_b.ioc_, ts_b.pool);
         dl.set_cache(cache);
-        auto ec = dl.download(ts_b.url_for_path("/data"), dl_path_b);
+        auto ec = dl.download(ts_b.url_for_path("/data"), dl_path_b).get();
         REQUIRE_FALSE(ec);
         REQUIRE(read_file(dl_path_b) == "content from server B\n");
     }
@@ -592,7 +594,7 @@ TEST_CASE("Downloader: cancel stops download", "[downloader]")
             dl.cancel();
         });
 
-    auto ec = dl.download(ts.url_for_path("/bigcancel"), dl_path);
+    auto ec = dl.download(ts.url_for_path("/bigcancel"), dl_path).get();
     REQUIRE(ec);
     REQUIRE(dl.current_state() == httplib::client::downloader::state::cancelled);
     cancel_thread.join();
@@ -607,7 +609,7 @@ TEST_CASE("Downloader: cancel stops download", "[downloader]")
     fs::remove(fs::path(dl_path.string() + ".dlstate"), rm_ec);
 }
 
-TEST_CASE("Downloader: re-download after cancel succeeds", "[downloader]")
+TEST_CASE("Downloader: download after cancel starts cleanly", "[downloader]")
 {
     auto server_path = fs::temp_directory_path() / "httplib_dl_recancel_srv.txt";
     {
@@ -631,12 +633,17 @@ TEST_CASE("Downloader: re-download after cancel succeeds", "[downloader]")
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
 
+    // A cancel issued while idle applies to the interrupted run only. The next
+    // download must start from a clean slate instead of failing once.
     dl.cancel();
-    auto first = dl.download(ts.url_for_path("/recancel"), dl_path);
-    REQUIRE(first);
+    auto after_cancel = dl.download(ts.url_for_path("/recancel"), dl_path).get();
+    REQUIRE_FALSE(after_cancel);
+    REQUIRE(read_file(dl_path) == "after-cancel\n");
 
-    auto second = dl.download(ts.url_for_path("/recancel"), dl_path);
-    REQUIRE_FALSE(second);
+    // Cancelling a completed run must not poison the following run either.
+    dl.cancel();
+    auto again = dl.download(ts.url_for_path("/recancel"), dl_path).get();
+    REQUIRE_FALSE(again);
     REQUIRE(read_file(dl_path) == "after-cancel\n");
 
     fs::remove(server_path);
@@ -678,7 +685,7 @@ TEST_CASE("Downloader: multiple retries succeed eventually", "[downloader]")
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
     dl.set_config({ .max_retries = 3 });
-    auto ec = dl.download(ts.url_for_path("/retry-me"), dl_path);
+    auto ec = dl.download(ts.url_for_path("/retry-me"), dl_path).get();
     REQUIRE_FALSE(ec);
     REQUIRE(read_file(dl_path) == "retry-ok\n");
     REQUIRE(attempt.load() == 3);
@@ -704,7 +711,7 @@ TEST_CASE("Downloader: single-segment fallback when no content-length", "[downlo
     ts.start();
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
-    auto ec = dl.download(ts.url_for_path("/no-cl"), dl_path);
+    auto ec = dl.download(ts.url_for_path("/no-cl"), dl_path).get();
     REQUIRE_FALSE(ec);
     REQUIRE(read_file(dl_path) == "no content-length\n");
 
@@ -719,7 +726,7 @@ TEST_CASE("Downloader: config presets", "[downloader]")
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
 
-    auto& cfg = dl.get_config();
+    auto cfg = dl.get_config();
     REQUIRE(cfg.segments == 4);
     REQUIRE(cfg.max_retries == 3);
     REQUIRE(cfg.resume == true);
@@ -727,6 +734,7 @@ TEST_CASE("Downloader: config presets", "[downloader]")
     REQUIRE(cfg.max_speed_bytes_per_sec == 0);
     REQUIRE(cfg.save_state == true);
     REQUIRE(cfg.acquire_timeout == std::chrono::seconds(30));
+    REQUIRE(cfg.retry_backoff == std::chrono::milliseconds(200));
     REQUIRE(dl.get_cache() == nullptr);
 
     dl.set_config({ .segments = 8, .max_retries = 5, .resume = false });
@@ -778,7 +786,7 @@ TEST_CASE("Downloader: custom headers sent in request", "[downloader]")
     httplib::client::downloader dl(ts.ioc_, ts.pool);
     http::fields headers;
     headers.set(http::field::authorization, "Bearer secret-token");
-    auto ec = dl.download(ts.url_for_path("/auth"), dl_path, headers);
+    auto ec = dl.download(ts.url_for_path("/auth"), dl_path, headers).get();
     REQUIRE_FALSE(ec);
     REQUIRE(read_file(dl_path) == "with-headers\n");
 
@@ -1036,7 +1044,7 @@ TEST_CASE("Downloader: cache is isolated by request credentials", "[downloader]"
         httplib::client::downloader dl(ts.ioc_, ts.pool);
         dl.set_cache(cache);
         dl.set_config({ .segments = 1 });
-        auto ec = dl.download(ts.url_for_path("/secret"), dl_path_a, headers_a);
+        auto ec = dl.download(ts.url_for_path("/secret"), dl_path_a, headers_a).get();
         REQUIRE_FALSE(ec);
         REQUIRE(read_file(dl_path_a) == "shared payload\n");
     }
@@ -1044,7 +1052,7 @@ TEST_CASE("Downloader: cache is isolated by request credentials", "[downloader]"
         httplib::client::downloader dl(ts.ioc_, ts.pool);
         dl.set_cache(cache);
         dl.set_config({ .segments = 1 });
-        auto ec = dl.download(ts.url_for_path("/secret"), dl_path_b, headers_b);
+        auto ec = dl.download(ts.url_for_path("/secret"), dl_path_b, headers_b).get();
         REQUIRE_FALSE(ec);
         REQUIRE(read_file(dl_path_b) == "shared payload\n");
     }
@@ -1089,7 +1097,7 @@ TEST_CASE("Downloader: no-store responses are not cached", "[downloader]")
     httplib::client::downloader dl(ts.ioc_, ts.pool);
     dl.set_cache(cache);
     dl.set_config({ .segments = 1 });
-    auto ec = dl.download(ts.url_for_path("/nostore"), dl_path);
+    auto ec = dl.download(ts.url_for_path("/nostore"), dl_path).get();
     REQUIRE_FALSE(ec);
     REQUIRE(read_file(dl_path) == "no-store payload\n");
 
@@ -1142,7 +1150,7 @@ TEST_CASE("Downloader: fresh cache entry is served without network", "[downloade
         httplib::client::downloader dl(ts.ioc_, ts.pool);
         dl.set_cache(cache);
         dl.set_config({ .segments = 1 });
-        auto ec = dl.download(ts.url_for_path("/fresh"), dl_path1);
+        auto ec = dl.download(ts.url_for_path("/fresh"), dl_path1).get();
         REQUIRE_FALSE(ec);
         REQUIRE(read_file(dl_path1) == "fresh payload\n");
     }
@@ -1155,7 +1163,7 @@ TEST_CASE("Downloader: fresh cache entry is served without network", "[downloade
         httplib::client::downloader dl(ts.ioc_, ts.pool);
         dl.set_cache(cache);
         dl.set_config({ .segments = 1 });
-        auto ec = dl.download(ts.url_for_path("/fresh"), dl_path2);
+        auto ec = dl.download(ts.url_for_path("/fresh"), dl_path2).get();
         REQUIRE_FALSE(ec);
         REQUIRE(read_file(dl_path2) == "fresh payload\n");
     }
@@ -1213,7 +1221,7 @@ TEST_CASE("Downloader: stale entry is revalidated with 304 and keeps its body", 
         httplib::client::downloader dl(ts.ioc_, ts.pool);
         dl.set_cache(cache);
         dl.set_config({ .segments = 1 });
-        auto ec = dl.download(ts.url_for_path("/reval"), dl_path1);
+        auto ec = dl.download(ts.url_for_path("/reval"), dl_path1).get();
         REQUIRE_FALSE(ec);
         REQUIRE(read_file(dl_path1) == "revalidated payload\n");
     }
@@ -1225,7 +1233,7 @@ TEST_CASE("Downloader: stale entry is revalidated with 304 and keeps its body", 
         httplib::client::downloader dl(ts.ioc_, ts.pool);
         dl.set_cache(cache);
         dl.set_config({ .segments = 1 });
-        auto ec = dl.download(ts.url_for_path("/reval"), dl_path2);
+        auto ec = dl.download(ts.url_for_path("/reval"), dl_path2).get();
         REQUIRE_FALSE(ec);
         REQUIRE(read_file(dl_path2) == "revalidated payload\n");
     }
@@ -1304,7 +1312,7 @@ TEST_CASE("Downloader: multi-segment pause and resume", "[downloader]")
             dl.resume();
         });
 
-    auto ec = dl.download(ts.url_for_path("/pause"), dl_path);
+    auto ec = dl.download(ts.url_for_path("/pause"), dl_path).get();
     control_thread.join();
 
     REQUIRE_FALSE(ec);
@@ -1379,7 +1387,7 @@ TEST_CASE("Downloader: cancel while paused aborts immediately", "[downloader]")
     // A pause can land before the state callback observes it; cancel() must
     // also wake a not-yet-notified paused coroutine, so issue it from a timer
     // thread as well in case the transfer finished already.
-    auto ec = dl.download(ts.url_for_path("/pcancel"), dl_path);
+    auto ec = dl.download(ts.url_for_path("/pcancel"), dl_path).get();
     control_thread.join();
 
     REQUIRE(ec);
@@ -1421,7 +1429,7 @@ TEST_CASE("Downloader: multi-segment failure cleans up part files", "[downloader
     httplib::client::downloader dl(ts.ioc_, ts.pool);
     dl.set_config({ .segments = 4, .max_retries = 1 });
 
-    auto ec = dl.download(ts.url_for_path("/segfail"), dl_path);
+    auto ec = dl.download(ts.url_for_path("/segfail"), dl_path).get();
     REQUIRE(ec);
     REQUIRE(dl.current_state() == httplib::client::downloader::state::failed);
 
@@ -1450,7 +1458,7 @@ TEST_CASE("Downloader: persistent server 500 ends failed", "[downloader]")
     httplib::client::downloader dl(ts.ioc_, ts.pool);
     dl.set_config({ .max_retries = 1 });
 
-    auto ec = dl.download(ts.url_for_path("/500"), dl_path);
+    auto ec = dl.download(ts.url_for_path("/500"), dl_path).get();
     REQUIRE(ec);
     REQUIRE(dl.current_state() == httplib::client::downloader::state::failed);
     REQUIRE_FALSE(fs::exists(dl_path));
@@ -1468,7 +1476,7 @@ TEST_CASE("Downloader: invalid URL maps to a failed error, not a throw", "[downl
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
 
-    auto ec = dl.download("not a url at all", dl_path);
+    auto ec = dl.download("not a url at all", dl_path).get();
     REQUIRE(ec);
     REQUIRE(ec == boost::system::errc::make_error_code(boost::system::errc::invalid_argument));
     REQUIRE(dl.current_state() == httplib::client::downloader::state::failed);
@@ -1538,7 +1546,7 @@ TEST_CASE("Downloader: multi-segment resume reuses existing part files", "[downl
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
     dl.set_config({ .segments = kSegments, .resume = true });
-    auto ec = dl.download(ts.url_for_path("/resume-multi"), dl_path);
+    auto ec = dl.download(ts.url_for_path("/resume-multi"), dl_path).get();
     REQUIRE_FALSE(ec);
     REQUIRE(read_file(dl_path) == data);
 
@@ -1626,7 +1634,7 @@ TEST_CASE("Downloader: stale state from another URL is not resumed", "[downloade
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
     dl.set_config({ .segments = kSegments, .resume = true });
-    auto ec = dl.download(ts.url_for_path("/fresh"), dl_path);
+    auto ec = dl.download(ts.url_for_path("/fresh"), dl_path).get();
     REQUIRE_FALSE(ec);
     REQUIRE(read_file(dl_path) == data);
 
@@ -1674,7 +1682,7 @@ TEST_CASE("Downloader: falls back to single segment when server ignores Range", 
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
     dl.set_config({ .segments = 4 });
-    auto ec = dl.download(ts.url_for_path("/norange"), dl_path);
+    auto ec = dl.download(ts.url_for_path("/norange"), dl_path).get();
     REQUIRE_FALSE(ec);
     REQUIRE(read_file(dl_path) == data);
     REQUIRE(range_hits.load() >= 1); // the segmented attempt did send Range requests
@@ -1714,7 +1722,7 @@ TEST_CASE("Downloader: max speed throttles the transfer", "[downloader]")
     dl.set_config({ .segments = 1, .max_speed_bytes_per_sec = 128 * 1024 });
 
     auto t0 = std::chrono::steady_clock::now();
-    auto ec = dl.download(ts.url_for_path("/speed"), dl_path);
+    auto ec = dl.download(ts.url_for_path("/speed"), dl_path).get();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0);
 
     REQUIRE_FALSE(ec);
@@ -1758,11 +1766,245 @@ TEST_CASE("Downloader: relative redirect Location is resolved", "[downloader]")
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
     dl.set_config({ .segments = 1, .max_redirects = 5 });
-    auto ec = dl.download(ts.url_for_path("/start"), dl_path);
+    auto ec = dl.download(ts.url_for_path("/start"), dl_path).get();
     REQUIRE_FALSE(ec);
     REQUIRE(read_file(dl_path) == "relative-ok\n");
 
     std::error_code rm_ec;
     fs::remove(server_path, rm_ec);
     fs::remove(dl_path, rm_ec);
+}
+
+TEST_CASE("Downloader: redirect response body does not corrupt connection reuse", "[downloader]")
+{
+    auto server_path = fs::temp_directory_path() / "httplib_dl_redirbody_srv.txt";
+    {
+        std::ofstream f(server_path, std::ios::binary);
+        f << "redirect-body-ok\n";
+    }
+    auto dl_path = fs::temp_directory_path() / "httplib_dl_redirbody_out.bin";
+
+    // A redirect body large enough that it is buffered together with the
+    // response header. If the downloader returns the connection to the pool
+    // without draining it, the next request on that connection parses these
+    // bytes as a response and fails.
+    std::string const redirect_body(8192, 'X');
+
+    // Track the client's ephemeral port for the GET /start and the redirected
+    // GET /final. When the redirect body is drained the same pooled connection
+    // is reused, so both land on the same port. If it is not drained the
+    // response destructor closes the connection and the redirect uses a fresh
+    // one (different port).
+    std::atomic<std::uint16_t> start_port { 0 };
+    std::atomic<std::uint16_t> final_port { 0 };
+
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>(
+        "/start",
+        [&](httplib::server::request& req, httplib::server::response& resp)
+        {
+            start_port.store(req.remote_endpoint().port());
+            resp.set(http::field::location, "/final");
+            resp.set_string_content(redirect_body, "text/plain", http::status::found);
+        });
+    ts.router().set_http_handler<http::verb::get>("/final",
+                                                  [&](httplib::server::request& req, httplib::server::response& resp)
+                                                  {
+                                                      final_port.store(req.remote_endpoint().port());
+                                                      resp.set_file_content(server_path);
+                                                  });
+    ts.router().set_http_handler<http::verb::head>("/start",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::location, "/final");
+                                                       resp.set_empty_content(http::status::found);
+                                                   });
+    ts.router().set_http_handler<http::verb::head>("/final",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::content_length, "18");
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
+    ts.start();
+
+    httplib::client::downloader dl(ts.ioc_, ts.pool);
+    dl.set_config({ .segments = 1, .max_retries = 0, .max_redirects = 5 });
+    auto ec = dl.download(ts.url_for_path("/start"), dl_path).get();
+    REQUIRE_FALSE(ec);
+    REQUIRE(read_file(dl_path) == "redirect-body-ok\n");
+    REQUIRE(start_port.load() != 0);
+    REQUIRE(final_port.load() == start_port.load());
+
+    std::error_code rm_ec;
+    fs::remove(server_path, rm_ec);
+    fs::remove(dl_path, rm_ec);
+}
+
+TEST_CASE("Downloader: oversized part file fails the merge instead of succeeding", "[downloader]")
+{
+    auto server_path = fs::temp_directory_path() / "httplib_dl_mergebad_srv.bin";
+    constexpr std::uint64_t kSize = 100 * 1024; // divisible by 4
+    constexpr int kSegments = 4;
+    constexpr std::uint64_t kSegSize = kSize / kSegments;
+
+    std::string data(kSize, 'A');
+    {
+        std::ofstream f(server_path, std::ios::binary);
+        f.write(data.data(), static_cast<std::streamsize>(data.size()));
+    }
+
+    auto dl_path = fs::temp_directory_path() / "httplib_dl_mergebad_out.bin";
+    std::error_code rm_ec;
+    fs::remove(dl_path, rm_ec);
+    for (int i = 0; i < kSegments; ++i)
+    {
+        fs::remove(fs::path(dl_path.string() + ".part" + std::to_string(i)), rm_ec);
+    }
+    fs::remove(fs::path(dl_path.string() + ".dlstate"), rm_ec);
+
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>("/mergebad",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(server_path); });
+    ts.router().set_http_handler<http::verb::head>("/mergebad",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   { resp.set_file_content(server_path); });
+    ts.start();
+
+    // Seed every part as "already complete" (so no network fetch happens), but
+    // make part 0 larger than its segment. The parts no longer add up to the
+    // content length, so merging must fail rather than emit a corrupt file.
+    for (int i = 0; i < kSegments; ++i)
+    {
+        auto part = fs::path(dl_path.string() + ".part" + std::to_string(i));
+        std::ofstream pf(part, std::ios::binary);
+        std::uint64_t sz = kSegSize + (i == 0 ? 50 : 0);
+        std::string chunk(static_cast<std::size_t>(sz), static_cast<char>('a' + i));
+        pf.write(chunk.data(), static_cast<std::streamsize>(chunk.size()));
+    }
+    {
+        std::ofstream sf(fs::path(dl_path.string() + ".dlstate"), std::ios::trunc);
+        sf << "url=" << ts.url_for_path("/mergebad") << '\n';
+        sf << "content_length=" << kSize << '\n';
+        sf << "segments=" << kSegments << '\n';
+    }
+
+    httplib::client::downloader dl(ts.ioc_, ts.pool);
+    dl.set_config({ .segments = kSegments, .resume = true });
+    auto ec = dl.download(ts.url_for_path("/mergebad"), dl_path).get();
+    REQUIRE(ec);
+    REQUIRE(dl.current_state() == httplib::client::downloader::state::failed);
+    REQUIRE_FALSE(fs::exists(dl_path, rm_ec));
+
+    fs::remove(server_path, rm_ec);
+    fs::remove(dl_path, rm_ec);
+    for (int i = 0; i < kSegments; ++i)
+    {
+        fs::remove(fs::path(dl_path.string() + ".part" + std::to_string(i)), rm_ec);
+    }
+    fs::remove(fs::path(dl_path.string() + ".dlstate"), rm_ec);
+}
+
+TEST_CASE("Downloader: connection failure surfaces its real error code", "[downloader]")
+{
+    dl_test_scaffold ts;
+    ts.start();
+
+    // Find a port that is guaranteed to have no listener.
+    net::ip::tcp::acceptor probe(ts.ioc_);
+    probe.open(net::ip::tcp::v4());
+    probe.bind({ net::ip::make_address("127.0.0.1"), 0 });
+    probe.listen(1);
+    auto closed_port = probe.local_endpoint().port();
+    probe.close();
+
+    auto dl_path = fs::temp_directory_path() / "httplib_dl_connfail_out.bin";
+
+    httplib::client::downloader dl(ts.ioc_, ts.pool);
+    dl.set_config({ .max_retries = 0, .retry_backoff = std::chrono::milliseconds(0) });
+    auto ec = dl.download(std::format("http://127.0.0.1:{}/nope", closed_port), dl_path).get();
+
+    REQUIRE(ec);
+    // Previously every transport failure was folded into a generic timeout,
+    // hiding the true cause.
+    REQUIRE(ec != boost::system::errc::make_error_code(boost::system::errc::timed_out));
+    REQUIRE(dl.current_state() == httplib::client::downloader::state::failed);
+
+    std::error_code rm_ec;
+    fs::remove(dl_path, rm_ec);
+}
+
+TEST_CASE("Downloader: cache hit emits a final progress tick", "[downloader]")
+{
+    auto server_path = fs::temp_directory_path() / "httplib_dl_cacheprog_srv.txt";
+    std::string const payload = "cached-progress\n";
+    {
+        std::ofstream f(server_path, std::ios::binary);
+        f << payload;
+    }
+
+    auto dl_path1 = fs::temp_directory_path() / "httplib_dl_cacheprog_out1.bin";
+    auto dl_path2 = fs::temp_directory_path() / "httplib_dl_cacheprog_out2.bin";
+    auto cache_dir = fs::temp_directory_path() / "httplib_dl_cacheprog_dir";
+    fs::remove_all(cache_dir);
+
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<http::verb::get>("/cacheprog",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  {
+                                                      resp.set(http::field::etag, "\"cp\"");
+                                                      resp.set(http::field::cache_control, "max-age=3600");
+                                                      resp.set_file_content(server_path);
+                                                  });
+    ts.router().set_http_handler<http::verb::head>("/cacheprog",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(http::field::etag, "\"cp\"");
+                                                       resp.set(http::field::cache_control, "max-age=3600");
+                                                       resp.set(http::field::content_length,
+                                                                std::to_string(payload.size()));
+                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                   });
+    ts.start();
+
+    auto cache = std::make_shared<httplib::client::disk_cache>(cache_dir);
+
+    {
+        httplib::client::downloader dl(ts.ioc_, ts.pool);
+        dl.set_cache(cache);
+        dl.set_config({ .segments = 1 });
+        auto ec = dl.download(ts.url_for_path("/cacheprog"), dl_path1).get();
+        REQUIRE_FALSE(ec);
+    }
+
+    // The second download is served from a still-fresh cache entry; it must
+    // still report 100% progress so observers reach a terminal update.
+    std::atomic<std::uint64_t> last_downloaded { 0 };
+    std::atomic<std::uint64_t> last_total { 0 };
+    std::atomic<int> progress_ticks { 0 };
+    {
+        httplib::client::downloader dl(ts.ioc_, ts.pool);
+        dl.set_cache(cache);
+        dl.set_config({ .segments = 1 });
+        dl.set_progress_callback(
+            [&](httplib::client::downloader::progress_info const& info)
+            {
+                ++progress_ticks;
+                last_downloaded.store(info.downloaded_bytes);
+                last_total.store(info.total_bytes);
+            });
+        auto ec = dl.download(ts.url_for_path("/cacheprog"), dl_path2).get();
+        REQUIRE_FALSE(ec);
+        REQUIRE(read_file(dl_path2) == payload);
+    }
+
+    REQUIRE(progress_ticks.load() >= 1);
+    REQUIRE(last_downloaded.load() == payload.size());
+    REQUIRE(last_total.load() == payload.size());
+
+    std::error_code rm_ec;
+    fs::remove(server_path, rm_ec);
+    fs::remove(dl_path1, rm_ec);
+    fs::remove(dl_path2, rm_ec);
+    fs::remove_all(cache_dir, rm_ec);
 }
