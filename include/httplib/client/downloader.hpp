@@ -63,8 +63,8 @@ namespace httplib::client
 
         downloader(downloader const&) = delete;
         downloader& operator=(downloader const&) = delete;
-        downloader(downloader&&) = default;
-        downloader& operator=(downloader&&) = default;
+        downloader(downloader&&) noexcept;
+        downloader& operator=(downloader&&) noexcept;
 
         void set_config(config const& cfg);
         void set_progress_callback(progress_callback cb);

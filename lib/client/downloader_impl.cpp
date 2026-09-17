@@ -1427,6 +1427,11 @@ namespace httplib::client
     {
     }
 
+    downloader::downloader(downloader&&) noexcept = default;
+
+    downloader&
+    downloader::operator=(downloader&&) noexcept = default;
+
     downloader::~downloader() {}
 
     void
