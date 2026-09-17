@@ -15,11 +15,16 @@ namespace httplib::server
 
         virtual bool has_header() const = 0;
 
-        virtual net::awaitable<boost::system::error_code> write_header(http::status status,
-                                                                       http::fields const& headers,
-                                                                       bool relay = true)
+        virtual net::awaitable<void> write_header(http::status status, http::fields const& headers, bool relay) = 0;
+        virtual net::awaitable<void> write_header(http::status status,
+                                                  http::fields const& headers,
+                                                  bool relay,
+                                                  boost::system::error_code& ec)
             = 0;
-        virtual net::awaitable<boost::system::error_code> write_body(net::const_buffer const& data, bool more) = 0;
+
+        virtual net::awaitable<void> write_body(net::const_buffer const& data, bool more) = 0;
+        virtual net::awaitable<void> write_body(net::const_buffer const& data, bool more, boost::system::error_code& ec)
+            = 0;
     };
 
 } // namespace httplib::server

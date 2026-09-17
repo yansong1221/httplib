@@ -368,9 +368,11 @@ namespace httplib::server::detail
             }
         }
 
-        if (auto rel_ec = co_await resp.create_stream_writer()->write_header(result, response_hdrs); rel_ec)
+        boost::system::error_code ec;
+        co_await resp.create_stream_writer()->write_header(result, response_hdrs, true, ec);
+        if (ec)
         {
-            logger_->trace("[proxy] write response header failed: {}", rel_ec.message());
+            logger_->trace("[proxy] write response header failed: {}", ec.message());
             co_return false;
         }
 
@@ -395,11 +397,11 @@ namespace httplib::server::detail
             {
                 co_await interceptor_->on_upstream_response_body(net::buffer(relay_buf_, bytes), more);
             }
-
-            if (auto rel_ec = co_await resp.create_stream_writer()->write_body(net::buffer(relay_buf_, bytes), more);
-                rel_ec)
+            boost::system::error_code ec;
+            co_await resp.create_stream_writer()->write_body(net::buffer(relay_buf_, bytes), more, ec);
+            if (ec)
             {
-                logger_->trace("[proxy] write response body failed: {}", rel_ec.message());
+                logger_->trace("[proxy] write response body failed: {}", ec.message());
                 co_return;
             }
         }

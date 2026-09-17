@@ -12,19 +12,39 @@ namespace httplib::server
         explicit sse_writer_impl(server::stream_writer* cw) : cw_(cw) {}
 
         net::awaitable<void>
-        begin()
+        begin() override
         {
-            http::fields headers;
-            headers.set(http::field::content_type, "text/event-stream");
-            headers.set(http::field::cache_control, "no-cache");
-            if (auto ec = co_await cw_->write_header(http::status::ok, headers, false); ec)
+            boost::system::error_code ec;
+            co_await begin(ec);
+            if (ec)
             {
                 throw boost::system::system_error(ec);
             }
         }
-
+        net::awaitable<void>
+        begin(boost::system::error_code& ec) override
+        {
+            http::fields headers;
+            headers.set(http::field::content_type, "text/event-stream");
+            headers.set(http::field::cache_control, "no-cache");
+            co_await cw_->write_header(http::status::ok, headers, false, ec);
+        }
         net::awaitable<void>
         send_event(std::string_view data, std::string_view event, std::string_view id, bool more) override
+        {
+            boost::system::error_code ec;
+            co_await send_event(data, event, id, more, ec);
+            if (ec)
+            {
+                throw boost::system::system_error(ec);
+            }
+        }
+        net::awaitable<void>
+        send_event(std::string_view data,
+                   std::string_view event,
+                   std::string_view id,
+                   bool more,
+                   boost::system::error_code& ec) override
         {
             std::string msg;
             if (!id.empty())
@@ -75,30 +95,40 @@ namespace httplib::server
                 }
             }
             msg += "\n";
-            if (auto ec = co_await cw_->write_body(net::buffer(msg), more); ec)
-            {
-                throw boost::system::system_error(ec);
-            }
+            co_await cw_->write_body(net::buffer(msg), more, ec);
         }
 
         net::awaitable<void>
         send_retry(std::chrono::milliseconds ms, bool more) override
         {
-            auto msg = "retry: " + std::to_string(ms.count()) + "\n\n";
-            if (auto ec = co_await cw_->write_body(net::buffer(msg), more); ec)
+            boost::system::error_code ec;
+            co_await send_retry(ms, more, ec);
+            if (ec)
             {
                 throw boost::system::system_error(ec);
             }
         }
-
+        net::awaitable<void>
+        send_retry(std::chrono::milliseconds ms, bool more, boost::system::error_code& ec) override
+        {
+            auto msg = "retry: " + std::to_string(ms.count()) + "\n\n";
+            co_await cw_->write_body(net::buffer(msg), more, ec);
+        }
         net::awaitable<void>
         send_comment(std::string_view comment, bool more) override
         {
-            auto msg = std::string(": ") + std::string(comment) + "\n\n";
-            if (auto ec = co_await cw_->write_body(net::buffer(msg), more); ec)
+            boost::system::error_code ec;
+            co_await send_comment(comment, more, ec);
+            if (ec)
             {
                 throw boost::system::system_error(ec);
             }
+        }
+        net::awaitable<void>
+        send_comment(std::string_view comment, bool more, boost::system::error_code& ec) override
+        {
+            auto msg = std::string(": ") + std::string(comment) + "\n\n";
+            co_await cw_->write_body(net::buffer(msg), more, ec);
         }
 
       private:

@@ -13,13 +13,26 @@ namespace httplib::server
         virtual ~sse_writer() = default;
 
         virtual net::awaitable<void> begin() = 0;
+        virtual net::awaitable<void> begin(boost::system::error_code& ec) = 0;
+
         virtual net::awaitable<void> send_event(std::string_view data,
                                                 std::string_view event,
                                                 std::string_view id,
                                                 bool more)
             = 0;
+        virtual net::awaitable<void> send_event(std::string_view data,
+                                                std::string_view event,
+                                                std::string_view id,
+                                                bool more,
+                                                boost::system::error_code& ec)
+            = 0;
+
         virtual net::awaitable<void> send_retry(std::chrono::milliseconds ms, bool more) = 0;
+        virtual net::awaitable<void> send_retry(std::chrono::milliseconds ms, bool more, boost::system::error_code& ec)
+            = 0;
         virtual net::awaitable<void> send_comment(std::string_view comment, bool more) = 0;
+        virtual net::awaitable<void> send_comment(std::string_view comment, bool more, boost::system::error_code& ec)
+            = 0;
     };
 
 } // namespace httplib::server

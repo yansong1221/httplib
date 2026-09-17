@@ -31,8 +31,21 @@ namespace httplib::server
             return header_sent_;
         }
 
-        net::awaitable<boost::system::error_code>
+        net::awaitable<void>
         write_header(http::status status, http::fields const& headers, bool relay) override
+        {
+            boost::system::error_code ec;
+            co_await write_header(status, headers, relay, ec);
+            if (ec)
+            {
+                throw boost::system::system_error(ec);
+            }
+        }
+        net::awaitable<void>
+        write_header(http::status status,
+                     http::fields const& headers,
+                     bool relay,
+                     boost::system::error_code& ec) override
         {
             co_await boost::asio::post(strand_);
 
@@ -45,8 +58,6 @@ namespace httplib::server
             {
                 resp_->insert(f.name_string(), f.value());
             }
-
-            boost::system::error_code ec;
             stream_->expires_after(write_timeout_);
 
             if (relay)
@@ -75,18 +86,26 @@ namespace httplib::server
             {
                 header_sent_ = true;
             }
-            co_return ec;
         }
-
-        net::awaitable<boost::system::error_code>
+        net::awaitable<void>
         write_body(net::const_buffer const& data, bool more) override
+        {
+            boost::system::error_code ec;
+            co_await write_body(data, more, ec);
+            if (ec)
+            {
+                throw boost::system::system_error(ec);
+            }
+        }
+        net::awaitable<void>
+        write_body(net::const_buffer const& data, bool more, boost::system::error_code& ec) override
         {
             co_await boost::asio::post(strand_);
 
             if (!sr_ && !relay_sr_)
             {
-                throw boost::system::system_error(
-                    boost::system::errc::make_error_code(boost::system::errc::invalid_argument));
+                ec = boost::system::errc::make_error_code(boost::system::errc::invalid_argument);
+                co_return;
             }
 
             if (sr_)
@@ -95,21 +114,22 @@ namespace httplib::server
                 body.data = (void*)data.data();
                 body.size = data.size();
                 body.more = more;
-                co_return co_await write_buffer(*sr_);
+                co_await write_buffer(*sr_, ec);
+                co_return;
             }
 
             relay_msg_->body().data = (void*)data.data();
             relay_msg_->body().size = data.size();
             relay_msg_->body().more = more;
-            co_return co_await write_buffer(*relay_sr_);
+            co_await write_buffer(*relay_sr_, ec);
+            co_return;
         }
 
       private:
         template <typename Serializer>
-        net::awaitable<boost::system::error_code>
-        write_buffer(Serializer& sr)
+        net::awaitable<void>
+        write_buffer(Serializer& sr, boost::system::error_code& ec)
         {
-            boost::system::error_code ec;
             stream_->expires_after(write_timeout_);
             co_await http::async_write(*stream_, sr, util::net_awaitable[ec]);
             stream_->expires_never();
@@ -121,7 +141,6 @@ namespace httplib::server
             {
                 resp_->keep_alive(false);
             }
-            co_return ec;
         }
 
       private:

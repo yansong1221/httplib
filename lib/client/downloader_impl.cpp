@@ -596,6 +596,8 @@ namespace httplib::client
         {
             merged.set(f.name_string(), f.value());
         }
+        // 下载场景保存原始字节（断点续传/分片合并依赖），不接受内容编码压缩。
+        merged.set(http::field::accept_encoding, "identity");
 
         auto h = ui.host;
         auto p = ui.port;
@@ -804,7 +806,7 @@ namespace httplib::client
                     co_return pause_ec;
                 }
 
-                auto r = co_await resp.read_some_raw(net::buffer(buf));
+                auto r = co_await resp.read_some_decompressed(net::buffer(buf));
                 if (r.has_error())
                 {
                     co_return r.error();
@@ -973,7 +975,7 @@ namespace httplib::client
                     co_return pause_ec;
                 }
 
-                auto r = co_await resp.read_some_raw(net::buffer(buf));
+                auto r = co_await resp.read_some_decompressed(net::buffer(buf));
                 if (r.has_error())
                 {
                     co_return r.error();
