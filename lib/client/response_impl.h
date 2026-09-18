@@ -192,11 +192,19 @@ namespace httplib::client
                 status_ = header_parser_->get().result();
                 header_ = header_parser_->get().base();
                 resp_parser_ = std::make_unique<http::response_parser<http::buffer_body>>(std::move(*header_parser_));
+                // header parser 读 header 时被设成 eager(false)；解析 body 必须恢复 eager(true)。
+                resp_parser_->eager(true);
                 header_parser_.reset();
             }
 
             for (;;)
             {
+                // 已是 body 末尾：不要再发起底层读，直接结束。
+                if (resp_parser_->is_done())
+                {
+                    co_return 0;
+                }
+
                 auto& body = resp_parser_->get().body();
                 body.data = (void*)buf.data();
                 body.size = buf.size();
@@ -215,11 +223,6 @@ namespace httplib::client
                 if (consumed > 0)
                 {
                     co_return consumed;
-                }
-
-                if (resp_parser_->is_done())
-                {
-                    co_return 0;
                 }
             }
         }
@@ -253,10 +256,14 @@ namespace httplib::client
                 }
                 status_ = header_parser_->get().result();
                 header_ = header_parser_->get().base();
+
                 dec_parser_ = std::make_unique<http::response_parser<body::any_body>>(std::move(*header_parser_));
-                header_parser_.reset();
                 dec_parser_->get().body() = body::buffer_body::value_type {};
                 dec_parser_->get().body().decompressed_limit = parent_->body_limit_;
+                // header parser 读 header 时被设成 eager(false)；解析 body 必须恢复 eager(true)。
+                dec_parser_->eager(true);
+
+                header_parser_.reset();
             }
 
             for (;;)
@@ -270,6 +277,12 @@ namespace httplib::client
                     std::memcpy(buf.data(), buf_body.pending.data(), n);
                     buf_body.pending.erase(0, n);
                     co_return n;
+                }
+
+                // 已解压完且无溢出数据：不要再发起底层读，直接结束。
+                if (dec_parser_->is_done())
+                {
+                    co_return 0;
                 }
 
                 buf_body.data = (void*)buf.data();
@@ -290,11 +303,6 @@ namespace httplib::client
                 {
                     co_return consumed;
                 }
-
-                if (dec_parser_->is_done())
-                {
-                    co_return 0;
-                }
             }
         }
 
@@ -309,12 +317,20 @@ namespace httplib::client
             {
                 co_return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
             }
+
+            auto read_lock = co_await parent_->read_mutex_.lock();
+            if (!read_lock)
+            {
+                co_return net::error::make_error_code(net::error::operation_aborted);
+            }
+
             status_ = header_parser_->get().result();
             header_ = header_parser_->get().base();
 
             http::response_parser<body::any_body> body_parser(std::move(*header_parser_));
-            header_parser_.reset();
             body_parser.get().body().decompressed_limit = parent_->body_limit_;
+
+            header_parser_.reset();
 
             if (body_setup)
             {
