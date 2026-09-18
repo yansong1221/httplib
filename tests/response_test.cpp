@@ -785,6 +785,49 @@ TEST_CASE("Static mount: directory listing via subpath", "[response]")
     std::filesystem::remove_all(tmp_dir);
 }
 
+TEST_CASE("Static mount: html directory listing escapes target and file names", "[response]")
+{
+    auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_html";
+    std::filesystem::create_directories(tmp_dir);
+    {
+        std::ofstream f(tmp_dir / "a&b.txt");
+        f << "x";
+    }
+
+    {
+        run(
+            [&](auto& server)
+            {
+                // mount point 故意包含 '<' '>'：目录列表的 target 来自请求路径，
+                // 必须被 HTML 转义，不能原样进入 <title>/<h1>。
+                auto entry = httplib::server::mount_point_entry("/<x>", tmp_dir);
+                entry.set_enabled_directory(true);
+                entry.set_directory_format(httplib::server::mount_point_entry::dir_format_type::html);
+                server.router().set_static_mount_point(std::move(entry));
+            },
+            [](auto& client) -> net::awaitable<void>
+            {
+                auto resp = UNWRAP(co_await client.async_get("/<x>/"));
+                REQUIRE(resp.result() == http::status::ok);
+                REQUIRE(resp[http::field::content_type] == "text/html; charset=utf-8");
+
+                auto body = resp.as_string();
+
+                // target 中的 '<' '>' 必须 HTML 转义。
+                REQUIRE(body.find("&lt;x&gt;") != std::string::npos);
+                REQUIRE(body.find("<x>") == std::string::npos);
+
+                // 文件名中的 '&' 必须 HTML 转义，href 必须 URL 编码。
+                REQUIRE(body.find("a&amp;b.txt") != std::string::npos);
+                REQUIRE(body.find("a%26b.txt") != std::string::npos);
+
+                co_return;
+            });
+    }
+
+    std::filesystem::remove_all(tmp_dir);
+}
+
 TEST_CASE("Static mount: symlink escaping base dir is blocked", "[response]")
 {
     auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_symlink";

@@ -1,10 +1,10 @@
 #pragma once
 #include "body/any_body.hpp"
 #include "httplib/server/stream_writer.hpp"
+#include "httplib/util/async_mutex.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "response_impl.hpp"
 #include "stream/http_stream.hpp"
-#include <boost/asio/strand.hpp>
 #include <boost/beast/http/buffer_body.hpp>
 #include <boost/beast/http/serializer.hpp>
 #include <boost/beast/http/write.hpp>
@@ -21,7 +21,7 @@ namespace httplib::server
             : resp_(&resp)
             , stream_(&stream)
             , write_timeout_(write_timeout)
-            , strand_(net::make_strand(stream.get_executor()))
+            , write_mutex_(stream.get_executor())
         {
         }
 
@@ -47,7 +47,12 @@ namespace httplib::server
                      bool relay,
                      boost::system::error_code& ec) override
         {
-            co_await boost::asio::post(strand_);
+            auto write_lock = co_await write_mutex_.lock();
+            if (!write_lock)
+            {
+                ec = net::error::operation_aborted;
+                co_return;
+            }
 
             for (auto const& f : headers)
             {
@@ -100,7 +105,12 @@ namespace httplib::server
         net::awaitable<void>
         write_body(net::const_buffer const& data, bool more, boost::system::error_code& ec) override
         {
-            co_await boost::asio::post(strand_);
+            auto write_lock = co_await write_mutex_.lock();
+            if (!write_lock)
+            {
+                ec = net::error::operation_aborted;
+                co_return;
+            }
 
             if (!sr_ && !relay_sr_)
             {
@@ -144,10 +154,11 @@ namespace httplib::server
         }
 
       private:
-        net::strand<http_stream::executor_type> strand_;
         response::impl* resp_;
         http_stream* stream_;
         std::chrono::steady_clock::duration write_timeout_;
+        // 串行化所有写入，保证一次只有一个协程操作序列化器/流。
+        util::async_mutex write_mutex_;
         // 直连流式：any_body 序列化（支持 Content-Encoding 压缩）。
         std::unique_ptr<http::response_serializer<body::any_body>> sr_;
         // 代理转发：beast buffer_body 原样透传。
