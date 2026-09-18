@@ -48,7 +48,7 @@ namespace httplib::client
             }
 
             auto& body = req_msg_->body();
-            body.data = (void*)data.data();
+            body.data = data.size() > 0 ? const_cast<void*>(data.data()) : nullptr;
             body.size = data.size();
             body.more = more;
 

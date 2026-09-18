@@ -519,7 +519,7 @@ namespace httplib::body
         if (need_more_data)
         {
             pending_.assign(sv);
-            ec = http::error::need_more;
+            //ec = http::error::need_more;
         }
         return incoming.size();
     }

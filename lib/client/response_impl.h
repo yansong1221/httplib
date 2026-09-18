@@ -192,7 +192,6 @@ namespace httplib::client
                 status_ = header_parser_->get().result();
                 header_ = header_parser_->get().base();
                 resp_parser_ = std::make_unique<http::response_parser<http::buffer_body>>(std::move(*header_parser_));
-                resp_parser_->eager(true);
                 header_parser_.reset();
             }
 
@@ -208,7 +207,7 @@ namespace httplib::client
                 body.data = (void*)buf.data();
                 body.size = buf.size();
 
-                auto ec = co_await parent_->async_read_once(*resp_parser_);
+                auto ec = co_await parent_->async_read_some(*resp_parser_);
                 if (ec == http::error::need_buffer)
                 {
                     ec = {};
@@ -259,8 +258,6 @@ namespace httplib::client
                 dec_parser_ = std::make_unique<http::response_parser<body::any_body>>(std::move(*header_parser_));
                 dec_parser_->get().body() = body::buffer_body::value_type {};
                 dec_parser_->get().body().decompressed_limit = parent_->body_limit_;
-                dec_parser_->eager(true);
-
                 header_parser_.reset();
             }
 
@@ -286,7 +283,7 @@ namespace httplib::client
                 buf_body.data = (void*)buf.data();
                 buf_body.size = buf.size();
 
-                auto ec = co_await parent_->async_read_once(*dec_parser_);
+                auto ec = co_await parent_->async_read_some(*dec_parser_);
                 if (ec == http::error::need_buffer)
                 {
                     ec = {};

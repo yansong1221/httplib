@@ -128,7 +128,7 @@ namespace httplib::server
                 co_return;
             }
 
-            relay_msg_->body().data = (void*)data.data();
+            relay_msg_->body().data = data.size() > 0 ? const_cast<void*>(data.data()) : nullptr;
             relay_msg_->body().size = data.size();
             relay_msg_->body().more = more;
             co_await write_buffer(*relay_sr_, ec);
