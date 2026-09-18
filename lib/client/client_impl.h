@@ -6,7 +6,6 @@
 #include "httplib/util/use_awaitable.hpp"
 #include "stream/http_stream.hpp"
 #include "util/logging.hpp"
-#include <boost/asio/strand.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/read.hpp>
 #include <boost/beast/http/serializer.hpp>
@@ -177,10 +176,6 @@ namespace httplib::client
 
       public:
         net::any_io_executor executor_;
-        // 串行化整条连接上的异步 I/O：stream 在此 strand 上创建，
-        // 所有 socket 读写的完成回调都会调度回该 strand，
-        // 保证同一连接上并发操作（含流式读取）不会交错执行。
-        net::strand<net::any_io_executor> strand_;
         // 连接级读取互斥：临界区跨越 async_read_some 的挂起点，串行化同一连接上
         // 的并发读（header/body/streaming），避免 parser / buffer_ 数据竞争。
         util::async_mutex read_mutex_;
