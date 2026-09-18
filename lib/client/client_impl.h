@@ -123,7 +123,6 @@ namespace httplib::client
                 end_io();
             }
 
-            // CL-01: 仅在未发送任何字节时才重试（否则新连接上只发剩余部分，形成残缺请求）
             if (is_retryable(ec) && retry && !bytes_written)
             {
                 close();
@@ -140,29 +139,84 @@ namespace httplib::client
             parser.eager(!headers_only);
             while (headers_only ? !parser.is_header_done() : !parser.is_done())
             {
-                ec = co_await async_read_some(parser);
+                begin_io();
+                co_await http::async_read_some(*stream_, buffer_, parser, util::net_awaitable[ec]);
                 if (ec)
                 {
+                    if (ec != http::error::need_buffer)
+                    {
+                        close();
+                    }
                     break;
+                }
+                end_io();
+                if (parser.is_done())
+                {
+                    finish_io();
+                    if (!parser.keep_alive())
+                    {
+                        close();
+                    }
                 }
             }
             co_return ec;
         }
+
         template <typename Body>
         net::awaitable<boost::system::error_code>
-        async_read_some(http::response_parser<Body>& parser)
+        async_read_once(http::response_parser<Body>& parser)
         {
             boost::system::error_code ec;
-            begin_io();
-            co_await http::async_read_some(*stream_, buffer_, parser, util::net_awaitable[ec]);
-            if (ec)
+            parser.eager(true);
+
+            if (buffer_.size() > 0)
             {
-                if (ec != http::error::need_buffer)
+                auto const used = parser.put(buffer_.data(), ec);
+                buffer_.consume(used);
+                if (ec != http::error::need_more)
                 {
-                    close();
+                    co_return normalize_read(parser, ec);
                 }
             }
+
+            begin_io();
+            auto mb = buffer_.prepare(65536);
+            auto const n = co_await stream_->async_read_some(mb, util::net_awaitable[ec]);
+            buffer_.commit(n);
             end_io();
+
+            if (ec == net::error::eof)
+            {
+                if (parser.got_some())
+                {
+                    ec = {};
+                    parser.put_eof(ec);
+                }
+                else
+                {
+                    ec = http::error::end_of_stream;
+                }
+                co_return normalize_read(parser, ec);
+            }
+            if (ec)
+            {
+                co_return normalize_read(parser, ec);
+            }
+
+            auto const used = parser.put(buffer_.data(), ec);
+            buffer_.consume(used);
+            co_return normalize_read(parser, ec);
+        }
+
+        template <typename Body>
+        boost::system::error_code
+        normalize_read(http::response_parser<Body>& parser, boost::system::error_code ec)
+        {
+            if (ec == http::error::need_more || ec == http::error::need_buffer)
+            {
+                ec = {};
+            }
+
             if (parser.is_done())
             {
                 finish_io();
@@ -171,7 +225,11 @@ namespace httplib::client
                     close();
                 }
             }
-            co_return ec;
+            else if (ec)
+            {
+                close();
+            }
+            return ec;
         }
 
       public:

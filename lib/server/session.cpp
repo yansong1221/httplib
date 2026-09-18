@@ -147,10 +147,9 @@ namespace httplib::server
     net::awaitable<session::task::ptr>
     session::detect_ssl_task::then()
     {
-        beast::flat_buffer buffer;
-        buffer.reserve(io_buffer_size);
+        beast::flat_buffer buffer; 
 #ifdef HTTPLIB_ENABLED_SSL
-        if (auto ssl_ctx = (*server_impl_).ssl_context(); ssl_ctx)
+        if (auto ssl_ctx = server_impl_->ssl_context(); ssl_ctx)
         {
             boost::system::error_code ec;
             stream_.expires_after(server_impl_->read_timeout());

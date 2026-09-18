@@ -13,7 +13,6 @@
 
 namespace httplib
 {
-    inline constexpr std::size_t io_buffer_size = 16 * 1024;
 
     class http_stream
     {

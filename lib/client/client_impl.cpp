@@ -38,7 +38,7 @@ namespace httplib::client
         , use_ssl_(ssl)
         , detail::logger("httplib.client")
     {
-        buffer_.reserve(io_buffer_size);
+
     }
 
     void

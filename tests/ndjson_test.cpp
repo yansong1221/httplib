@@ -4,6 +4,10 @@
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/redirect_error.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/use_awaitable.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <cstring>
@@ -294,6 +298,56 @@ TEST_CASE("NDJSON: partial line split across chunks", "[ndjson]")
             REQUIRE(items.size() == 2);
             REQUIRE(items[0].at("x") == 100);
             REQUIRE(items[1].at("y") == 200);
+
+            co_return;
+        });
+}
+
+TEST_CASE("NDJSON: lines are delivered incrementally", "[ndjson]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/ndjson",
+                [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+                {
+                    auto w = resp.create_ndjson_writer();
+                    co_await w->begin();
+                    co_await w->write(
+                        {
+                            { "i", 1 }
+                    },
+                        true);
+
+                    // 第二条延迟 1s；客户端必须在第一条到达后立即返回，而不是等它。
+                    auto ex = co_await net::this_coro::executor;
+                    net::steady_timer timer(ex, std::chrono::seconds(1));
+                    boost::system::error_code ec;
+                    co_await timer.async_wait(net::redirect_error(net::use_awaitable, ec));
+
+                    co_await w->write(
+                        {
+                            { "i", 2 }
+                    },
+                        false);
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp
+                = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/ndjson"),
+                                                            httplib::client::http_client::body_mode::lazy));
+            REQUIRE(resp.result() == http::status::ok);
+            auto ndjson = resp.create_ndjson_reader();
+
+            auto begin = std::chrono::steady_clock::now();
+            auto first = co_await ndjson->read();
+            auto elapsed = std::chrono::steady_clock::now() - begin;
+
+            REQUIRE(first.has_value());
+            REQUIRE(first.value().at("i") == 1);
+            REQUIRE(elapsed < std::chrono::milliseconds(500));
 
             co_return;
         });
