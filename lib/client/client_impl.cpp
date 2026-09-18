@@ -31,6 +31,7 @@ namespace httplib::client
 
         : executor_(ex)
         , strand_(net::make_strand(ex))
+        , read_mutex_(strand_)
         , resolver_(ex)
         , host_(host)
         , host_value_(util::make_host_value(host, port, ssl))

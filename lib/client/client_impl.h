@@ -2,6 +2,7 @@
 
 #include "body/any_body.hpp"
 #include "httplib/client/client.hpp"
+#include "httplib/util/async_mutex.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "stream/http_stream.hpp"
 #include "util/logging.hpp"
@@ -140,24 +141,35 @@ namespace httplib::client
             parser.eager(!headers_only);
             while (headers_only ? !parser.is_header_done() : !parser.is_done())
             {
-                begin_io();
-                co_await http::async_read_some(*stream_, buffer_, parser, util::net_awaitable[ec]);
+                ec = co_await async_read_some(parser);
                 if (ec)
                 {
-                    if (ec != http::error::need_buffer)
-                    {
-                        close();
-                    }
                     break;
                 }
-                end_io();
-                if (parser.is_done())
+            }
+            co_return ec;
+        }
+        template <typename Body>
+        net::awaitable<boost::system::error_code>
+        async_read_some(http::response_parser<Body>& parser)
+        {
+            boost::system::error_code ec;
+            begin_io();
+            co_await http::async_read_some(*stream_, buffer_, parser, util::net_awaitable[ec]);
+            if (ec)
+            {
+                if (ec != http::error::need_buffer)
                 {
-                    finish_io();
-                    if (!parser.keep_alive())
-                    {
-                        close();
-                    }
+                    close();
+                }
+            }
+            end_io();
+            if (parser.is_done())
+            {
+                finish_io();
+                if (!parser.keep_alive())
+                {
+                    close();
                 }
             }
             co_return ec;
@@ -169,6 +181,9 @@ namespace httplib::client
         // 所有 socket 读写的完成回调都会调度回该 strand，
         // 保证同一连接上并发操作（含流式读取）不会交错执行。
         net::strand<net::any_io_executor> strand_;
+        // 连接级读取互斥：临界区跨越 async_read_some 的挂起点，串行化同一连接上
+        // 的并发读（header/body/streaming），避免 parser / buffer_ 数据竞争。
+        util::async_mutex read_mutex_;
         tcp::resolver resolver_;
         timeout_policy timeout_policy_ = timeout_policy::overall;
         std::chrono::steady_clock::duration timeout_ = std::chrono::seconds(30);

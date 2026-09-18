@@ -170,13 +170,19 @@ namespace httplib::client
         net::awaitable<boost::system::result<std::size_t>>
         read_some_raw(net::mutable_buffer const& buf)
         {
-            // 先跳上 client 的 strand，保证 parser 状态变更与底层读写串行；
-            // 配合 stream 也跑在 strand 上，协程在 socket 等待后仍会回到 strand。
             if (msg_)
             {
                 co_return 0;
             }
-            co_await net::post(parent_->strand_, net::use_awaitable);
+
+            // 连接级读取互斥：read_some_raw / read_some_decompressed 会在挂起点处
+            // 交错访问共享的 parent_->buffer_ 与各自的 parser，必须串行化。
+            auto read_lock = co_await parent_->read_mutex_.lock();
+            if (!read_lock)
+            {
+                co_return net::error::make_error_code(net::error::operation_aborted);
+            }
+
             if (!resp_parser_)
             {
                 if (!header_parser_)
@@ -195,7 +201,7 @@ namespace httplib::client
                 body.data = (void*)buf.data();
                 body.size = buf.size();
 
-                auto ec = co_await parent_->async_read(*resp_parser_, false);
+                auto ec = co_await parent_->async_read_some(*resp_parser_);
                 if (ec == http::error::need_buffer)
                 {
                     ec = {};
@@ -223,12 +229,18 @@ namespace httplib::client
         net::awaitable<boost::system::result<std::size_t>>
         read_some_decompressed(net::mutable_buffer const& buf)
         {
-            // 与 read_some_raw 一致：跳上 client strand 串行执行。
             if (msg_)
             {
                 co_return 0;
             }
-            co_await net::post(parent_->strand_, net::use_awaitable);
+
+            // 连接级读取互斥，同上：串行化同一连接上的流式读取。
+            auto read_lock = co_await parent_->read_mutex_.lock();
+            if (!read_lock)
+            {
+                co_return net::error::make_error_code(net::error::operation_aborted);
+            }
+
             if (buf.size() == 0)
             {
                 co_return 0;
@@ -263,7 +275,7 @@ namespace httplib::client
                 buf_body.data = (void*)buf.data();
                 buf_body.size = buf.size();
 
-                auto ec = co_await parent_->async_read(*dec_parser_, false);
+                auto ec = co_await parent_->async_read_some(*dec_parser_);
                 if (ec == http::error::need_buffer)
                 {
                     ec = {};
