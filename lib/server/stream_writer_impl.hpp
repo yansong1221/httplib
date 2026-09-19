@@ -25,17 +25,11 @@ namespace httplib::server
         {
         }
 
-        bool
-        has_header() const override
-        {
-            return header_sent_;
-        }
-
         net::awaitable<void>
-        write_header(http::status status, http::fields const& headers, bool relay) override
+        write_header(http::status status, http::fields const& headers, mode m) override
         {
             boost::system::error_code ec;
-            co_await write_header(status, headers, relay, ec);
+            co_await write_header(status, headers, m, ec);
             if (ec)
             {
                 throw boost::system::system_error(ec);
@@ -44,7 +38,7 @@ namespace httplib::server
         net::awaitable<void>
         write_header(http::status status,
                      http::fields const& headers,
-                     bool relay,
+                     mode m,
                      boost::system::error_code& ec) override
         {
             auto write_lock = co_await write_mutex_.lock();
@@ -65,7 +59,7 @@ namespace httplib::server
             }
             stream_->expires_after(write_timeout_);
 
-            if (relay)
+            if (m == mode::relay)
             {
                 resp_->reset_content();
 
@@ -89,7 +83,7 @@ namespace httplib::server
             }
             else
             {
-                header_sent_ = true;
+                resp_->set_stream_header_sent(true);
             }
         }
         net::awaitable<void>
@@ -164,7 +158,6 @@ namespace httplib::server
         // 代理转发：beast buffer_body 原样透传。
         std::unique_ptr<http::response<http::buffer_body>> relay_msg_;
         std::unique_ptr<http::response_serializer<http::buffer_body>> relay_sr_;
-        bool header_sent_ = false;
     };
 
 } // namespace httplib::server

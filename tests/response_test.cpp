@@ -108,7 +108,7 @@ TEST_CASE("Response: set_chunked_write_handler with multiple chunks", "[response
                     auto cw = resp.create_stream_writer();
                     http::fields headers;
                     headers.set(http::field::content_type, "text/plain");
-                    co_await cw->write_header(http::status::ok, headers, false);
+                    co_await cw->write_header(http::status::ok, headers, httplib::server::stream_writer::mode::chunked);
                     constexpr std::string_view chunks[] = { "A", "B", "C" };
                     for (int i = 0; i < 3; ++i)
                     {
@@ -156,7 +156,7 @@ TEST_CASE("Response: stream_writer gzip compression", "[response][compression]")
                     http::fields headers;
                     headers.set(http::field::content_type, "text/plain");
                     headers.set(http::field::content_encoding, "gzip");
-                    co_await cw->write_header(http::status::ok, headers, false);
+                    co_await cw->write_header(http::status::ok, headers, httplib::server::stream_writer::mode::chunked);
                     constexpr std::string_view chunks[] = { "A", "B", "C" };
                     for (int i = 0; i < 3; ++i)
                     {

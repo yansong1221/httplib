@@ -239,7 +239,7 @@ setup_http_routes(httplib::server::router& router)
             auto cw = resp.create_stream_writer();
             http::fields headers;
             headers.set(http::field::content_type, "text/plain");
-            co_await cw->write_header(http::status::ok, headers, false);
+            co_await cw->write_header(http::status::ok, headers, httplib::server::stream_writer::mode::chunked);
             for (int i = 0; i < 5; ++i)
             {
                 co_await cw->write_body(net::buffer(std::format("chunk #{}\n", i)), i < 4);

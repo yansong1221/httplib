@@ -208,7 +208,7 @@ TEST_CASE("NDJSON: single line split across chunks", "[ndjson]")
                     auto cw = resp.create_stream_writer();
                     http::fields headers;
                     headers.set(http::field::content_type, "application/x-ndjson");
-                    co_await cw->write_header(http::status::ok, headers, false);
+                    co_await cw->write_header(http::status::ok, headers, httplib::server::stream_writer::mode::chunked);
                     co_await cw->write_body(net::buffer(std::string("{\"a\":1}")), true);
                     co_await cw->write_body(net::buffer(std::string("\n")), false);
                 });
@@ -241,7 +241,7 @@ TEST_CASE("NDJSON: multiple lines in one chunk", "[ndjson]")
                     auto cw = resp.create_stream_writer();
                     http::fields headers;
                     headers.set(http::field::content_type, "application/x-ndjson");
-                    co_await cw->write_header(http::status::ok, headers, false);
+                    co_await cw->write_header(http::status::ok, headers, httplib::server::stream_writer::mode::chunked);
                     co_await cw->write_body(net::buffer(std::string("{\"a\":1}\n{\"b\":2}\n")), false);
                 });
         },
@@ -274,7 +274,7 @@ TEST_CASE("NDJSON: partial line split across chunks", "[ndjson]")
                     auto cw = resp.create_stream_writer();
                     http::fields headers;
                     headers.set(http::field::content_type, "application/x-ndjson");
-                    co_await cw->write_header(http::status::ok, headers, false);
+                    co_await cw->write_header(http::status::ok, headers, httplib::server::stream_writer::mode::chunked);
                     co_await cw->write_body(net::buffer(std::string("{\"x\":100}\n{\"y\":")), true);
                     co_await cw->write_body(net::buffer(std::string("200}\n")), false);
                 });

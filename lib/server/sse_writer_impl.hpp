@@ -27,7 +27,7 @@ namespace httplib::server
             http::fields headers;
             headers.set(http::field::content_type, "text/event-stream");
             headers.set(http::field::cache_control, "no-cache");
-            co_await cw_->write_header(http::status::ok, headers, false, ec);
+            co_await cw_->write_header(http::status::ok, headers, stream_writer::mode::chunked, ec);
         }
         net::awaitable<void>
         send_event(std::string_view data, std::string_view event, std::string_view id, bool more) override

@@ -181,7 +181,7 @@ namespace httplib::server
     bool
     response::is_stream_started() const
     {
-        return impl_->stream_writer_ && impl_->stream_writer_->has_header();
+        return impl_->stream_header_sent();
     }
 
 } // namespace httplib::server

@@ -13,12 +13,18 @@ namespace httplib::server
       public:
         virtual ~stream_writer() = default;
 
-        virtual bool has_header() const = 0;
+        enum class mode
+        {
+            /// 透传上游原始字节，不做二次压缩（反向代理）。
+            relay,
+            /// 自身流式输出（chunked，可压缩）。
+            chunked,
+        };
 
-        virtual net::awaitable<void> write_header(http::status status, http::fields const& headers, bool relay) = 0;
+        virtual net::awaitable<void> write_header(http::status status, http::fields const& headers, mode m) = 0;
         virtual net::awaitable<void> write_header(http::status status,
                                                   http::fields const& headers,
-                                                  bool relay,
+                                                  mode m,
                                                   boost::system::error_code& ec)
             = 0;
 

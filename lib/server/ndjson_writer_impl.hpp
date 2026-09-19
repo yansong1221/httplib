@@ -27,7 +27,7 @@ namespace httplib::server
         {
             http::fields headers;
             headers.set(http::field::content_type, "application/x-ndjson");
-            co_await cw_->write_header(http::status::ok, headers, false, ec);
+            co_await cw_->write_header(http::status::ok, headers, stream_writer::mode::chunked, ec);
         }
 
         net::awaitable<void>

@@ -365,7 +365,7 @@ namespace httplib::server::detail
         }
 
         boost::system::error_code ec;
-        co_await resp.create_stream_writer()->write_header(result, response_hdrs, true, ec);
+        co_await resp.create_stream_writer()->write_header(result, response_hdrs, stream_writer::mode::relay, ec);
         if (ec)
         {
             logger_->trace("[proxy] write response header failed: {}", ec.message());

@@ -201,6 +201,17 @@ namespace httplib::server
             this->body() = body::empty_body::value_type {};
         }
 
+        void
+        set_stream_header_sent(bool sent)
+        {
+            stream_header_sent_ = sent;
+        }
+        bool
+        stream_header_sent() const
+        {
+            return stream_header_sent_;
+        }
+
         static response
         make_response(unsigned int version,
                       bool keep_alive,
@@ -216,6 +227,7 @@ namespace httplib::server
         std::unique_ptr<stream_writer> stream_writer_;
         http_stream* stream_ = nullptr;
         std::chrono::steady_clock::duration write_timeout_ { 30 };
+        bool stream_header_sent_ = false;
     };
 
 } // namespace httplib::server

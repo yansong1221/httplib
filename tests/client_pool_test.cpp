@@ -704,7 +704,7 @@ TEST_CASE("client_pool: reader survives handle destruction", "[client_pool]")
                     auto cw = resp.create_stream_writer();
                     http::fields headers;
                     headers.set(http::field::content_type, "text/plain");
-                    co_await cw->write_header(http::status::ok, headers, false);
+                    co_await cw->write_header(http::status::ok, headers, httplib::server::stream_writer::mode::chunked);
                     co_await cw->write_body(net::buffer("ABC"), false);
                 });
         },
