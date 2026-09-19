@@ -236,9 +236,15 @@ namespace httplib::server
     request::read_form_data()
     {
         boost::system::error_code ec;
-        co_await impl_->read_body([](http::request<body::any_body>& req)
-                                  { req.body() = body::form_data_body::value_type {}; },
-                                  ec);
+        auto params = impl_->form_data_params();
+        co_await impl_->read_body(
+            [params](http::request<body::any_body>& req)
+            {
+                body::form_data_body::value_type value {};
+                value.params = params;
+                req.body() = std::move(value);
+            },
+            ec);
         if (ec)
         {
             throw boost::system::system_error(ec);
@@ -264,7 +270,18 @@ namespace httplib::server
     request::read_body()
     {
         boost::system::error_code ec;
-        co_await impl_->read_body(nullptr, ec);
+        auto params = impl_->form_data_params();
+        co_await impl_->read_body(
+            [params](http::request<body::any_body>& req)
+            {
+                if (req[http::field::content_type].starts_with("multipart/form-data"))
+                {
+                    body::form_data_body::value_type value {};
+                    value.params = params;
+                    req.body() = std::move(value);
+                }
+            },
+            ec);
         if (ec)
         {
             throw boost::system::system_error(ec);

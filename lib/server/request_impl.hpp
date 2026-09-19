@@ -127,16 +127,11 @@ namespace httplib::server
 
         // ---- lazy body reader（对照 client::response::impl）----
 
-        using body_setup_fn = std::function<void(http::request<body::any_body>&)>;
-
         struct lazy_body_read_ctx
         {
             http_stream* stream = nullptr;
             beast::flat_buffer* buffer = nullptr;
             std::chrono::steady_clock::duration read_timeout { 30 };
-            // multipart/form-data 解析配置（默认关闭落盘）。
-            html::form_data::param form_data_params;
-            std::uint64_t body_limit = 0;
         };
 
         // 构造 lazy 请求（body 未读）：header 已解析完毕，保留 header_parser 供后续读取。
@@ -152,9 +147,8 @@ namespace httplib::server
             lazy_ctx_->stream = &stream;
             lazy_ctx_->buffer = &buffer;
             lazy_ctx_->read_timeout = read_timeout;
-            lazy_ctx_->body_limit = body_limit;
-            lazy_ctx_->form_data_params = std::move(form_data_params);
-            start(std::move(header_parser), body_limit);
+            form_data_params_ = std::move(form_data_params);
+            start(std::move(header_parser), body_limit, stream.get_executor());
         }
 
         bool
@@ -163,75 +157,10 @@ namespace httplib::server
             return lazy_ctx_ != nullptr;
         }
 
-        // 流式读取原始（未解压）body：把 header_parser 转成 buffer_body 解析器。
-        net::awaitable<std::size_t>
-        read_some_raw(net::mutable_buffer const& buf, boost::system::error_code& ec)
+        html::form_data::param const&
+        form_data_params() const
         {
-            co_return co_await read_some_raw_impl(buf, ec);
-        }
-
-        // 流式读取解压后的 body。
-        net::awaitable<std::size_t>
-        read_some_decompressed(net::mutable_buffer const& buf, boost::system::error_code& ec)
-        {
-            co_return co_await read_some_decompressed_impl(buf, ec);
-        }
-
-        // 读取剩余 body 并按 body_setup 物化到本请求。
-        net::awaitable<void>
-        read_body(body_setup_fn const& body_setup, boost::system::error_code& ec)
-        {
-            if (!lazy_ctx_)
-            {
-                ec = boost::system::error_code {};
-                co_return;
-            }
-            auto& ctx = *lazy_ctx_;
-            auto header_parser = take_header_parser();
-            if (!header_parser)
-            {
-                // 已物化完成则视为成功；已转流式读取则拒绝。
-                if (is_body_done())
-                {
-                    ec = boost::system::error_code {};
-                    co_return;
-                }
-                ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
-                co_return;
-            }
-
-            http::request_parser<body::any_body> body_parser(std::move(*header_parser));
-            body_parser.eager(true);
-            body_parser.get().body().decompressed_limit = ctx.body_limit;
-
-            if (body_setup)
-            {
-                body_setup(body_parser.get());
-            }
-            auto& msg = body_parser.get();
-            if (msg[http::field::content_type].starts_with("multipart/form-data"))
-            {
-                auto& body = msg.body();
-                if (!std::holds_alternative<body::form_data_body::value_type>(body))
-                {
-                    body = body::form_data_body::value_type {};
-                }
-                auto& fd = std::get<body::form_data_body::value_type>(body);
-                fd.params = ctx.form_data_params;
-            }
-
-            while (!body_parser.is_done())
-            {
-                ctx.stream->expires_after(ctx.read_timeout);
-                co_await http::async_read_some(*ctx.stream, *ctx.buffer, body_parser, util::net_awaitable[ec]);
-                ctx.stream->expires_never();
-                if (ec)
-                {
-                    co_return;
-                }
-            }
-            this->body() = std::move(body_parser.release().body());
-            ec = boost::system::error_code {};
+            return form_data_params_;
         }
 
         std::string_view
@@ -339,8 +268,9 @@ namespace httplib::server
 
         // ---- lazy body reader state ----
         std::unique_ptr<lazy_body_read_ctx> lazy_ctx_;
+        html::form_data::param form_data_params_;
 
-        // ---- httplib::detail::lazy_body_reader data source ----
+        // ---- httplib::detail::lazy_body_reader data source / materialization ----
         template <typename Parser>
         net::awaitable<void>
         read_some(Parser& parser, boost::system::error_code& ec)
@@ -348,6 +278,17 @@ namespace httplib::server
             lazy_ctx_->stream->expires_after(lazy_ctx_->read_timeout);
             co_await http::async_read_some(*lazy_ctx_->stream, *lazy_ctx_->buffer, parser, util::net_awaitable[ec]);
             lazy_ctx_->stream->expires_never();
+        }
+        bool
+        reader_is_materialized() const
+        {
+            // 非 lazy 请求的 body 已在 session 阶段物化到本请求。
+            return lazy_ctx_ == nullptr;
+        }
+        void
+        store_body(http::request<body::any_body>&& msg)
+        {
+            this->body() = std::move(msg.body());
         }
     };
 } // namespace httplib::server
