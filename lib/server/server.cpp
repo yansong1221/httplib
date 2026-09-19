@@ -63,13 +63,13 @@ namespace httplib::server
         co_return co_await impl_->async_run();
     }
 
-    std::shared_future<boost::system::error_code>
+    std::future<boost::system::error_code>
     http_server::run()
     {
         return impl_->run();
     }
 
-    void
+    std::future<void>
     http_server::stop()
     {
         return impl_->stop();
@@ -131,7 +131,7 @@ namespace httplib::server
     }
 
     void
-    http_server::set_compress_content_types(std::function<bool(std::string_view)> predicate)
+    http_server::set_compress_content_types(compress_content_type_predicate predicate)
     {
         impl_->set_compress_content_types(std::move(predicate));
     }

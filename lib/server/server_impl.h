@@ -10,6 +10,7 @@
 #include <boost/asio/detached.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/thread_pool.hpp>
+#include <atomic>
 #include <functional>
 #include <iostream>
 #include <map>
@@ -40,10 +41,10 @@ namespace httplib::server
 
         void listen(std::string_view host, uint16_t port, int backlog = net::socket_base::max_listen_connections);
 
-        std::shared_future<boost::system::error_code> run();
+        std::future<boost::system::error_code> run();
         net::awaitable<boost::system::error_code> async_run();
 
-        void stop();
+        std::future<void> stop();
         net::awaitable<void> async_stop();
         bool is_open() const;
 
@@ -62,7 +63,7 @@ namespace httplib::server
 
         tcp::endpoint local_endpoint() const;
 
-        void set_compress_content_types(std::function<bool(std::string_view)> predicate);
+        void set_compress_content_types(http_server::compress_content_type_predicate predicate);
         bool should_compress_content_type(std::string_view content_type) const;
 
         void
@@ -79,23 +80,23 @@ namespace httplib::server
         void
         set_header_limit(std::uint32_t limit)
         {
-            header_limit_ = limit;
+            header_limit_.store(limit);
         }
         std::uint32_t
         header_limit() const
         {
-            return header_limit_;
+            return header_limit_.load();
         }
 
         void
         set_body_limit(std::uint64_t limit)
         {
-            body_limit_ = limit;
+            body_limit_.store(limit);
         }
         std::uint64_t
         body_limit() const
         {
-            return body_limit_;
+            return body_limit_.load();
         }
 
         void set_reverse_proxy(std::string_view location,
@@ -122,10 +123,10 @@ namespace httplib::server
 
         void use_ssl(net::const_buffer const& cert_file, net::const_buffer const& key_file, std::string passwd = {});
 #ifdef HTTPLIB_ENABLED_SSL
-        const std::shared_ptr<ssl::context>&
+        std::shared_ptr<ssl::context>
         ssl_context() const
         {
-            return ssl_context_;
+            return ssl_context_.load();
         }
 #endif
 
@@ -135,8 +136,8 @@ namespace httplib::server
 
       private:
         net::any_io_executor ex_;
-        int acceptor_count_ = 32;
-        int proxy_buffer_size_ = 512 * 1024;
+        std::atomic<int> acceptor_count_ = 32;
+        std::atomic<int> proxy_buffer_size_ = 512 * 1024;
 
         router_impl router_;
         tcp::acceptor acceptor_;
@@ -148,22 +149,22 @@ namespace httplib::server
         /// `async_run()` while draining in-flight sessions.
         util::async_event session_event_ { ex_ };
 
-        std::chrono::steady_clock::duration read_timeout_ = std::chrono::seconds(30);
-        std::chrono::steady_clock::duration write_timeout_ = std::chrono::seconds(30);
+        std::atomic<std::chrono::steady_clock::duration> read_timeout_ = std::chrono::seconds(30);
+        std::atomic<std::chrono::steady_clock::duration> write_timeout_ = std::chrono::seconds(30);
 
-        std::function<bool(std::string_view)> compress_content_type_predicate_;
+        http_server::compress_content_type_predicate compress_content_type_predicate_;
 
         html::form_data::param form_data_params_ = { .max_file_size = 10 * 1024 * 1024 };
 
-        std::uint32_t header_limit_ = 65536;
-        std::uint64_t body_limit_ = 1024ULL * 1024 * 1024;
+        std::atomic<std::uint32_t> header_limit_ = 65536;
+        std::atomic<std::uint64_t> body_limit_ = 1024ULL * 1024 * 1024;
         std::atomic<bool> running_ = false;
 
         /// Closed by `async_run()` when it exits; awaited by `async_stop()`.
         util::async_event stop_event_ { ex_ };
 
 #ifdef HTTPLIB_ENABLED_SSL
-        std::shared_ptr<ssl::context> ssl_context_;
+        std::atomic<std::shared_ptr<ssl::context>> ssl_context_;
 #endif
 
         friend class websocket_conn_impl;

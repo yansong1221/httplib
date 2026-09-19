@@ -62,7 +62,7 @@ namespace httplib::server
         return ex_;
     }
 
-    std::shared_future<boost::system::error_code>
+    std::future<boost::system::error_code>
     http_server::impl::run()
     {
         return net::co_spawn(
@@ -72,9 +72,25 @@ namespace httplib::server
             boost::asio::use_future);
     }
 
-    void
+    std::future<void>
     http_server::impl::stop()
     {
+        return net::co_spawn(
+            ex_,
+            [self = shared_from_this(), this]() -> net::awaitable<void>
+            {
+                co_await async_stop();
+                co_return;
+            },
+            boost::asio::use_future);
+    }
+    httplib::net::awaitable<void>
+    http_server::impl::async_stop()
+    {
+        if (!running_)
+        {
+            co_return;
+        }
         if (acceptor_.is_open())
         {
             boost::system::error_code ec;
@@ -91,16 +107,6 @@ namespace httplib::server
         for (auto const& v : sessions)
         {
             v->abort();
-        }
-    }
-    httplib::net::awaitable<void>
-    http_server::impl::async_stop()
-    {
-        stop();
-
-        if (!running_)
-        {
-            co_return;
         }
 
         // `async_run()` closes `stop_event_` on exit, so every caller observes
@@ -128,7 +134,7 @@ namespace httplib::server
         session_event_.reset();
 
         std::vector<net::awaitable<boost::system::error_code>> ops;
-        for (int i = 0; i < acceptor_count_; ++i)
+        for (int i = 0; i < acceptor_count_.load(); ++i)
         {
             ops.push_back(co_accept());
         }
@@ -269,46 +275,46 @@ namespace httplib::server
     void
     http_server::impl::set_read_timeout(std::chrono::steady_clock::duration const& dur)
     {
-        read_timeout_ = dur;
+        read_timeout_.store(dur);
     }
 
     void
     http_server::impl::set_write_timeout(std::chrono::steady_clock::duration const& dur)
     {
-        write_timeout_ = dur;
+        write_timeout_.store(dur);
     }
 
     std::chrono::steady_clock::duration
     http_server::impl::read_timeout() const
     {
-        return read_timeout_;
+        return read_timeout_.load();
     }
 
     std::chrono::steady_clock::duration
     http_server::impl::write_timeout() const
     {
-        return write_timeout_;
+        return write_timeout_.load();
     }
 
     int
     http_server::impl::acceptor_count() const
     {
-        return acceptor_count_;
+        return acceptor_count_.load();
     }
     void
     http_server::impl::set_acceptor_count(int n)
     {
-        acceptor_count_ = n;
+        acceptor_count_.store(n);
     }
     int
     http_server::impl::proxy_buffer_size() const
     {
-        return proxy_buffer_size_;
+        return proxy_buffer_size_.load();
     }
     void
     http_server::impl::set_proxy_buffer_size(int sz)
     {
-        proxy_buffer_size_ = sz;
+        proxy_buffer_size_.store(sz);
     }
 
     tcp::endpoint
@@ -319,7 +325,7 @@ namespace httplib::server
     }
 
     void
-    http_server::impl::set_compress_content_types(std::function<bool(std::string_view)> predicate)
+    http_server::impl::set_compress_content_types(http_server::compress_content_type_predicate predicate)
     {
         compress_content_type_predicate_ = std::move(predicate);
     }
@@ -370,7 +376,7 @@ namespace httplib::server
         ssl_ctx->use_certificate(cert_file, ssl::context_base::pem);
         ssl_ctx->use_rsa_private_key(key_file, ssl::context::pem);
 
-        ssl_context_ = ssl_ctx;
+        ssl_context_.store(std::move(ssl_ctx));
 #else
         throw boost::system::system_error(
             boost::system::errc::make_error_code(boost::system::errc::protocol_not_supported));

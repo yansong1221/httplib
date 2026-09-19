@@ -38,10 +38,10 @@ namespace httplib::server
                             int backlog = net::socket_base::max_listen_connections);
         http_server& listen(uint16_t port, int backlog = net::socket_base::max_listen_connections);
 
-        std::shared_future<boost::system::error_code> run();
+        std::future<boost::system::error_code> run();
         net::awaitable<boost::system::error_code> async_run();
 
-        void stop();
+        std::future<void> stop();
         net::awaitable<void> async_stop();
 
         httplib::server::router& router();
@@ -60,7 +60,9 @@ namespace httplib::server
         std::shared_ptr<spdlog::logger> logger() const;
         void set_logger(std::shared_ptr<spdlog::logger> logger);
 
-        void set_compress_content_types(std::function<bool(std::string_view)> predicate);
+        using compress_content_type_predicate = std::function<bool(std::string_view)>;
+
+        void set_compress_content_types(compress_content_type_predicate predicate);
 
         void set_form_data_config(html::form_data::param const& params);
 
