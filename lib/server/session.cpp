@@ -28,10 +28,10 @@ namespace httplib::server
 
         template <typename S1, typename S2>
         net::awaitable<void>
-        transfer(S1& from, S2& to, size_t& bytes_transferred, int buffer_size)
+        transfer(S1& from, S2& to, size_t& bytes_transferred)
         {
             bytes_transferred = 0;
-            std::vector<uint8_t> buffer(buffer_size);
+            uint8_t buffer[8196] = { 0 };
             boost::system::error_code ec;
 
             for (;;)
@@ -553,8 +553,8 @@ namespace httplib::server
         using namespace net::experimental::awaitable_operators;
         size_t l2r_transferred = 0;
         size_t r2l_transferred = 0;
-        co_await (detail::transfer(stream_, proxy_socket_, l2r_transferred, (*server_impl_).proxy_buffer_size())
-                  && detail::transfer(proxy_socket_, stream_, r2l_transferred, (*server_impl_).proxy_buffer_size()));
+        co_await (detail::transfer(stream_, proxy_socket_, l2r_transferred)
+                  && detail::transfer(proxy_socket_, stream_, r2l_transferred));
         co_return nullptr;
     }
 

@@ -6,11 +6,11 @@
 #include "router_impl.h"
 #include "session.hpp"
 #include "util/logging.hpp"
+#include <atomic>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/thread_pool.hpp>
-#include <atomic>
 #include <functional>
 #include <iostream>
 #include <map>
@@ -20,11 +20,6 @@
 #include <string_view>
 #include <unordered_set>
 #include <vector>
-
-namespace httplib::client
-{
-    class http_client_pool;
-}
 
 namespace httplib::server
 {
@@ -39,7 +34,7 @@ namespace httplib::server
       public:
         net::any_io_executor get_executor() noexcept;
 
-        void listen(std::string_view host, uint16_t port, int backlog = net::socket_base::max_listen_connections);
+        void listen(std::string_view host, uint16_t port);
 
         std::future<boost::system::error_code> run();
         net::awaitable<boost::system::error_code> async_run();
@@ -56,25 +51,20 @@ namespace httplib::server
         std::chrono::steady_clock::duration read_timeout() const;
         std::chrono::steady_clock::duration write_timeout() const;
 
-        int acceptor_count() const;
-        void set_acceptor_count(int n);
-        int proxy_buffer_size() const;
-        void set_proxy_buffer_size(int sz);
+        tcp::endpoint const& local_endpoint() const;
 
-        tcp::endpoint local_endpoint() const;
-
-        void set_compress_content_types(http_server::compress_content_type_predicate predicate);
+        void set_compress_content_types(http_server::compress_predicate predicate);
         bool should_compress_content_type(std::string_view content_type) const;
 
         void
         set_form_data_params(html::form_data::param const& params)
         {
-            form_data_params_ = params;
+            form_data_params_.store(std::make_shared<html::form_data::param>(params));
         }
-        html::form_data::param const&
+        html::form_data::param
         form_data_params() const
         {
-            return form_data_params_;
+            return *form_data_params_.load();
         }
 
         void
@@ -136,11 +126,11 @@ namespace httplib::server
 
       private:
         net::any_io_executor ex_;
-        std::atomic<int> acceptor_count_ = 32;
-        std::atomic<int> proxy_buffer_size_ = 512 * 1024;
+        static constexpr auto acceptor_count_ = 32;
 
         router_impl router_;
         tcp::acceptor acceptor_;
+        tcp::endpoint local_endpoint_;
 
         std::mutex session_mutex_;
         std::unordered_set<std::shared_ptr<session>> sessions_;
@@ -149,12 +139,14 @@ namespace httplib::server
         /// `async_run()` while draining in-flight sessions.
         util::async_event session_event_ { ex_ };
 
-        std::atomic<std::chrono::steady_clock::duration> read_timeout_ = std::chrono::seconds(30);
-        std::atomic<std::chrono::steady_clock::duration> write_timeout_ = std::chrono::seconds(30);
+        std::atomic<std::chrono::steady_clock::duration> read_timeout_ { std::chrono::seconds(30) };
+        std::atomic<std::chrono::steady_clock::duration> write_timeout_ { std::chrono::seconds(30) };
 
-        http_server::compress_content_type_predicate compress_content_type_predicate_;
+        std::atomic<std::shared_ptr<http_server::compress_predicate>> compress_predicate_;
 
-        html::form_data::param form_data_params_ = { .max_file_size = 10 * 1024 * 1024 };
+        std::atomic<std::shared_ptr<html::form_data::param>> form_data_params_ {
+            std::make_shared<html::form_data::param>(html::form_data::param { .max_file_size = 10 * 1024 * 1024 })
+        };
 
         std::atomic<std::uint32_t> header_limit_ = 65536;
         std::atomic<std::uint64_t> body_limit_ = 1024ULL * 1024 * 1024;

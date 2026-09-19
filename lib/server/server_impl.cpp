@@ -16,6 +16,7 @@
 #include "ws_forward_impl.h"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/predicate.hpp>
+#include <boost/asio/socket_base.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/use_future.hpp>
 #include <spdlog/spdlog.h>
@@ -27,6 +28,30 @@
 
 namespace httplib::server
 {
+    namespace detail
+    {
+        static std::string
+        read_file_fast(fs::path const& path)
+        {
+            std::ifstream file(path, std::ios::binary | std::ios::ate);
+            if (!file)
+            {
+                throw std::runtime_error("Cannot open file: " + path.string());
+            }
+
+            std::streamsize size = file.tellg();
+            file.seekg(0, std::ios::beg);
+
+            std::string buffer(size, 0);
+            if (!file.read(buffer.data(), size))
+            {
+                throw std::runtime_error("Failed to read file: " + path.string());
+            }
+
+            return buffer;
+        }
+    } // namespace detail
+
     http_server::impl::impl(net::any_io_executor const& ex)
         : ex_(ex)
         , acceptor_(ex)
@@ -37,9 +62,7 @@ namespace httplib::server
     http_server::impl::~impl() = default;
 
     void
-    http_server::impl::listen(std::string_view host,
-                              uint16_t port,
-                              int backlog /*= net::socket_base::max_listen_connections*/)
+    http_server::impl::listen(std::string_view host, uint16_t port)
     {
         tcp::resolver resolver(ex_);
         auto results = resolver.resolve(host, std::to_string(port));
@@ -50,10 +73,13 @@ namespace httplib::server
         acceptor_.set_option(tcp::acceptor::reuse_address(true));
 #endif
         acceptor_.bind(endp);
-        acceptor_.listen(backlog);
+        acceptor_.listen(net::socket_base::max_listen_connections);
 
-        auto listen_endp = local_endpoint();
-        get_logger()->info("Http Server Listen on: [{}:{}]", listen_endp.address().to_string(), listen_endp.port());
+        boost::system::error_code ec;
+        local_endpoint_ = acceptor_.local_endpoint(ec);
+        get_logger()->info("Http Server Listen on: [{}:{}]",
+                           local_endpoint_.address().to_string(),
+                           local_endpoint_.port());
     }
 
     net::any_io_executor
@@ -91,12 +117,11 @@ namespace httplib::server
         {
             co_return;
         }
-        if (acceptor_.is_open())
-        {
-            boost::system::error_code ec;
-            acceptor_.cancel(ec);
-            acceptor_.close(ec);
-        }
+
+        boost::system::error_code ec;
+        acceptor_.cancel(ec);
+        acceptor_.close(ec);
+
         // 先在锁内快照，避免持锁调用 abort()/net::post 造成阻塞或重入。
         std::vector<std::shared_ptr<session>> sessions;
         {
@@ -134,7 +159,7 @@ namespace httplib::server
         session_event_.reset();
 
         std::vector<net::awaitable<boost::system::error_code>> ops;
-        for (int i = 0; i < acceptor_count_.load(); ++i)
+        for (int i = 0; i < acceptor_count_; ++i)
         {
             ops.push_back(co_accept());
         }
@@ -296,38 +321,16 @@ namespace httplib::server
         return write_timeout_.load();
     }
 
-    int
-    http_server::impl::acceptor_count() const
-    {
-        return acceptor_count_.load();
-    }
-    void
-    http_server::impl::set_acceptor_count(int n)
-    {
-        acceptor_count_.store(n);
-    }
-    int
-    http_server::impl::proxy_buffer_size() const
-    {
-        return proxy_buffer_size_.load();
-    }
-    void
-    http_server::impl::set_proxy_buffer_size(int sz)
-    {
-        proxy_buffer_size_.store(sz);
-    }
-
-    tcp::endpoint
+    tcp::endpoint const&
     http_server::impl::local_endpoint() const
     {
-        boost::system::error_code ec;
-        return acceptor_.local_endpoint(ec);
+        return local_endpoint_;
     }
 
     void
-    http_server::impl::set_compress_content_types(http_server::compress_content_type_predicate predicate)
+    http_server::impl::set_compress_content_types(http_server::compress_predicate predicate)
     {
-        compress_content_type_predicate_ = std::move(predicate);
+        compress_predicate_.store(std::make_shared<http_server::compress_predicate>(std::move(predicate)));
     }
 
     static bool
@@ -342,9 +345,9 @@ namespace httplib::server
     bool
     http_server::impl::should_compress_content_type(std::string_view content_type) const
     {
-        if (compress_content_type_predicate_)
+        if (auto predicate = compress_predicate_.load())
         {
-            return compress_content_type_predicate_(content_type);
+            return (*predicate)(content_type);
         }
         return default_compress_content_type(content_type);
     }
@@ -480,4 +483,182 @@ namespace httplib::server
         return acceptor_.is_open();
     }
 
+    http_server::http_server(net::io_context& ioc) : http_server(ioc.get_executor()) {}
+
+    http_server::http_server(net::any_io_executor const& ex) : impl_(std::make_shared<impl>(ex)) {}
+
+    http_server::~http_server() { stop(); }
+
+    net::any_io_executor
+    http_server::get_executor() noexcept
+    {
+        return impl_->get_executor();
+    }
+
+    http_server&
+    http_server::listen(std::string_view host, uint16_t port)
+    {
+        impl_->listen(host, port);
+        return *this;
+    }
+
+    http_server&
+    http_server::listen(uint16_t port)
+    {
+        return listen("0.0.0.0", port);
+    }
+
+    net::awaitable<boost::system::error_code>
+    http_server::async_run()
+    {
+        co_return co_await impl_->async_run();
+    }
+
+    std::future<boost::system::error_code>
+    http_server::run()
+    {
+        return impl_->run();
+    }
+
+    std::future<void>
+    http_server::stop()
+    {
+        return impl_->stop();
+    }
+    router&
+    http_server::router()
+    {
+        return impl_->router();
+    }
+
+    tcp::endpoint const&
+    http_server::local_endpoint() const
+    {
+        return impl_->local_endpoint();
+    }
+
+    void
+    http_server::set_read_timeout(std::chrono::steady_clock::duration const& dur)
+    {
+        impl_->set_read_timeout(dur);
+    }
+
+    void
+    http_server::set_write_timeout(std::chrono::steady_clock::duration const& dur)
+    {
+        impl_->set_write_timeout(dur);
+    }
+
+    std::chrono::steady_clock::duration
+    http_server::read_timeout() const
+    {
+        return impl_->read_timeout();
+    }
+
+    std::chrono::steady_clock::duration
+    http_server::write_timeout() const
+    {
+        return impl_->write_timeout();
+    }
+
+    std::shared_ptr<spdlog::logger>
+    http_server::logger() const
+    {
+        return impl_->get_logger();
+    }
+    void
+    http_server::set_logger(std::shared_ptr<spdlog::logger> logger)
+    {
+        impl_->set_logger(logger);
+    }
+
+    void
+    http_server::set_compress_content_types(compress_predicate predicate)
+    {
+        impl_->set_compress_content_types(std::move(predicate));
+    }
+
+    void
+    http_server::set_form_data_config(html::form_data::param const& params)
+    {
+        impl_->set_form_data_params(params);
+    }
+
+    void
+    http_server::set_header_limit(std::uint32_t limit)
+    {
+        impl_->set_header_limit(limit);
+    }
+
+    void
+    http_server::set_body_limit(std::uint64_t limit)
+    {
+        impl_->set_body_limit(limit);
+    }
+
+    void
+    http_server::set_reverse_proxy(std::string_view location, std::string_view url, proxy_interceptor_factory factory)
+    {
+        impl_->set_reverse_proxy(location, url, std::move(factory));
+    }
+
+    void
+    http_server::set_reverse_proxy(std::string_view location,
+                                   std::shared_ptr<upstream_provider> provider,
+                                   proxy_interceptor_factory factory)
+    {
+        impl_->set_reverse_proxy(location, std::move(provider), std::move(factory));
+    }
+
+    void
+    http_server::set_reverse_proxy(std::string_view location,
+                                   std::vector<upstream_backend> backends,
+                                   upstream_locator locator,
+                                   proxy_interceptor_factory factory)
+    {
+        impl_->set_reverse_proxy(location, std::move(backends), locator, std::move(factory));
+    }
+
+    void
+    http_server::set_ws_forward(std::string_view location, std::string_view url, ws_interceptor_factory factory)
+    {
+        impl_->set_ws_forward(location, url, std::move(factory));
+    }
+
+    void
+    http_server::set_ws_forward(std::string_view location,
+                                std::shared_ptr<upstream_provider> provider,
+                                ws_interceptor_factory factory)
+    {
+        impl_->set_ws_forward(location, std::move(provider), std::move(factory));
+    }
+
+    void
+    http_server::set_ws_forward(std::string_view location,
+                                std::vector<upstream_backend> backends,
+                                upstream_locator locator,
+                                ws_interceptor_factory factory)
+    {
+        impl_->set_ws_forward(location, std::move(backends), locator, std::move(factory));
+    }
+
+    void
+    http_server::set_ssl(std::span<char const> const& cert_file,
+                         std::span<char const> const& key_file,
+                         std::string passwd /*= {}*/)
+    {
+        impl_->use_ssl(cert_file, key_file, passwd);
+    }
+
+    void
+    http_server::set_ssl_file(fs::path const& cert_file, fs::path const& key_file, std::string passwd /*= {}*/)
+    {
+        set_ssl(detail::read_file_fast(cert_file), detail::read_file_fast(key_file), passwd);
+    }
+
+    net::awaitable<void>
+    http_server::async_stop()
+    {
+        co_return co_await impl_->async_stop();
+    }
 } // namespace httplib::server
