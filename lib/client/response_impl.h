@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "body/any_body.hpp"
 #include "body/empty_body.hpp"
+#include "body/lazy_body_reader.hpp"
 #include "client_impl.h"
 #include "httplib/client/response.hpp"
 #include <algorithm>
@@ -16,16 +17,21 @@
 
 namespace httplib::client
 {
-    class response::impl : public std::enable_shared_from_this<response::impl>
+    class response::impl
+        : public std::enable_shared_from_this<response::impl>
+        , public httplib::detail::lazy_body_reader<false, response::impl>
     {
+        friend class httplib::detail::lazy_body_reader<false, response::impl>;
+        using base = httplib::detail::lazy_body_reader<false, response::impl>;
+
       public:
         impl(net::any_io_executor ex,
              std::shared_ptr<http_client::impl> parent,
              std::unique_ptr<http::response_parser<http::empty_body>>&& header_parser)
             : parent_(std::move(parent))
             , read_mutex_(std::move(ex))
-            , header_parser_(std::move(header_parser))
         {
+            start(std::move(header_parser), parent_->body_limit_.load());
         }
 
         // eager：直接构造已完成读入的响应
@@ -55,11 +61,7 @@ namespace httplib::client
             {
                 return msg_->result();
             }
-            if (header_parser_)
-            {
-                return header_parser_->get().result();
-            }
-            return status_;
+            return base::result();
         }
 
         unsigned
@@ -75,11 +77,7 @@ namespace httplib::client
             {
                 return msg_->base();
             }
-            if (header_parser_)
-            {
-                return header_parser_->get().base();
-            }
-            return header_;
+            return base::headers();
         }
 
         http::fields&
@@ -89,11 +87,7 @@ namespace httplib::client
             {
                 return msg_->base();
             }
-            if (header_parser_)
-            {
-                return header_parser_->get().base();
-            }
-            return header_;
+            return base::headers();
         }
 
         // ---- eager accessors ----
@@ -161,24 +155,7 @@ namespace httplib::client
             {
                 return true;
             }
-            if (resp_parser_)
-            {
-                return resp_parser_->is_done();
-            }
-            if (dec_parser_)
-            {
-                if (!dec_parser_->is_done())
-                {
-                    return false;
-                }
-                // 解析器已读完，但解压溢出数据可能还没取完。
-                if (auto const* buf_body = std::get_if<body::buffer_body::value_type>(&dec_parser_->get().body()))
-                {
-                    return buf_body->pending.empty();
-                }
-                return true;
-            }
-            return false;
+            return base::is_body_done();
         }
 
         net::awaitable<std::size_t>
@@ -190,60 +167,9 @@ namespace httplib::client
                 ec = net::error::make_error_code(net::error::operation_aborted);
                 co_return 0;
             }
-
-            if (msg_)
-            {
-                ec = {};
-                co_return 0;
-            }
-
-            if (!resp_parser_)
-            {
-                if (!header_parser_)
-                {
-                    ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
-                    co_return 0;
-                }
-                status_ = header_parser_->get().result();
-                header_ = header_parser_->get().base();
-                resp_parser_ = std::make_unique<http::response_parser<http::buffer_body>>(std::move(*header_parser_));
-                header_parser_.reset();
-            }
-
-            for (;;)
-            {
-                // 已是 body 末尾：不要再发起底层读，直接结束。
-                if (resp_parser_->is_done())
-                {
-                    ec = {};
-                    co_return 0;
-                }
-
-                auto& body = resp_parser_->get().body();
-                body.data = (void*)buf.data();
-                body.size = buf.size();
-
-                co_await parent_->async_read_some(*resp_parser_, ec);
-                if (ec == http::error::need_buffer)
-                {
-                    ec = {};
-                }
-
-                auto consumed = buf.size() - body.size;
-                if (consumed > 0)
-                {
-                    co_return consumed;
-                }
-
-                if (ec)
-                {
-                    co_return 0;
-                }
-            }
+            co_return co_await read_some_raw_impl(buf, ec);
         }
 
-        // 流式读取解压后的 body：把 buffer_body 放进 any_body，复用其 content-encoding 解压逻辑。
-        // 调用方缓冲写不下时溢出到 value_type::pending，下次调用先取 pending，保证不丢数据。
         net::awaitable<std::size_t>
         read_some_decompressed(net::mutable_buffer const& buf, boost::system::error_code& ec)
         {
@@ -253,69 +179,7 @@ namespace httplib::client
                 ec = net::error::make_error_code(net::error::operation_aborted);
                 co_return 0;
             }
-
-            if (msg_ || buf.size() == 0)
-            {
-                ec = {};
-                co_return 0;
-            }
-
-            if (!dec_parser_)
-            {
-                if (!header_parser_)
-                {
-                    ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
-                    co_return 0;
-                }
-                status_ = header_parser_->get().result();
-                header_ = header_parser_->get().base();
-
-                dec_parser_ = std::make_unique<http::response_parser<body::any_body>>(std::move(*header_parser_));
-                dec_parser_->get().body() = body::buffer_body::value_type {};
-                dec_parser_->get().body().decompressed_limit = parent_->body_limit_.load();
-                header_parser_.reset();
-            }
-
-            for (;;)
-            {
-                auto& buf_body = std::get<body::buffer_body::value_type>(dec_parser_->get().body());
-
-                // 先取上一次没写完的溢出数据。
-                if (!buf_body.pending.empty())
-                {
-                    auto n = std::min(buf.size(), buf_body.pending.size());
-                    std::memcpy(buf.data(), buf_body.pending.data(), n);
-                    buf_body.pending.erase(0, n);
-                    ec = {};
-                    co_return n;
-                }
-
-                // 已解压完且无溢出数据：不要再发起底层读，直接结束。
-                if (dec_parser_->is_done())
-                {
-                    ec = {};
-                    co_return 0;
-                }
-
-                buf_body.data = (void*)buf.data();
-                buf_body.size = buf.size();
-
-                co_await parent_->async_read_some(*dec_parser_, ec);
-                if (ec == http::error::need_buffer)
-                {
-                    ec = {};
-                }
-
-                auto consumed = buf.size() - buf_body.size;
-                if (consumed > 0)
-                {
-                    co_return consumed;
-                }
-                if (ec)
-                {
-                    co_return 0;
-                }
-            }
+            co_return co_await read_some_decompressed_impl(buf, ec);
         }
 
         net::awaitable<void>
@@ -333,18 +197,15 @@ namespace httplib::client
                 ec = {};
                 co_return;
             }
-            if (!header_parser_)
+            auto header_parser = take_header_parser();
+            if (!header_parser)
             {
                 ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
                 co_return;
             }
 
-            status_ = header_parser_->get().result();
-            header_ = header_parser_->get().base();
-
-            http::response_parser<body::any_body> body_parser(std::move(*header_parser_));
+            http::response_parser<body::any_body> body_parser(std::move(*header_parser));
             body_parser.get().body().decompressed_limit = parent_->body_limit_.load();
-            header_parser_.reset();
 
             if (body_setup)
             {
@@ -375,12 +236,14 @@ namespace httplib::client
       private:
         util::async_mutex read_mutex_;
 
-        http::status status_ { http::status::unknown };
-        http::fields header_;
         std::optional<http::response<body::any_body>> msg_;
-        std::unique_ptr<http::response_parser<http::empty_body>> header_parser_;
-        std::unique_ptr<http::response_parser<http::buffer_body>> resp_parser_;
-        // 解压流式读取专用：any_body 解析器，body 持有 buffer_body 值以走解压 reader。
-        std::unique_ptr<http::response_parser<body::any_body>> dec_parser_;
+
+        // ---- httplib::detail::lazy_body_reader data source ----
+        template <typename Parser>
+        net::awaitable<void>
+        read_some(Parser& parser, boost::system::error_code& ec)
+        {
+            co_await parent_->async_read_some(parser, ec);
+        }
     };
 } // namespace httplib::client

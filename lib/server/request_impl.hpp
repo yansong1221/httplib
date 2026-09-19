@@ -1,5 +1,6 @@
 #pragma once
 #include "body/any_body.hpp"
+#include "body/lazy_body_reader.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
@@ -20,8 +21,12 @@
 namespace httplib::server
 {
 
-    class request::impl : public http::request<body::any_body>
+    class request::impl
+        : public http::request<body::any_body>
+        , public httplib::detail::lazy_body_reader<true, request::impl>
     {
+        friend class httplib::detail::lazy_body_reader<true, request::impl>;
+
       public:
         impl(tcp::endpoint const& local_endpoint,
              tcp::endpoint const& remote_endpoint,
@@ -129,10 +134,6 @@ namespace httplib::server
             http_stream* stream = nullptr;
             beast::flat_buffer* buffer = nullptr;
             std::chrono::steady_clock::duration read_timeout { 30 };
-            std::unique_ptr<http::request_parser<http::empty_body>> header_parser;
-            std::unique_ptr<http::request_parser<http::buffer_body>> resp_parser;
-            // 解压流式读取专用：any_body 解析器，body 持有 buffer_body 值以走解压 reader。
-            std::unique_ptr<http::request_parser<body::any_body>> dec_parser;
             // multipart/form-data 解析配置（默认关闭落盘）。
             html::form_data::param form_data_params;
             std::uint64_t body_limit = 0;
@@ -151,9 +152,9 @@ namespace httplib::server
             lazy_ctx_->stream = &stream;
             lazy_ctx_->buffer = &buffer;
             lazy_ctx_->read_timeout = read_timeout;
-            lazy_ctx_->header_parser = std::move(header_parser);
             lazy_ctx_->body_limit = body_limit;
             lazy_ctx_->form_data_params = std::move(form_data_params);
+            start(std::move(header_parser), body_limit);
         }
 
         bool
@@ -162,159 +163,18 @@ namespace httplib::server
             return lazy_ctx_ != nullptr;
         }
 
-        bool
-        is_body_done() const
-        {
-            if (!lazy_ctx_)
-            {
-                return true;
-            }
-            auto& ctx = *lazy_ctx_;
-            if (ctx.resp_parser)
-            {
-                return ctx.resp_parser->is_done();
-            }
-            if (ctx.dec_parser)
-            {
-                if (!ctx.dec_parser->is_done())
-                {
-                    return false;
-                }
-                // 解析器已读完，但解压溢出数据可能还没取完。
-                if (auto const* buf_body = std::get_if<body::buffer_body::value_type>(&ctx.dec_parser->get().body()))
-                {
-                    return buf_body->pending.empty();
-                }
-                return true;
-            }
-            // 尚未开始读取：header 之后若还有 body 则未读完。
-            return !ctx.header_parser || ctx.header_parser->is_done();
-        }
-
         // 流式读取原始（未解压）body：把 header_parser 转成 buffer_body 解析器。
         net::awaitable<std::size_t>
         read_some_raw(net::mutable_buffer const& buf, boost::system::error_code& ec)
         {
-            if (!lazy_ctx_)
-            {
-                co_return 0;
-            }
-            auto& ctx = *lazy_ctx_;
-            if (!ctx.resp_parser)
-            {
-                if (!ctx.header_parser)
-                {
-                    ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
-                    co_return 0;
-                }
-                ctx.resp_parser
-                    = std::make_unique<http::request_parser<http::buffer_body>>(std::move(*ctx.header_parser));
-                ctx.resp_parser->eager(true);
-                ctx.header_parser.reset();
-            }
-
-            for (;;)
-            {
-                if (ctx.resp_parser->is_done())
-                {
-                    ec = {};
-                    co_return 0;
-                }
-
-                auto& body = ctx.resp_parser->get().body();
-                body.data = (void*)buf.data();
-                body.size = buf.size();
-
-                ctx.stream->expires_after(ctx.read_timeout);
-                co_await http::async_read_some(*ctx.stream, *ctx.buffer, *ctx.resp_parser, util::net_awaitable[ec]);
-                ctx.stream->expires_never();
-                if (ec == http::error::need_buffer)
-                {
-                    ec = {};
-                }
-
-                auto consumed = buf.size() - body.size;
-                if (consumed > 0)
-                {
-                    co_return consumed;
-                }
-
-                if (ec)
-                {
-                    co_return 0;
-                }
-            }
+            co_return co_await read_some_raw_impl(buf, ec);
         }
 
-        // 流式读取解压后的 body：把 buffer_body 放进 any_body，复用其 content-encoding 解压逻辑。
-        // 调用方缓冲写不下时溢出到 value_type::pending，下次调用先取 pending，保证不丢数据。
+        // 流式读取解压后的 body。
         net::awaitable<std::size_t>
         read_some_decompressed(net::mutable_buffer const& buf, boost::system::error_code& ec)
         {
-            if (!lazy_ctx_)
-            {
-                co_return 0;
-            }
-            if (buf.size() == 0)
-            {
-                co_return 0;
-            }
-            auto& ctx = *lazy_ctx_;
-            if (!ctx.dec_parser)
-            {
-                if (!ctx.header_parser)
-                {
-                    ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
-                    co_return 0;
-                }
-                ctx.dec_parser = std::make_unique<http::request_parser<body::any_body>>(std::move(*ctx.header_parser));
-                ctx.dec_parser->eager(true);
-                ctx.header_parser.reset();
-                ctx.dec_parser->get().body().decompressed_limit = ctx.body_limit;
-                ctx.dec_parser->get().body() = body::buffer_body::value_type {};
-            }
-
-            for (;;)
-            {
-                auto& buf_body = std::get<body::buffer_body::value_type>(ctx.dec_parser->get().body());
-
-                // 先取上一次没写完的溢出数据。
-                if (!buf_body.pending.empty())
-                {
-                    auto n = std::min(buf.size(), buf_body.pending.size());
-                    std::memcpy(buf.data(), buf_body.pending.data(), n);
-                    buf_body.pending.erase(0, n);
-                    co_return n;
-                }
-
-                if (ctx.dec_parser->is_done())
-                {
-                    ec = {};
-                    co_return 0;
-                }
-
-                buf_body.data = (void*)buf.data();
-                buf_body.size = buf.size();
-
-                ctx.stream->expires_after(ctx.read_timeout);
-                co_await http::async_read_some(*ctx.stream, *ctx.buffer, *ctx.dec_parser, util::net_awaitable[ec]);
-                ctx.stream->expires_never();
-                if (ec == http::error::need_buffer)
-                {
-                    ec = {};
-                }
-
-                auto consumed = buf.size() - buf_body.size;
-                if (consumed > 0)
-                {
-                    co_return consumed;
-                }
-
-                if (ec)
-                {
-                    co_return 0;
-                }
-            }
+            co_return co_await read_some_decompressed_impl(buf, ec);
         }
 
         // 读取剩余 body 并按 body_setup 物化到本请求。
@@ -327,7 +187,8 @@ namespace httplib::server
                 co_return;
             }
             auto& ctx = *lazy_ctx_;
-            if (!ctx.header_parser)
+            auto header_parser = take_header_parser();
+            if (!header_parser)
             {
                 // 已物化完成则视为成功；已转流式读取则拒绝。
                 if (is_body_done())
@@ -339,9 +200,8 @@ namespace httplib::server
                 co_return;
             }
 
-            http::request_parser<body::any_body> body_parser(std::move(*ctx.header_parser));
+            http::request_parser<body::any_body> body_parser(std::move(*header_parser));
             body_parser.eager(true);
-            ctx.header_parser.reset();
             body_parser.get().body().decompressed_limit = ctx.body_limit;
 
             if (body_setup)
@@ -479,5 +339,15 @@ namespace httplib::server
 
         // ---- lazy body reader state ----
         std::unique_ptr<lazy_body_read_ctx> lazy_ctx_;
+
+        // ---- httplib::detail::lazy_body_reader data source ----
+        template <typename Parser>
+        net::awaitable<void>
+        read_some(Parser& parser, boost::system::error_code& ec)
+        {
+            lazy_ctx_->stream->expires_after(lazy_ctx_->read_timeout);
+            co_await http::async_read_some(*lazy_ctx_->stream, *lazy_ctx_->buffer, parser, util::net_awaitable[ec]);
+            lazy_ctx_->stream->expires_never();
+        }
     };
 } // namespace httplib::server
