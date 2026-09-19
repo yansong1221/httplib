@@ -265,11 +265,20 @@ namespace httplib::server
         }
         co_return std::move(std::get<html::query_params>(impl_->body()));
     }
-
     net::awaitable<void>
     request::read_body()
     {
         boost::system::error_code ec;
+        co_await read_body(ec);
+        if (ec)
+        {
+            throw boost::system::system_error(ec);
+        }
+    }
+
+    net::awaitable<void>
+    request::read_body(boost::system::error_code& ec)
+    {
         auto params = impl_->form_data_params();
         co_await impl_->read_body(
             [params](http::request<body::any_body>& req)
@@ -282,10 +291,6 @@ namespace httplib::server
                 }
             },
             ec);
-        if (ec)
-        {
-            throw boost::system::system_error(ec);
-        }
         co_return;
     }
 

@@ -2,12 +2,9 @@
 #include "body/any_body.hpp"
 #include "httplib/server/stream_writer.hpp"
 #include "httplib/util/async_mutex.hpp"
-#include "httplib/util/use_awaitable.hpp"
 #include "response_impl.hpp"
-#include "stream/http_stream.hpp"
 #include <boost/beast/http/buffer_body.hpp>
 #include <boost/beast/http/serializer.hpp>
-#include <boost/beast/http/write.hpp>
 #include <memory>
 #include <string>
 
@@ -17,13 +14,7 @@ namespace httplib::server
     class stream_writer_impl : public stream_writer
     {
       public:
-        stream_writer_impl(response::impl& resp, http_stream& stream, std::chrono::steady_clock::duration write_timeout)
-            : resp_(&resp)
-            , stream_(&stream)
-            , write_timeout_(write_timeout)
-            , write_mutex_(stream.get_executor())
-        {
-        }
+        stream_writer_impl(response::impl& resp) : resp_(resp), write_mutex_(resp_.task_->executor()) {}
 
         net::awaitable<void>
         write_header(http::status status, http::fields const& headers, mode m) override
@@ -36,10 +27,7 @@ namespace httplib::server
             }
         }
         net::awaitable<void>
-        write_header(http::status status,
-                     http::fields const& headers,
-                     mode m,
-                     boost::system::error_code& ec) override
+        write_header(http::status status, http::fields const& headers, mode m, boost::system::error_code& ec) override
         {
             auto write_lock = co_await write_mutex_.lock();
             if (!write_lock)
@@ -50,40 +38,38 @@ namespace httplib::server
 
             for (auto const& f : headers)
             {
-                resp_->erase(f.name_string());
+                resp_.erase(f.name_string());
             }
-            resp_->result(status);
+            resp_.result(status);
             for (auto const& f : headers)
             {
-                resp_->insert(f.name_string(), f.value());
+                resp_.insert(f.name_string(), f.value());
             }
-            stream_->expires_after(write_timeout_);
 
             if (m == mode::relay)
             {
-                resp_->reset_content();
+                resp_.reset_content();
 
                 // 代理转发：原样透传上游字节，不做二次压缩。
-                relay_msg_ = std::make_unique<http::response<http::buffer_body>>(*resp_);
+                relay_msg_ = std::make_unique<http::response<http::buffer_body>>(resp_);
                 relay_sr_ = std::make_unique<http::response_serializer<http::buffer_body>>(*relay_msg_);
-                co_await http::async_write_header(*stream_, *relay_sr_, util::net_awaitable[ec]);
+                co_await resp_.task_->write_header(*relay_sr_, ec);
             }
             else
             {
-                resp_->body() = body::buffer_body::value_type {};
-                resp_->chunked(true);
+                resp_.body() = body::buffer_body::value_type {};
+                resp_.chunked(true);
 
-                sr_ = std::make_unique<http::response_serializer<body::any_body>>(*resp_);
-                co_await http::async_write_header(*stream_, *sr_, util::net_awaitable[ec]);
+                sr_ = std::make_unique<http::response_serializer<body::any_body>>(resp_);
+                co_await resp_.task_->write_header(*sr_, ec);
             }
-            stream_->expires_never();
             if (ec)
             {
-                resp_->keep_alive(false);
+                resp_.keep_alive(false);
             }
             else
             {
-                resp_->set_stream_header_sent(true);
+                resp_.set_stream_header_sent(true);
             }
         }
         net::awaitable<void>
@@ -134,23 +120,19 @@ namespace httplib::server
         net::awaitable<void>
         write_buffer(Serializer& sr, boost::system::error_code& ec)
         {
-            stream_->expires_after(write_timeout_);
-            co_await http::async_write(*stream_, sr, util::net_awaitable[ec]);
-            stream_->expires_never();
+            co_await resp_.task_->write(sr, ec);
             if (ec == http::error::need_buffer)
             {
                 ec = {};
             }
             else if (ec)
             {
-                resp_->keep_alive(false);
+                resp_.keep_alive(false);
             }
         }
 
       private:
-        response::impl* resp_;
-        http_stream* stream_;
-        std::chrono::steady_clock::duration write_timeout_;
+        response::impl& resp_;
         // 串行化所有写入，保证一次只有一个协程操作序列化器/流。
         util::async_mutex write_mutex_;
         // 直连流式：any_body 序列化（支持 Content-Encoding 压缩）。

@@ -3,7 +3,7 @@
 #include "html/html.h"
 #include "httplib/server/response.hpp"
 #include "httplib/server/stream_writer.hpp"
-#include "stream/http_stream.hpp"
+#include "session.hpp"
 #include "util/mime_types.hpp"
 #include <boost/beast/version.hpp>
 #include <fmt/format.h>
@@ -213,20 +213,16 @@ namespace httplib::server
         }
 
         static response
-        make_response(unsigned int version,
-                      bool keep_alive,
-                      http_stream* stream = nullptr,
-                      std::chrono::steady_clock::duration write_timeout = std::chrono::steady_clock::duration(30))
+        make_response(unsigned int version, bool keep_alive, std::shared_ptr<session::http_task> task = {})
         {
             auto _impl = std::make_unique<response::impl>(version, keep_alive);
-            _impl->stream_ = stream;
-            _impl->write_timeout_ = write_timeout;
+            _impl->task_ = std::move(task);
             return response(std::move(_impl));
         }
 
-        std::unique_ptr<stream_writer> stream_writer_;
-        http_stream* stream_ = nullptr;
-        std::chrono::steady_clock::duration write_timeout_ { 30 };
+        std::shared_ptr<stream_writer> stream_writer_;
+        // 连接所有者（http_task）：提供写流与写超时，作用同 request 的 reader_。
+        std::shared_ptr<session::http_task> task_;
         bool stream_header_sent_ = false;
     };
 

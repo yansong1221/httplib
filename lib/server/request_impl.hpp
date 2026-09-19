@@ -3,15 +3,11 @@
 #include "body/lazy_body_reader.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/util/misc.hpp"
-#include "httplib/util/use_awaitable.hpp"
-#include "stream/http_stream.hpp"
+#include "session.hpp"
 #include <algorithm>
 #include <boost/asio/ip/tcp.hpp>
-#include <boost/beast/core/flat_buffer.hpp>
-#include <boost/beast/http/buffer_body.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/parser.hpp>
-#include <boost/beast/http/read.hpp>
 #include <boost/system/result.hpp>
 #include <chrono>
 #include <cstring>
@@ -126,35 +122,14 @@ namespace httplib::server
         }
 
         // ---- lazy body reader（对照 client::response::impl）----
-
-        struct lazy_body_read_ctx
-        {
-            http_stream* stream = nullptr;
-            beast::flat_buffer* buffer = nullptr;
-            std::chrono::steady_clock::duration read_timeout { 30 };
-        };
-
-        // 构造 lazy 请求（body 未读）：header 已解析完毕，保留 header_parser 供后续读取。
-        void
-        setup_lazy_reading(http_stream& stream,
-                           beast::flat_buffer& buffer,
-                           std::unique_ptr<http::request_parser<http::empty_body>> header_parser,
-                           std::chrono::steady_clock::duration read_timeout,
-                           std::uint64_t body_limit,
-                           html::form_data::param form_data_params = html::form_data::param {})
-        {
-            lazy_ctx_ = std::make_unique<lazy_body_read_ctx>();
-            lazy_ctx_->stream = &stream;
-            lazy_ctx_->buffer = &buffer;
-            lazy_ctx_->read_timeout = read_timeout;
-            form_data_params_ = std::move(form_data_params);
-            start(std::move(header_parser), body_limit, stream.get_executor());
-        }
+        // 读取栈统一在 make_request 里初始化（reader_/form_data_params/start）。
 
         bool
         is_lazy() const
         {
-            return lazy_ctx_ != nullptr;
+            // body 尚未读尽才视为 lazy（读尽后等价于已物化，不再需要 read_*）。
+            // 普通处理同样走 setup_lazy_reading，但全量读入后 is_body_done() 为真。
+            return reader_ != nullptr && !is_body_done();
         }
 
         html::form_data::param const&
@@ -236,15 +211,25 @@ namespace httplib::server
             path_params_ = std::move(params);
         }
 
+        // 常规请求：header_parser 归入 lazy 读取栈，随时可流式读取或全量物化
+        // （http_task 提供连接读取接口，作用同 client 的 parent_）。
         static request
-        make_request(tcp::endpoint const& local_endpoint,
+        make_request(std::shared_ptr<session::http_task> task,
+                     tcp::endpoint const& local_endpoint,
                      tcp::endpoint const& remote_endpoint,
-                     http::request<body::any_body>&& other,
+                     std::unique_ptr<http::request_parser<http::empty_body>> header_parser,
                      bool is_ssl = false)
         {
-            auto _impl = std::make_unique<request::impl>(local_endpoint, remote_endpoint, std::move(other), is_ssl);
+            auto _impl = std::make_unique<request::impl>(local_endpoint,
+                                                         remote_endpoint,
+                                                         http::request<http::empty_body>(header_parser->get()),
+                                                         is_ssl);
+            _impl->reader_ = std::move(task);
+            _impl->form_data_params_ = _impl->reader_->form_data_params();
+            _impl->start(std::move(header_parser), _impl->reader_->body_limit(), _impl->reader_->executor());
             return request(std::move(_impl));
         }
+        // 已完成解析的需求（如 websocket 升级）：body 无待读，不进入 lazy 栈。
         static request
         make_request(tcp::endpoint const& local_endpoint,
                      tcp::endpoint const& remote_endpoint,
@@ -267,7 +252,9 @@ namespace httplib::server
         request_data data_;
 
         // ---- lazy body reader state ----
-        std::unique_ptr<lazy_body_read_ctx> lazy_ctx_;
+        // 连接所有者（http_task），作用同 client 的 parent_（http_client::impl）。
+        // 共享所有权：请求对其所依赖的连接读取栈保持强引用，避免裸指针悬空。
+        std::shared_ptr<session::http_task> reader_;
         html::form_data::param form_data_params_;
 
         // ---- httplib::detail::lazy_body_reader data source / materialization ----
@@ -275,15 +262,13 @@ namespace httplib::server
         net::awaitable<void>
         read_some(Parser& parser, boost::system::error_code& ec)
         {
-            lazy_ctx_->stream->expires_after(lazy_ctx_->read_timeout);
-            co_await http::async_read_some(*lazy_ctx_->stream, *lazy_ctx_->buffer, parser, util::net_awaitable[ec]);
-            lazy_ctx_->stream->expires_never();
+            co_await reader_->read_some(parser, ec);
         }
         bool
         reader_is_materialized() const
         {
             // 非 lazy 请求的 body 已在 session 阶段物化到本请求。
-            return lazy_ctx_ == nullptr;
+            return reader_ == nullptr;
         }
         void
         store_body(http::request<body::any_body>&& msg)

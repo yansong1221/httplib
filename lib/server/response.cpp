@@ -172,16 +172,9 @@ namespace httplib::server
     {
         if (!impl_->stream_writer_)
         {
-            impl_->stream_writer_
-                = std::make_unique<stream_writer_impl>(*impl_, *impl_->stream_, impl_->write_timeout_);
+            impl_->stream_writer_ = std::make_unique<stream_writer_impl>(*impl_); 
         }
         return impl_->stream_writer_.get();
-    }
-
-    bool
-    response::is_stream_started() const
-    {
-        return impl_->stream_header_sent();
     }
 
 } // namespace httplib::server

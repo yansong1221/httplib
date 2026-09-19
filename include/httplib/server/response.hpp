@@ -68,8 +68,6 @@ namespace httplib::server
         // 低层流式写响应：write_header 后逐段 write_body（可配合 Content-Encoding 压缩）
         stream_writer* create_stream_writer();
 
-        bool is_stream_started() const;
-
         class impl;
 
       protected:

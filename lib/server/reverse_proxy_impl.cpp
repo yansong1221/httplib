@@ -363,9 +363,10 @@ namespace httplib::server::detail
                 response_hdrs.set(http::field::location, prefix_ + location.substr(upstream_base.size()));
             }
         }
+        auto writer = resp.create_stream_writer();
 
         boost::system::error_code ec;
-        co_await resp.create_stream_writer()->write_header(result, response_hdrs, stream_writer::mode::relay, ec);
+        co_await writer->write_header(result, response_hdrs, stream_writer::mode::relay, ec);
         if (ec)
         {
             logger_->trace("[proxy] write response header failed: {}", ec.message());
@@ -392,7 +393,9 @@ namespace httplib::server::detail
             {
                 co_await interceptor_->on_upstream_response_body(net::buffer(relay_buf_, bytes), more);
             }
-            co_await resp.create_stream_writer()->write_body(net::buffer(relay_buf_, bytes), more, ec);
+            auto writer = resp.create_stream_writer();
+
+            co_await writer->write_body(net::buffer(relay_buf_, bytes), more, ec);
             if (ec)
             {
                 logger_->trace("[proxy] write response body failed: {}", ec.message());

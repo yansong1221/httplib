@@ -352,7 +352,7 @@ namespace httplib::server
     net::awaitable<void>
     router_impl::post_routing(request& req, response& resp) const
     {
-        if (resp.is_stream_started())
+        if (get_impl(resp).stream_header_sent())
         {
             co_return;
         }

@@ -209,6 +209,28 @@ namespace httplib::server
     {
     }
 
+    std::chrono::steady_clock::duration
+    session::http_task::read_timeout() const
+    {
+        return server_impl_->read_timeout();
+    }
+    std::uint64_t
+    session::http_task::body_limit() const
+    {
+        return server_impl_->body_limit();
+    }
+    html::form_data::param
+    session::http_task::form_data_params() const
+    {
+        return server_impl_->form_data_params();
+    }
+
+    std::chrono::steady_clock::duration
+    session::http_task::write_timeout() const
+    {
+        return server_impl_->write_timeout();
+    }
+
     net::awaitable<session::task::ptr>
     session::http_task::then()
 
@@ -231,9 +253,7 @@ namespace httplib::server
             header_parser->header_limit(server_impl_->header_limit());
             header_parser->body_limit(server_impl_->body_limit());
 
-            stream_.expires_after(server_impl_->read_timeout());
-            co_await http::async_read_header(stream_, buffer_, *header_parser, util::net_awaitable[ec]);
-            stream_.expires_never();
+            co_await read_header(*header_parser, ec);
             if (ec)
             {
                 server_impl_->get_logger()->trace("read http header failed: {}", ec.message());
@@ -256,13 +276,12 @@ namespace httplib::server
                                                            server_impl_);
             }
 
-            auto resp = response::impl::make_response(header.version(),
-                                                      header.keep_alive(),
-                                                      &stream_,
-                                                      server_impl_->write_timeout());
-            auto req = request::impl::make_request(local_endp,
+            auto self = std::static_pointer_cast<http_task>(shared_from_this());
+            auto resp = response::impl::make_response(header.version(), header.keep_alive(), self);
+            auto req = request::impl::make_request(self,
+                                                   local_endp,
                                                    remote_endp,
-                                                   http::request<http::empty_body>(header),
+                                                   std::move(header_parser),
                                                    stream_.is_ssl());
 
             auto h_start = std::chrono::steady_clock::time_point {};
@@ -313,42 +332,18 @@ namespace httplib::server
                             }
                         }
 
-                        if (match.lazy)
-                        {
-                            get_impl(req).setup_lazy_reading(stream_,
-                                                             buffer_,
-                                                             std::move(header_parser),
-                                                             server_impl_->read_timeout(),
-                                                             server_impl_->body_limit(),
-                                                             server_impl_->form_data_params());
-                        }
-                        else
+                        // make_request 已把 header_parser 归入 lazy 读取栈：
+                        // 非 lazy 路由立即全量读入并物化（等同 read_body），
+                        // lazy 路由则留给处理函数按需流式读取。
+                        if (!match.lazy)
                         {
                             boost::system::error_code ec;
-                            http::request_parser<body::any_body> body_parser(std::move(*header_parser));
-                            body_parser.get().body().decompressed_limit = server_impl_->body_limit();
-
-                            auto ct = body_parser.get()[http::field::content_type];
-                            if (ct.starts_with("multipart/form-data"))
+                            co_await req.read_body(ec);
+                            if (ec)
                             {
-                                auto& body = body_parser.get().body();
-                                body = body::form_data_body::value_type {};
-                                auto& fd = std::get<body::form_data_body::value_type>(body);
-                                fd.params = (*server_impl_).form_data_params();
+                                server_impl_->get_logger()->trace("read http body failed: {}", ec.message());
+                                co_return nullptr;
                             }
-
-                            while (!body_parser.is_done())
-                            {
-                                stream_.expires_after(server_impl_->read_timeout());
-                                co_await http::async_read_some(stream_, buffer_, body_parser, util::net_awaitable[ec]);
-                                stream_.expires_never();
-                                if (ec)
-                                {
-                                    server_impl_->get_logger()->trace("read http body failed: {}", ec.message());
-                                    co_return nullptr;
-                                }
-                            }
-                            get_impl(req).body() = std::move(body_parser.release().body());
                         }
                     }
 
@@ -428,14 +423,21 @@ namespace httplib::server
     net::awaitable<bool>
     session::http_task::async_write(request const& req, response& resp)
     {
-        if (resp.is_stream_started())
+        if (get_impl(resp).stream_header_sent())
         {
             co_return true;
         }
 
         if (!get_impl(resp).has_content_length())
         {
-            get_impl(resp).prepare_payload();
+            if (std::holds_alternative<body::empty_body::value_type>(get_impl(resp).body()))
+            {
+                get_impl(resp).content_length(0);
+            }
+            else
+            {
+                get_impl(resp).prepare_payload();
+            }
         }
 
         if (auto accept_encoding = req[http::field::accept_encoding]; !accept_encoding.empty())
@@ -464,9 +466,7 @@ namespace httplib::server
 
         while (!serializer.is_done())
         {
-            stream_.expires_after(server_impl_->write_timeout());
-            co_await http::async_write_some(stream_, serializer, util::net_awaitable[ec]);
-            stream_.expires_never();
+            co_await write_some(serializer, ec);
             if (ec)
             {
                 server_impl_->get_logger()->trace("write http body failed: {}", ec.message());
@@ -536,10 +536,7 @@ namespace httplib::server
             co_return nullptr;
         }
 
-        auto resp = response::impl::make_response(get_impl(req_).version(),
-                                                  get_impl(req_).keep_alive(),
-                                                  &stream_,
-                                                  server_impl_->write_timeout());
+        auto resp = response::impl::make_response(get_impl(req_).version(), get_impl(req_).keep_alive());
         get_impl(resp).reason("Connection Established");
         get_impl(resp).result(http::status::ok);
         co_await http::async_write(stream_, (get_impl(resp)), util::net_awaitable[ec]);
