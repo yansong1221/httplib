@@ -120,7 +120,10 @@ TEST_CASE("Response: set_chunked_write_handler with multiple chunks", "[response
         {
             auto writer = client.create_lazy_request();
             std::string streamed;
-            co_await writer->write_header(http::verb::get, "/stream", {});
+            co_await writer->write_header(http::verb::get,
+                                          "/stream",
+                                          {},
+                                          httplib::client::lazy_request::mode::relay);
             co_await writer->write_body(net::buffer("", 0), false);
 
             auto resp = UNWRAP(co_await writer->read_response_lazy());

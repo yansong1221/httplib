@@ -276,8 +276,13 @@ namespace httplib::server::detail
 
         writer_ = client_->create_lazy_request();
 
-        if (auto rel_ec = co_await writer_->write_header(req.method(), upstream_.target_path, upstream_headers_);
-            rel_ec)
+        boost::system::error_code rel_ec;
+        co_await writer_->write_header(req.method(),
+                                       upstream_.target_path,
+                                       upstream_headers_,
+                                       httplib::client::lazy_request::mode::relay,
+                                       rel_ec);
+        if (rel_ec)
         {
             logger_->trace("[proxy] write_header to {}:{} failed: {}",
                            upstream_.host,
@@ -306,8 +311,8 @@ namespace httplib::server::detail
             {
                 co_await interceptor_->on_upstream_request_body(net::buffer(relay_buf_, bytes), more);
             }
-
-            if (auto rel_ec = co_await writer_->write_body(net::buffer(relay_buf_, bytes), more); rel_ec)
+            co_await writer_->write_body(net::buffer(relay_buf_, bytes), more, rel_ec);
+            if (rel_ec)
             {
                 logger_->trace("[proxy] write_body to {}:{} failed: {}",
                                upstream_.host,

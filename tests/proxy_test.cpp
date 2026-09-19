@@ -1523,7 +1523,10 @@ TEST_CASE("proxy: chunked request body forwarded", "[proxy]")
         [](auto& upstream_client, auto& proxy_client) -> net::awaitable<void>
         {
             auto writer = proxy_client.create_lazy_request();
-            co_await writer->write_header(http::verb::post, "/api/echo", {}, false);
+            co_await writer->write_header(http::verb::post,
+                                          "/api/echo",
+                                          {},
+                                          httplib::client::lazy_request::mode::chunked);
             co_await writer->write_body(net::buffer(std::string("Hello")), true);
             co_await writer->write_body(net::buffer(std::string(" World")), false);
             auto resp = co_await writer->read_response_lazy();

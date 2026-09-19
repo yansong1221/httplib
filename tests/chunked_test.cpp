@@ -24,7 +24,7 @@ namespace
     {
         auto writer = client.create_lazy_request();
 
-        co_await writer->write_header(method, path, {}, false);
+        co_await writer->write_header(method, path, {}, httplib::client::lazy_request::mode::chunked);
         for (size_t i = 0; i < chunks.size(); ++i)
         {
             auto more = (i + 1 < chunks.size());

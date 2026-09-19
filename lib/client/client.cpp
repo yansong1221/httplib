@@ -283,13 +283,13 @@ namespace httplib::client
     void
     http_client::set_verify_ssl(bool verify)
     {
-        impl_->verify_ssl_ = verify;
+        impl_->set_verify_ssl(verify);
     }
 
     void
     http_client::set_ca_cert(std::string_view cert)
     {
-        impl_->ca_cert_ = cert;
+        impl_->set_ca_cert(cert);
     }
 
     void

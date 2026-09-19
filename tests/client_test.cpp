@@ -630,7 +630,10 @@ TEST_CASE("client: chunked transfer via sessions", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             auto writer = client.create_lazy_request();
-            co_await writer->write_header(http::verb::get, "/chunked", {});
+            co_await writer->write_header(http::verb::get,
+                                          "/chunked",
+                                          {},
+                                          httplib::client::lazy_request::mode::relay);
             co_await writer->write_body(net::buffer("", 0), false);
 
             auto resp = UNWRAP(co_await writer->read_response_lazy());
@@ -666,7 +669,10 @@ TEST_CASE("client: lazy request reads full response", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             auto writer = client.create_lazy_request();
-            co_await writer->write_header(http::verb::post, "/echo-full", {}, false);
+            co_await writer->write_header(http::verb::post,
+                                          "/echo-full",
+                                          {},
+                                          httplib::client::lazy_request::mode::chunked);
             co_await writer->write_body(net::buffer(std::string_view("hello")), false);
 
             auto resp = UNWRAP(co_await writer->read_response());

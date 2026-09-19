@@ -27,18 +27,18 @@
 
 namespace httplib::client
 {
+
     http_client::impl::impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl)
 
         : executor_(ex)
-        , read_mutex_(ex)
-        , resolver_(ex)
+        , resolver_executor_(net::make_strand(ex))
+        , resolver_(resolver_executor_)
         , host_(host)
         , host_value_(util::make_host_value(host, port, ssl))
         , port_(port)
         , use_ssl_(ssl)
         , detail::logger("httplib.client")
     {
-
     }
 
     void
@@ -46,29 +46,56 @@ namespace httplib::client
     {
         finish_io();
 
-        std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
-        resolver_.cancel();
-        if (stream_)
         {
-            stream_->close();
+            std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
+            if (auto s = stream_.load(); s)
+            {
+                s->close();
+            }
+            stream_.store(nullptr);
         }
-        buffer_.clear();
+
+        // resolver_ 运行在独立 strand 上；把 cancel 投递过去，避免与
+        // co_connect() 中在途的 async_resolve 跨线程竞争。
+        // buffer_ 不在这里清理：它由 read_mutex_ 保护，且清理动作可能与挂起中的
+        // 读操作冲突。下次读取响应头时会先清空。
+        if (auto self = weak_from_this().lock())
+        {
+            net::post(resolver_executor_, [self] { self->resolver_.cancel(); });
+        }
     }
 
     void
-    http_client::impl::apply_rate_limits()
+    http_client::impl::apply_rate_limits(std::shared_ptr<http_stream> s) const
     {
-        if (!stream_)
+        if (!s)
         {
             return;
         }
+
         auto to_limit = [](std::uint64_t bytes_per_second) -> std::size_t
         {
             return bytes_per_second == 0 ? (std::numeric_limits<std::size_t>::max)()
                                          : static_cast<std::size_t>(bytes_per_second);
         };
-        stream_->rate_policy().read_limit(to_limit(download_rate_limit_));
-        stream_->rate_policy().write_limit(to_limit(upload_rate_limit_));
+        s->rate_policy().read_limit(to_limit(download_rate_limit_.load()));
+        s->rate_policy().write_limit(to_limit(upload_rate_limit_.load()));
+    }
+
+    void
+    http_client::impl::copy_settings_from(impl const& other)
+    {
+        timeout_policy_.store(other.timeout_policy_.load());
+        timeout_.store(other.timeout_.load());
+        verify_ssl_.store(other.verify_ssl_.load());
+        header_limit_.store(other.header_limit_.load());
+        body_limit_.store(other.body_limit_.load());
+        download_rate_limit_.store(other.download_rate_limit_.load());
+        upload_rate_limit_.store(other.upload_rate_limit_.load());
+        set_logger(other.get_logger());
+
+        std::unique_lock<std::recursive_mutex> lck(other.stream_mutex_);
+        ca_cert_ = other.ca_cert_;
     }
 
     void
@@ -76,7 +103,7 @@ namespace httplib::client
     {
         std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
         download_rate_limit_ = bytes_per_second;
-        apply_rate_limits();
+        apply_rate_limits(stream_.load());
     }
 
     void
@@ -84,19 +111,27 @@ namespace httplib::client
     {
         std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
         upload_rate_limit_ = bytes_per_second;
-        apply_rate_limits();
+        apply_rate_limits(stream_.load());
+    }
+
+    void
+    http_client::impl::set_ca_cert(std::string_view cert)
+    {
+        std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
+        ca_cert_ = std::string(cert);
     }
 
     bool
     http_client::impl::is_open() const
     {
-        std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
-        return stream_ && stream_->is_open();
+        auto s = stream_.load();
+        return s && s->is_open();
     }
 
     bool
     http_client::impl::has_active_session() const
     {
+        std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
         return !read_impl_.expired() || !write_impl_.expired();
     }
 
@@ -104,12 +139,13 @@ namespace httplib::client
     http_client::impl::is_alive() const
     {
         std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
-        if (!stream_ || !stream_->is_open())
+        auto s = stream_.load();
+        if (!s || !s->is_open())
         {
             return false;
         }
         boost::system::error_code ec;
-        return stream_->is_peer_alive(ec);
+        return s->is_peer_alive(ec);
     }
 
     net::awaitable<http_client::response_result>
@@ -117,15 +153,25 @@ namespace httplib::client
     {
         prepare_request(req);
         http::request_serializer<body::any_body> serializer(get_impl(req));
-        if (auto ec = co_await async_write(serializer, false); ec)
+
+        boost::system::error_code ec;
+        co_await async_write(serializer, false, true, ec);
+        if (ec)
         {
             co_return ec;
         }
+        co_return co_await read_response_lazy(req.method());
+    }
+    net::awaitable<httplib::client::http_client::response_result>
+    http_client::impl::read_response_lazy(http::verb method)
+    {
+        // 新响应从干净的缓冲区开始（上一连接/上一响应可能残留字节）。
+        buffer_.clear();
 
         auto header_parser = std::make_unique<http::response_parser<http::empty_body>>();
-        header_parser->skip(req.method() == http::verb::head);
-        header_parser->header_limit(header_limit_);
-        header_parser->body_limit(body_limit_);
+        header_parser->skip(method == http::verb::head);
+        header_parser->header_limit(header_limit_.load());
+        header_parser->body_limit(body_limit_.load());
 
         auto ec = co_await async_read(*header_parser, true);
         if (ec)
@@ -133,20 +179,21 @@ namespace httplib::client
             co_return ec;
         }
 
-        co_return client::response::impl::make_lazy(std::move(header_parser), shared_from_this());
+        co_return client::response::impl::make_lazy(executor_, std::move(header_parser), shared_from_this());
     }
 
     net::awaitable<http_client::response_result>
     http_client::impl::async_send_request_lazy_with_redirect(http_client::request& req)
     {
         auto self = shared_from_this();
+        auto max_redirects = max_redirects_.load();
 
-        if (max_redirects_ <= 0)
+        if (max_redirects <= 0)
         {
             co_return co_await async_send_request_lazy(req);
         }
 
-        for (int r = 0; r <= max_redirects_; ++r)
+        for (int r = 0; r <= max_redirects; ++r)
         {
             auto result = co_await async_send_request_lazy(req);
             if (result.has_error())
@@ -155,7 +202,7 @@ namespace httplib::client
             }
             auto& resp = result.value();
             auto s = resp.result();
-            if (r < max_redirects_
+            if (r < max_redirects
                 && (s == http::status::moved_permanently || s == http::status::found || s == http::status::see_other
                     || s == http::status::temporary_redirect || s == http::status::permanent_redirect))
             {
@@ -191,15 +238,8 @@ namespace httplib::client
                         req.target(u.encoded_target().empty() ? "/" : u.encoded_target());
 
                         auto new_impl = std::make_shared<impl>(executor_, std::move(new_host), new_port, new_ssl);
-                        new_impl->timeout_policy_ = timeout_policy_;
-                        new_impl->timeout_ = timeout_;
-                        new_impl->verify_ssl_ = verify_ssl_;
-                        new_impl->set_logger(get_logger());
-                        new_impl->max_redirects_ = max_redirects_ - r - 1;
-                        new_impl->header_limit_ = header_limit_;
-                        new_impl->body_limit_ = body_limit_;
-                        new_impl->download_rate_limit_ = download_rate_limit_;
-                        new_impl->upload_rate_limit_ = upload_rate_limit_;
+                        new_impl->copy_settings_from(*this);
+                        new_impl->max_redirects_.store(max_redirects - r - 1);
 
                         co_return co_await new_impl->async_send_request_lazy_with_redirect(req);
                     }
@@ -240,31 +280,37 @@ namespace httplib::client
     http_client::impl::begin_io()
     {
         std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
-        if (stream_)
+        auto s = stream_.load();
+        if (!s)
         {
-            if (timeout_policy_ == timeout_policy::step)
+            return;
+        }
+        switch (timeout_policy_.load())
+        {
+            case httplib::client::http_client::timeout_policy::overall:
             {
-                stream_->expires_after(timeout_);
-            }
-            else if (timeout_policy_ == timeout_policy::never)
-            {
-                stream_->expires_never();
-            }
-            else if (timeout_policy_ == timeout_policy::overall)
-            {
-                if (!overall_timer_active_)
+                if (!overall_timer_active_.load())
                 {
-                    stream_->expires_after(timeout_);
-                    overall_timer_active_ = true;
+                    s->expires_after(timeout_.load());
+                    overall_timer_active_.store(true);
                 }
             }
+            break;
+            case httplib::client::http_client::timeout_policy::step:
+                s->expires_after(timeout_.load());
+                break;
+            case httplib::client::http_client::timeout_policy::never:
+                s->expires_never();
+                break;
+            default:
+                break;
         }
     }
 
     void
     http_client::impl::end_io()
     {
-        switch (timeout_policy_)
+        switch (timeout_policy_.load())
         {
             case http_client::timeout_policy::step:
             case http_client::timeout_policy::never:
@@ -279,10 +325,10 @@ namespace httplib::client
     http_client::impl::finish_io()
     {
         std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
-        overall_timer_active_ = false;
-        if (stream_)
+        overall_timer_active_.store(false);
+        if (auto s = stream_.load())
         {
-            stream_->expires_never();
+            s->expires_never();
         }
     }
     void
@@ -328,8 +374,8 @@ namespace httplib::client
             }
         }
     }
-    net::awaitable<boost::system::error_code>
-    http_client::impl::co_connect()
+    net::awaitable<void>
+    http_client::impl::co_connect(boost::system::error_code& ec)
     {
         finish_io();
         begin_io();
@@ -339,20 +385,25 @@ namespace httplib::client
             close();
             // 直接用 client 的 executor 创建流；并发读取由 read_mutex_
             // （read_body / read_some_raw / read_some_decompressed）串行化。
-            auto stream_result = http_stream::create_stream(executor_, host_, use_ssl_, verify_ssl_, ca_cert_);
+            // ca_cert_ 由 stream_mutex_ 保护，在此持锁快照。
+            auto stream_result = http_stream::create_stream(executor_, host_, use_ssl_, verify_ssl_.load(), ca_cert_);
             if (!stream_result)
             {
-                co_return stream_result.error();
+                ec = stream_result.error();
+                co_return;
             }
-            stream_ = std::make_unique<http_stream>(std::move(*stream_result));
-            apply_rate_limits();
+            auto s = std::make_shared<http_stream>(std::move(*stream_result));
+            apply_rate_limits(s);
+            // 先把流赋给 stream_ 再连接：这样连接期间发生的 close() 关的就是同一条流，
+            // async_connect 会被取消并返回错误，不存在“连接完成后复活已关闭连接”的问题。
+            stream_.store(s);
             lck.unlock();
 
-            boost::system::error_code ec;
-            auto addr = net::ip::make_address(host_, ec);
-            if (!ec)
+            boost::system::error_code addr_ec;
+            auto addr = net::ip::make_address(host_, addr_ec);
+            if (!addr_ec)
             {
-                ec = co_await stream_->async_connect(tcp::endpoint(addr, port_));
+                co_await s->async_connect(tcp::endpoint(addr, port_), ec);
             }
             else
             {
@@ -360,27 +411,27 @@ namespace httplib::client
                     = co_await resolver_.async_resolve(host_, std::to_string(port_), util::net_awaitable[ec]);
                 if (!ec)
                 {
-                    ec = co_await stream_->async_connect(endpoints);
+                    co_await s->async_connect(endpoints, ec);
                 }
             }
             if (ec)
             {
                 get_logger()->warn("connect [{}] error {}", util::make_url_value(host_, port_, use_ssl_), ec.message());
                 close();
-                co_return ec;
+                co_return;
             }
         }
         end_io();
-        co_return boost::system::error_code {};
     }
 
     std::shared_ptr<lazy_request>
     http_client::impl::create_lazy_request()
     {
+        std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
         auto sp = write_impl_.lock();
         if (!sp)
         {
-            sp = std::make_shared<lazy_request_impl>(shared_from_this());
+            sp = std::make_shared<lazy_request_impl>(executor_, shared_from_this());
             write_impl_ = sp;
         }
         return sp;

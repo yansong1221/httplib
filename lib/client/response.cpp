@@ -10,7 +10,7 @@
 namespace httplib::client
 {
 
-    response::response() : impl_(std::make_shared<impl>()) {}
+    response::response() = default;
 
     response::response(response&&) noexcept = default;
     response& response::operator=(response&&) noexcept = default;

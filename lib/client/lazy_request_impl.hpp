@@ -16,11 +16,41 @@ namespace httplib::client
     class http_client::impl::lazy_request_impl final : public lazy_request
     {
       public:
-        explicit lazy_request_impl(std::shared_ptr<http_client::impl> parent) : parent_(std::move(parent)) {}
-
-        net::awaitable<boost::system::error_code>
-        write_header(http::verb method, std::string_view target, http::fields const& headers, bool relay) override
+        explicit lazy_request_impl(net::any_io_executor ex, std::shared_ptr<http_client::impl> parent)
+            : write_mutex_(std::move(ex))
+            , parent_(std::move(parent))
         {
+        }
+        net::awaitable<void>
+        write_header(http::verb method, std::string_view target, http::fields const& headers, mode m) override
+        {
+            boost::system::error_code ec;
+            co_await write_header(method, target, headers, m, ec);
+            if (ec)
+            {
+                throw boost::system::system_error(ec);
+            }
+        }
+        net::awaitable<void>
+        write_header(http::verb method,
+                     std::string_view target,
+                     http::fields const& headers,
+                     mode m,
+                     boost::system::error_code& ec) override
+        {
+            if (!parent_)
+            {
+                ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+                co_return;
+            }
+
+            auto write_lock = co_await write_mutex_.lock();
+            if (!write_lock)
+            {
+                ec = net::error::make_error_code(net::error::operation_aborted);
+                co_return;
+            }
+
             method_ = method;
             req_msg_ = std::make_unique<http::request<http::buffer_body>>(method, target, 11);
             req_sr_ = std::make_unique<http::request_serializer<http::buffer_body>>(*req_msg_);
@@ -31,20 +61,43 @@ namespace httplib::client
             }
             req_msg_->set(http::field::host, parent_->host_value_);
             req_msg_->keep_alive(true);
-            if (!relay && !req_msg_->has_content_length())
+            if (m == mode::chunked)
             {
                 req_msg_->chunked(true);
             }
-
-            co_return co_await parent_->async_write(*req_sr_, true);
+            co_await parent_->async_write(*req_sr_, true, true, ec);
         }
 
-        net::awaitable<boost::system::error_code>
+        net::awaitable<void>
         write_body(net::const_buffer const& data, bool more) override
         {
+            boost::system::error_code ec;
+            co_await write_body(data, more, ec);
+            if (ec)
+            {
+                throw boost::system::system_error(ec);
+            }
+        }
+
+        net::awaitable<void>
+        write_body(net::const_buffer const& data, bool more, boost::system::error_code& ec) override
+        {
+            if (!parent_)
+            {
+                ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+                co_return;
+            }
+            auto write_lock = co_await write_mutex_.lock();
+            if (!write_lock)
+            {
+                ec = net::error::make_error_code(net::error::operation_aborted);
+                co_return;
+            }
+
             if (!req_msg_)
             {
-                co_return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+                ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+                co_return;
             }
 
             auto& body = req_msg_->body();
@@ -52,33 +105,30 @@ namespace httplib::client
             body.size = data.size();
             body.more = more;
 
-            auto ec = co_await parent_->async_write(*req_sr_, false, false);
+            co_await parent_->async_write(*req_sr_, false, false, ec);
             if (ec == http::error::need_buffer)
             {
                 ec = {};
             }
-            co_return ec;
         }
 
         net::awaitable<boost::system::result<client::response>>
         read_response_lazy() override
         {
-            auto header_parser = std::make_unique<http::response_parser<http::empty_body>>();
-            header_parser->skip(method_ == http::verb::head);
-            header_parser->header_limit(parent_->header_limit_);
-            header_parser->body_limit(parent_->body_limit_);
-
-            if (auto ec = co_await parent_->async_read(*header_parser, true); ec)
+            if (!parent_)
             {
-                co_return ec;
+                co_return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
             }
-
-            co_return client::response::impl::make_lazy(std::move(header_parser), parent_);
+            co_return co_await parent_->read_response_lazy(method_);
         }
 
         net::awaitable<boost::system::result<client::response>>
         read_response() override
         {
+            if (!parent_)
+            {
+                co_return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+            }
             auto result = co_await read_response_lazy();
             if (result.has_error())
             {
@@ -90,6 +140,7 @@ namespace httplib::client
             }
             co_return result;
         }
+        util::async_mutex write_mutex_;
 
         std::shared_ptr<http_client::impl> parent_;
         http::verb method_ = http::verb::unknown;

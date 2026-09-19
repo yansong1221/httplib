@@ -6,6 +6,10 @@
 #include "httplib/util/use_awaitable.hpp"
 #include "stream/http_stream.hpp"
 #include "util/logging.hpp"
+#include <atomic>
+#include <boost/asio/error.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/strand.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/read.hpp>
 #include <boost/beast/http/serializer.hpp>
@@ -31,32 +35,40 @@ namespace httplib::client
         void
         set_timeout_policy(timeout_policy const& policy)
         {
-            timeout_policy_ = policy;
+            timeout_policy_.store(policy);
         }
 
         void
         set_timeout(std::chrono::steady_clock::duration const& duration)
         {
-            timeout_ = duration;
+            timeout_.store(duration);
         }
 
         void
         set_max_redirects(int n)
         {
-            max_redirects_ = n;
+            max_redirects_.store(n);
         }
 
         void
         set_header_limit(std::uint32_t limit)
         {
-            header_limit_ = limit;
+            header_limit_.store(limit);
         }
 
         void
         set_body_limit(std::uint64_t limit)
         {
-            body_limit_ = limit;
+            body_limit_.store(limit);
         }
+
+        void
+        set_verify_ssl(bool verify)
+        {
+            verify_ssl_.store(verify);
+        }
+
+        void set_ca_cert(std::string_view cert);
 
         void set_download_rate_limit(std::uint64_t bytes_per_second);
         void set_upload_rate_limit(std::uint64_t bytes_per_second);
@@ -73,15 +85,21 @@ namespace httplib::client
 
         std::shared_ptr<lazy_request> create_lazy_request();
 
+        net::awaitable<http_client::response_result> read_response_lazy(http::verb method);
+
       private:
         friend class ::httplib::client::response::impl;
 
         void prepare_request(http_client::request& req);
-        net::awaitable<boost::system::error_code> co_connect();
+        net::awaitable<void> co_connect(boost::system::error_code& ec);
 
         /// Apply the stored read/write rate limits to `stream_`. Caller must hold
         /// stream_mutex_.
-        void apply_rate_limits();
+        void apply_rate_limits(std::shared_ptr<http_stream> s) const;
+
+        /// Copy the per-connection policy (timeout / limits / SSL / ca cert / logger)
+        /// from `other` onto `*this`. Used when a redirect spawns a fresh impl.
+        void copy_settings_from(impl const& other);
 
         void begin_io();
         void end_io();
@@ -94,15 +112,31 @@ namespace httplib::client
                    || ec == http::error::end_of_stream;
         }
 
+        // NOTE: async_write / async_read / async_read_some are lock-free primitives.
+        // The caller must hold write_mutex_ (writes) / read_mutex_ (reads) for as long
+        // as the operation is in flight. The socket is snapshotted per operation so a
+        // concurrent close() can never turn `*stream_` into a null dereference.
         template <typename Body>
-        net::awaitable<boost::system::error_code>
-        async_write(http::request_serializer<Body>& serializer, bool headers_only, bool retry = true)
+        net::awaitable<void>
+        async_write(http::request_serializer<Body>& serializer,
+                    bool headers_only,
+                    bool retry,
+                    boost::system::error_code& ec)
         {
-            boost::system::error_code ec;
-            if (ec = co_await co_connect(); ec)
+            if (!serializer.is_header_done())
             {
+                co_await co_connect(ec);
+                if (ec)
+                {
+                    co_return;
+                }
+            }
 
-                co_return ec;
+            auto s = stream_.load();
+            if (!s)
+            {
+                ec = net::error::make_error_code(net::error::not_connected);
+                co_return;
             }
 
             bool bytes_written = false;
@@ -110,7 +144,7 @@ namespace httplib::client
             while (headers_only ? !serializer.is_header_done() : !serializer.is_done())
             {
                 begin_io();
-                co_await http::async_write_some(*stream_, serializer, util::net_awaitable[ec]);
+                co_await http::async_write_some(*s, serializer, util::net_awaitable[ec]);
                 if (ec)
                 {
                     if (ec != http::error::need_buffer)
@@ -125,11 +159,11 @@ namespace httplib::client
 
             if (is_retryable(ec) && retry && !bytes_written)
             {
+                ec = {};
                 close();
                 get_logger()->trace("retrying request...");
-                co_return co_await async_write(serializer, headers_only, false);
+                co_return co_await async_write(serializer, headers_only, false, ec);
             }
-            co_return ec;
         }
         template <typename Body>
         net::awaitable<boost::system::error_code>
@@ -150,9 +184,14 @@ namespace httplib::client
         async_read_some(http::response_parser<Body>& parser)
         {
             boost::system::error_code ec;
+            auto s = stream_.load();
+            if (!s)
+            {
+                co_return net::error::make_error_code(net::error::not_connected);
+            }
             parser.eager(false);
             begin_io();
-            co_await http::async_read_some(*stream_, buffer_, parser, util::net_awaitable[ec]);
+            co_await http::async_read_some(*s, buffer_, parser, util::net_awaitable[ec]);
             if (ec)
             {
                 if (ec != http::error::need_buffer)
@@ -174,35 +213,39 @@ namespace httplib::client
 
       public:
         net::any_io_executor executor_;
-        // 连接级读取互斥：临界区跨越 async_read_some 的挂起点，串行化同一连接上
-        // 的并发读（header/body/streaming），避免 parser / buffer_ 数据竞争。
-        util::async_mutex read_mutex_;
+        // resolver 绑定到独立 strand：串行化 async_resolve 与 close() 投递的
+        // cancel，避免二者跨线程并发访问同一个 resolver。
+        net::any_io_executor resolver_executor_;
         tcp::resolver resolver_;
-        timeout_policy timeout_policy_ = timeout_policy::overall;
-        std::chrono::steady_clock::duration timeout_ = std::chrono::seconds(30);
-        bool overall_timer_active_ = false;
+        std::atomic<timeout_policy> timeout_policy_ { timeout_policy::overall };
+        std::atomic<std::chrono::steady_clock::duration> timeout_ { std::chrono::seconds(30) };
+        std::atomic<bool> overall_timer_active_ { false };
 
         std::string const host_;
         std::string const host_value_;
         uint16_t const port_;
         bool const use_ssl_;
-        bool verify_ssl_ = true;
+        std::atomic<bool> verify_ssl_ { true };
+        /// 仅由 stream_mutex_ 保护（std::string 非原子，co_connect 读取前需持锁）。
         std::string ca_cert_;
 
-        std::unique_ptr<http_stream> stream_;
+        std::atomic<std::shared_ptr<http_stream>> stream_;
         mutable std::recursive_mutex stream_mutex_;
+        /// 仅由 read_mutex_ 保护：所有基于 Beast parser 的读取共享该缓冲。
         beast::flat_buffer buffer_;
+        /// 仅由 stream_mutex_ 保护。
         std::weak_ptr<lazy_request_impl> write_impl_;
+        /// 仅由 stream_mutex_ 保护。
         std::weak_ptr<void> read_impl_;
 
-        int max_redirects_ = 0;
+        std::atomic<int> max_redirects_ { 0 };
 
-        std::uint32_t header_limit_ = 65536;
-        std::uint64_t body_limit_ = 1024ULL * 1024 * 1024;
+        std::atomic<std::uint32_t> header_limit_ { 65536 };
+        std::atomic<std::uint64_t> body_limit_ { 1024ULL * 1024 * 1024 };
         /// Response-body (download) throughput cap in bytes/sec; 0 means unlimited.
-        std::uint64_t download_rate_limit_ = 0;
+        std::atomic<std::uint64_t> download_rate_limit_ { 0 };
         /// Request-body (upload) throughput cap in bytes/sec; 0 means unlimited.
-        std::uint64_t upload_rate_limit_ = 0;
+        std::atomic<std::uint64_t> upload_rate_limit_ { 0 };
     };
 
 } // namespace httplib::client

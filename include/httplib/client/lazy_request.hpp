@@ -14,12 +14,27 @@ namespace httplib::client
       public:
         virtual ~lazy_request() = default;
 
-        virtual net::awaitable<boost::system::error_code> write_header(http::verb method,
-                                                                       std::string_view target,
-                                                                       http::fields const& headers,
-                                                                       bool relay = true)
+        enum class mode
+        {
+            relay,
+            chunked,
+        };
+
+        virtual net::awaitable<void> write_header(http::verb method,
+                                                  std::string_view target,
+                                                  http::fields const& headers,
+                                                  mode m)
             = 0;
-        virtual net::awaitable<boost::system::error_code> write_body(net::const_buffer const& data, bool more) = 0;
+        virtual net::awaitable<void> write_header(http::verb method,
+                                                  std::string_view target,
+                                                  http::fields const& headers,
+                                                  mode m,
+                                                  boost::system::error_code& ec)
+            = 0;
+
+        virtual net::awaitable<void> write_body(net::const_buffer const& data, bool more) = 0;
+        virtual net::awaitable<void> write_body(net::const_buffer const& data, bool more, boost::system::error_code& ec)
+            = 0;
 
         // 收尾请求并读取响应头，返回惰性响应（body 未读，可流式读取）。
         virtual net::awaitable<boost::system::result<response>> read_response_lazy() = 0;

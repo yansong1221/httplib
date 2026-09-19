@@ -163,10 +163,9 @@ namespace httplib
         }
 
         template <typename EndPoints>
-        net::awaitable<boost::system::error_code>
-        async_connect(EndPoints&& endpoints)
+        net::awaitable<void>
+        async_connect(EndPoints&& endpoints, boost::system::error_code& ec)
         {
-            boost::system::error_code ec;
             co_await std::visit(
                 [&](auto& t) -> net::awaitable<void>
                 {
@@ -194,7 +193,6 @@ namespace httplib
                 socket().set_option(net::ip::tcp::no_delay(true));
                 socket().set_option(net::socket_base::keep_alive(true));
             }
-            co_return ec;
         }
 
         auto&&

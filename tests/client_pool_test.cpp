@@ -722,7 +722,10 @@ TEST_CASE("client_pool: reader survives handle destruction", "[client_pool]")
                 REQUIRE(h);
                 auto writer = h->create_lazy_request();
 
-                co_await writer->write_header(http::verb::get, "/stream", {});
+                co_await writer->write_header(http::verb::get,
+                                              "/stream",
+                                              {},
+                                              httplib::client::lazy_request::mode::relay);
                 co_await writer->write_body(net::buffer("", 0), false);
 
                 resp = UNWRAP(co_await writer->read_response_lazy());

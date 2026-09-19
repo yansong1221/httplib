@@ -19,9 +19,21 @@ namespace httplib::client
     class response::impl : public std::enable_shared_from_this<response::impl>
     {
       public:
+        impl(net::any_io_executor ex,
+             std::shared_ptr<http_client::impl> parent,
+             std::unique_ptr<http::response_parser<http::empty_body>>&& header_parser)
+            : parent_(std::move(parent))
+            , read_mutex_(std::move(ex))
+            , header_parser_(std::move(header_parser))
+        {
+        }
+
         // eager：直接构造已完成读入的响应
-        impl() = default;
-        explicit impl(http::response<body::any_body>&& msg) : msg_(std::move(msg)) {}
+        explicit impl(net::any_io_executor ex, http::response<body::any_body>&& msg)
+            : read_mutex_(std::move(ex))
+            , msg_(std::move(msg))
+        {
+        }
         ~impl()
         {
             if (parent_ && !is_body_done())
@@ -31,9 +43,9 @@ namespace httplib::client
         }
 
         static response
-        make(http::response<body::any_body>&& msg)
+        make(net::any_io_executor ex, http::response<body::any_body>&& msg)
         {
-            return response(std::make_shared<impl>(std::move(msg)));
+            return response(std::make_shared<impl>(std::move(ex), std::move(msg)));
         }
 
         http::status
@@ -130,13 +142,15 @@ namespace httplib::client
 
         // 构造 lazy 响应（body 未读）
         static response
-        make_lazy(std::unique_ptr<http::response_parser<http::empty_body>>&& header_parser,
+        make_lazy(net::any_io_executor ex,
+                  std::unique_ptr<http::response_parser<http::empty_body>>&& header_parser,
                   std::shared_ptr<http_client::impl> parent)
         {
-            auto impl = std::make_shared<response::impl>();
-            impl->parent_ = std::move(parent);
-            impl->header_parser_ = std::move(header_parser);
-            impl->parent_->read_impl_ = impl;
+            auto impl = std::make_shared<response::impl>(std::move(ex), std::move(parent), std::move(header_parser));
+            {
+                std::unique_lock<std::recursive_mutex> lck(impl->parent_->stream_mutex_);
+                impl->parent_->read_impl_ = impl;
+            }
             return response(std::move(impl));
         }
 
@@ -170,17 +184,15 @@ namespace httplib::client
         net::awaitable<boost::system::result<std::size_t>>
         read_some_raw(net::mutable_buffer const& buf)
         {
-            if (msg_)
-            {
-                co_return 0;
-            }
-
-            // 连接级读取互斥：read_some_raw / read_some_decompressed 会在挂起点处
-            // 交错访问共享的 parent_->buffer_ 与各自的 parser，必须串行化。
-            auto read_lock = co_await parent_->read_mutex_.lock();
+            auto read_lock = co_await read_mutex_.lock();
             if (!read_lock)
             {
                 co_return net::error::make_error_code(net::error::operation_aborted);
+            }
+
+            if (msg_)
+            {
+                co_return 0;
             }
 
             if (!resp_parser_)
@@ -230,16 +242,15 @@ namespace httplib::client
         net::awaitable<boost::system::result<std::size_t>>
         read_some_decompressed(net::mutable_buffer const& buf)
         {
-            if (msg_)
-            {
-                co_return 0;
-            }
-
-            // 连接级读取互斥，同上：串行化同一连接上的流式读取。
-            auto read_lock = co_await parent_->read_mutex_.lock();
+            auto read_lock = co_await read_mutex_.lock();
             if (!read_lock)
             {
                 co_return net::error::make_error_code(net::error::operation_aborted);
+            }
+
+            if (msg_)
+            {
+                co_return 0;
             }
 
             if (buf.size() == 0)
@@ -257,7 +268,7 @@ namespace httplib::client
 
                 dec_parser_ = std::make_unique<http::response_parser<body::any_body>>(std::move(*header_parser_));
                 dec_parser_->get().body() = body::buffer_body::value_type {};
-                dec_parser_->get().body().decompressed_limit = parent_->body_limit_;
+                dec_parser_->get().body().decompressed_limit = parent_->body_limit_.load();
                 header_parser_.reset();
             }
 
@@ -304,6 +315,12 @@ namespace httplib::client
         net::awaitable<boost::system::error_code>
         read_body(http_client::impl::body_setup_fn const& body_setup)
         {
+            auto read_lock = co_await read_mutex_.lock();
+            if (!read_lock)
+            {
+                co_return net::error::make_error_code(net::error::operation_aborted);
+            }
+
             if (msg_)
             {
                 co_return boost::system::error_code {};
@@ -313,19 +330,11 @@ namespace httplib::client
                 co_return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
             }
 
-            auto read_lock = co_await parent_->read_mutex_.lock();
-            if (!read_lock)
-            {
-                co_return net::error::make_error_code(net::error::operation_aborted);
-            }
-
             status_ = header_parser_->get().result();
             header_ = header_parser_->get().base();
 
             http::response_parser<body::any_body> body_parser(std::move(*header_parser_));
-            body_parser.get().body().decompressed_limit = parent_->body_limit_;
-            body_parser.eager(true);
-
+            body_parser.get().body().decompressed_limit = parent_->body_limit_.load();
             header_parser_.reset();
 
             if (body_setup)
@@ -337,7 +346,10 @@ namespace httplib::client
                 co_return ec;
             }
             msg_ = body_parser.release();
-            parent_->read_impl_.reset();
+            {
+                std::unique_lock<std::recursive_mutex> lck(parent_->stream_mutex_);
+                parent_->read_impl_.reset();
+            }
             co_return boost::system::error_code {};
         }
 
@@ -352,6 +364,8 @@ namespace httplib::client
         std::shared_ptr<http_client::impl> parent_;
 
       private:
+        util::async_mutex read_mutex_;
+
         http::status status_ { http::status::unknown };
         http::fields header_;
         std::optional<http::response<body::any_body>> msg_;

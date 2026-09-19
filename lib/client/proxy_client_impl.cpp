@@ -51,7 +51,7 @@ namespace httplib::client
             co_return ec;
         }
 
-        ec = co_await stream->async_connect(endpoints);
+        co_await stream->async_connect(endpoints, ec);
         if (ec)
         {
             get_logger()->error("proxy connect failed {}:{}: {}", host_, port_, ec.message());
