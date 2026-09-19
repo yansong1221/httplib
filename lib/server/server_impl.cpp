@@ -16,6 +16,7 @@
 #include "ws_forward_impl.h"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/predicate.hpp>
+#include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/use_future.hpp>
 #include <spdlog/spdlog.h>
 
@@ -80,14 +81,16 @@ namespace httplib::server
             acceptor_.cancel(ec);
             acceptor_.close(ec);
         }
+        // 先在锁内快照，避免持锁调用 abort()/net::post 造成阻塞或重入。
+        std::vector<std::shared_ptr<session>> sessions;
         {
             std::lock_guard lck(session_mutex_);
-            auto count = sessions_.size();
-            get_logger()->trace("[server] stopping, {} sessions remaining", count);
-            for (auto const& v : sessions_)
-            {
-                v->abort();
-            }
+            sessions.assign(sessions_.begin(), sessions_.end());
+        }
+        get_logger()->trace("[server] stopping, {} sessions remaining", sessions.size());
+        for (auto const& v : sessions)
+        {
+            v->abort();
         }
     }
     httplib::net::awaitable<void>
@@ -173,7 +176,9 @@ namespace httplib::server
         boost::system::error_code ec;
         for (;;)
         {
-            tcp::socket sock(ex_);
+            // 每条连接一个 strand：socket/stream 与 abort 都绑定到它，连接内串行执行。
+            auto strand = net::make_strand(ex_);
+            tcp::socket sock(strand);
             co_await acceptor_.async_accept(sock, util::net_awaitable[ec]);
             if (ec)
             {
@@ -192,13 +197,25 @@ namespace httplib::server
                 }
                 break;
             }
-            net::co_spawn(ex_,
+            net::co_spawn(strand,
                           handle_accept(std::move(sock)),
-                          [](std::exception_ptr e)
+                          [self = shared_from_this()](std::exception_ptr e)
                           {
-                              if (e)
+                              if (!e)
+                              {
+                                  return;
+                              }
+                              try
                               {
                                   std::rethrow_exception(e);
+                              }
+                              catch (std::exception const& ex)
+                              {
+                                  self->get_logger()->error("handle_accept exception: {}", ex.what());
+                              }
+                              catch (...)
+                              {
+                                  self->get_logger()->error("handle_accept unknown exception");
                               }
                           });
         }
@@ -216,7 +233,7 @@ namespace httplib::server
         }
         get_logger()->trace("accept new connection [{}:{}]", remote_endp.address().to_string(), remote_endp.port());
 
-        auto conn = std::make_shared<session>(std::move(sock), shared_from_this());
+        auto conn = std::make_shared<session>(co_await net::this_coro::executor, std::move(sock), shared_from_this());
         std::size_t session_count = 0;
         {
             std::lock_guard lck(session_mutex_);

@@ -20,6 +20,13 @@ namespace httplib
 #endif
 
       public:
+        using executor_type = http_stream::plain_stream::executor_type;
+
+        executor_type
+        get_executor()
+        {
+            return std::visit([&](auto& t) mutable { return t.get_executor(); }, stream_);
+        }
         bool
         is_open() const
         {

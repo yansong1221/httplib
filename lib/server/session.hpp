@@ -5,6 +5,8 @@
 #include "httplib/server/server_fwd.hpp"
 #include "stream/http_stream.hpp"
 #include "stream/websocket_stream.hpp"
+#include <atomic>
+#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
@@ -19,10 +21,10 @@ namespace httplib::server
     class session : public std::enable_shared_from_this<session>
     {
       public:
-        class task
+        class task : public std::enable_shared_from_this<task>
         {
           public:
-            using ptr = std::unique_ptr<task>;
+            using ptr = std::shared_ptr<task>;
 
             virtual ~task() = default;
             virtual net::awaitable<task::ptr> then() = 0;
@@ -34,18 +36,25 @@ namespace httplib::server
         class http_proxy_task;
         class websocket_task;
 
-        explicit session(tcp::socket&& stream, std::shared_ptr<http_server::impl> server_impl);
+        explicit session(net::any_io_executor ex, tcp::socket&& stream, std::shared_ptr<http_server::impl> server_impl);
         ~session();
 
       public:
         void abort();
         net::awaitable<void> run();
 
-      private:
-        task::ptr task_;
+        /// 本连接绑定的 strand executor；连接的启动与中止都投递到它上面执行。
+        net::any_io_executor
+        executor() const noexcept
+        {
+            return executor_;
+        }
 
+      private:
+        net::any_io_executor executor_;
+        /// 仅在 executor_（strand）上访问，因此无需原子；abort_ 可能来自任意线程。
+        task::ptr task_;
         std::atomic_bool abort_ = false;
-        std::mutex task_mtx_;
     };
 
     class session::detect_ssl_task : public session::task

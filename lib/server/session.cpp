@@ -9,6 +9,7 @@
 #include "websocket_conn_impl.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/write.hpp>
 #include <boost/beast/core/detect_ssl.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
@@ -88,7 +89,7 @@ namespace httplib::server
             buffer_.consume(bytes_used);
 
             http_stream variant_stream(std::move(stream_));
-            co_return std::make_unique<http_task>(std::move(variant_stream), std::move(buffer_), server_impl_);
+            co_return std::make_shared<http_task>(std::move(variant_stream), std::move(buffer_), server_impl_);
         }
 
         void
@@ -105,8 +106,9 @@ namespace httplib::server
     };
 #endif
 
-    session::session(tcp::socket&& stream, std::shared_ptr<http_server::impl> server_impl)
-        : task_(std::make_unique<detect_ssl_task>(std::move(stream), server_impl))
+    session::session(net::any_io_executor ex, tcp::socket&& stream, std::shared_ptr<http_server::impl> server_impl)
+        : executor_(std::move(ex))
+        , task_(std::make_shared<detect_ssl_task>(std::move(stream), std::move(server_impl)))
     {
     }
 
@@ -119,22 +121,33 @@ namespace httplib::server
         {
             return;
         }
-        std::lock_guard<std::mutex> lck(task_mtx_);
-        if (task_)
-        {
-            task_->abort();
-        }
+        // 不能从调用线程直接 cancel/close 连接对象；投递回本连接的 strand，
+        // 与 run()/then() 的 I/O 串行执行，避免跨线程竞争。
+        net::post(executor_,
+                  [self = shared_from_this()]()
+                  {
+                      if (auto t = self->task_)
+                      {
+                          t->abort();
+                      }
+                  });
     }
 
     httplib::net::awaitable<void>
     session::run()
     {
-        for (; !abort_ && task_;)
+        // run() 在 executor_（strand）上执行，task_ 只在此处和 abort() 投递的回调中访问。
+        for (; !abort_;)
         {
-            auto&& next_task = co_await task_->then();
-            std::lock_guard<std::mutex> lck(task_mtx_);
-            task_ = std::move(next_task);
+            auto t = task_;
+            if (!t)
+            {
+                break;
+            }
+            auto next_t = co_await t->then();
+            task_ = std::move(next_t);
         }
+        task_.reset();
         co_return;
     }
 
@@ -147,7 +160,7 @@ namespace httplib::server
     net::awaitable<session::task::ptr>
     session::detect_ssl_task::then()
     {
-        beast::flat_buffer buffer; 
+        beast::flat_buffer buffer;
 #ifdef HTTPLIB_ENABLED_SSL
         if (auto ssl_ctx = server_impl_->ssl_context(); ssl_ctx)
         {
@@ -162,20 +175,21 @@ namespace httplib::server
             }
             if (is_ssl)
             {
-                co_return std::make_unique<session::ssl_handshake_task>(
+                co_return std::make_shared<session::ssl_handshake_task>(
                     http_stream::tls_stream(std::move(stream_), ssl_ctx),
                     std::move(buffer),
                     server_impl_);
             }
         }
 #endif
-        co_return std::make_unique<session::http_task>(http_stream(std::move(stream_)),
+        co_return std::make_shared<session::http_task>(http_stream(std::move(stream_)),
                                                        std::move(buffer),
                                                        server_impl_);
     }
     void
     session::detect_ssl_task::abort()
     {
+        // 只会由 session::abort() 投递到本连接的 strand 后调用，直接操作即可。
         try
         {
             stream_.cancel();
@@ -237,7 +251,7 @@ namespace httplib::server
                                                        remote_endp,
                                                        std::move(header_parser->release()),
                                                        stream_.is_ssl());
-                co_return std::make_unique<websocket_task>(websocket_stream(std::move(stream_)),
+                co_return std::make_shared<websocket_task>(websocket_stream(std::move(stream_)),
                                                            std::move(req),
                                                            server_impl_);
             }

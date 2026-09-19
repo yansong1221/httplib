@@ -17,7 +17,7 @@ namespace httplib::server
         : server_impl_(std::move(server_impl))
         , req_(std::move(req))
         , ws_(std::move(stream))
-        , ac_que_(server_impl_->get_executor())
+        , ac_que_(ws_.get_executor())
     {
     }
     websocket_conn_impl::~websocket_conn_impl() {}
