@@ -245,15 +245,15 @@ namespace httplib::client
     }
 
     void
-    request::set_body(std::string_view data)
+    request::set_body(std::string_view data, std::string_view content_type)
     {
-        impl_->content_length(data.size());
-        impl_->body() = std::string(data);
+        set_body(std::string(data), content_type);
     }
 
     void
-    request::set_body(std::string&& data)
+    request::set_body(std::string&& data, std::string_view content_type)
     {
+        impl_->set(http::field::content_type, content_type);
         impl_->content_length(data.size());
         impl_->body() = std::move(data);
     }

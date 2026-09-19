@@ -79,9 +79,9 @@ namespace httplib::client
         bool has_active_session() const;
         bool is_alive() const;
 
-        net::awaitable<http_client::response_result> async_send_request_lazy(http_client::request& req);
+        net::awaitable<http_client::response_result> async_send_request_lazy(request& req);
 
-        net::awaitable<http_client::response_result> async_send_request_lazy_with_redirect(http_client::request& req);
+        net::awaitable<http_client::response_result> async_send_request_lazy_with_redirect(request& req);
 
         std::shared_ptr<lazy_request> create_lazy_request();
 
@@ -90,7 +90,7 @@ namespace httplib::client
       private:
         friend class ::httplib::client::response::impl;
 
-        void prepare_request(http_client::request& req);
+        void prepare_request(request& req);
         net::awaitable<void> co_connect(boost::system::error_code& ec);
 
         /// Apply the stored read/write rate limits to `stream_`. Caller must hold
@@ -118,12 +118,10 @@ namespace httplib::client
         // concurrent close() can never turn `*stream_` into a null dereference.
         template <typename Body>
         net::awaitable<void>
-        async_write(http::request_serializer<Body>& serializer,
-                    bool headers_only,
-                    bool retry,
-                    boost::system::error_code& ec)
+        async_write(http::request_serializer<Body>& serializer, bool headers_only, boost::system::error_code& ec)
         {
-            if (!serializer.is_header_done())
+            bool header_done = serializer.is_header_done();
+            if (!header_done)
             {
                 co_await co_connect(ec);
                 if (ec)
@@ -131,7 +129,45 @@ namespace httplib::client
                     co_return;
                 }
             }
+            bool retry = !header_done;
 
+            serializer.split(headers_only);
+            while (headers_only ? !serializer.is_header_done() : !serializer.is_done())
+            {
+                co_await async_write_some(serializer, ec);
+                if (ec)
+                {
+                    if (is_retryable(ec) && retry)
+                    {
+                        ec = {};
+                        close();
+                        get_logger()->trace("retrying request...");
+                        co_await co_connect(ec);
+                        if (ec)
+                        {
+                            co_return;
+                        }
+                    }
+                    else
+                    {
+                        break;
+                    }
+                }
+                retry = false;
+            }
+
+            // if (is_retryable(ec) && retry)
+            //{
+            //     ec = {};
+            //     close();
+            //     get_logger()->trace("retrying request...");
+            //     co_return co_await async_write(serializer, headers_only, false, ec);
+            // }
+        }
+        template <typename Body>
+        net::awaitable<void>
+        async_write_some(http::request_serializer<Body>& serializer, boost::system::error_code& ec)
+        {
             auto s = stream_.load();
             if (!s)
             {
@@ -139,55 +175,40 @@ namespace httplib::client
                 co_return;
             }
 
-            bool bytes_written = false;
-            serializer.split(headers_only);
-            while (headers_only ? !serializer.is_header_done() : !serializer.is_done())
+            begin_io();
+            co_await http::async_write_some(*s, serializer, util::net_awaitable[ec]);
+            if (ec)
             {
-                begin_io();
-                co_await http::async_write_some(*s, serializer, util::net_awaitable[ec]);
-                if (ec)
+                if (ec != http::error::need_buffer)
                 {
-                    if (ec != http::error::need_buffer)
-                    {
-                        close();
-                    }
-                    break;
+                    close();
                 }
-                bytes_written = true;
-                end_io();
             }
-
-            if (is_retryable(ec) && retry && !bytes_written)
-            {
-                ec = {};
-                close();
-                get_logger()->trace("retrying request...");
-                co_return co_await async_write(serializer, headers_only, false, ec);
-            }
+            end_io();
         }
+
         template <typename Body>
-        net::awaitable<boost::system::error_code>
-        async_read(http::response_parser<Body>& parser, bool headers_only)
+        net::awaitable<void>
+        async_read(http::response_parser<Body>& parser, bool headers_only, boost::system::error_code& ec)
         {
-            boost::system::error_code ec;
             while (headers_only ? !parser.is_header_done() : !parser.is_done())
             {
-                if (ec = co_await async_read_some(parser); ec)
+                co_await async_read_some(parser, ec);
+                if (ec)
                 {
                     break;
                 }
             }
-            co_return ec;
         }
         template <typename Body>
-        net::awaitable<boost::system::error_code>
-        async_read_some(http::response_parser<Body>& parser)
+        net::awaitable<void>
+        async_read_some(http::response_parser<Body>& parser, boost::system::error_code& ec)
         {
-            boost::system::error_code ec;
             auto s = stream_.load();
             if (!s)
             {
-                co_return net::error::make_error_code(net::error::not_connected);
+                ec = net::error::make_error_code(net::error::not_connected);
+                co_return;
             }
             parser.eager(false);
             begin_io();
@@ -208,7 +229,6 @@ namespace httplib::client
                     close();
                 }
             }
-            co_return ec;
         }
 
       public:

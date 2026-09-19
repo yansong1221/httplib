@@ -45,12 +45,13 @@ namespace
         std::array<char, 4096> buf;
         for (;;)
         {
-            auto result = co_await resp->read_some_raw(net::buffer(buf));
-            if (result.has_error() || result.value() == 0)
+            boost::system::error_code ec;
+            auto result = co_await resp->read_some_raw(net::buffer(buf), ec);
+            if (ec || result == 0)
             {
                 break;
             }
-            body.append(buf.data(), result.value());
+            body.append(buf.data(), result);
         }
         co_return body;
     }
@@ -72,7 +73,7 @@ TEST_CASE("Chunked: Content-Length hits chunked handler", "[chunked]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_post("/chunked-only", "data"sv));
+            auto resp = UNWRAP(co_await client.async_post("/chunked-only", "data"sv, "text/plain"sv));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(as_string(resp) == "chunked-handled");
             co_return;
@@ -102,7 +103,7 @@ TEST_CASE("Chunked: regular POST takes precedence over chunked", "[chunked]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_post("/chunked/precedence", "data"sv));
+            auto resp = UNWRAP(co_await client.async_post("/chunked/precedence", "data"sv, "text/plain"sv));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(as_string(resp) == "regular-data");
             co_return;
@@ -136,7 +137,7 @@ TEST_CASE("Chunked: GET coexists with chunked POST", "[chunked]")
             REQUIRE(get_resp.result() == http::status::ok);
             REQUIRE(as_string(get_resp) == "get-ok");
 
-            auto post_resp = UNWRAP(co_await client.async_post("/chunked/both", "data"sv));
+            auto post_resp = UNWRAP(co_await client.async_post("/chunked/both", "data"sv, "text/plain"sv));
             REQUIRE(post_resp.result() == http::status::ok);
             REQUIRE(as_string(post_resp) == "chunked-ok");
             co_return;
@@ -158,7 +159,7 @@ TEST_CASE("Chunked: is_lazy() false for regular handler", "[chunked]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_post("/chunked/check", "data"sv));
+            auto resp = UNWRAP(co_await client.async_post("/chunked/check", "data"sv, "text/plain"sv));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(as_string(resp) == "not-chunked");
             co_return;
@@ -183,11 +184,11 @@ TEST_CASE("Chunked: multi-verb chunked handler registration", "[chunked]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto post_resp = UNWRAP(co_await client.async_post("/chunked/multi", "data"sv));
+            auto post_resp = UNWRAP(co_await client.async_post("/chunked/multi", "data"sv, "text/plain"sv));
             REQUIRE(post_resp.result() == http::status::ok);
             REQUIRE(as_string(post_resp) == "chunked-POST");
 
-            auto put_resp = UNWRAP(co_await client.async_put("/chunked/multi", "data"sv));
+            auto put_resp = UNWRAP(co_await client.async_put("/chunked/multi", "data"sv, "text/plain"sv));
             REQUIRE(put_resp.result() == http::status::ok);
             REQUIRE(as_string(put_resp) == "chunked-PUT");
             co_return;
@@ -221,7 +222,7 @@ TEST_CASE("Chunked: handler with path param", "[chunked]")
             REQUIRE(get_resp.result() == http::status::ok);
             REQUIRE(as_string(get_resp) == "get-42");
 
-            auto post_resp = UNWRAP(co_await client.async_post("/chunked/user/42", "data"sv));
+            auto post_resp = UNWRAP(co_await client.async_post("/chunked/user/42", "data"sv, "text/plain"sv));
             REQUIRE(post_resp.result() == http::status::ok);
             REQUIRE(as_string(post_resp) == "chunked-42");
             co_return;
@@ -255,7 +256,7 @@ TEST_CASE("Chunked: handler with wildcard path", "[chunked]")
             REQUIRE(get_resp.result() == http::status::ok);
             REQUIRE(as_string(get_resp) == "get-a/b/c");
 
-            auto post_resp = UNWRAP(co_await client.async_post("/chunked/ws/x/y", "data"sv));
+            auto post_resp = UNWRAP(co_await client.async_post("/chunked/ws/x/y", "data"sv, "text/plain"sv));
             REQUIRE(post_resp.result() == http::status::ok);
             REQUIRE(as_string(post_resp) == "chunked-x/y");
             co_return;
@@ -289,8 +290,8 @@ TEST_CASE("Chunked: middleware is wrapped via set_lazy_http_handler", "[chunked]
         {
             auto hdrs = httplib::http::fields();
             hdrs.set(http::field::origin, "https://example.com");
-            auto get_resp = UNWRAP(co_await client.async_send_request(
-                httplib::client::request(http::verb::get, "/chunked/cors_middleware", hdrs)));
+            httplib::client::request req(http::verb::get, "/chunked/cors_middleware", hdrs);
+            auto get_resp = UNWRAP(co_await client.async_send_request(req));
             REQUIRE(get_resp.result() == http::status::ok);
             REQUIRE(as_string(get_resp) == "cors_middleware-get");
             REQUIRE(get_resp[http::field::access_control_allow_origin] == "https://example.com");
@@ -321,11 +322,11 @@ TEST_CASE("Chunked: regular PUT coexists with chunked POST", "[chunked]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto put_resp = UNWRAP(co_await client.async_put("/chunked/mixed", "hello"sv));
+            auto put_resp = UNWRAP(co_await client.async_put("/chunked/mixed", "hello"sv, "text/plain"sv));
             REQUIRE(put_resp.result() == http::status::ok);
             REQUIRE(as_string(put_resp) == "regular-put-hello");
 
-            auto post_resp = UNWRAP(co_await client.async_post("/chunked/mixed", "data"sv));
+            auto post_resp = UNWRAP(co_await client.async_post("/chunked/mixed", "data"sv, "text/plain"sv));
             REQUIRE(post_resp.result() == http::status::ok);
             REQUIRE(as_string(post_resp) == "chunked-post");
             co_return;
@@ -355,7 +356,7 @@ TEST_CASE("Chunked: chunked handler does not affect path that only has regular h
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_post("/regular/path", "data"sv));
+            auto resp = UNWRAP(co_await client.async_post("/regular/path", "data"sv, "text/plain"sv));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(as_string(resp) == "regular-data");
             co_return;

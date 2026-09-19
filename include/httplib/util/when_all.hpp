@@ -109,7 +109,7 @@ namespace httplib::util
 
     template <typename ReturnType>
     net::awaitable<std::vector<ReturnType>>
-    when_all(std::vector<std::function<net::awaitable<ReturnType>()>>&& ops)
+    when_all(std::vector<std::function<net::awaitable<ReturnType>()>>& ops)
     {
         if (ops.empty())
         {
@@ -168,11 +168,11 @@ namespace httplib::util
             auto op_ptr = std::make_shared<std::decay_t<decltype(op)>>(std::move(op));
             new_ops.emplace_back([op_ptr]() -> net::awaitable<ReturnType> { co_return co_await std::move(*op_ptr); });
         }
-        co_return co_await when_all(std::move(new_ops));
+        co_return co_await when_all(new_ops);
     }
 
     static net::awaitable<void>
-    when_all(std::vector<std::function<net::awaitable<void>()>>&& ops)
+    when_all(std::vector<std::function<net::awaitable<void>()>>& ops)
     {
         if (ops.empty())
         {
@@ -228,7 +228,7 @@ namespace httplib::util
                     co_return;
                 });
         }
-        co_await when_all(std::move(new_ops));
+        co_await when_all(new_ops);
         co_return;
     }
 

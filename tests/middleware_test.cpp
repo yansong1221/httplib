@@ -130,12 +130,12 @@ TEST_CASE("Global middleware: applies to all routes", "[middleware]")
         {
             auto hdrs = httplib::http::fields();
             hdrs.set(http::field::authorization, "Basic YWRtaW46c2VjcmV0");
-            auto resp1 = UNWRAP(
-                co_await client.async_send_request(httplib::client::request(http::verb::get, "/public", hdrs)));
+            httplib::client::request req1(http::verb::get, "/public", hdrs);
+            auto resp1 = UNWRAP(co_await client.async_send_request(req1));
             REQUIRE(resp1.result() == http::status::ok);
 
-            auto resp2 = UNWRAP(
-                co_await client.async_send_request(httplib::client::request(http::verb::get, "/private", hdrs)));
+            httplib::client::request req2(http::verb::get, "/private", hdrs);
+            auto resp2 = UNWRAP(co_await client.async_send_request(req2));
             REQUIRE(resp2.result() == http::status::ok);
 
             auto resp3 = UNWRAP(co_await client.async_get("/public"));
@@ -256,8 +256,8 @@ TEST_CASE("cors_middleware: allow_origins with multiple origins", "[middleware]"
         {
             auto hdrs = httplib::http::fields();
             hdrs.set(http::field::origin, "https://a.com");
-            auto resp = UNWRAP(co_await client.async_send_request(
-                httplib::client::request(http::verb::get, "/cors_middleware-multi", hdrs)));
+            httplib::client::request req(http::verb::get, "/cors_middleware-multi", hdrs);
+            auto resp = UNWRAP(co_await client.async_send_request(req));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp.as_string() == "cors_middleware-data");
             co_return;
@@ -283,8 +283,8 @@ TEST_CASE("cors_middleware: allow_methods custom", "[middleware]")
         {
             auto hdrs = httplib::http::fields();
             hdrs.set(http::field::origin, "https://x.com");
-            auto resp = UNWRAP(co_await client.async_send_request(
-                httplib::client::request(http::verb::options, "/cors_middleware-methods", hdrs)));
+            httplib::client::request req(http::verb::options, "/cors_middleware-methods", hdrs);
+            auto resp = UNWRAP(co_await client.async_send_request(req));
             REQUIRE(resp.result() == http::status::no_content);
             auto methods = std::string(resp["Access-Control-Allow-Methods"]);
             REQUIRE(methods.find("PUT") != std::string::npos);
@@ -313,8 +313,8 @@ TEST_CASE("Basic Auth: valid credentials pass through", "[middleware]")
             auto hdrs = httplib::http::fields();
             hdrs.set(http::field::authorization, "Basic dXNlcjpwYXNz");
 
-            auto resp = UNWRAP(
-                co_await client.async_send_request(httplib::client::request(http::verb::get, "/secret", hdrs)));
+            httplib::client::request req(http::verb::get, "/secret", hdrs);
+            auto resp = UNWRAP(co_await client.async_send_request(req));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp.as_string() == "secret-data");
             co_return;
@@ -339,8 +339,8 @@ TEST_CASE("Basic Auth: invalid credentials return 401", "[middleware]")
             auto hdrs = httplib::http::fields();
             hdrs.set(http::field::authorization, "Basic dXNlcjp3cm9uZw==");
 
-            auto resp = UNWRAP(
-                co_await client.async_send_request(httplib::client::request(http::verb::get, "/secret", hdrs)));
+            httplib::client::request req(http::verb::get, "/secret", hdrs);
+            auto resp = UNWRAP(co_await client.async_send_request(req));
             REQUIRE(resp.result() == http::status::unauthorized);
             co_return;
         });
@@ -388,8 +388,8 @@ TEST_CASE("Bearer Auth: valid token passes through", "[middleware]")
             auto hdrs = httplib::http::fields();
             hdrs.set(http::field::authorization, "Bearer abc-123");
 
-            auto resp = UNWRAP(
-                co_await client.async_send_request(httplib::client::request(http::verb::get, "/token-area", hdrs)));
+            httplib::client::request req(http::verb::get, "/token-area", hdrs);
+            auto resp = UNWRAP(co_await client.async_send_request(req));
             REQUIRE(resp.result() == http::status::ok);
             co_return;
         });
@@ -413,8 +413,8 @@ TEST_CASE("Bearer Auth: invalid token returns 401", "[middleware]")
             auto hdrs = httplib::http::fields();
             hdrs.set(http::field::authorization, "Bearer wrong-token");
 
-            auto resp = UNWRAP(
-                co_await client.async_send_request(httplib::client::request(http::verb::get, "/token-area", hdrs)));
+            httplib::client::request req(http::verb::get, "/token-area", hdrs);
+            auto resp = UNWRAP(co_await client.async_send_request(req));
             REQUIRE(resp.result() == http::status::unauthorized);
             co_return;
         });
@@ -458,8 +458,8 @@ TEST_CASE("Bearer Auth: non-Bearer scheme returns 401", "[middleware]")
         {
             auto hdrs = httplib::http::fields();
             hdrs.set(http::field::authorization, "Digest xxx");
-            auto resp = UNWRAP(
-                co_await client.async_send_request(httplib::client::request(http::verb::get, "/bearer-scheme", hdrs)));
+            httplib::client::request req(http::verb::get, "/bearer-scheme", hdrs);
+            auto resp = UNWRAP(co_await client.async_send_request(req));
             REQUIRE(resp.result() == http::status::unauthorized);
             co_return;
         });
@@ -604,8 +604,8 @@ TEST_CASE("Combined: cors_middleware + Auth", "[middleware]")
             auto hdrs = httplib::http::fields();
             hdrs.set(http::field::authorization, "Basic dTpw");
 
-            auto resp = UNWRAP(
-                co_await client.async_send_request(httplib::client::request(http::verb::get, "/protected", hdrs)));
+            httplib::client::request req(http::verb::get, "/protected", hdrs);
+            auto resp = UNWRAP(co_await client.async_send_request(req));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp.as_string() == "protected-data");
             REQUIRE(resp["Access-Control-Allow-Origin"] == "*");

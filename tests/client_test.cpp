@@ -6,9 +6,9 @@
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/lazy_request.hpp"
 #include "httplib/client/stream_reader.hpp"
-#include "httplib/server/stream_writer.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
+#include "httplib/server/stream_writer.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
@@ -411,7 +411,7 @@ TEST_CASE("client: POST string body", "[client]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_post("/post-echo", std::string_view("post-body")));
+            auto resp = UNWRAP(co_await client.async_post("/post-echo", std::string_view("post-body"), "text/plain"sv));
             REQUIRE(resp.result() == http::status::ok);
         });
 }
@@ -455,7 +455,7 @@ TEST_CASE("client: PUT string body", "[client]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_put("/put-echo", std::string_view("put-data")));
+            auto resp = UNWRAP(co_await client.async_put("/put-echo", std::string_view("put-data"), "text/plain"sv));
             REQUIRE(resp.result() == http::status::ok);
         });
 }
@@ -472,7 +472,8 @@ TEST_CASE("client: PATCH string body", "[client]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_patch("/patch-echo", std::string_view("patch-data")));
+            auto resp
+                = UNWRAP(co_await client.async_patch("/patch-echo", std::string_view("patch-data"), "text/plain"sv));
             REQUIRE(resp.result() == http::status::ok);
         });
 }
@@ -630,10 +631,7 @@ TEST_CASE("client: chunked transfer via sessions", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             auto writer = client.create_lazy_request();
-            co_await writer->write_header(http::verb::get,
-                                          "/chunked",
-                                          {},
-                                          httplib::client::lazy_request::mode::relay);
+            co_await writer->write_header(http::verb::get, "/chunked", {}, httplib::client::lazy_request::mode::relay);
             co_await writer->write_body(net::buffer("", 0), false);
 
             auto resp = UNWRAP(co_await writer->read_response_lazy());
@@ -641,12 +639,13 @@ TEST_CASE("client: chunked transfer via sessions", "[client]")
             std::array<char, 4096> buf;
             while (true)
             {
-                auto result = co_await resp.read_some_raw(net::buffer(buf));
-                if (result.has_error() || result.value() == 0)
+                boost::system::error_code ec;
+                auto result = co_await resp.read_some_raw(net::buffer(buf), ec);
+                if (ec || result == 0)
                 {
                     break;
                 }
-                streamed.append(buf.data(), result.value());
+                streamed.append(buf.data(), result);
             }
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(streamed == "Chunk0Chunk1Chunk2Chunk3Chunk4");
@@ -902,9 +901,7 @@ TEST_CASE("client: strips sensitive headers on cross-origin redirect", "[client]
             origin.router().template set_http_handler<http::verb::get>(
                 "/start",
                 [&](httplib::server::request&, httplib::server::response& resp)
-                {
-                    resp.set_redirect(std::format("http://127.0.0.1:{}/target", target_port), http::status::found);
-                });
+                { resp.set_redirect(std::format("http://127.0.0.1:{}/target", target_port), http::status::found); });
             origin.listen("127.0.0.1", 0);
             auto origin_port = origin.local_endpoint().port();
             origin.run();
@@ -916,7 +913,7 @@ TEST_CASE("client: strips sensitive headers on cross-origin redirect", "[client]
             auto req = httplib::client::request(http::verb::get, "/start");
             req.set(http::field::authorization, "Bearer secret");
             req.set(http::field::cookie, "session=abc");
-            auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
+            auto resp = UNWRAP(co_await client.async_send_request(req));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp.as_string() == "target-ok");
             REQUIRE_FALSE(leaked_auth.load());
@@ -984,8 +981,8 @@ TEST_CASE("client: async_send_request with headers", "[client]")
         {
             http::fields hdrs;
             hdrs.set("X-Forwarded-For", "10.0.0.1");
-            auto resp = UNWRAP(
-                co_await client.async_send_request(httplib::client::request(http::verb::get, "/custom-headers", hdrs)));
+            httplib::client::request req(http::verb::get, "/custom-headers", hdrs);
+            auto resp = UNWRAP(co_await client.async_send_request(req));
             REQUIRE(resp.result() == http::status::ok);
         });
 }
@@ -1011,7 +1008,7 @@ TEST_CASE("client: async_send_request form_data", "[client]")
             form.fields.push_back({ "name", "", "text/plain", "alice" });
             auto req = httplib::client::request(http::verb::post, "/form-upload");
             req.set_body(std::move(form));
-            auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
+            auto resp = UNWRAP(co_await client.async_send_request(req));
             REQUIRE(resp.result() == http::status::ok);
         });
 }
@@ -1035,7 +1032,7 @@ TEST_CASE("client: async_send_request query_params body", "[client]")
             body.add("key", "url-value");
             auto req = httplib::client::request(http::verb::post, "/form-post");
             req.set_body(std::move(body));
-            auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
+            auto resp = UNWRAP(co_await client.async_send_request(req));
             REQUIRE(resp.result() == http::status::ok);
         });
 }
@@ -1063,7 +1060,7 @@ TEST_CASE("client: send file body upload", "[client]")
         {
             auto req = httplib::client::request(http::verb::put, "/upload");
             req.set_file_body(up);
-            auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
+            auto resp = UNWRAP(co_await client.async_send_request(req));
             REQUIRE(resp.result() == http::status::ok);
         });
     std::filesystem::remove(up);
@@ -1085,8 +1082,8 @@ TEST_CASE("client: lazy read text", "[client]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_send_request(
-                httplib::client::request(http::verb::get, "/lazy-text"), httplib::client::http_client::body_mode::lazy));
+            httplib::client::request req(http::verb::get, "/lazy-text");
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             REQUIRE(resp.result() == http::status::ok);
             auto text = UNWRAP(co_await resp.read_string());
             REQUIRE(text == "lazy-hello");
@@ -1111,8 +1108,8 @@ TEST_CASE("client: lazy read json", "[client]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_send_request(
-                httplib::client::request(http::verb::get, "/lazy-json"), httplib::client::http_client::body_mode::lazy));
+            httplib::client::request req(http::verb::get, "/lazy-json");
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             REQUIRE(resp.result() == http::status::ok);
             auto val = UNWRAP(co_await resp.read_json());
             REQUIRE(val.at("key") == "value");
@@ -1132,8 +1129,8 @@ TEST_CASE("client: lazy read body typed", "[client]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_send_request(
-                httplib::client::request(http::verb::get, "/lazy-body"), httplib::client::http_client::body_mode::lazy));
+            httplib::client::request req(http::verb::get, "/lazy-body");
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             auto text = UNWRAP(co_await resp.read_string());
             REQUIRE(text == "lazy-body");
         });
@@ -1160,8 +1157,8 @@ TEST_CASE("client: lazy read multipart body", "[client]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_send_request(
-                httplib::client::request(http::verb::get, "/lazy-form"), httplib::client::http_client::body_mode::lazy));
+            httplib::client::request req(http::verb::get, "/lazy-form");
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             auto fd = UNWRAP(co_await resp.read_form_data());
             REQUIRE(fd.fields.size() == 2);
             REQUIRE(fd.fields[0].name == "a");
@@ -1184,8 +1181,8 @@ TEST_CASE("client: lazy read to file", "[client]")
         },
         [&](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_send_request(
-                httplib::client::request(http::verb::get, "/lazy-file"), httplib::client::http_client::body_mode::lazy));
+            httplib::client::request req(http::verb::get, "/lazy-file");
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             auto ec = co_await resp.read_to_file(save);
             REQUIRE(!ec);
         });
@@ -1215,9 +1212,8 @@ TEST_CASE("client: lazy redirect", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             client.set_max_redirects(5);
-            auto resp = UNWRAP(co_await client.async_send_request(
-                httplib::client::request(http::verb::get, "/lazy-redirect-me"),
-                httplib::client::http_client::body_mode::lazy));
+            httplib::client::request req(http::verb::get, "/lazy-redirect-me");
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             REQUIRE(resp.result() == http::status::ok);
             auto text = UNWRAP(co_await resp.read_string());
             REQUIRE(text == "lazy-arrived");
@@ -1237,8 +1233,8 @@ TEST_CASE("client: lazy redirect loop limited", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             client.set_max_redirects(3);
-            auto resp = UNWRAP(co_await client.async_send_request(
-                httplib::client::request(http::verb::get, "/lazy-loop"), httplib::client::http_client::body_mode::lazy));
+            httplib::client::request req(http::verb::get, "/lazy-loop");
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             REQUIRE(resp.result() == http::status::found);
         });
 }
@@ -1263,9 +1259,8 @@ TEST_CASE("client: lazy redirect full URL", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             client.set_max_redirects(1);
-            auto resp = UNWRAP(co_await client.async_send_request(
-                httplib::client::request(http::verb::get, "/lazy-ext-redirect"),
-                httplib::client::http_client::body_mode::lazy));
+            httplib::client::request req(http::verb::get, "/lazy-ext-redirect");
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             REQUIRE(resp.result() == http::status::ok);
             auto text = UNWRAP(co_await resp.read_string());
             REQUIRE(text == "lazy-target-reached");

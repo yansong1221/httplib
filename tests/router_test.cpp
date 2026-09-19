@@ -133,7 +133,7 @@ TEST_CASE("Router: multiple HTTP verbs on one route", "[router]")
             REQUIRE(resp_get.result() == http::status::ok);
             REQUIRE(as_string(resp_get) == "get-response");
 
-            auto resp_post = UNWRAP(co_await client.async_post("/multi-verb", std::string_view("")));
+            auto resp_post = UNWRAP(co_await client.async_post("/multi-verb", std::string_view(""), "text/plain"sv));
             REQUIRE(resp_post.result() == http::status::ok);
             REQUIRE(as_string(resp_post) == "post-response");
             co_return;
@@ -217,7 +217,7 @@ TEST_CASE("Router: set_post_routing_handler for CORS", "[router]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_post("/api/data", std::string_view("{}")));
+            auto resp = UNWRAP(co_await client.async_post("/api/data", std::string_view("{}"), "application/json"sv));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp["Access-Control-Allow-Origin"] == "*");
             REQUIRE(as_string(resp) == "data-ok");
@@ -261,7 +261,7 @@ TEST_CASE("Router: 405 Method Not Allowed", "[router]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_post("/readonly", std::string_view("")));
+            auto resp = UNWRAP(co_await client.async_post("/readonly", std::string_view(""), "text/plain"sv));
             REQUIRE(resp.result() == http::status::method_not_allowed);
             REQUIRE(resp["Allow"] == "GET");
             co_return;

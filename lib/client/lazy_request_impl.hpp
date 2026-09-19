@@ -65,7 +65,7 @@ namespace httplib::client
             {
                 req_msg_->chunked(true);
             }
-            co_await parent_->async_write(*req_sr_, true, true, ec);
+            co_await parent_->async_write(*req_sr_, true, ec);
         }
 
         net::awaitable<void>
@@ -105,7 +105,7 @@ namespace httplib::client
             body.size = data.size();
             body.more = more;
 
-            co_await parent_->async_write(*req_sr_, false, false, ec);
+            co_await parent_->async_write(*req_sr_, false, ec);
             if (ec == http::error::need_buffer)
             {
                 ec = {};

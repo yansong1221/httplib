@@ -214,14 +214,14 @@ namespace httplib::client
         }
     } // namespace
 
-    downloader::impl::url_info
+    boost::system::result<downloader::impl::url_info>
     downloader::impl::parse_url(std::string_view url)
     {
         url_info ui;
         auto r = boost::urls::parse_uri(url);
         if (!r)
         {
-            throw std::invalid_argument("downloader: invalid url");
+            return boost::system::errc::make_error_code(boost::system::errc::invalid_argument);
         }
         auto const& u = *r;
         ui.host = u.host();
@@ -581,10 +581,14 @@ namespace httplib::client
         if (location.starts_with("http://") || location.starts_with("https://"))
         {
             auto ui = parse_url(location);
-            t.host = ui.host;
-            t.port = ui.port;
-            t.ssl = ui.ssl;
-            t.path = ui.path;
+            if (!ui)
+            {
+                return std::nullopt;
+            }
+            t.host = ui->host;
+            t.port = ui->port;
+            t.ssl = ui->ssl;
+            t.path = ui->path;
         }
         else
         {
@@ -1020,7 +1024,7 @@ namespace httplib::client
             handle->set_download_rate_limit(per_connection_rate_);
 
             auto req = httplib::client::request(method, t, merged);
-            auto resp_result = co_await handle->async_send_request(std::move(req), http_client::body_mode::lazy);
+            auto resp_result = co_await handle->async_send_request(req, http_client::body_mode::lazy);
             if (!resp_result.has_value())
             {
                 request_result rr;
@@ -1222,13 +1226,12 @@ namespace httplib::client
                 {
                     co_return pause_ec;
                 }
-
-                auto r = co_await resp.read_some_decompressed(net::buffer(buf));
-                if (r.has_error())
+                boost::system::error_code ec;
+                auto n = co_await resp.read_some_decompressed(net::buffer(buf), ec);
+                if (ec)
                 {
-                    co_return r.error();
+                    co_return ec;
                 }
-                auto n = r.value();
                 if (n == 0)
                 {
                     break;
@@ -1409,13 +1412,12 @@ namespace httplib::client
                 {
                     co_return pause_ec;
                 }
-
-                auto r = co_await resp.read_some_decompressed(net::buffer(buf));
-                if (r.has_error())
+                boost::system::error_code ec;
+                auto n = co_await resp.read_some_decompressed(net::buffer(buf), ec);
+                if (ec)
                 {
-                    co_return r.error();
+                    co_return ec;
                 }
-                auto n = r.value();
                 if (n == 0)
                 {
                     break;
@@ -1787,19 +1789,15 @@ namespace httplib::client
             has_final_ui_ = false;
         }
 
-        url_info ui;
-        try
+        auto ui = parse_url(url);
+        if (!ui)
         {
-            ui = parse_url(url);
-        }
-        catch (std::invalid_argument const&)
-        {
-            auto ec = boost::system::errc::make_error_code(boost::system::errc::invalid_argument);
+            auto ec = ui.error();
             set_state(downloader::state::failed, ec);
             co_return ec;
         }
 
-        state_url_ = make_cache_key(ui);
+        state_url_ = make_cache_key(ui.value());
 
         set_state(downloader::state::connecting, {});
 
@@ -1825,7 +1823,7 @@ namespace httplib::client
                         }
                         else
                         {
-                            usable = co_await check_remote_cache(ui, *meta);
+                            usable = co_await check_remote_cache(ui.value(), *meta);
                         }
                         if (usable)
                         {
@@ -1864,7 +1862,7 @@ namespace httplib::client
                 }
             }
 
-            auto probe = co_await probe_content_length(ui);
+            auto probe = co_await probe_content_length(ui.value());
             auto content_length = probe.content_length;
 
             store_suggested_filename(probe.headers);
@@ -1880,18 +1878,18 @@ namespace httplib::client
                     auto segs = static_cast<std::uint64_t>(std::clamp(active_config_.segments, 2, 32));
                     per_connection_rate_ = std::max<std::uint64_t>(1, per_connection_rate_ / segs);
                 }
-                ec = co_await co_download_multi_segment(ui, save_path, content_length, probe.headers);
+                ec = co_await co_download_multi_segment(ui.value(), save_path, content_length, probe.headers);
                 if (ec == boost::system::errc::make_error_code(boost::system::errc::operation_not_supported))
                 {
                     // Server does not honor Range requests; fall back to a plain
                     // single-stream download.
                     per_connection_rate_ = active_config_.max_speed_bytes_per_sec;
-                    ec = co_await co_download_single(ui, save_path);
+                    ec = co_await co_download_single(ui.value(), save_path);
                 }
             }
             else
             {
-                ec = co_await co_download_single(ui, save_path);
+                ec = co_await co_download_single(ui.value(), save_path);
             }
 
             if (!ec && cache_ && !save_path.empty())

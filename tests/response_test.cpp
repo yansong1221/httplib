@@ -120,22 +120,20 @@ TEST_CASE("Response: set_chunked_write_handler with multiple chunks", "[response
         {
             auto writer = client.create_lazy_request();
             std::string streamed;
-            co_await writer->write_header(http::verb::get,
-                                          "/stream",
-                                          {},
-                                          httplib::client::lazy_request::mode::relay);
+            co_await writer->write_header(http::verb::get, "/stream", {}, httplib::client::lazy_request::mode::relay);
             co_await writer->write_body(net::buffer("", 0), false);
 
             auto resp = UNWRAP(co_await writer->read_response_lazy());
             std::array<char, 4096> buf;
+            boost::system::error_code ec;
             while (true)
             {
-                auto result = co_await resp.read_some_raw(net::buffer(buf));
-                if (result.has_error() || result.value() == 0)
+                auto result = co_await resp.read_some_raw(net::buffer(buf), ec);
+                if (ec || result == 0)
                 {
                     break;
                 }
-                streamed.append(buf.data(), result.value());
+                streamed.append(buf.data(), result);
             }
 
             REQUIRE(resp.result() == http::status::ok);
@@ -291,8 +289,8 @@ TEST_CASE("Response: set_file_content with Range request", "[response]")
                 auto range_headers = httplib::http::fields();
                 range_headers.set(http::field::range, "bytes=0-4");
 
-                auto resp = UNWRAP(co_await client.async_send_request(
-                    httplib::client::request(http::verb::get, "/file-range", range_headers)));
+                httplib::client::request req(http::verb::get, "/file-range", range_headers);
+                auto resp = UNWRAP(co_await client.async_send_request(req));
                 REQUIRE(resp.result() == http::status::partial_content);
                 REQUIRE(resp.as_string() == "01234");
                 co_return;
@@ -324,8 +322,8 @@ TEST_CASE("Response: Range request open-ended (bytes=N-)", "[response]")
                 auto range_headers = httplib::http::fields();
                 range_headers.set(http::field::range, "bytes=7-");
 
-                auto resp = UNWRAP(co_await client.async_send_request(
-                    httplib::client::request(http::verb::get, "/file-range-open", range_headers)));
+                httplib::client::request req(http::verb::get, "/file-range-open", range_headers);
+                auto resp = UNWRAP(co_await client.async_send_request(req));
                 REQUIRE(resp.result() == http::status::partial_content);
                 REQUIRE(resp.as_string() == "789");
                 co_return;
@@ -357,8 +355,8 @@ TEST_CASE("Response: Range request suffix (bytes=-N)", "[response]")
                 auto range_headers = httplib::http::fields();
                 range_headers.set(http::field::range, "bytes=-4");
 
-                auto resp = UNWRAP(co_await client.async_send_request(
-                    httplib::client::request(http::verb::get, "/file-range-suffix", range_headers)));
+                httplib::client::request req(http::verb::get, "/file-range-suffix", range_headers);
+                auto resp = UNWRAP(co_await client.async_send_request(req));
                 REQUIRE(resp.result() == http::status::partial_content);
                 REQUIRE(resp.as_string() == "6789");
                 co_return;
@@ -390,8 +388,8 @@ TEST_CASE("Response: Range request Content-Range header", "[response]")
                 auto range_headers = httplib::http::fields();
                 range_headers.set(http::field::range, "bytes=2-5");
 
-                auto resp = UNWRAP(co_await client.async_send_request(
-                    httplib::client::request(http::verb::get, "/file-cr", range_headers)));
+                httplib::client::request req(http::verb::get, "/file-cr", range_headers);
+                auto resp = UNWRAP(co_await client.async_send_request(req));
                 REQUIRE(resp.result() == http::status::partial_content);
                 REQUIRE(resp.as_string() == "cdef");
                 REQUIRE(resp.base().find(http::field::content_range) != resp.base().end());
@@ -425,8 +423,8 @@ TEST_CASE("Response: Range request out of bounds returns 416", "[response]")
                 auto range_headers = httplib::http::fields();
                 range_headers.set(http::field::range, "bytes=10-20");
 
-                auto resp = UNWRAP(co_await client.async_send_request(
-                    httplib::client::request(http::verb::get, "/file-range-oob", range_headers)));
+                httplib::client::request req(http::verb::get, "/file-range-oob", range_headers);
+                auto resp = UNWRAP(co_await client.async_send_request(req));
                 REQUIRE(resp.result() == http::status::range_not_satisfiable);
                 REQUIRE(resp.base().find(http::field::content_range) != resp.base().end());
                 co_return;
@@ -463,8 +461,8 @@ TEST_CASE("Response: If-None-Match returns 304 for matching ETag", "[response]")
 
                 auto hdrs = httplib::http::fields();
                 hdrs.set(http::field::if_none_match, etag);
-                auto resp2 = UNWRAP(
-                    co_await client.async_send_request(httplib::client::request(http::verb::get, "/file-etag", hdrs)));
+                httplib::client::request req(http::verb::get, "/file-etag", hdrs);
+                auto resp2 = UNWRAP(co_await client.async_send_request(req));
                 REQUIRE(resp2.result() == http::status::not_modified);
                 co_return;
             });
@@ -500,8 +498,8 @@ TEST_CASE("Response: If-Modified-Since returns 304 for unmodified", "[response]"
 
                 auto hdrs = httplib::http::fields();
                 hdrs.set(http::field::if_modified_since, last_mod);
-                auto resp2 = UNWRAP(
-                    co_await client.async_send_request(httplib::client::request(http::verb::get, "/file-ims", hdrs)));
+                httplib::client::request req(http::verb::get, "/file-ims", hdrs);
+                auto resp2 = UNWRAP(co_await client.async_send_request(req));
                 REQUIRE(resp2.result() == http::status::not_modified);
                 co_return;
             });
@@ -562,8 +560,8 @@ TEST_CASE("Response: Multi-range request returns multipart/byteranges", "[respon
                 auto range_headers = httplib::http::fields();
                 range_headers.set(http::field::range, "bytes=0-2,5-7");
 
-                auto resp = UNWRAP(co_await client.async_send_request(
-                    httplib::client::request(http::verb::get, "/file-multi-range", range_headers)));
+                httplib::client::request req(http::verb::get, "/file-multi-range", range_headers);
+                auto resp = UNWRAP(co_await client.async_send_request(req));
                 REQUIRE(resp.result() == http::status::partial_content);
                 auto ct = std::string(resp[http::field::content_type]);
                 REQUIRE(ct.starts_with("multipart/byteranges"));
@@ -921,22 +919,22 @@ TEST_CASE("Response: read_some_decompressed decodes gzip body", "[response]")
         {
             httplib::http::fields headers;
             headers.set(http::field::accept_encoding, "gzip");
-            auto resp = UNWRAP(
-                co_await client.async_send_request(httplib::client::request(http::verb::get, "/gzip-stream", headers),
-                                                   httplib::client::http_client::body_mode::lazy));
+            httplib::client::request req(http::verb::get, "/gzip-stream", headers);
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp[http::field::content_encoding] == "gzip");
 
             std::string decoded;
             std::array<char, 7> buf;
+            boost::system::error_code ec;
             while (true)
             {
-                auto result = co_await resp.read_some_decompressed(net::buffer(buf));
-                if (result.has_error() || result.value() == 0)
+                auto result = co_await resp.read_some_decompressed(net::buffer(buf), ec);
+                if (ec || result == 0)
                 {
                     break;
                 }
-                decoded.append(buf.data(), result.value());
+                decoded.append(buf.data(), result);
             }
             REQUIRE(decoded == kGzipPayload);
             co_return;
@@ -956,19 +954,20 @@ TEST_CASE("Response: read_some_decompressed with single large buffer", "[respons
         {
             httplib::http::fields headers;
             headers.set(http::field::accept_encoding, "gzip");
-            auto resp = UNWRAP(
-                co_await client.async_send_request(httplib::client::request(http::verb::get, "/gzip-big", headers),
-                                                   httplib::client::http_client::body_mode::lazy));
+            httplib::client::request req(http::verb::get, "/gzip-big", headers);
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             REQUIRE(resp[http::field::content_encoding] == "gzip");
 
             std::array<char, 4096> buf;
-            auto r1 = co_await resp.read_some_decompressed(net::buffer(buf));
-            REQUIRE_FALSE(r1.has_error());
-            REQUIRE(r1.value() == kGzipPayload.size());
-            std::string decoded(buf.data(), r1.value());
-            auto r2 = co_await resp.read_some_decompressed(net::buffer(buf));
-            REQUIRE_FALSE(r2.has_error());
-            REQUIRE(r2.value() == 0);
+            boost::system::error_code ec1;
+            auto r1 = co_await resp.read_some_decompressed(net::buffer(buf), ec1);
+            REQUIRE_FALSE(ec1);
+            REQUIRE(r1 == kGzipPayload.size());
+            std::string decoded(buf.data(), r1);
+            boost::system::error_code ec2;
+            auto r2 = co_await resp.read_some_decompressed(net::buffer(buf), ec2);
+            REQUIRE_FALSE(ec2);
+            REQUIRE(r2 == 0);
             REQUIRE(decoded == kGzipPayload);
             co_return;
         });
@@ -988,22 +987,22 @@ TEST_CASE("Response: read_some_decompressed passes through identity body", "[res
         {
             httplib::http::fields headers;
             headers.set(http::field::accept_encoding, "identity");
-            auto resp = UNWRAP(
-                co_await client.async_send_request(httplib::client::request(http::verb::get, "/plain", headers),
-                                                   httplib::client::http_client::body_mode::lazy));
+            httplib::client::request req(http::verb::get, "/plain", headers);
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE_FALSE(resp[http::field::content_encoding] == "gzip");
 
             std::string decoded;
             std::array<char, 16> buf;
+            boost::system::error_code ec;
             while (true)
             {
-                auto result = co_await resp.read_some_decompressed(net::buffer(buf));
-                if (result.has_error() || result.value() == 0)
+                auto result = co_await resp.read_some_decompressed(net::buffer(buf), ec);
+                if (ec || result == 0)
                 {
                     break;
                 }
-                decoded.append(buf.data(), result.value());
+                decoded.append(buf.data(), result);
             }
             REQUIRE(decoded == kGzipPayload);
             co_return;
@@ -1031,8 +1030,8 @@ TEST_CASE("Response: unsupported request content-encoding is dropped", "[respons
             httplib::http::fields headers;
             headers.set(http::field::content_encoding, "unsupported-encoding-xyz");
             auto req = httplib::client::request(http::verb::post, "/enc", headers);
-            req.set_body(std::string("plain hello body"));
-            auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
+            req.set_body(std::string("plain hello body"), "text/plain"sv);
+            auto resp = UNWRAP(co_await client.async_send_request(req));
             REQUIRE(resp.result() == http::status::ok);
             co_return;
         });
@@ -1054,24 +1053,21 @@ TEST_CASE("Response: is_body_done reflects decompressed pending overflow", "[res
         {
             httplib::http::fields headers;
             headers.set(http::field::accept_encoding, "gzip");
-            auto resp = UNWRAP(
-                co_await client.async_send_request(httplib::client::request(http::verb::get, "/gzip-done", headers),
-                                                   httplib::client::http_client::body_mode::lazy));
+            httplib::client::request req(http::verb::get, "/gzip-done", headers);
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             REQUIRE_FALSE(resp.is_body_done());
 
             std::array<char, 5> buf;
             std::size_t total = 0;
-            while (auto r = co_await resp.read_some_decompressed(net::buffer(buf)))
+            boost::system::error_code ec;
+            for (;;)
             {
-                if (r.has_error())
+                auto r = co_await resp.read_some_decompressed(net::buffer(buf), ec);
+                if (ec || r == 0)
                 {
                     break;
                 }
-                if (r.value() == 0)
-                {
-                    break;
-                }
-                total += r.value();
+                total += r;
             }
             REQUIRE(total == kGzipPayload.size());
             REQUIRE(resp.is_body_done());
@@ -1101,8 +1097,8 @@ TEST_CASE("Response: decompressed body limit rejects compression bomb", "[respon
             httplib::http::fields headers;
             headers.set(http::field::content_encoding, "gzip");
             auto req = httplib::client::request(http::verb::post, "/bomb", headers);
-            req.set_body(big_original);
-            auto resp = co_await client.async_send_request(std::move(req));
+            req.set_body(big_original, "text/plain"sv);
+            auto resp = co_await client.async_send_request(req);
             REQUIRE_FALSE(resp.has_value());
             REQUIRE_FALSE(handler_called);
             co_return;

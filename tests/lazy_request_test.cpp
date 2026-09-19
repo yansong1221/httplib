@@ -51,7 +51,7 @@ TEST_CASE("server lazy: read_string", "[server-lazy]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_post("/string", std::string_view("hello lazy")));
+            auto resp = UNWRAP(co_await client.async_post("/string", std::string_view("hello lazy"), "text/plain"sv));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp.as_string() == "hello lazy");
         });
@@ -90,7 +90,10 @@ TEST_CASE("server lazy: read_json", "[server-lazy]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_post("/json", boost::json::value({{"msg","hi"}})));
+            auto resp = UNWRAP(co_await client.async_post("/json",
+                                                          boost::json::value({
+                                                              { "msg", "hi" }
+            })));
             REQUIRE(resp.result() == http::status::ok);
             spdlog::info("client json ct={} body={}",
                          std::string(resp.base()[http::field::content_type]),
@@ -117,7 +120,10 @@ TEST_CASE("server lazy: read_body default content-type dispatch", "[server-lazy]
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_post("/any", boost::json::value({{"a",1}})));
+            auto resp = UNWRAP(co_await client.async_post("/any",
+                                                          boost::json::value({
+                                                              { "a", 1 }
+            })));
             REQUIRE(resp.result() == http::status::ok);
         });
 }
@@ -141,7 +147,7 @@ TEST_CASE("server lazy: read_query_params", "[server-lazy]")
             params.add("key", "url-value");
             auto req = httplib::client::request(http::verb::post, "/params");
             req.set_body(std::move(params));
-            auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
+            auto resp = UNWRAP(co_await client.async_send_request(req));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp.as_string() == "url-value");
         });
@@ -183,7 +189,7 @@ TEST_CASE("server lazy: read_some_raw streaming", "[server-lazy]")
         [](auto& client) -> net::awaitable<void>
         {
             auto big = big_payload();
-            auto resp = UNWRAP(co_await client.async_post("/raw", std::string_view(big)));
+            auto resp = UNWRAP(co_await client.async_post("/raw", std::string_view(big), "text/plain"sv));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp.as_string() == big);
         });
@@ -205,11 +211,12 @@ TEST_CASE("server lazy: body not consumed forces connection close", "[server-laz
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(
-                co_await client.async_post("/ignore", std::string_view("a request body that is never consumed")));
+            auto resp = UNWRAP(co_await client.async_post("/ignore",
+                                                          std::string_view("a request body that is never consumed"),
+                                                          "text/plain"sv));
             REQUIRE(resp.result() == http::status::ok);
             // 服务端已发 Connection: close，客户端下一请求应自动重连并成功
-            auto resp2 = UNWRAP(co_await client.async_post("/ignore", std::string_view("second")));
+            auto resp2 = UNWRAP(co_await client.async_post("/ignore", std::string_view("second"), "text/plain"sv));
             REQUIRE(resp2.result() == http::status::ok);
         });
 }
@@ -236,7 +243,7 @@ TEST_CASE("server lazy: regular handler takes precedence", "[server-lazy]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_post("/both", std::string_view("body")));
+            auto resp = UNWRAP(co_await client.async_post("/both", std::string_view("body"), "text/plain"sv));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp.as_string() == "regular");
         });
@@ -268,7 +275,7 @@ TEST_CASE("server lazy: read_form_data with file upload", "[server-lazy]")
             form.fields.push_back({ "file", "data.txt", "text/plain", "file-contents" });
             auto req = httplib::client::request(http::verb::post, "/upload");
             req.set_body(std::move(form));
-            auto resp = UNWRAP(co_await client.async_send_request(std::move(req)));
+            auto resp = UNWRAP(co_await client.async_send_request(req));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp.as_string() == "file-contents");
         });

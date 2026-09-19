@@ -29,6 +29,7 @@ struct stress_config
     uint16_t port = 8080;
     std::string path = "/";
     std::string body;
+    std::string content_type = "application/json";
     std::string method = "GET";
     std::string url;
     http::verb verb = http::verb::get;
@@ -270,9 +271,11 @@ main(int argc, char** argv)
          "Target URL (e.g. http://host:port/path)")("body",
                                                     po::value<std::string>(&cfg.body)->default_value(""),
                                                     "Request body") //
-        ("method,X",
-         po::value<std::string>(&cfg.method)->default_value("GET"),
-         "HTTP method")                                                                    //
+        ("content-type",
+         po::value<std::string>(&cfg.content_type)->default_value("application/json"),
+         "Content-Type of the request body")("method,X",
+                                             po::value<std::string>(&cfg.method)->default_value("GET"),
+                                             "HTTP method")                                //
         ("threads,t", po::value<int>(&cfg.threads)->default_value(2), "Number of threads") //
         ("connections,c",
          po::value<int>(&cfg.connections)->default_value(10),
@@ -397,7 +400,7 @@ main(int argc, char** argv)
                     auto req = httplib::client::request(cfg.verb, cfg.path, req_headers);
                     if (!cfg.body.empty())
                     {
-                        req.set_body(cfg.body);
+                        req.set_body(cfg.body, cfg.content_type);
                     }
                     result = co_await client.async_send_request(std::move(req));
 

@@ -16,6 +16,8 @@ namespace httplib::client
         net::awaitable<boost::system::result<boost::json::value>>
         read() override
         {
+            boost::system::error_code ec;
+
             for (;;)
             {
                 auto lf = buf_.find('\n');
@@ -26,14 +28,14 @@ namespace httplib::client
                         co_return boost::json::value {};
                     }
 
-                    auto result = co_await impl_->read_some_decompressed(net::buffer(read_buf_));
-                    if (result.has_error())
+                    auto bytes = co_await impl_->read_some_decompressed(net::buffer(read_buf_), ec);
+                    if (ec)
                     {
-                        co_return result.error();
+                        co_return ec;
                     }
-                    if (result.value() != 0)
+                    if (bytes != 0)
                     {
-                        buf_.append(read_buf_.data(), result.value());
+                        buf_.append(read_buf_.data(), bytes);
                     }
                     continue;
                 }

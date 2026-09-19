@@ -192,8 +192,8 @@ namespace httplib::server
         }
 
         // 流式读取原始（未解压）body：把 header_parser 转成 buffer_body 解析器。
-        net::awaitable<boost::system::result<std::size_t>>
-        read_some_raw(net::mutable_buffer const& buf)
+        net::awaitable<std::size_t>
+        read_some_raw(net::mutable_buffer const& buf, boost::system::error_code& ec)
         {
             if (!lazy_ctx_)
             {
@@ -204,7 +204,8 @@ namespace httplib::server
             {
                 if (!ctx.header_parser)
                 {
-                    co_return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+                    ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+                    co_return 0;
                 }
                 ctx.resp_parser
                     = std::make_unique<http::request_parser<http::buffer_body>>(std::move(*ctx.header_parser));
@@ -216,6 +217,7 @@ namespace httplib::server
             {
                 if (ctx.resp_parser->is_done())
                 {
+                    ec = {};
                     co_return 0;
                 }
 
@@ -223,17 +225,12 @@ namespace httplib::server
                 body.data = (void*)buf.data();
                 body.size = buf.size();
 
-                boost::system::error_code ec;
                 ctx.stream->expires_after(ctx.read_timeout);
                 co_await http::async_read_some(*ctx.stream, *ctx.buffer, *ctx.resp_parser, util::net_awaitable[ec]);
                 ctx.stream->expires_never();
                 if (ec == http::error::need_buffer)
                 {
                     ec = {};
-                }
-                if (ec)
-                {
-                    co_return ec;
                 }
 
                 auto consumed = buf.size() - body.size;
@@ -242,7 +239,7 @@ namespace httplib::server
                     co_return consumed;
                 }
 
-                if (ctx.resp_parser->is_done())
+                if (ec)
                 {
                     co_return 0;
                 }
@@ -251,8 +248,8 @@ namespace httplib::server
 
         // 流式读取解压后的 body：把 buffer_body 放进 any_body，复用其 content-encoding 解压逻辑。
         // 调用方缓冲写不下时溢出到 value_type::pending，下次调用先取 pending，保证不丢数据。
-        net::awaitable<boost::system::result<std::size_t>>
-        read_some_decompressed(net::mutable_buffer const& buf)
+        net::awaitable<std::size_t>
+        read_some_decompressed(net::mutable_buffer const& buf, boost::system::error_code& ec)
         {
             if (!lazy_ctx_)
             {
@@ -267,7 +264,8 @@ namespace httplib::server
             {
                 if (!ctx.header_parser)
                 {
-                    co_return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+                    ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+                    co_return 0;
                 }
                 ctx.dec_parser = std::make_unique<http::request_parser<body::any_body>>(std::move(*ctx.header_parser));
                 ctx.dec_parser->eager(true);
@@ -291,23 +289,19 @@ namespace httplib::server
 
                 if (ctx.dec_parser->is_done())
                 {
+                    ec = {};
                     co_return 0;
                 }
 
                 buf_body.data = (void*)buf.data();
                 buf_body.size = buf.size();
 
-                boost::system::error_code ec;
                 ctx.stream->expires_after(ctx.read_timeout);
                 co_await http::async_read_some(*ctx.stream, *ctx.buffer, *ctx.dec_parser, util::net_awaitable[ec]);
                 ctx.stream->expires_never();
                 if (ec == http::error::need_buffer)
                 {
                     ec = {};
-                }
-                if (ec)
-                {
-                    co_return ec;
                 }
 
                 auto consumed = buf.size() - buf_body.size;
@@ -316,7 +310,7 @@ namespace httplib::server
                     co_return consumed;
                 }
 
-                if (ctx.dec_parser->is_done())
+                if (ec)
                 {
                     co_return 0;
                 }
@@ -324,12 +318,13 @@ namespace httplib::server
         }
 
         // 读取剩余 body 并按 body_setup 物化到本请求。
-        net::awaitable<boost::system::error_code>
-        read_body(body_setup_fn const& body_setup)
+        net::awaitable<void>
+        read_body(body_setup_fn const& body_setup, boost::system::error_code& ec)
         {
             if (!lazy_ctx_)
             {
-                co_return boost::system::error_code {};
+                ec = boost::system::error_code {};
+                co_return;
             }
             auto& ctx = *lazy_ctx_;
             if (!ctx.header_parser)
@@ -337,9 +332,11 @@ namespace httplib::server
                 // 已物化完成则视为成功；已转流式读取则拒绝。
                 if (is_body_done())
                 {
-                    co_return boost::system::error_code {};
+                    ec = boost::system::error_code {};
+                    co_return;
                 }
-                co_return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+                ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+                co_return;
             }
 
             http::request_parser<body::any_body> body_parser(std::move(*ctx.header_parser));
@@ -365,17 +362,16 @@ namespace httplib::server
 
             while (!body_parser.is_done())
             {
-                boost::system::error_code ec;
                 ctx.stream->expires_after(ctx.read_timeout);
                 co_await http::async_read_some(*ctx.stream, *ctx.buffer, body_parser, util::net_awaitable[ec]);
                 ctx.stream->expires_never();
                 if (ec)
                 {
-                    co_return ec;
+                    co_return;
                 }
             }
             this->body() = std::move(body_parser.release().body());
-            co_return boost::system::error_code {};
+            ec = boost::system::error_code {};
         }
 
         std::string_view

@@ -1,9 +1,9 @@
 #include "common.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/lazy_request.hpp"
-#include "httplib/server/stream_writer.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
+#include "httplib/server/stream_writer.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include <array>
 #include <atomic>
@@ -731,22 +731,24 @@ TEST_CASE("client_pool: reader survives handle destruction", "[client_pool]")
                 resp = UNWRAP(co_await writer->read_response_lazy());
 
                 std::array<char, 1> buf;
-                auto r = co_await resp.read_some_raw(net::buffer(buf));
-                REQUIRE_FALSE(r.has_error());
-                REQUIRE(r.value() == 1);
-                streamed.append(buf.data(), r.value());
+                boost::system::error_code ec;
+                auto r = co_await resp.read_some_raw(net::buffer(buf), ec);
+                REQUIRE_FALSE(ec);
+                REQUIRE(r == 1);
+                streamed.append(buf.data(), r);
             }
             // handle (and writer) destroyed above; the response keeps the impl alive.
 
             std::array<char, 1> buf;
             for (;;)
             {
-                auto r = co_await resp.read_some_raw(net::buffer(buf));
-                if (r.has_error() || r.value() == 0)
+                boost::system::error_code ec;
+                auto r = co_await resp.read_some_raw(net::buffer(buf), ec);
+                if (ec || r == 0)
                 {
                     break;
                 }
-                streamed.append(buf.data(), r.value());
+                streamed.append(buf.data(), r);
             }
             CHECK(streamed.size() >= 3);
             CHECK(streamed.substr(0, 3) == "ABC");

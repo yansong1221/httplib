@@ -1,8 +1,8 @@
 #include "common.hpp"
-#include "httplib/server/stream_writer.hpp"
 #include "httplib/server/ndjson_writer.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
+#include "httplib/server/stream_writer.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/steady_timer.hpp>
@@ -41,9 +41,8 @@ TEST_CASE("NDJSON: server sends single line", "[ndjson]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp
-                = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/ndjson"),
-                                                            httplib::client::http_client::body_mode::lazy));
+            httplib::client::request req(http::verb::get, "/ndjson");
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             REQUIRE(resp.result() == http::status::ok);
             auto ndjson = resp.create_ndjson_reader();
 
@@ -88,9 +87,8 @@ TEST_CASE("NDJSON: server sends multiple lines", "[ndjson]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp
-                = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/ndjson"),
-                                                            httplib::client::http_client::body_mode::lazy));
+            httplib::client::request req(http::verb::get, "/ndjson");
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             REQUIRE(resp.result() == http::status::ok);
             auto ndjson = resp.create_ndjson_reader();
 
@@ -126,9 +124,8 @@ TEST_CASE("NDJSON: Content-Type is application/x-ndjson", "[ndjson]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp
-                = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/ndjson"),
-                                                            httplib::client::http_client::body_mode::lazy));
+            httplib::client::request req(http::verb::get, "/ndjson");
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             REQUIRE(resp.result() == http::status::ok);
             auto ndjson = resp.create_ndjson_reader();
 
@@ -168,9 +165,8 @@ TEST_CASE("NDJSON: reader stops early", "[ndjson]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp
-                = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/ndjson"),
-                                                            httplib::client::http_client::body_mode::lazy));
+            httplib::client::request req(http::verb::get, "/ndjson");
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             REQUIRE(resp.result() == http::status::ok);
             auto ndjson = resp.create_ndjson_reader();
 
@@ -219,9 +215,8 @@ TEST_CASE("NDJSON: single line split across chunks", "[ndjson]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp
-                = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/ndjson"),
-                                                            httplib::client::http_client::body_mode::lazy));
+            httplib::client::request req(http::verb::get, "/ndjson");
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             REQUIRE(resp.result() == http::status::ok);
             auto ndjson = resp.create_ndjson_reader();
 
@@ -252,9 +247,8 @@ TEST_CASE("NDJSON: multiple lines in one chunk", "[ndjson]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp
-                = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/ndjson"),
-                                                            httplib::client::http_client::body_mode::lazy));
+            httplib::client::request req(http::verb::get, "/ndjson");
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             REQUIRE(resp.result() == http::status::ok);
             auto ndjson = resp.create_ndjson_reader();
 
@@ -287,9 +281,8 @@ TEST_CASE("NDJSON: partial line split across chunks", "[ndjson]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp
-                = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/ndjson"),
-                                                            httplib::client::http_client::body_mode::lazy));
+            httplib::client::request req(http::verb::get, "/ndjson");
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             REQUIRE(resp.result() == http::status::ok);
             auto ndjson = resp.create_ndjson_reader();
 
@@ -335,9 +328,8 @@ TEST_CASE("NDJSON: lines are delivered incrementally", "[ndjson]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp
-                = UNWRAP(co_await client.async_send_request(httplib::client::request(http::verb::get, "/ndjson"),
-                                                            httplib::client::http_client::body_mode::lazy));
+            httplib::client::request req(http::verb::get, "/ndjson");
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             REQUIRE(resp.result() == http::status::ok);
             auto ndjson = resp.create_ndjson_reader();
 
@@ -368,9 +360,8 @@ TEST_CASE("NDJSON: reader decodes gzip-compressed stream", "[ndjson]")
         {
             httplib::http::fields headers;
             headers.set(http::field::accept_encoding, "gzip");
-            auto resp = UNWRAP(co_await client.async_send_request(
-                httplib::client::request(http::verb::get, "/ndjson-gzip", headers),
-                httplib::client::http_client::body_mode::lazy));
+            httplib::client::request req(http::verb::get, "/ndjson-gzip", headers);
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             REQUIRE(resp.result() == http::status::ok);
             REQUIRE(resp[http::field::content_encoding] == "gzip");
 

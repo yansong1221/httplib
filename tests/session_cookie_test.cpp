@@ -79,7 +79,7 @@ TEST_CASE("Session: middleware persists data across requests", "[session]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp1 = UNWRAP(co_await client.async_post("/login", std::string_view("")));
+            auto resp1 = UNWRAP(co_await client.async_post("/login", std::string_view(""), "text/plain"sv));
             REQUIRE(resp1.result() == http::status::ok);
             auto cookie = std::string(resp1[http::field::set_cookie]);
 

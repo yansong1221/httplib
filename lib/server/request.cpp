@@ -207,8 +207,10 @@ namespace httplib::server
     net::awaitable<std::string>
     request::read_string()
     {
-        auto ec = co_await impl_->read_body([](http::request<body::any_body>& req)
-                                            { req.body() = body::string_body::value_type {}; });
+        boost::system::error_code ec;
+        co_await impl_->read_body([](http::request<body::any_body>& req)
+                                  { req.body() = body::string_body::value_type {}; },
+                                  ec);
         if (ec)
         {
             throw boost::system::system_error(ec);
@@ -219,8 +221,10 @@ namespace httplib::server
     net::awaitable<boost::json::value>
     request::read_json()
     {
-        auto ec = co_await impl_->read_body([](http::request<body::any_body>& req)
-                                            { req.body() = body::json_body::value_type {}; });
+        boost::system::error_code ec;
+        co_await impl_->read_body([](http::request<body::any_body>& req)
+                                  { req.body() = body::json_body::value_type {}; },
+                                  ec);
         if (ec)
         {
             throw boost::system::system_error(ec);
@@ -231,8 +235,10 @@ namespace httplib::server
     net::awaitable<html::form_data>
     request::read_form_data()
     {
-        auto ec = co_await impl_->read_body([](http::request<body::any_body>& req)
-                                            { req.body() = body::form_data_body::value_type {}; });
+        boost::system::error_code ec;
+        co_await impl_->read_body([](http::request<body::any_body>& req)
+                                  { req.body() = body::form_data_body::value_type {}; },
+                                  ec);
         if (ec)
         {
             throw boost::system::system_error(ec);
@@ -243,8 +249,10 @@ namespace httplib::server
     net::awaitable<html::query_params>
     request::read_query_params()
     {
-        auto ec = co_await impl_->read_body([](http::request<body::any_body>& req)
-                                            { req.body() = body::query_params_body::value_type {}; });
+        boost::system::error_code ec;
+        co_await impl_->read_body([](http::request<body::any_body>& req)
+                                  { req.body() = body::query_params_body::value_type {}; },
+                                  ec);
         if (ec)
         {
             throw boost::system::system_error(ec);
@@ -255,7 +263,8 @@ namespace httplib::server
     net::awaitable<void>
     request::read_body()
     {
-        auto ec = co_await impl_->read_body(nullptr);
+        boost::system::error_code ec;
+        co_await impl_->read_body(nullptr, ec);
         if (ec)
         {
             throw boost::system::system_error(ec);
@@ -264,25 +273,37 @@ namespace httplib::server
     }
 
     net::awaitable<std::size_t>
+    request::read_some_raw(net::mutable_buffer const& buffer, boost::system::error_code& ec)
+    {
+        co_return co_await impl_->read_some_raw(buffer, ec);
+    }
+    httplib::net::awaitable<std::size_t>
     request::read_some_raw(net::mutable_buffer const& buffer)
     {
-        auto result = co_await impl_->read_some_raw(buffer);
-        if (result.has_error())
+        boost::system::error_code ec;
+        auto bytes = co_await read_some_raw(buffer, ec);
+        if (ec)
         {
-            throw boost::system::system_error(result.error());
+            throw boost::system::system_error(ec);
         }
-        co_return result.value();
+        co_return bytes;
     }
 
     net::awaitable<std::size_t>
+    request::read_some_decompressed(net::mutable_buffer const& buffer, boost::system::error_code& ec)
+    {
+        co_return co_await impl_->read_some_decompressed(buffer, ec);
+    }
+    net::awaitable<std::size_t>
     request::read_some_decompressed(net::mutable_buffer const& buffer)
     {
-        auto result = co_await impl_->read_some_decompressed(buffer);
-        if (result.has_error())
+        boost::system::error_code ec;
+        auto bytes = co_await read_some_decompressed(buffer, ec);
+        if (ec)
         {
-            throw boost::system::system_error(result.error());
+            throw boost::system::system_error(ec);
         }
-        co_return result.value();
+        co_return bytes;
     }
 
     bool

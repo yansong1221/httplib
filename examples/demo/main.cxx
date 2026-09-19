@@ -5,7 +5,6 @@
 #include "httplib/client/ws_client.hpp"
 #include "httplib/html/form_data.hpp"
 #include "httplib/html/query_params.hpp"
-#include "httplib/server/stream_writer.hpp"
 #include "httplib/server/middleware/auth.hpp"
 #include "httplib/server/middleware/cors.hpp"
 #include "httplib/server/middleware/rate_limit.hpp"
@@ -16,6 +15,7 @@
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
 #include "httplib/server/sse_writer.hpp"
+#include "httplib/server/stream_writer.hpp"
 #include "httplib/version.hpp"
 #include <array>
 #include <boost/asio/co_spawn.hpp>
@@ -499,20 +499,20 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 
     // Stream with chunk handler
     {
-        auto resp
-            = co_await client.async_send_request(httplib::client::request(http::verb::get, "/api/stream"),
-                                                 httplib::client::http_client::body_mode::lazy);
+        auto resp = co_await client.async_send_request(httplib::client::request(http::verb::get, "/api/stream"),
+                                                       httplib::client::http_client::body_mode::lazy);
         if (resp)
         {
+            std::array<char, 4096> buf;
+            boost::system::error_code ec;
             while (true)
             {
-                std::array<char, 4096> buf;
-                auto result = co_await resp->read_some_raw(net::buffer(buf));
-                if (result.has_error() || result.value() == 0)
+                auto result = co_await resp->read_some_raw(net::buffer(buf), ec);
+                if (ec || result == 0)
                 {
                     break;
                 }
-                spdlog::info("  chunk: {}", std::string_view(buf.data(), result.value()).substr(0, result.value() - 1));
+                spdlog::info("  chunk: {}", std::string_view(buf.data(), result).substr(0, result - 1));
             }
             spdlog::info("GET /api/stream -> {}", static_cast<unsigned>(resp->result()));
         }
@@ -520,9 +520,8 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 
     // SSE (Server-Sent Events)
     {
-        auto resp
-            = co_await client.async_send_request(httplib::client::request(http::verb::get, "/api/sse"),
-                                                 httplib::client::http_client::body_mode::lazy);
+        auto resp = co_await client.async_send_request(httplib::client::request(http::verb::get, "/api/sse"),
+                                                       httplib::client::http_client::body_mode::lazy);
         if (resp)
         {
             auto sse = resp->create_sse_reader();
@@ -546,9 +545,8 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 
     // NDJSON (Newline Delimited JSON)
     {
-        auto resp
-            = co_await client.async_send_request(httplib::client::request(http::verb::get, "/api/ndjson"),
-                                                 httplib::client::http_client::body_mode::lazy);
+        auto resp = co_await client.async_send_request(httplib::client::request(http::verb::get, "/api/ndjson"),
+                                                       httplib::client::http_client::body_mode::lazy);
         if (resp)
         {
             auto ndjson = resp->create_ndjson_reader();

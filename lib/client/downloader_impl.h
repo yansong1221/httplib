@@ -121,7 +121,7 @@ namespace httplib::client
         net::any_io_executor executor_;
 
       private:
-        static url_info parse_url(std::string_view url);
+        static boost::system::result<url_info> parse_url(std::string_view url);
         static std::string make_url_string(url_info const& ui);
         std::string make_cache_key(url_info const& ui) const;
         static std::string cache_auth_scope(http::fields const& headers);

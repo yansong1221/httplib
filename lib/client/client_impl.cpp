@@ -149,13 +149,13 @@ namespace httplib::client
     }
 
     net::awaitable<http_client::response_result>
-    http_client::impl::async_send_request_lazy(http_client::request& req)
+    http_client::impl::async_send_request_lazy(request& req)
     {
         prepare_request(req);
         http::request_serializer<body::any_body> serializer(get_impl(req));
 
         boost::system::error_code ec;
-        co_await async_write(serializer, false, true, ec);
+        co_await async_write(serializer, false, ec);
         if (ec)
         {
             co_return ec;
@@ -173,7 +173,8 @@ namespace httplib::client
         header_parser->header_limit(header_limit_.load());
         header_parser->body_limit(body_limit_.load());
 
-        auto ec = co_await async_read(*header_parser, true);
+        boost::system::error_code ec;
+        co_await async_read(*header_parser, true, ec);
         if (ec)
         {
             co_return ec;
@@ -183,7 +184,7 @@ namespace httplib::client
     }
 
     net::awaitable<http_client::response_result>
-    http_client::impl::async_send_request_lazy_with_redirect(http_client::request& req)
+    http_client::impl::async_send_request_lazy_with_redirect(request& req)
     {
         auto self = shared_from_this();
         auto max_redirects = max_redirects_.load();
@@ -332,7 +333,7 @@ namespace httplib::client
         }
     }
     void
-    http_client::impl::prepare_request(http_client::request& req)
+    http_client::impl::prepare_request(request& req)
     {
         if (!req.has(http::field::host))
         {
@@ -383,9 +384,7 @@ namespace httplib::client
         if (!is_open())
         {
             close();
-            // 直接用 client 的 executor 创建流；并发读取由 read_mutex_
-            // （read_body / read_some_raw / read_some_decompressed）串行化。
-            // ca_cert_ 由 stream_mutex_ 保护，在此持锁快照。
+
             auto stream_result = http_stream::create_stream(executor_, host_, use_ssl_, verify_ssl_.load(), ca_cert_);
             if (!stream_result)
             {
@@ -394,9 +393,8 @@ namespace httplib::client
             }
             auto s = std::make_shared<http_stream>(std::move(*stream_result));
             apply_rate_limits(s);
-            // 先把流赋给 stream_ 再连接：这样连接期间发生的 close() 关的就是同一条流，
-            // async_connect 会被取消并返回错误，不存在“连接完成后复活已关闭连接”的问题。
             stream_.store(s);
+
             lck.unlock();
 
             boost::system::error_code addr_ec;
@@ -437,4 +435,335 @@ namespace httplib::client
         return sp;
     }
 
+    http_client::http_client(net::io_context& ex, std::string_view host, uint16_t port, bool ssl)
+        : http_client(ex.get_executor(), host, port, ssl)
+    {
+    }
+
+    http_client::http_client(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl)
+        : impl_(std::make_shared<http_client::impl>(ex, host, port, ssl))
+    {
+    }
+
+    http_client::http_client(net::io_context& ex, std::string_view url) : http_client(ex.get_executor(), url) {}
+
+    http_client::http_client(net::any_io_executor const& ex, std::string_view url) : impl_(nullptr)
+    {
+        auto r = boost::urls::parse_uri(url);
+        if (!r)
+        {
+            throw std::invalid_argument(std::format("invalid url: {}", url));
+        }
+
+        auto const& u = *r;
+
+        auto port = (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
+        port = u.has_port() ? u.port_number() : port;
+
+        impl_ = std::make_shared<http_client::impl>(ex, u.host(), port, u.scheme_id() == boost::urls::scheme::https);
+    }
+
+    http_client::~http_client() {}
+
+    void
+    http_client::set_timeout_policy(timeout_policy const& policy)
+    {
+        impl_->set_timeout_policy(policy);
+    }
+
+    void
+    http_client::set_timeout(std::chrono::steady_clock::duration const& duration)
+    {
+        impl_->set_timeout(duration);
+    }
+
+    std::string_view
+    http_client::host() const
+    {
+        return impl_->host_;
+    }
+
+    uint16_t
+    http_client::port() const
+    {
+        return impl_->port_;
+    }
+
+    bool
+    http_client::is_use_ssl() const
+    {
+        return impl_->use_ssl_;
+    }
+
+    std::shared_ptr<spdlog::logger>
+    http_client::logger() const
+    {
+        return impl_->get_logger();
+    }
+
+    void
+    http_client::set_logger(std::shared_ptr<spdlog::logger> logger)
+    {
+        impl_->set_logger(std::move(logger));
+    }
+
+    // =============================================================================
+    // core send
+    // =============================================================================
+
+    net::awaitable<http_client::response_result>
+    http_client::async_send_request(request& req, http_client::body_mode mode)
+    {
+        auto result = co_await impl_->async_send_request_lazy_with_redirect(req);
+        if (result.has_error())
+        {
+            co_return result.error();
+        }
+        if (mode == body_mode::eager)
+        {
+            if (auto ec = co_await result->read_body(); ec)
+            {
+                co_return ec;
+            }
+        }
+        co_return result;
+    }
+    net::awaitable<httplib::client::http_client::response_result>
+    http_client::async_send_request(request&& req, body_mode mode /*= body_mode::eager*/)
+    {
+        request hold_req(std::move(req));
+        co_return co_await async_send_request(hold_req, mode);
+    }
+
+    // =============================================================================
+    // lazy request
+    // =============================================================================
+
+    std::shared_ptr<lazy_request>
+    http_client::create_lazy_request()
+    {
+        return impl_->create_lazy_request();
+    }
+
+    // =============================================================================
+    // HTTP method shorthands (no body)
+    // =============================================================================
+
+    net::awaitable<http_client::response_result>
+    http_client::async_get(std::string_view path, html::query_params const& params, http::fields const& headers)
+    {
+        request req(http::verb::get, path, params, headers);
+        co_return co_await async_send_request(req);
+    }
+
+    net::awaitable<http_client::response_result>
+    http_client::async_head(std::string_view path, html::query_params const& params, http::fields const& headers)
+    {
+        request req(http::verb::head, path, params, headers);
+        co_return co_await async_send_request(req);
+    }
+
+    net::awaitable<http_client::response_result>
+    http_client::async_post(std::string_view path, html::query_params const& params, http::fields const& headers)
+    {
+        request req(http::verb::post, path, params, headers);
+        co_return co_await async_send_request(req);
+    }
+
+    net::awaitable<http_client::response_result>
+    http_client::async_put(std::string_view path, html::query_params const& params, http::fields const& headers)
+    {
+        request req(http::verb::put, path, params, headers);
+        co_return co_await async_send_request(req);
+    }
+
+    net::awaitable<http_client::response_result>
+    http_client::async_patch(std::string_view path, html::query_params const& params, http::fields const& headers)
+    {
+        request req(http::verb::patch, path, params, headers);
+        co_return co_await async_send_request(req);
+    }
+
+    net::awaitable<http_client::response_result>
+    http_client::async_del(std::string_view path, html::query_params const& params, http::fields const& headers)
+    {
+        request req(http::verb::delete_, path, params, headers);
+        co_return co_await async_send_request(req);
+    }
+
+    net::awaitable<http_client::response_result>
+    http_client::async_options(std::string_view path, html::query_params const& params, http::fields const& headers)
+    {
+        request req(http::verb::options, path, params, headers);
+        co_return co_await async_send_request(req);
+    }
+
+    // =============================================================================
+    // HTTP method shorthands (with body)
+    // =============================================================================
+
+    net::awaitable<http_client::response_result>
+    http_client::async_post(std::string_view path,
+                            std::string_view body,
+                            std::string_view content_type,
+                            html::query_params const& params,
+                            http::fields const& headers)
+    {
+        auto req = request(http::verb::post, path, params, headers);
+        req.set_body(body, content_type);
+        co_return co_await async_send_request(req);
+    }
+
+    net::awaitable<http_client::response_result>
+    http_client::async_post(std::string_view path,
+                            boost::json::value&& body,
+                            html::query_params const& params,
+                            http::fields const& headers)
+    {
+        auto req = request(http::verb::post, path, params, headers);
+        req.set_body(std::move(body));
+        co_return co_await async_send_request(req);
+    }
+
+    net::awaitable<http_client::response_result>
+    http_client::async_put(std::string_view path,
+                           std::string_view body,
+                           std::string_view content_type,
+                           html::query_params const& params,
+                           http::fields const& headers)
+    {
+        auto req = request(http::verb::put, path, params, headers);
+        req.set_body(body, content_type);
+        co_return co_await async_send_request(req);
+    }
+
+    net::awaitable<http_client::response_result>
+    http_client::async_put(std::string_view path,
+                           boost::json::value&& body,
+                           html::query_params const& params,
+                           http::fields const& headers)
+    {
+        auto req = request(http::verb::put, path, params, headers);
+        req.set_body(std::move(body));
+        co_return co_await async_send_request(req);
+    }
+
+    net::awaitable<http_client::response_result>
+    http_client::async_patch(std::string_view path,
+                             std::string_view body,
+                             std::string_view content_type,
+                             html::query_params const& params,
+                             http::fields const& headers)
+    {
+        auto req = request(http::verb::patch, path, params, headers);
+        req.set_body(body, content_type);
+        co_return co_await async_send_request(req);
+    }
+
+    net::awaitable<http_client::response_result>
+    http_client::async_patch(std::string_view path,
+                             boost::json::value&& body,
+                             html::query_params const& params,
+                             http::fields const& headers)
+    {
+        auto req = request(http::verb::patch, path, params, headers);
+        req.set_body(std::move(body));
+        co_return co_await async_send_request(req);
+    }
+
+    // =============================================================================
+    // Download
+    // =============================================================================
+
+    net::awaitable<http_client::response_result>
+    http_client::async_download(http::verb method,
+                                std::string_view path,
+                                fs::path const& save_path,
+                                http::fields const& headers)
+    {
+        auto req = request(method, path, headers);
+        auto result = co_await impl_->async_send_request_lazy_with_redirect(req);
+        if (result.has_error())
+        {
+            co_return result.error();
+        }
+
+        if (auto ec = co_await result->read_to_file(save_path); ec)
+        {
+            co_return ec;
+        }
+        co_return result;
+    }
+
+    void
+    http_client::close()
+    {
+        impl_->close();
+    }
+
+    bool
+    http_client::is_open() const
+    {
+        return impl_->is_open();
+    }
+
+    bool
+    http_client::has_active_session() const
+    {
+        return impl_->has_active_session();
+    }
+
+    bool
+    http_client::is_alive() const
+    {
+        return impl_->is_alive();
+    }
+
+    void
+    http_client::set_max_redirects(int n)
+    {
+        impl_->set_max_redirects(n);
+    }
+
+    void
+    http_client::set_verify_ssl(bool verify)
+    {
+        impl_->set_verify_ssl(verify);
+    }
+
+    void
+    http_client::set_ca_cert(std::string_view cert)
+    {
+        impl_->set_ca_cert(cert);
+    }
+
+    void
+    http_client::set_header_limit(std::uint32_t limit)
+    {
+        impl_->set_header_limit(limit);
+    }
+
+    void
+    http_client::set_body_limit(std::uint64_t limit)
+    {
+        impl_->set_body_limit(limit);
+    }
+
+    void
+    http_client::set_download_rate_limit(std::uint64_t bytes_per_second)
+    {
+        impl_->set_download_rate_limit(bytes_per_second);
+    }
+
+    void
+    http_client::set_upload_rate_limit(std::uint64_t bytes_per_second)
+    {
+        impl_->set_upload_rate_limit(bytes_per_second);
+    }
+
+    net::any_io_executor
+    http_client::get_executor() const
+    {
+        return impl_->executor_;
+    }
 } // namespace httplib::client

@@ -13,19 +13,20 @@ namespace httplib::client
         net::awaitable<boost::system::result<sse_event>>
         read_event() override
         {
+            boost::system::error_code ec;
             while (!parser_.has_event() && !impl_->is_body_done())
             {
 
-                auto result = co_await impl_->read_some_decompressed(net::buffer(read_buf_));
-                if (result.has_error())
+                auto bytes = co_await impl_->read_some_decompressed(net::buffer(read_buf_), ec);
+                if (ec)
                 {
-                    co_return result.error();
+                    co_return ec;
                 }
-                if (result.value() == 0)
+                if (bytes == 0)
                 {
                     break;
                 }
-                parser_.feed(std::string_view(read_buf_.data(), result.value()));
+                parser_.feed(std::string_view(read_buf_.data(), bytes));
             }
             if (parser_.has_event())
             {

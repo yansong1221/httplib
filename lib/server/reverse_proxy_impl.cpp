@@ -276,49 +276,40 @@ namespace httplib::server::detail
 
         writer_ = client_->create_lazy_request();
 
-        boost::system::error_code rel_ec;
+        boost::system::error_code ec;
         co_await writer_->write_header(req.method(),
                                        upstream_.target_path,
                                        upstream_headers_,
                                        httplib::client::lazy_request::mode::relay,
-                                       rel_ec);
-        if (rel_ec)
+                                       ec);
+        if (ec)
         {
-            logger_->trace("[proxy] write_header to {}:{} failed: {}",
-                           upstream_.host,
-                           upstream_.port,
-                           rel_ec.message());
-            resp.set_error_content(upstream_error_to_status(rel_ec));
+            logger_->trace("[proxy] write_header to {}:{} failed: {}", upstream_.host, upstream_.port, ec.message());
+            resp.set_error_content(upstream_error_to_status(ec));
             co_return false;
         }
 
         while (!req.is_body_done())
         {
-            std::size_t bytes;
-            try
+            auto bytes = co_await req.read_some_raw(net::buffer(relay_buf_), ec);
+            if (ec)
             {
-                bytes = co_await req.read_some_raw(net::buffer(relay_buf_));
-            }
-            catch (boost::system::system_error const& e)
-            {
-                logger_->trace("[proxy] read request body failed: {}", e.what());
+                logger_->trace("[proxy] read request body failed: {}", ec.message());
                 resp.set_error_content(http::status::bad_request);
                 co_return false;
             }
+
             auto more = !req.is_body_done();
 
             if (interceptor_)
             {
                 co_await interceptor_->on_upstream_request_body(net::buffer(relay_buf_, bytes), more);
             }
-            co_await writer_->write_body(net::buffer(relay_buf_, bytes), more, rel_ec);
-            if (rel_ec)
+            co_await writer_->write_body(net::buffer(relay_buf_, bytes), more, ec);
+            if (ec)
             {
-                logger_->trace("[proxy] write_body to {}:{} failed: {}",
-                               upstream_.host,
-                               upstream_.port,
-                               rel_ec.message());
-                resp.set_error_content(upstream_error_to_status(rel_ec));
+                logger_->trace("[proxy] write_body to {}:{} failed: {}", upstream_.host, upstream_.port, ec.message());
+                resp.set_error_content(upstream_error_to_status(ec));
                 co_return false;
             }
         }
@@ -387,22 +378,20 @@ namespace httplib::server::detail
     net::awaitable<void>
     reverse_proxy_context::relay_response(response& resp)
     {
+        boost::system::error_code ec;
         while (!upstream_response_.is_body_done())
         {
-            auto bytes_result = co_await upstream_response_.read_some_raw(net::buffer(relay_buf_));
-            if (bytes_result.has_error())
+            auto bytes = co_await upstream_response_.read_some_raw(net::buffer(relay_buf_), ec);
+            if (ec)
             {
-                logger_->trace("[proxy] read response body failed: {}", bytes_result.error().message());
+                logger_->trace("[proxy] read response body failed: {}", ec.message());
                 co_return;
             }
-            auto bytes = bytes_result.value();
             auto more = !upstream_response_.is_body_done();
-
             if (interceptor_)
             {
                 co_await interceptor_->on_upstream_response_body(net::buffer(relay_buf_, bytes), more);
             }
-            boost::system::error_code ec;
             co_await resp.create_stream_writer()->write_body(net::buffer(relay_buf_, bytes), more, ec);
             if (ec)
             {

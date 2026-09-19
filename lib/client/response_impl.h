@@ -181,17 +181,19 @@ namespace httplib::client
             return false;
         }
 
-        net::awaitable<boost::system::result<std::size_t>>
-        read_some_raw(net::mutable_buffer const& buf)
+        net::awaitable<std::size_t>
+        read_some_raw(net::mutable_buffer const& buf, boost::system::error_code& ec)
         {
             auto read_lock = co_await read_mutex_.lock();
             if (!read_lock)
             {
-                co_return net::error::make_error_code(net::error::operation_aborted);
+                ec = net::error::make_error_code(net::error::operation_aborted);
+                co_return 0;
             }
 
             if (msg_)
             {
+                ec = {};
                 co_return 0;
             }
 
@@ -199,7 +201,8 @@ namespace httplib::client
             {
                 if (!header_parser_)
                 {
-                    co_return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+                    ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+                    co_return 0;
                 }
                 status_ = header_parser_->get().result();
                 header_ = header_parser_->get().base();
@@ -212,6 +215,7 @@ namespace httplib::client
                 // 已是 body 末尾：不要再发起底层读，直接结束。
                 if (resp_parser_->is_done())
                 {
+                    ec = {};
                     co_return 0;
                 }
 
@@ -219,14 +223,10 @@ namespace httplib::client
                 body.data = (void*)buf.data();
                 body.size = buf.size();
 
-                auto ec = co_await parent_->async_read_some(*resp_parser_);
+                co_await parent_->async_read_some(*resp_parser_, ec);
                 if (ec == http::error::need_buffer)
                 {
                     ec = {};
-                }
-                if (ec)
-                {
-                    co_return ec;
                 }
 
                 auto consumed = buf.size() - body.size;
@@ -234,34 +234,38 @@ namespace httplib::client
                 {
                     co_return consumed;
                 }
+
+                if (ec)
+                {
+                    co_return 0;
+                }
             }
         }
 
         // 流式读取解压后的 body：把 buffer_body 放进 any_body，复用其 content-encoding 解压逻辑。
         // 调用方缓冲写不下时溢出到 value_type::pending，下次调用先取 pending，保证不丢数据。
-        net::awaitable<boost::system::result<std::size_t>>
-        read_some_decompressed(net::mutable_buffer const& buf)
+        net::awaitable<std::size_t>
+        read_some_decompressed(net::mutable_buffer const& buf, boost::system::error_code& ec)
         {
             auto read_lock = co_await read_mutex_.lock();
             if (!read_lock)
             {
-                co_return net::error::make_error_code(net::error::operation_aborted);
-            }
-
-            if (msg_)
-            {
+                ec = net::error::make_error_code(net::error::operation_aborted);
                 co_return 0;
             }
 
-            if (buf.size() == 0)
+            if (msg_ || buf.size() == 0)
             {
+                ec = {};
                 co_return 0;
             }
+
             if (!dec_parser_)
             {
                 if (!header_parser_)
                 {
-                    co_return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+                    ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+                    co_return 0;
                 }
                 status_ = header_parser_->get().result();
                 header_ = header_parser_->get().base();
@@ -282,26 +286,24 @@ namespace httplib::client
                     auto n = std::min(buf.size(), buf_body.pending.size());
                     std::memcpy(buf.data(), buf_body.pending.data(), n);
                     buf_body.pending.erase(0, n);
+                    ec = {};
                     co_return n;
                 }
 
                 // 已解压完且无溢出数据：不要再发起底层读，直接结束。
                 if (dec_parser_->is_done())
                 {
+                    ec = {};
                     co_return 0;
                 }
 
                 buf_body.data = (void*)buf.data();
                 buf_body.size = buf.size();
 
-                auto ec = co_await parent_->async_read_some(*dec_parser_);
+                co_await parent_->async_read_some(*dec_parser_, ec);
                 if (ec == http::error::need_buffer)
                 {
                     ec = {};
-                }
-                if (ec)
-                {
-                    co_return ec;
                 }
 
                 auto consumed = buf.size() - buf_body.size;
@@ -309,25 +311,32 @@ namespace httplib::client
                 {
                     co_return consumed;
                 }
+                if (ec)
+                {
+                    co_return 0;
+                }
             }
         }
 
-        net::awaitable<boost::system::error_code>
-        read_body(http_client::impl::body_setup_fn const& body_setup)
+        net::awaitable<void>
+        read_body(http_client::impl::body_setup_fn const& body_setup, boost::system::error_code& ec)
         {
             auto read_lock = co_await read_mutex_.lock();
             if (!read_lock)
             {
-                co_return net::error::make_error_code(net::error::operation_aborted);
+                ec = net::error::make_error_code(net::error::operation_aborted);
+                co_return;
             }
 
             if (msg_)
             {
-                co_return boost::system::error_code {};
+                ec = {};
+                co_return;
             }
             if (!header_parser_)
             {
-                co_return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+                ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+                co_return;
             }
 
             status_ = header_parser_->get().result();
@@ -341,16 +350,16 @@ namespace httplib::client
             {
                 body_setup(body_parser.get());
             }
-            if (auto ec = co_await parent_->async_read(body_parser, false); ec)
+            co_await parent_->async_read(body_parser, false, ec);
+            if (ec)
             {
-                co_return ec;
+                co_return;
             }
             msg_ = body_parser.release();
             {
                 std::unique_lock<std::recursive_mutex> lck(parent_->stream_mutex_);
                 parent_->read_impl_.reset();
             }
-            co_return boost::system::error_code {};
         }
 
         // 移动取出已物化的 body（不拷贝，取出后本响应不再持有该 body）。

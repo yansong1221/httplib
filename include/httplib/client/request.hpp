@@ -68,8 +68,8 @@ namespace httplib::client
 
         // ---- body 设置 ----
 
-        void set_body(std::string_view data);
-        void set_body(std::string&& data);
+        void set_body(std::string_view data, std::string_view content_type);
+        void set_body(std::string&& data, std::string_view content_type);
         void set_body(boost::json::value&& data);
         void set_body(html::form_data&& data);
         void set_body(html::query_params&& data);

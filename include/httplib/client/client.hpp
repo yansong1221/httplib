@@ -24,9 +24,6 @@ namespace httplib::client
             eager,
             lazy
         };
-
-        using response = client::response;
-        using request = client::request;
         using response_result = boost::system::result<response>;
 
       public:
@@ -65,10 +62,18 @@ namespace httplib::client
 
         net::any_io_executor get_executor() const;
 
+        void close();
+        bool is_open() const;
+        bool has_active_session() const;
+        bool is_alive() const;
+
       public:
+        std::shared_ptr<lazy_request> create_lazy_request();
         // ---- core send ----
 
-        net::awaitable<response_result> async_send_request(request req, body_mode mode = body_mode::eager);
+        net::awaitable<response_result> async_send_request(request& req, body_mode mode = body_mode::eager);
+        net::awaitable<response_result> async_send_request(request&& req, body_mode mode = body_mode::eager);
+        // net::awaitable<response_result> async_send_request(request req, body_mode mode = body_mode::eager);
 
         // ---- HTTP method shorthands (no body) ----
 
@@ -98,6 +103,7 @@ namespace httplib::client
 
         net::awaitable<response_result> async_post(std::string_view path,
                                                    std::string_view body,
+                                                   std::string_view content_type,
                                                    html::query_params const& params = {},
                                                    http::fields const& headers = http::fields());
         net::awaitable<response_result> async_post(std::string_view path,
@@ -106,6 +112,7 @@ namespace httplib::client
                                                    http::fields const& headers = http::fields());
         net::awaitable<response_result> async_put(std::string_view path,
                                                   std::string_view body,
+                                                  std::string_view content_type,
                                                   html::query_params const& params = {},
                                                   http::fields const& headers = http::fields());
         net::awaitable<response_result> async_put(std::string_view path,
@@ -114,6 +121,7 @@ namespace httplib::client
                                                   http::fields const& headers = http::fields());
         net::awaitable<response_result> async_patch(std::string_view path,
                                                     std::string_view body,
+                                                    std::string_view content_type,
                                                     html::query_params const& params = {},
                                                     http::fields const& headers = http::fields());
         net::awaitable<response_result> async_patch(std::string_view path,
@@ -127,13 +135,6 @@ namespace httplib::client
                                                        std::string_view path,
                                                        fs::path const& save_path,
                                                        http::fields const& headers = http::fields());
-
-        std::shared_ptr<lazy_request> create_lazy_request();
-
-        void close();
-        bool is_open() const;
-        bool has_active_session() const;
-        bool is_alive() const;
 
       private:
         http_client(http_client const&) = delete;
@@ -155,4 +156,5 @@ namespace httplib::client
             return self.impl_;
         }
     };
+
 } // namespace httplib::client
