@@ -678,7 +678,7 @@ TEST_CASE("http_client: is_alive detects peer close", "[client_pool]")
             REQUIRE(h);
             auto r = co_await h->async_get("/ok");
             REQUIRE(r.has_value());
-            CHECK(h->is_alive());
+            CHECK(co_await h->async_is_alive());
 
             // Server closes the idle connection after its read timeout.
             net::steady_timer timer(ex);
@@ -686,7 +686,7 @@ TEST_CASE("http_client: is_alive detects peer close", "[client_pool]")
             boost::system::error_code ec;
             co_await timer.async_wait(httplib::util::net_awaitable[ec]);
 
-            CHECK_FALSE(h->is_alive());
+            CHECK_FALSE(co_await h->async_is_alive());
 
             p.stop();
         });

@@ -4,6 +4,7 @@
 #include "httplib/client/response.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <filesystem>
+#include <future>
 #include <memory>
 
 namespace httplib::client
@@ -62,10 +63,14 @@ namespace httplib::client
 
         net::any_io_executor get_executor() const;
 
-        void close();
+        std::future<void> close();
+        net::awaitable<void> async_close();
+
         bool is_open() const;
         bool has_active_session() const;
-        bool is_alive() const;
+
+        std::future<bool> is_alive() const;
+        net::awaitable<bool> async_is_alive() const;
 
       public:
         std::shared_ptr<lazy_request> create_lazy_request();
@@ -156,5 +161,7 @@ namespace httplib::client
             return self.impl_;
         }
     };
+
+
 
 } // namespace httplib::client

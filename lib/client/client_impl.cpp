@@ -9,6 +9,7 @@
 #include "util/logging.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
+#include <boost/asio/use_future.hpp>
 #include <boost/asio/write.hpp>
 #include <boost/beast/http/buffer_body.hpp>
 #include <boost/beast/http/empty_body.hpp>
@@ -30,39 +31,14 @@ namespace httplib::client
 
     http_client::impl::impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl)
 
-        : executor_(ex)
-        , resolver_executor_(net::make_strand(ex))
-        , resolver_(resolver_executor_)
+        : executor_(net::make_strand(ex))
+        , resolver_(executor_)
         , host_(host)
         , host_value_(util::make_host_value(host, port, ssl))
         , port_(port)
         , use_ssl_(ssl)
         , detail::logger("httplib.client")
     {
-    }
-
-    void
-    http_client::impl::close()
-    {
-        finish_io();
-
-        {
-            std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
-            if (auto s = stream_.load(); s)
-            {
-                s->close();
-            }
-            stream_.store(nullptr);
-        }
-
-        // resolver_ 运行在独立 strand 上；把 cancel 投递过去，避免与
-        // co_connect() 中在途的 async_resolve 跨线程竞争。
-        // buffer_ 不在这里清理：它由 read_mutex_ 保护，且清理动作可能与挂起中的
-        // 读操作冲突。下次读取响应头时会先清空。
-        if (auto self = weak_from_this().lock())
-        {
-            net::post(resolver_executor_, [self] { self->resolver_.cancel(); });
-        }
     }
 
     void
@@ -135,22 +111,24 @@ namespace httplib::client
         return !read_impl_.expired() || !write_impl_.expired();
     }
 
-    bool
-    http_client::impl::is_alive() const
-    {
-        std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
-        auto s = stream_.load();
-        if (!s || !s->is_open())
-        {
-            return false;
-        }
-        boost::system::error_code ec;
-        return s->is_peer_alive(ec);
-    }
+    // bool
+    // http_client::impl::is_alive() const
+    //{
+    //     std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
+    //     auto s = stream_.load();
+    //     if (!s || !s->is_open())
+    //     {
+    //         return false;
+    //     }
+    //     boost::system::error_code ec;
+    //     return s->is_peer_alive(ec);
+    // }
 
     net::awaitable<http_client::response_result>
     http_client::impl::async_send_request_lazy(request& req)
     {
+        co_await net::dispatch(executor_, net::use_awaitable);
+
         prepare_request(req);
         http::request_serializer<body::any_body> serializer(get_impl(req));
 
@@ -165,6 +143,8 @@ namespace httplib::client
     net::awaitable<httplib::client::http_client::response_result>
     http_client::impl::read_response_lazy(http::verb method)
     {
+        co_await net::dispatch(executor_, net::use_awaitable);
+
         // 新响应从干净的缓冲区开始（上一连接/上一响应可能残留字节）。
         buffer_.clear();
 
@@ -187,6 +167,9 @@ namespace httplib::client
     http_client::impl::async_send_request_lazy_with_redirect(request& req)
     {
         auto self = shared_from_this();
+
+        co_await net::dispatch(executor_, net::use_awaitable);
+
         auto max_redirects = max_redirects_.load();
 
         if (max_redirects <= 0)
@@ -218,7 +201,7 @@ namespace httplib::client
                 // 读完并丢弃 redirect 响应的 body，保证连接可复用
                 if (auto drain_result = co_await resp.read_string(); drain_result.has_error())
                 {
-                    close();
+                    co_await async_close();
                 }
 
                 // Full URL (cross-domain) create new impl
@@ -280,7 +263,6 @@ namespace httplib::client
     void
     http_client::impl::begin_io()
     {
-        std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
         auto s = stream_.load();
         if (!s)
         {
@@ -325,7 +307,6 @@ namespace httplib::client
     void
     http_client::impl::finish_io()
     {
-        std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
         overall_timer_active_.store(false);
         if (auto s = stream_.load())
         {
@@ -378,12 +359,14 @@ namespace httplib::client
     net::awaitable<void>
     http_client::impl::co_connect(boost::system::error_code& ec)
     {
+        co_await net::dispatch(executor_, net::use_awaitable);
+
         finish_io();
         begin_io();
-        std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
+
         if (!is_open())
         {
-            close();
+            co_await async_close();
 
             auto stream_result = http_stream::create_stream(executor_, host_, use_ssl_, verify_ssl_.load(), ca_cert_);
             if (!stream_result)
@@ -394,8 +377,6 @@ namespace httplib::client
             auto s = std::make_shared<http_stream>(std::move(*stream_result));
             apply_rate_limits(s);
             stream_.store(s);
-
-            lck.unlock();
 
             boost::system::error_code addr_ec;
             auto addr = net::ip::make_address(host_, addr_ec);
@@ -415,7 +396,7 @@ namespace httplib::client
             if (ec)
             {
                 get_logger()->warn("connect [{}] error {}", util::make_url_value(host_, port_, use_ssl_), ec.message());
-                close();
+                co_await async_close();
                 co_return;
             }
         }
@@ -433,6 +414,44 @@ namespace httplib::client
             write_impl_ = sp;
         }
         return sp;
+    }
+
+    net::awaitable<void>
+    http_client::impl::async_close()
+    {
+        co_await net::dispatch(executor_, net::use_awaitable);
+
+        resolver_.cancel();
+        if (auto s = stream_.exchange(nullptr); s)
+        {
+            s->close();
+        }
+    }
+    std::future<void>
+    http_client::impl::close()
+    {
+        return net::co_spawn(
+            executor_,
+            [self = shared_from_this()]() -> net::awaitable<void>
+            {
+                co_await self->async_close();
+                co_return;
+            },
+            net::use_future);
+    }
+
+    net::awaitable<bool>
+    http_client::impl::async_is_alive() const
+    {
+        co_await net::dispatch(executor_, net::use_awaitable);
+
+        auto s = stream_.load();
+        if (!s || !s->is_open())
+        {
+            co_return false;
+        }
+        boost::system::error_code ec;
+        co_return s->is_peer_alive(ec);
     }
 
     http_client::http_client(net::io_context& ex, std::string_view host, uint16_t port, bool ssl)
@@ -695,10 +714,15 @@ namespace httplib::client
         co_return result;
     }
 
-    void
+    std::future<void>
     http_client::close()
     {
-        impl_->close();
+        return impl_->close();
+    }
+    net::awaitable<void>
+    http_client::async_close()
+    {
+        co_return co_await impl_->async_close();
     }
 
     bool
@@ -713,12 +737,19 @@ namespace httplib::client
         return impl_->has_active_session();
     }
 
-    bool
+    net::awaitable<bool>
+    http_client::async_is_alive() const
+    {
+        co_return co_await impl_->async_is_alive();
+    }
+    std::future<bool>
     http_client::is_alive() const
     {
-        return impl_->is_alive();
+        return net::co_spawn(
+            get_executor(),
+            [self = impl_]() -> net::awaitable<bool> { co_return co_await self->async_is_alive(); },
+            net::use_future);
     }
-
     void
     http_client::set_max_redirects(int n)
     {

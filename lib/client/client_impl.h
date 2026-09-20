@@ -15,6 +15,7 @@
 #include <boost/beast/http/serializer.hpp>
 #include <boost/beast/http/write.hpp>
 #include <functional>
+#include <future>
 #include <limits>
 #include <spdlog/spdlog.h>
 
@@ -27,8 +28,6 @@ namespace httplib::client
     {
       public:
         class lazy_request_impl;
-
-        using body_setup_fn = std::function<void(http::response<body::any_body>&)>;
 
         impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl);
 
@@ -74,12 +73,13 @@ namespace httplib::client
         void set_upload_rate_limit(std::uint64_t bytes_per_second);
 
       public:
-        void close();
+        std::future<void> close();
+        net::awaitable<void> async_close();
+
         bool is_open() const;
         bool has_active_session() const;
-        bool is_alive() const;
 
-        net::awaitable<http_client::response_result> async_send_request_lazy(request& req);
+        net::awaitable<bool> async_is_alive() const;
 
         net::awaitable<http_client::response_result> async_send_request_lazy_with_redirect(request& req);
 
@@ -92,6 +92,7 @@ namespace httplib::client
 
         void prepare_request(request& req);
         net::awaitable<void> co_connect(boost::system::error_code& ec);
+        net::awaitable<http_client::response_result> async_send_request_lazy(request& req);
 
         /// Apply the stored read/write rate limits to `stream_`. Caller must hold
         /// stream_mutex_.
@@ -120,6 +121,8 @@ namespace httplib::client
         net::awaitable<void>
         async_write(http::request_serializer<Body>& serializer, bool headers_only, boost::system::error_code& ec)
         {
+            co_await net::dispatch(executor_, net::use_awaitable);
+
             bool header_done = serializer.is_header_done();
             if (!header_done)
             {
@@ -140,7 +143,7 @@ namespace httplib::client
                     if (is_retryable(ec) && retry)
                     {
                         ec = {};
-                        close();
+                        co_await async_close();
                         get_logger()->trace("retrying request...");
                         co_await co_connect(ec);
                         if (ec)
@@ -155,19 +158,13 @@ namespace httplib::client
                 }
                 retry = false;
             }
-
-            // if (is_retryable(ec) && retry)
-            //{
-            //     ec = {};
-            //     close();
-            //     get_logger()->trace("retrying request...");
-            //     co_return co_await async_write(serializer, headers_only, false, ec);
-            // }
         }
         template <typename Body>
         net::awaitable<void>
         async_write_some(http::request_serializer<Body>& serializer, boost::system::error_code& ec)
         {
+            co_await net::dispatch(executor_, net::use_awaitable);
+
             auto s = stream_.load();
             if (!s)
             {
@@ -191,6 +188,8 @@ namespace httplib::client
         net::awaitable<void>
         async_read(http::response_parser<Body>& parser, bool headers_only, boost::system::error_code& ec)
         {
+            co_await net::dispatch(executor_, net::use_awaitable);
+
             while (headers_only ? !parser.is_header_done() : !parser.is_done())
             {
                 co_await async_read_some(parser, ec);
@@ -204,6 +203,8 @@ namespace httplib::client
         net::awaitable<void>
         async_read_some(http::response_parser<Body>& parser, boost::system::error_code& ec)
         {
+            co_await net::dispatch(executor_, net::use_awaitable);
+
             auto s = stream_.load();
             if (!s)
             {
@@ -233,9 +234,7 @@ namespace httplib::client
 
       public:
         net::any_io_executor executor_;
-        // resolver 绑定到独立 strand：串行化 async_resolve 与 close() 投递的
-        // cancel，避免二者跨线程并发访问同一个 resolver。
-        net::any_io_executor resolver_executor_;
+
         tcp::resolver resolver_;
         std::atomic<timeout_policy> timeout_policy_ { timeout_policy::overall };
         std::atomic<std::chrono::steady_clock::duration> timeout_ { std::chrono::seconds(30) };

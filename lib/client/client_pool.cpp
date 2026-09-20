@@ -121,7 +121,7 @@ namespace httplib::client
                 client_handle handle;
                 try
                 {
-                    handle = acquire_or_create(url, serving);
+                    handle = co_await acquire_or_create(url, serving);
                 }
                 catch (...)
                 {
@@ -476,13 +476,13 @@ namespace httplib::client
             }
         }
 
-        client_handle
+        net::awaitable<client_handle>
         acquire_or_create(std::string const& url, bool serving)
         {
             // 未被唤醒的新请求不得越过已有等待者取连接/建连。
             if (!serving && has_live_waiter_locked(url))
             {
-                return {};
+                co_return client_handle {};
             }
 
             while (true)
@@ -505,7 +505,7 @@ namespace httplib::client
                     bool alive = false;
                     try
                     {
-                        alive = conn->is_alive();
+                        alive = co_await conn->async_is_alive();
                     }
                     catch (...)
                     {
@@ -515,13 +515,13 @@ namespace httplib::client
                     // stop() 后不能再把旧连接塞回池，也不能改池计数。
                     if (!is_running())
                     {
-                        return {};
+                        co_return client_handle {};
                     }
 
                     it = pools_.find(url);
                     if (it == pools_.end())
                     {
-                        return {};
+                        co_return client_handle {};
                     }
 
                     auto& validated_st = it->second;
@@ -539,13 +539,13 @@ namespace httplib::client
                     }
 
                     inc_active_locked(validated_st);
-                    return client_handle(std::static_pointer_cast<http_client_pool::impl>(shared_from_this()),
-                                         std::move(conn));
+                    co_return client_handle(std::static_pointer_cast<http_client_pool::impl>(shared_from_this()),
+                                            std::move(conn));
                 }
 
                 inc_active_locked(st);
-                return client_handle(std::static_pointer_cast<http_client_pool::impl>(shared_from_this()),
-                                     std::move(conn));
+                co_return client_handle(std::static_pointer_cast<http_client_pool::impl>(shared_from_this()),
+                                        std::move(conn));
             }
 
             // Only touch pools_ when actually creating a connection, so a failed
@@ -561,8 +561,8 @@ namespace httplib::client
                     auto client = std::make_unique<http_client>(ex_, url);
                     apply_client_settings(*client);
                     get_logger()->debug("client pool: created connection for {} (total={})", url, total_connections_);
-                    return client_handle(std::static_pointer_cast<http_client_pool::impl>(shared_from_this()),
-                                         std::move(client));
+                    co_return client_handle(std::static_pointer_cast<http_client_pool::impl>(shared_from_this()),
+                                            std::move(client));
                 }
                 catch (...)
                 {
@@ -573,7 +573,7 @@ namespace httplib::client
                 }
             }
 
-            return {};
+            co_return client_handle {};
         }
 
         net::awaitable<bool>
