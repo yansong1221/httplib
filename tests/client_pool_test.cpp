@@ -121,7 +121,7 @@ TEST_CASE("client_pool: stats reflect correct counts", "[client_pool]")
             httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 4 });
 
             {
-                auto s0 = p.stats("127.0.0.1", 80, httplib::client::scheme::plain);
+                auto s0 = (co_await p.async_stats("127.0.0.1", 80, httplib::client::scheme::plain));
                 REQUIRE(s0.active == 0);
                 REQUIRE(s0.idle == 0);
             }
@@ -129,7 +129,7 @@ TEST_CASE("client_pool: stats reflect correct counts", "[client_pool]")
             auto h1 = co_await p.async_acquire("127.0.0.1", 80, httplib::client::scheme::plain);
             REQUIRE(h1);
             {
-                auto s1 = p.stats("127.0.0.1", 80, httplib::client::scheme::plain);
+                auto s1 = (co_await p.async_stats("127.0.0.1", 80, httplib::client::scheme::plain));
                 REQUIRE(s1.active == 1);
                 REQUIRE(s1.idle == 0);
             }
@@ -137,14 +137,14 @@ TEST_CASE("client_pool: stats reflect correct counts", "[client_pool]")
             auto h2 = co_await p.async_acquire("127.0.0.1", 80, httplib::client::scheme::plain);
             REQUIRE(h2);
             {
-                auto s2 = p.stats("127.0.0.1", 80, httplib::client::scheme::plain);
+                auto s2 = (co_await p.async_stats("127.0.0.1", 80, httplib::client::scheme::plain));
                 REQUIRE(s2.active == 2);
                 REQUIRE(s2.idle == 0);
             }
 
             h1 = {};
             {
-                auto s3 = p.stats("127.0.0.1", 80, httplib::client::scheme::plain);
+                auto s3 = (co_await p.async_stats("127.0.0.1", 80, httplib::client::scheme::plain));
                 REQUIRE(s3.idle == 1);
             }
 
@@ -199,7 +199,7 @@ TEST_CASE("client_pool: idle timeout evicts connection", "[client_pool]")
                 auto h = co_await p.async_acquire("127.0.0.1", 80, httplib::client::scheme::plain, std::chrono::milliseconds(50));
             }
 
-            auto s0 = p.stats("127.0.0.1", 80, httplib::client::scheme::plain);
+            auto s0 = (co_await p.async_stats("127.0.0.1", 80, httplib::client::scheme::plain));
             REQUIRE(s0.idle == 1);
 
             net::steady_timer timer(ioc.get_executor());
@@ -207,7 +207,7 @@ TEST_CASE("client_pool: idle timeout evicts connection", "[client_pool]")
             boost::system::error_code ec;
             co_await timer.async_wait(httplib::util::net_awaitable[ec]);
 
-            auto s1 = p.stats("127.0.0.1", 80, httplib::client::scheme::plain);
+            auto s1 = (co_await p.async_stats("127.0.0.1", 80, httplib::client::scheme::plain));
             REQUIRE(s1.idle == 0);
 
             p.stop();
@@ -315,7 +315,7 @@ TEST_CASE("client_pool: stats for non-existent host returns zeros", "[client_poo
         {
             httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 4 });
 
-            auto s = p.stats("10.0.0.1", 9999, httplib::client::scheme::plain);
+            auto s = (co_await p.async_stats("10.0.0.1", 9999, httplib::client::scheme::plain));
             REQUIRE(s.active == 0);
             REQUIRE(s.idle == 0);
 
@@ -375,7 +375,7 @@ TEST_CASE("client_pool: idle reuse cycles", "[client_pool]")
                 REQUIRE(h);
             }
 
-            auto s = p.stats("127.0.0.1", 80, httplib::client::scheme::plain);
+            auto s = (co_await p.async_stats("127.0.0.1", 80, httplib::client::scheme::plain));
             REQUIRE(s.idle == 1);
             REQUIRE(s.active == 0);
 
@@ -392,16 +392,16 @@ TEST_CASE("client_pool: release with unmatched url is safe", "[client_pool]")
 
             auto h_a = co_await p.async_acquire("127.0.0.1", 80, httplib::client::scheme::plain);
             REQUIRE(h_a);
-            REQUIRE(p.stats("127.0.0.1", 80, httplib::client::scheme::plain).active == 1);
+            REQUIRE((co_await p.async_stats("127.0.0.1", 80, httplib::client::scheme::plain)).active == 1);
 
             auto h_b = co_await p.async_acquire("10.0.0.1", 80, httplib::client::scheme::plain);
             REQUIRE(h_b);
 
             h_a = {};
-            REQUIRE(p.stats("127.0.0.1", 80, httplib::client::scheme::plain).idle == 1);
+            REQUIRE((co_await p.async_stats("127.0.0.1", 80, httplib::client::scheme::plain)).idle == 1);
 
             h_b = {};
-            REQUIRE(p.stats("10.0.0.1", 80, httplib::client::scheme::plain).idle == 1);
+            REQUIRE((co_await p.async_stats("10.0.0.1", 80, httplib::client::scheme::plain)).idle == 1);
 
             p.stop();
         });
@@ -424,8 +424,8 @@ TEST_CASE("client_pool: stats(url) should match acquire(url) normalization", "[c
 
             // pool key drops the default port ("http://127.0.0.1"), but stats(url)
             // looks up the raw string, so the two disagree.
-            auto sUrl = p.stats("http://127.0.0.1:80");
-            auto sHost = p.stats("127.0.0.1", 80, httplib::client::scheme::plain);
+            auto sUrl = (co_await p.async_stats("http://127.0.0.1:80"));
+            auto sHost = (co_await p.async_stats("127.0.0.1", 80, httplib::client::scheme::plain));
             CHECK(sHost.active == 1);
             CHECK(sUrl.active == sHost.active);
 
@@ -444,7 +444,7 @@ TEST_CASE("client_pool: stats(url) with path/query does not resolve to pool key"
             REQUIRE(h);
             REQUIRE_FALSE(h.has_error());
 
-            auto s = p.stats("http://127.0.0.1:9999/some/path?x=1");
+            auto s = (co_await p.async_stats("http://127.0.0.1:9999/some/path?x=1"));
             CHECK(s.active == 1);
 
             p.stop();
@@ -468,8 +468,8 @@ TEST_CASE("client_pool: max_size is enforced per host", "[client_pool]")
             auto hb = co_await p.async_acquire("192.168.0.1", 80, httplib::client::scheme::plain);
             REQUIRE(ha);
             REQUIRE(hb);
-            CHECK(p.stats("127.0.0.1", 80, httplib::client::scheme::plain).active == 1);
-            CHECK(p.stats("192.168.0.1", 80, httplib::client::scheme::plain).active == 1);
+            CHECK((co_await p.async_stats("127.0.0.1", 80, httplib::client::scheme::plain)).active == 1);
+            CHECK((co_await p.async_stats("192.168.0.1", 80, httplib::client::scheme::plain)).active == 1);
 
             p.stop();
         });
@@ -553,7 +553,7 @@ TEST_CASE("client_pool: concurrent acquire/release under multithreaded executor"
             CHECK(timed_out.load() == 0);
             CHECK(acquired.load() == kWorkers * kIterations);
 
-            auto s = p.stats("127.0.0.1", 80, httplib::client::scheme::plain);
+            auto s = (co_await p.async_stats("127.0.0.1", 80, httplib::client::scheme::plain));
             CHECK(s.active == 0);
             CHECK(s.idle <= 8);
             CHECK(s.idle + s.active <= 8);
@@ -592,7 +592,7 @@ TEST_CASE("client_pool: reuses a server-closed connection transparently", "[clie
                 auto r = co_await h->async_get("/ok");
                 REQUIRE(r.has_value());
             }
-            CHECK(p.stats(host, port, httplib::client::scheme::plain).idle == 1);
+            CHECK((co_await p.async_stats(host, port, httplib::client::scheme::plain)).idle == 1);
 
             // The server closes the idle connection after its read timeout.
             net::steady_timer timer(ex);
@@ -637,7 +637,7 @@ TEST_CASE("client_pool: validate_on_borrow discards dead idle connection", "[cli
                 auto r = co_await h->async_get("/ok");
                 REQUIRE(r.has_value());
             }
-            CHECK(p.stats(host, port, httplib::client::scheme::plain).idle == 1);
+            CHECK((co_await p.async_stats(host, port, httplib::client::scheme::plain)).idle == 1);
 
             // Server closes the idle connection after its read timeout.
             net::steady_timer timer(ex);
@@ -786,8 +786,8 @@ TEST_CASE("client_pool: idle eviction wakes a waiting acquire", "[client_pool]")
             REQUIRE(b);
 
             a.release(); // idle=1, active=1, route total=2=max_size
-            CHECK(p.stats(host, port, httplib::client::scheme::plain).idle == 1);
-            CHECK(p.stats(host, port, httplib::client::scheme::plain).active == 1);
+            CHECK((co_await p.async_stats(host, port, httplib::client::scheme::plain)).idle == 1);
+            CHECK((co_await p.async_stats(host, port, httplib::client::scheme::plain)).active == 1);
 
             struct waiter_result
             {
@@ -876,20 +876,20 @@ TEST_CASE("client_pool: idle_check_interval decouples eviction tick from idle_ti
             {
                 auto h = co_await p.async_acquire(host, port, httplib::client::scheme::plain);
             }
-            CHECK(p.stats(host, port, httplib::client::scheme::plain).idle == 1);
+            CHECK((co_await p.async_stats(host, port, httplib::client::scheme::plain)).idle == 1);
 
             // idle_timeout 已到，但检查周期尚未到：不应回收�?
             net::steady_timer t1(ioc.get_executor());
             t1.expires_after(std::chrono::milliseconds(200));
             boost::system::error_code ec;
             co_await t1.async_wait(httplib::util::net_awaitable[ec]);
-            CHECK(p.stats(host, port, httplib::client::scheme::plain).idle == 1);
+            CHECK((co_await p.async_stats(host, port, httplib::client::scheme::plain)).idle == 1);
 
             // 检查周期到达后，按 idle_timeout 回收�?
             net::steady_timer t2(ioc.get_executor());
             t2.expires_after(std::chrono::milliseconds(600));
             co_await t2.async_wait(httplib::util::net_awaitable[ec]);
-            CHECK(p.stats(host, port, httplib::client::scheme::plain).idle == 0);
+            CHECK((co_await p.async_stats(host, port, httplib::client::scheme::plain)).idle == 0);
 
             p.stop();
         });

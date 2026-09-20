@@ -4,7 +4,13 @@
 #include "httplib/util/misc.hpp"
 #include "httplib/util/ticker.hpp"
 #include "util/logging.hpp"
+#include <atomic>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/dispatch.hpp>
+#include <boost/asio/strand.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <boost/asio/use_future.hpp>
 #include <boost/system/system_error.hpp>
 #include <boost/url.hpp>
 #include <deque>
@@ -53,15 +59,14 @@ namespace httplib::client
       public:
         impl(net::any_io_executor const& ex, pool_params cfg)
             : detail::logger("httplib.client_pool")
-            , ex_(ex)
             , cfg_(std::move(cfg))
-            , ticker(ex)
+            , ticker(net::make_strand(ex))
         {
             auto interval = cfg_.idle_check_interval.count() > 0 ? cfg_.idle_check_interval : std::chrono::seconds(60);
             set_interval(interval);
         }
 
-        ~impl() { stop(); }
+        ~impl() {}
 
         net::awaitable<bool>
         on_start() override
@@ -72,6 +77,8 @@ namespace httplib::client
         net::awaitable<void>
         on_stop() override
         {
+            // ticker 的 run loop 退出后在本 strand 上执行：回收 idle 连接并唤醒等待者。
+            teardown();
             get_logger()->debug("client pool stopped");
             co_return;
         }
@@ -85,6 +92,11 @@ namespace httplib::client
             }
 
             auto self = shared_from_this();
+
+            // 池状态只在自身 strand 上访问：把调用协程切到 strand 后再操作，
+            // 后续 await（校验/等待唤醒）都会在 strand 上恢复，因此无需再加锁。
+            co_await net::dispatch(get_executor(), net::use_awaitable);
+
             auto url = util::make_url_value(host, port, s);
 
             // wait_timeout <= 0 means "fail fast": try once and return timed_out
@@ -99,12 +111,11 @@ namespace httplib::client
 
             do
             {
-                std::unique_lock<std::mutex> lock(mutex_);
                 if (!is_running())
                 {
                     if (in_queue)
                     {
-                        remove_waiter_locked(url, node);
+                        remove_waiter(url, node);
                     }
                     co_return client_handle(
                         boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
@@ -112,7 +123,7 @@ namespace httplib::client
 
                 if (in_queue && deadline <= std::chrono::steady_clock::now())
                 {
-                    remove_waiter_locked(url, node);
+                    remove_waiter(url, node);
                     get_logger()->debug("client pool: acquire timed out for {}", url);
                     co_return client_handle(boost::system::errc::make_error_code(boost::system::errc::timed_out));
                 }
@@ -129,7 +140,7 @@ namespace httplib::client
                     // 否则后续 waiter 可能因队首失效而迟迟不被唤醒。
                     if (in_queue)
                     {
-                        remove_waiter_locked(url, node);
+                        remove_waiter(url, node);
                     }
                     throw;
                 }
@@ -138,7 +149,7 @@ namespace httplib::client
                 {
                     if (in_queue)
                     {
-                        remove_waiter_locked(url, node);
+                        remove_waiter(url, node);
                     }
                     co_return std::move(handle);
                 }
@@ -149,7 +160,7 @@ namespace httplib::client
                 {
                     if (in_queue)
                     {
-                        remove_waiter_locked(url, node);
+                        remove_waiter(url, node);
                     }
                     get_logger()->debug("client pool: no available connection for {} (fail fast)", url);
                     co_return client_handle(boost::system::errc::make_error_code(boost::system::errc::timed_out));
@@ -166,7 +177,6 @@ namespace httplib::client
                 }
 
                 auto remaining = deadline - std::chrono::steady_clock::now();
-                lock.unlock();
 
                 if (remaining <= std::chrono::steady_clock::duration::zero())
                 {
@@ -183,21 +193,37 @@ namespace httplib::client
         void
         release(std::unique_ptr<http_client> conn)
         {
-            auto url = util::make_url_value(conn->host(), conn->port(), conn->is_use_ssl() ? scheme::tls : scheme::plain);
+            // 归还可能来自任意线程（client_handle 析构），投递到 strand 串行处理。
+            auto self = std::static_pointer_cast<impl>(shared_from_this());
+            net::co_spawn(
+                get_executor(),
+                [self, conn = std::move(conn)]() mutable -> net::awaitable<void>
+                {
+                    co_await self->async_release(std::move(conn));
+                    co_return;
+                },
+                net::detached);
+        }
 
-            std::lock_guard<std::mutex> lock(mutex_);
+        net::awaitable<void>
+        async_release(std::unique_ptr<http_client> conn)
+        {
+            co_await net::dispatch(get_executor(), net::use_awaitable);
+
+            auto url
+                = util::make_url_value(conn->host(), conn->port(), conn->is_use_ssl() ? scheme::tls : scheme::plain);
 
             if (!is_running())
             {
-                return;
+                co_return;
             }
 
             auto st_it = pools_.find(url);
             if (st_it == pools_.end())
             {
-                return;
+                co_return;
             }
-            dec_active_locked(st_it->second);
+            dec_active(st_it->second);
 
             if (!conn->has_active_session() && st_it->second.active_count < static_cast<int64_t>(cfg_.max_size))
             {
@@ -214,45 +240,45 @@ namespace httplib::client
 
             wake_one_waiter(url);
         }
-
         void
         stop() override
         {
-            // 重入/并发安全依靠幂等而非 once 标志：
-            // 1) mutex_ 串行状态搬运，第二个 stop() 只会看到已清空的容器，不会二次释放；
-            // 2) ticker::stop() 在 state_mutex_ 下按 is_running_ 幂等，重复调用为 no-op；
-            // 3) ticker::stop() 用 post 投递（不 inline），on_stop 不会回到本函数栈上，故无递归。
-            // stop() 是终态：is_running() 此后恒为 false，池不再接受借出。
+            // 同步翻转 is_running_（幂等）并取消维护循环，池立即拒绝新借出；
+            // 同时把 teardown 投递到 strand，保证与后续 strand 任务按 FIFO 先于其执行
+            // （on_stop 里还有一次兜底，teardown 幂等）。
+            ticker::stop();
+
+            auto self = std::static_pointer_cast<impl>(shared_from_this());
+            net::dispatch(get_executor(), [self]() { self->teardown(); });
+        }
+
+        /// 释放所有 idle 连接并唤醒等待者；仅在 strand 上执行（或析构时独占执行）。
+        void
+        teardown()
+        {
             std::vector<waiters_list> pending_waiters;
             std::vector<std::unique_ptr<http_client>> to_close;
 
+            pending_waiters.reserve(waiters_.size());
+            for (auto& [url, waiters] : waiters_)
             {
-                std::lock_guard<std::mutex> lock(mutex_);
-
-                pending_waiters.reserve(waiters_.size());
-                for (auto& [url, waiters] : waiters_)
-                {
-                    pending_waiters.push_back(std::move(waiters));
-                }
-                waiters_.clear();
-
-                for (auto& [info, st] : pools_)
-                {
-                    for (auto& pc : st.idle)
-                    {
-                        to_close.push_back(std::move(pc.client));
-                    }
-                    st.idle.clear();
-                }
-                pools_.clear();
-                total_connections_ = 0;
-                total_active_ = 0;
+                pending_waiters.push_back(std::move(waiters));
             }
+            waiters_.clear();
 
-            // 锁外请求 ticker 取消：避免持 mutex_ 时 inline 驱动 on_stop 造成重入/死锁。
-            ticker::stop();
+            for (auto& [info, st] : pools_)
+            {
+                for (auto& pc : st.idle)
+                {
+                    to_close.push_back(std::move(pc.client));
+                }
+                st.idle.clear();
+            }
+            pools_.clear();
+            total_connections_ = 0;
+            total_active_ = 0;
 
-            // 锁外 close/析构 idle 连接。
+            // close/析构 idle 连接（此时已不持有任何池状态）。
             for (auto& conn : to_close)
             {
                 conn->close();
@@ -275,7 +301,6 @@ namespace httplib::client
         pool_stats
         stats(std::string const& url) const
         {
-            std::lock_guard<std::mutex> lock(mutex_);
             pool_stats s;
             auto it = pools_.find(url);
             if (it != pools_.end())
@@ -289,22 +314,28 @@ namespace httplib::client
         size_t
         active_count() const
         {
-            std::lock_guard<std::mutex> lock(mutex_);
-            return total_active_;
+            return total_active_.load(std::memory_order_relaxed);
         }
 
         size_t
         idle_count() const
         {
-            std::lock_guard<std::mutex> lock(mutex_);
-            return total_connections_ - total_active_;
+            return total_connections_.load(std::memory_order_relaxed) - total_active_.load(std::memory_order_relaxed);
         }
 
         size_t
         total_count() const
         {
-            std::lock_guard<std::mutex> lock(mutex_);
-            return total_connections_;
+            return total_connections_.load(std::memory_order_relaxed);
+        }
+
+        // ---- async 版本：先切到池执行器，再读取池状态，可从任意线程调用 ----
+
+        net::awaitable<pool_stats>
+        async_stats(std::string url) const
+        {
+            co_await net::dispatch(get_executor(), net::use_awaitable);
+            co_return stats(url);
         }
 
       private:
@@ -317,16 +348,16 @@ namespace httplib::client
         void
         track_destroyed()
         {
-            if (total_connections_ > 0)
+            if (total_connections_.load(std::memory_order_relaxed) > 0)
             {
                 --total_connections_;
             }
         }
 
-        // ---- 持锁计数/容量辅助（调用前必须已持有 mutex_）----
+        // ---- 计数/容量辅助（仅在 strand 上访问）----
 
         bool
-        has_capacity_locked(std::string const& url) const noexcept
+        has_capacity(std::string const& url) const noexcept
         {
             bool route_ok = true;
             if (auto it = pools_.find(url); it != pools_.end())
@@ -340,20 +371,21 @@ namespace httplib::client
                 route_ok = false;
             }
 
-            return route_ok && (cfg_.max_total == 0 || total_connections_ < cfg_.max_total);
+            return route_ok
+                   && (cfg_.max_total == 0 || total_connections_.load(std::memory_order_relaxed) < cfg_.max_total);
         }
 
         void
-        inc_active_locked(pool_state& st) noexcept
+        inc_active(pool_state& st) noexcept
         {
             ++st.active_count;
             ++total_active_;
         }
 
         void
-        dec_active_locked(pool_state& st) noexcept
+        dec_active(pool_state& st) noexcept
         {
-            if (st.active_count > 0 && total_active_ > 0)
+            if (st.active_count > 0 && total_active_.load(std::memory_order_relaxed) > 0)
             {
                 --st.active_count;
                 --total_active_;
@@ -373,7 +405,7 @@ namespace httplib::client
         }
 
         bool
-        has_live_waiter_locked(std::string const& url) noexcept
+        has_live_waiter(std::string const& url) noexcept
         {
             auto it = waiters_.find(url);
             if (it == waiters_.end())
@@ -390,13 +422,13 @@ namespace httplib::client
         }
 
         bool
-        can_serve_locked(std::string const& url) const noexcept
+        can_serve(std::string const& url) const noexcept
         {
             if (auto it = pools_.find(url); it != pools_.end() && !it->second.idle.empty())
             {
                 return true;
             }
-            return has_capacity_locked(url);
+            return has_capacity(url);
         }
 
         void
@@ -424,7 +456,7 @@ namespace httplib::client
         }
 
         void
-        remove_waiter_locked(std::string const& url, std::shared_ptr<waiter_node> const& node)
+        remove_waiter(std::string const& url, std::shared_ptr<waiter_node> const& node)
         {
             auto it = waiters_.find(url);
             if (it == waiters_.end())
@@ -453,14 +485,14 @@ namespace httplib::client
             }
 
             // 队首 waiter 退出后，如果仍有空位/空闲连接，继续按 FIFO 唤醒下一个。
-            if (has_live_waiter_locked(url) && can_serve_locked(url))
+            if (has_live_waiter(url) && can_serve(url))
             {
                 wake_one_waiter(url);
             }
         }
 
         void
-        cleanup_waiters_locked() noexcept
+        cleanup_waiters() noexcept
         {
             for (auto it = waiters_.begin(); it != waiters_.end();)
             {
@@ -480,7 +512,7 @@ namespace httplib::client
         acquire_or_create(std::string const& url, bool serving)
         {
             // 未被唤醒的新请求不得越过已有等待者取连接/建连。
-            if (!serving && has_live_waiter_locked(url))
+            if (!serving && has_live_waiter(url))
             {
                 co_return client_handle {};
             }
@@ -538,35 +570,37 @@ namespace httplib::client
                         continue;
                     }
 
-                    inc_active_locked(validated_st);
+                    inc_active(validated_st);
                     co_return client_handle(std::static_pointer_cast<http_client_pool::impl>(shared_from_this()),
                                             std::move(conn));
                 }
 
-                inc_active_locked(st);
+                inc_active(st);
                 co_return client_handle(std::static_pointer_cast<http_client_pool::impl>(shared_from_this()),
                                         std::move(conn));
             }
 
             // Only touch pools_ when actually creating a connection, so a failed
             // acquire does not leave an empty pool_state entry behind.
-            if (has_capacity_locked(url))
+            if (has_capacity(url))
             {
                 auto& st = pools_[url];
-                inc_active_locked(st);
+                inc_active(st);
                 track_created();
                 try
                 {
                     // 用 host/port/ssl 构造，避免 URL 二次 parse 失败把异常抛进 acquire 路径。
-                    auto client = std::make_unique<http_client>(ex_, url);
+                    auto client = std::make_unique<http_client>(get_executor(), url);
                     apply_client_settings(*client);
-                    get_logger()->debug("client pool: created connection for {} (total={})", url, total_connections_);
+                    get_logger()->debug("client pool: created connection for {} (total={})",
+                                        url,
+                                        total_connections_.load(std::memory_order_relaxed));
                     co_return client_handle(std::static_pointer_cast<http_client_pool::impl>(shared_from_this()),
                                             std::move(client));
                 }
                 catch (...)
                 {
-                    dec_active_locked(st);
+                    dec_active(st);
                     track_destroyed();
                     wake_one_waiter(url);
                     throw;
@@ -582,9 +616,7 @@ namespace httplib::client
             auto now = std::chrono::steady_clock::now();
             std::vector<std::unique_ptr<http_client>> to_close;
             {
-                std::lock_guard<std::mutex> lock(mutex_);
-
-                cleanup_waiters_locked();
+                cleanup_waiters();
                 for (auto it = pools_.begin(); it != pools_.end();)
                 {
                     auto& st = it->second;
@@ -626,16 +658,12 @@ namespace httplib::client
       private:
         using waiters_list = std::deque<std::weak_ptr<waiter_node>>;
 
-        mutable std::mutex mutex_;
         std::unordered_map<std::string, pool_state> pools_;
-        size_t total_connections_ = 0;
-        size_t total_active_ = 0;
+        std::atomic<size_t> total_connections_ { 0 };
+        std::atomic<size_t> total_active_ { 0 };
         pool_params cfg_;
 
         std::unordered_map<std::string, waiters_list> waiters_;
-
-      public:
-        net::any_io_executor ex_;
     };
 
     // ---- client_handle ----
@@ -805,7 +833,7 @@ namespace httplib::client
     net::any_io_executor
     http_client_pool::get_executor() noexcept
     {
-        return impl_->ex_;
+        return impl_->get_executor();
     }
 
     std::shared_ptr<spdlog::logger>
@@ -841,29 +869,46 @@ namespace httplib::client
     void
     http_client_pool::stop()
     {
+        // 同步翻转 is_running_（ticker::stop 幂等）并取消维护循环；实际清理在
+        // ticker 的 on_stop() 于池 strand 上执行，无需在此等待。
         impl_->stop();
     }
 
-    http_client_pool::pool_stats
+    std::future<http_client_pool::pool_stats>
     http_client_pool::stats(std::string_view host, uint16_t port, scheme s /*= scheme::plain*/) const
     {
-        auto url = util::make_url_value(host, port, s);
-        return impl_->stats(url);
+        auto impl = impl_;
+        return net::co_spawn(impl->get_executor(), async_stats(host, port, s), net::use_future);
     }
 
-    httplib::client::http_client_pool::pool_stats
+    std::future<http_client_pool::pool_stats>
     http_client_pool::stats(std::string_view url) const
     {
+        auto impl = impl_;
+        return net::co_spawn(impl->get_executor(), async_stats(url), net::use_future);
+    }
+
+    net::awaitable<http_client_pool::pool_stats>
+    http_client_pool::async_stats(std::string_view host, uint16_t port, scheme s /*= scheme::plain*/) const
+    {
+        auto impl = impl_;
+        co_return co_await impl->async_stats(util::make_url_value(host, port, s));
+    }
+
+    net::awaitable<http_client_pool::pool_stats>
+    http_client_pool::async_stats(std::string_view url) const
+    {
+        auto impl = impl_;
         auto r = boost::urls::parse_uri(url);
         if (!r)
         {
-            return {};
+            co_return pool_stats {};
         }
         auto const& u = *r;
         auto host = u.host();
         auto port = u.port_number() ? u.port_number() : (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
         auto ssl = u.scheme_id() == boost::urls::scheme::https;
-        return impl_->stats(util::make_url_value(host, port, ssl ? scheme::tls : scheme::plain));
+        co_return co_await impl->async_stats(util::make_url_value(host, port, ssl ? scheme::tls : scheme::plain));
     }
 
 } // namespace httplib::client

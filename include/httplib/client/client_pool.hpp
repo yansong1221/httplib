@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <future>
 #include <memory>
 #include <string>
 
@@ -110,20 +111,29 @@ namespace httplib::client
         net::awaitable<client_handle> async_acquire(std::string_view url,
                                                     std::chrono::steady_clock::duration wait_timeout = default_timeout);
 
+        /// \brief 池内部串行化用的执行器（在传入 executor 上包了一层 strand）。
+        /// \details 池状态只在自身 strand 上访问；\c async_acquire 会自行切到该 strand。
         net::any_io_executor get_executor() noexcept;
 
         std::shared_ptr<spdlog::logger> logger() const;
         void set_logger(std::shared_ptr<spdlog::logger> logger);
 
+        /// \note 计数为原子读，可从任意线程调用。
         size_t active_count() const;
         size_t idle_count() const;
         size_t total_count() const;
 
-        /// 关闭池（终态，不可重启），唤醒所有等待者。
+        /// 关闭池（终态，不可重启），唤醒所有等待者。实际清理在池的 strand 上
+        /// （ticker 的 on_stop）执行。
         void stop();
 
-        pool_stats stats(std::string_view host, uint16_t port, scheme s) const;
-        pool_stats stats(std::string_view url) const;
+        /// \return 在池执行器上完成读取后变为 ready 的 future；不阻塞调用线程。
+        std::future<pool_stats> stats(std::string_view host, uint16_t port, scheme s) const;
+        std::future<pool_stats> stats(std::string_view url) const;
+
+        /// \brief stats 的异步版本：先切到池执行器再读取，可从任意线程调用。
+        net::awaitable<pool_stats> async_stats(std::string_view host, uint16_t port, scheme s) const;
+        net::awaitable<pool_stats> async_stats(std::string_view url) const;
 
       private:
         std::shared_ptr<impl> impl_;
