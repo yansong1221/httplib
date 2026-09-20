@@ -94,9 +94,10 @@ namespace httplib::client
         net::awaitable<void> co_connect(boost::system::error_code& ec);
         net::awaitable<http_client::response_result> async_send_request_lazy(request& req);
 
-        /// Apply the stored read/write rate limits to `stream_`. Caller must hold
-        /// stream_mutex_.
-        void apply_rate_limits(std::shared_ptr<http_stream> s) const;
+        /// Apply the stored read/write rate limits to the current stream（`stream_`）。
+        /// 可在任意线程调用：内部把 rate_policy 的修改投递到 strand 上执行，与 Beast
+        /// 绑定在同一 strand 的限速记账串行化，避免与在途读写并发改限速。
+        void apply_rate_limits() const;
 
         /// Copy the per-connection policy (timeout / limits / SSL / ca cert / logger)
         /// from `other` onto `*this`. Used when a redirect spawns a fresh impl.
@@ -113,10 +114,10 @@ namespace httplib::client
                    || ec == http::error::end_of_stream;
         }
 
-        // NOTE: async_write / async_read / async_read_some are lock-free primitives.
-        // The caller must hold write_mutex_ (writes) / read_mutex_ (reads) for as long
-        // as the operation is in flight. The socket is snapshotted per operation so a
-        // concurrent close() can never turn `*stream_` into a null dereference.
+        // NOTE: async_write / async_read / async_read_some 是无锁读写原语，串行化
+        // 完全依赖 strand（executor_）：每个入口先 dispatch 到 strand，底层 socket 操作
+        // 期间不持有任何 mutex。socket 每次操作按 `stream_->load()` 快照使用，因此并发
+        // async_close() 置空 stream_ 不会造成空指针解引用，只会让在途操作以错误码返回。
         template <typename Body>
         net::awaitable<void>
         async_write(http::request_serializer<Body>& serializer, bool headers_only, boost::system::error_code& ec)
@@ -245,12 +246,13 @@ namespace httplib::client
         uint16_t const port_;
         bool const use_ssl_;
         std::atomic<bool> verify_ssl_ { true };
-        /// 仅由 stream_mutex_ 保护（std::string 非原子，co_connect 读取前需持锁）。
-        std::string ca_cert_;
+        /// 原子快照：set_ca_cert / copy_settings_from 写，co_connect 读，跨线程安全。
+        std::atomic<std::shared_ptr<const std::string>> ca_cert_ { nullptr };
 
         std::atomic<std::shared_ptr<http_stream>> stream_;
         mutable std::recursive_mutex stream_mutex_;
-        /// 仅由 read_mutex_ 保护：所有基于 Beast parser 的读取共享该缓冲。
+        /// 仅由 strand（executor_）串行访问：所有基于 Beast parser 的读取都 dispatch 到
+        /// strand 后共享该缓冲。
         beast::flat_buffer buffer_;
         /// 仅由 stream_mutex_ 保护。
         std::weak_ptr<lazy_request_impl> write_impl_;

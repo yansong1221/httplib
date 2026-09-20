@@ -42,20 +42,22 @@ namespace httplib::client
     }
 
     void
-    http_client::impl::apply_rate_limits(std::shared_ptr<http_stream> s) const
+    http_client::impl::apply_rate_limits() const
     {
-        if (!s)
+        if (auto s = stream_.load(); s)
         {
-            return;
+            net::dispatch(executor_,
+                          [self = shared_from_this(), s]()
+                          {
+                              auto to_limit = [](std::uint64_t bytes_per_second) -> std::size_t
+                              {
+                                  return bytes_per_second == 0 ? (std::numeric_limits<std::size_t>::max)()
+                                                               : static_cast<std::size_t>(bytes_per_second);
+                              };
+                              s->rate_policy().read_limit(to_limit(self->download_rate_limit_.load()));
+                              s->rate_policy().write_limit(to_limit(self->upload_rate_limit_.load()));
+                          });
         }
-
-        auto to_limit = [](std::uint64_t bytes_per_second) -> std::size_t
-        {
-            return bytes_per_second == 0 ? (std::numeric_limits<std::size_t>::max)()
-                                         : static_cast<std::size_t>(bytes_per_second);
-        };
-        s->rate_policy().read_limit(to_limit(download_rate_limit_.load()));
-        s->rate_policy().write_limit(to_limit(upload_rate_limit_.load()));
     }
 
     void
@@ -69,32 +71,27 @@ namespace httplib::client
         download_rate_limit_.store(other.download_rate_limit_.load());
         upload_rate_limit_.store(other.upload_rate_limit_.load());
         set_logger(other.get_logger());
-
-        std::unique_lock<std::recursive_mutex> lck(other.stream_mutex_);
-        ca_cert_ = other.ca_cert_;
+        ca_cert_.store(other.ca_cert_.load());
     }
 
     void
     http_client::impl::set_download_rate_limit(std::uint64_t bytes_per_second)
     {
-        std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
         download_rate_limit_ = bytes_per_second;
-        apply_rate_limits(stream_.load());
+        apply_rate_limits();
     }
 
     void
     http_client::impl::set_upload_rate_limit(std::uint64_t bytes_per_second)
     {
-        std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
         upload_rate_limit_ = bytes_per_second;
-        apply_rate_limits(stream_.load());
+        apply_rate_limits();
     }
 
     void
     http_client::impl::set_ca_cert(std::string_view cert)
     {
-        std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
-        ca_cert_ = std::string(cert);
+        ca_cert_.store(std::make_shared<std::string const>(cert));
     }
 
     bool
@@ -110,19 +107,6 @@ namespace httplib::client
         std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
         return !read_impl_.expired() || !write_impl_.expired();
     }
-
-    // bool
-    // http_client::impl::is_alive() const
-    //{
-    //     std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
-    //     auto s = stream_.load();
-    //     if (!s || !s->is_open())
-    //     {
-    //         return false;
-    //     }
-    //     boost::system::error_code ec;
-    //     return s->is_peer_alive(ec);
-    // }
 
     net::awaitable<http_client::response_result>
     http_client::impl::async_send_request_lazy(request& req)
@@ -368,15 +352,21 @@ namespace httplib::client
         {
             co_await async_close();
 
-            auto stream_result = http_stream::create_stream(executor_, host_, use_ssl_, verify_ssl_.load(), ca_cert_);
+            auto ca_cert = ca_cert_.load();
+            auto stream_result = http_stream::create_stream(executor_,
+                                                            host_,
+                                                            use_ssl_,
+                                                            verify_ssl_.load(),
+                                                            ca_cert ? std::string_view(*ca_cert) : std::string_view {});
             if (!stream_result)
             {
                 ec = stream_result.error();
                 co_return;
             }
             auto s = std::make_shared<http_stream>(std::move(*stream_result));
-            apply_rate_limits(s);
             stream_.store(s);
+
+            apply_rate_limits();
 
             boost::system::error_code addr_ec;
             auto addr = net::ip::make_address(host_, addr_ec);
