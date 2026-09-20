@@ -15,12 +15,12 @@
 namespace httplib::client
 {
 
-    proxy_client::impl::impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl)
+    proxy_client::impl::impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, scheme s)
         : executor_(ex)
         , resolver_(ex)
         , host_(host)
         , port_(port)
-        , use_ssl_(ssl)
+        , scheme_(s)
         , httplib::detail::logger("httplib.proxy_client")
     {
     }
@@ -36,7 +36,7 @@ namespace httplib::client
             co_return boost::system::error_code {};
         }
 
-        auto stream_result = http_stream::create_stream(executor_, host_, use_ssl_, verify_ssl_, ca_cert_);
+        auto stream_result = http_stream::create_stream(executor_, host_, scheme_ == scheme::tls, verify_ssl_, ca_cert_);
         if (!stream_result)
         {
             get_logger()->error("proxy connect failed {}:{}: {}", host_, port_, stream_result.error().message());

@@ -77,7 +77,7 @@ namespace httplib::client
         }
 
         net::awaitable<client_handle>
-        async_acquire(std::string_view host, uint16_t port, bool ssl, std::chrono::steady_clock::duration wait_timeout)
+        async_acquire(std::string_view host, uint16_t port, scheme s, std::chrono::steady_clock::duration wait_timeout)
         {
             if (!is_running())
             {
@@ -85,7 +85,7 @@ namespace httplib::client
             }
 
             auto self = shared_from_this();
-            auto url = util::make_url_value(host, port, ssl);
+            auto url = util::make_url_value(host, port, s);
 
             // wait_timeout <= 0 means "fail fast": try once and return timed_out
             // immediately if no connection is available without waiting. The deadline
@@ -183,7 +183,7 @@ namespace httplib::client
         void
         release(std::unique_ptr<http_client> conn)
         {
-            auto url = util::make_url_value(conn->host(), conn->port(), conn->is_use_ssl());
+            auto url = util::make_url_value(conn->host(), conn->port(), conn->is_use_ssl() ? scheme::tls : scheme::plain);
 
             std::lock_guard<std::mutex> lock(mutex_);
 
@@ -780,10 +780,10 @@ namespace httplib::client
     net::awaitable<http_client_pool::client_handle>
     http_client_pool::async_acquire(std::string_view host,
                                     uint16_t port,
-                                    bool ssl /*= false*/,
+                                    scheme s /*= scheme::plain*/,
                                     std::chrono::steady_clock::duration wait_timeout /*= default_timeout*/)
     {
-        co_return co_await impl_->async_acquire(host, port, ssl, wait_timeout);
+        co_return co_await impl_->async_acquire(host, port, s, wait_timeout);
     }
 
     net::awaitable<http_client_pool::client_handle>
@@ -799,7 +799,7 @@ namespace httplib::client
         auto host = u.host();
         auto port = u.port_number() ? u.port_number() : (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
         auto ssl = u.scheme_id() == boost::urls::scheme::https;
-        co_return co_await impl_->async_acquire(host, port, ssl, wait_timeout);
+        co_return co_await impl_->async_acquire(host, port, ssl ? scheme::tls : scheme::plain, wait_timeout);
     }
 
     net::any_io_executor
@@ -845,9 +845,9 @@ namespace httplib::client
     }
 
     http_client_pool::pool_stats
-    http_client_pool::stats(std::string_view host, uint16_t port, bool ssl /*= false*/) const
+    http_client_pool::stats(std::string_view host, uint16_t port, scheme s /*= scheme::plain*/) const
     {
-        auto url = util::make_url_value(host, port, ssl);
+        auto url = util::make_url_value(host, port, s);
         return impl_->stats(url);
     }
 
@@ -863,7 +863,7 @@ namespace httplib::client
         auto host = u.host();
         auto port = u.port_number() ? u.port_number() : (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
         auto ssl = u.scheme_id() == boost::urls::scheme::https;
-        return impl_->stats(util::make_url_value(host, port, ssl));
+        return impl_->stats(util::make_url_value(host, port, ssl ? scheme::tls : scheme::plain));
     }
 
 } // namespace httplib::client

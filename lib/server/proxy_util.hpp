@@ -140,8 +140,8 @@ namespace httplib::server::detail
         v.port = u.port_number() ? u.port_number() : (v.ssl ? 443 : 80);
         v.prefix_path = std::string(u.encoded_path());
         v.target_path = make_upstream_path(req.target(), prefix, v.prefix_path);
-        v.url = websocket ? util::make_url_value(v.host, v.port, v.ssl, v.target_path, v.scheme)
-                          : util::make_url_value(v.host, v.port, v.ssl, v.target_path);
+        v.url = websocket ? util::make_url_value(v.host, v.port, v.ssl ? client::scheme::tls : client::scheme::plain, v.target_path, v.scheme)
+                          : util::make_url_value(v.host, v.port, v.ssl ? client::scheme::tls : client::scheme::plain, v.target_path);
 
         co_return out;
     }

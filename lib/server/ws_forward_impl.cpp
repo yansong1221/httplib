@@ -39,7 +39,8 @@ namespace httplib::server::detail
             co_await interceptor_->on_upstream_request(req, upstream_headers_, upstream_.url);
         }
 
-        auto upstream = std::make_shared<client::ws_client>(ex_, upstream_.host, upstream_.port, upstream_.ssl);
+        auto upstream
+            = std::make_shared<client::ws_client>(ex_, upstream_.host, upstream_.port, upstream_.ssl ? client::scheme::tls : client::scheme::plain);
         upstream->set_logger(logger_);
 
         auto ec = co_await upstream->async_run(
@@ -118,7 +119,8 @@ namespace httplib::server::detail
         upstream_headers_.erase(http::field::sec_websocket_version);
         upstream_headers_.erase(http::field::upgrade);
         upstream_headers_.erase(http::field::connection);
-        upstream_headers_.set(http::field::host, util::make_host_value(upstream_.host, upstream_.port, upstream_.ssl));
+        upstream_headers_.set(
+            http::field::host, util::make_host_value(upstream_.host, upstream_.port, upstream_.ssl ? client::scheme::tls : client::scheme::plain));
 
         co_return true;
     }

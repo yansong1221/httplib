@@ -226,7 +226,7 @@ namespace httplib::client
         auto const& u = *r;
         ui.host = u.host();
         ui.port = u.port_number() ? u.port_number() : (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
-        ui.ssl = u.scheme_id() == boost::urls::scheme::https;
+        ui.scheme = u.scheme_id() == boost::urls::scheme::https ? scheme::tls : scheme::plain;
         std::string ep(u.encoded_path().data(), u.encoded_path().size());
         ui.path = ep.empty() ? "/" : ep;
         if (u.has_query())
@@ -242,9 +242,10 @@ namespace httplib::client
     {
         std::string key;
         key.reserve(ui.host.size() + ui.path.size() + 32);
-        key.append(ui.ssl ? "https://" : "http://");
+        key.append(client::to_string(ui.scheme));
+        key.append("://");
         key.append(ui.host);
-        if ((ui.ssl && ui.port != 443) || (!ui.ssl && ui.port != 80))
+        if (ui.port != client::default_port(ui.scheme))
         {
             key.push_back(':');
             key.append(std::to_string(ui.port));
@@ -587,7 +588,7 @@ namespace httplib::client
             }
             t.host = ui->host;
             t.port = ui->port;
-            t.ssl = ui->ssl;
+            t.scheme = ui->scheme;
             t.path = ui->path;
         }
         else
@@ -998,7 +999,7 @@ namespace httplib::client
 
         auto h = ui.host;
         auto p = ui.port;
-        auto s = ui.ssl;
+        auto s = ui.scheme;
         auto t = ui.path;
 
         for (int redir = 0; redir <= active_config_.max_redirects; ++redir)
@@ -1056,13 +1057,13 @@ namespace httplib::client
                     {
                         // CL-02: 仅当 Location 为绝对 URL 且 origin 变化时移除敏感头，避免凭据泄露；
                         // 同 origin 重定向保留原头。
-                        if (rt->host != h || rt->port != p || rt->ssl != s)
+                        if (rt->host != h || rt->port != p || rt->scheme != s)
                         {
                             redirect::strip_origin_bound_headers(merged);
                         }
                         h = rt->host;
                         p = rt->port == 0 ? p : rt->port;
-                        s = rt->ssl;
+                        s = rt->scheme;
                         t = rt->path.empty() ? "/" : rt->path;
                     }
                     else

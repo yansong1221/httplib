@@ -237,7 +237,9 @@ namespace httplib::server::detail
 
                 auto new_ref = std::format("{}://{}{}",
                                            upstream_.scheme,
-                                           util::make_host_value(upstream_.host, upstream_.port, upstream_.ssl),
+util::make_host_value(upstream_.host,
+                                                                  upstream_.port,
+                                                                  upstream_.ssl ? client::scheme::tls : client::scheme::plain),
                                            ref_path);
                 if (!r->encoded_query().empty())
                 {
@@ -262,7 +264,7 @@ namespace httplib::server::detail
             co_await interceptor_->on_upstream_request(req, upstream_headers_, upstream_.url);
         }
 
-        client_ = co_await pool_->async_acquire(upstream_.host, upstream_.port, upstream_.ssl);
+        client_ = co_await pool_->async_acquire(upstream_.host, upstream_.port, upstream_.ssl ? client::scheme::tls : client::scheme::plain);
         if (!client_)
         {
             logger_->trace("[proxy] acquire client failed for {}:{}", upstream_.host, upstream_.port);
@@ -356,7 +358,8 @@ namespace httplib::server::detail
         if (result >= http::status::moved_permanently && result <= http::status::permanent_redirect
             && result != http::status::not_modified)
         {
-            auto upstream_base = util::make_url_value(upstream_.host, upstream_.port, upstream_.ssl);
+            auto upstream_base
+                = util::make_url_value(upstream_.host, upstream_.port, upstream_.ssl ? client::scheme::tls : client::scheme::plain);
             std::string location(response_hdrs[http::field::location]);
             if (location.starts_with(upstream_base))
             {

@@ -8,12 +8,12 @@
 
 namespace httplib::client
 {
-    ws_client::impl::impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl)
+    ws_client::impl::impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, scheme s)
         : executor_(ex)
         , resolver_(ex)
         , host_(host)
         , port_(port)
-        , use_ssl_(ssl)
+        , scheme_(s)
         , ac_que_(ex)
         , httplib::detail::logger("httplib.ws_client")
     {
@@ -37,7 +37,7 @@ namespace httplib::client
 
         if (!is_open())
         {
-            auto stream_result = http_stream::create_stream(executor_, host_, use_ssl_, verify_ssl_, ca_cert_);
+            auto stream_result = http_stream::create_stream(executor_, host_, scheme_ == scheme::tls, verify_ssl_, ca_cert_);
             if (!stream_result)
             {
                 get_logger()->error("ws connect failed {}:{}: {}", host_, port_, stream_result.error().message());
@@ -63,8 +63,8 @@ namespace httplib::client
         stream_->set_option(websocket::stream_base::decorator(
             [&](websocket::request_type& req)
             {
-                req.set(http::field::origin, util::make_url_value(host_, port_, use_ssl_));
-                req.set(http::field::host, util::make_host_value(host_, port_, use_ssl_));
+                req.set(http::field::origin, util::make_url_value(host_, port_, scheme_));
+                req.set(http::field::host, util::make_host_value(host_, port_, scheme_));
                 req.set(http::field::user_agent, std::string(BOOST_BEAST_VERSION_STRING) + "websocket-client-coro");
                 for (auto const& field : headers)
                 {

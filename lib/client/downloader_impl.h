@@ -39,7 +39,7 @@ namespace httplib::client
         {
             std::string host;
             uint16_t port = 0;
-            bool ssl = false;
+            scheme scheme = client::scheme::plain;
             std::string path;
         };
 
@@ -53,7 +53,7 @@ namespace httplib::client
         {
             std::string host;
             uint16_t port = 0;
-            bool ssl = false;
+            scheme scheme = client::scheme::plain;
             std::string path;
             bool valid = false;
         };

@@ -1,5 +1,6 @@
 #pragma once
 #include "httplib/config.hpp"
+#include "httplib/client/scheme.hpp"
 #include "httplib/util/type_traits.h"
 #include <boost/asio/buffer.hpp>
 #include <charconv>
@@ -62,11 +63,11 @@ namespace httplib::util
 
     HTTPLIB_API std::string_view buffer_to_string_view(boost::asio::const_buffer const& buffer);
 
-    HTTPLIB_API std::string make_host_value(std::string_view host, uint16_t port, bool ssl);
+    HTTPLIB_API std::string make_host_value(std::string_view host, uint16_t port, client::scheme s);
     HTTPLIB_API std::string make_url_value(std::string_view host,
                                            uint16_t port,
-                                           bool ssl,
+                                           client::scheme s,
                                            std::string_view target = {},
-                                           std::string_view scheme = {});
+                                           std::string_view url_scheme = {});
 
 } // namespace httplib::util

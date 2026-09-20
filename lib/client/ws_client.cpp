@@ -4,13 +4,13 @@
 namespace httplib::client
 {
 
-    ws_client::ws_client(net::io_context& ex, std::string_view host, uint16_t port, bool ssl /*= false*/)
-        : ws_client(ex.get_executor(), host, port, ssl)
+    ws_client::ws_client(net::io_context& ex, std::string_view host, uint16_t port, scheme s /*= scheme::plain*/)
+        : ws_client(ex.get_executor(), host, port, s)
     {
     }
 
-    ws_client::ws_client(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl /*= false*/)
-        : impl_(std::make_shared<ws_client::impl>(ex, host, port, ssl))
+    ws_client::ws_client(net::any_io_executor const& ex, std::string_view host, uint16_t port, scheme s /*= scheme::plain*/)
+        : impl_(std::make_shared<ws_client::impl>(ex, host, port, s))
     {
     }
     ws_client::~ws_client() { abort(); }

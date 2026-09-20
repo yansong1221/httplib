@@ -1,6 +1,7 @@
 #pragma once
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_fwd.hpp"
+#include "httplib/client/scheme.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <boost/system/error_code.hpp>
 #include <chrono>
@@ -103,7 +104,7 @@ namespace httplib::client
 
         net::awaitable<client_handle> async_acquire(std::string_view host,
                                                     uint16_t port,
-                                                    bool ssl,
+                                                    scheme s,
                                                     std::chrono::steady_clock::duration wait_timeout = default_timeout);
 
         net::awaitable<client_handle> async_acquire(std::string_view url,
@@ -121,7 +122,7 @@ namespace httplib::client
         /// 关闭池（终态，不可重启），唤醒所有等待者。
         void stop();
 
-        pool_stats stats(std::string_view host, uint16_t port, bool ssl) const;
+        pool_stats stats(std::string_view host, uint16_t port, scheme s) const;
         pool_stats stats(std::string_view url) const;
 
       private:

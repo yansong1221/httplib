@@ -29,14 +29,14 @@
 namespace httplib::client
 {
 
-    http_client::impl::impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl)
+    http_client::impl::impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, scheme s)
 
         : executor_(net::make_strand(ex))
         , resolver_(executor_)
         , host_(host)
-        , host_value_(util::make_host_value(host, port, ssl))
+        , host_value_(util::make_host_value(host, port, s))
         , port_(port)
-        , use_ssl_(ssl)
+        , scheme_(s)
         , detail::logger("httplib.client")
     {
     }
@@ -198,14 +198,15 @@ namespace httplib::client
                         = u.port_number() ? u.port_number() : (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
                     auto new_ssl = u.scheme_id() == boost::urls::scheme::https;
 
-                    if (new_host != host_ || new_port != port_ || new_ssl != use_ssl_)
+                    if (new_host != host_ || new_port != port_ || new_ssl != (scheme_ == scheme::tls))
                     {
                         // CL-02: 跨 origin 重定向时移除 origin-bound 敏感头，避免认证凭据泄露到新主机
                         redirect::strip_origin_bound_headers(req.base());
 
                         req.target(u.encoded_target().empty() ? "/" : u.encoded_target());
 
-                        auto new_impl = std::make_shared<impl>(executor_, std::move(new_host), new_port, new_ssl);
+                        auto new_impl = std::make_shared<impl>(
+                            executor_, std::move(new_host), new_port, new_ssl ? scheme::tls : scheme::plain);
                         new_impl->copy_settings_from(*this);
                         new_impl->max_redirects_.store(max_redirects - r - 1);
 
@@ -355,7 +356,7 @@ namespace httplib::client
             auto ca_cert = ca_cert_.load();
             auto stream_result = http_stream::create_stream(executor_,
                                                             host_,
-                                                            use_ssl_,
+                                                            scheme_ == scheme::tls,
                                                             verify_ssl_.load(),
                                                             ca_cert ? std::string_view(*ca_cert) : std::string_view {});
             if (!stream_result)
@@ -385,7 +386,9 @@ namespace httplib::client
             }
             if (ec)
             {
-                get_logger()->warn("connect [{}] error {}", util::make_url_value(host_, port_, use_ssl_), ec.message());
+                get_logger()->warn("connect [{}] error {}",
+                             util::make_url_value(host_, port_, scheme_),
+                             ec.message());
                 co_await async_close();
                 co_return;
             }
@@ -444,13 +447,13 @@ namespace httplib::client
         co_return s->is_peer_alive(ec);
     }
 
-    http_client::http_client(net::io_context& ex, std::string_view host, uint16_t port, bool ssl)
-        : http_client(ex.get_executor(), host, port, ssl)
+    http_client::http_client(net::io_context& ex, std::string_view host, uint16_t port, scheme s)
+        : http_client(ex.get_executor(), host, port, s)
     {
     }
 
-    http_client::http_client(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl)
-        : impl_(std::make_shared<http_client::impl>(ex, host, port, ssl))
+    http_client::http_client(net::any_io_executor const& ex, std::string_view host, uint16_t port, scheme s)
+        : impl_(std::make_shared<http_client::impl>(ex, host, port, s))
     {
     }
 
@@ -469,7 +472,11 @@ namespace httplib::client
         auto port = (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
         port = u.has_port() ? u.port_number() : port;
 
-        impl_ = std::make_shared<http_client::impl>(ex, u.host(), port, u.scheme_id() == boost::urls::scheme::https);
+        impl_ = std::make_shared<http_client::impl>(
+            ex,
+            u.host(),
+            port,
+            u.scheme_id() == boost::urls::scheme::https ? scheme::tls : scheme::plain);
     }
 
     http_client::~http_client() {}
@@ -501,7 +508,7 @@ namespace httplib::client
     bool
     http_client::is_use_ssl() const
     {
-        return impl_->use_ssl_;
+        return impl_->scheme_ == scheme::tls;
     }
 
     std::shared_ptr<spdlog::logger>

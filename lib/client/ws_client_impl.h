@@ -14,7 +14,7 @@ namespace httplib::client
         , public std::enable_shared_from_this<impl>
     {
       public:
-        impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl);
+        impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, scheme s);
 
       public:
         net::awaitable<boost::system::error_code> async_send(std::string&& data, bool binary = false);
@@ -71,7 +71,7 @@ namespace httplib::client
         tcp::resolver resolver_;
         std::string host_;
         uint16_t port_ = 0;
-        bool use_ssl_ = false;
+        scheme scheme_ = scheme::plain;
         bool verify_ssl_ = true;
         std::string ca_cert_;
 

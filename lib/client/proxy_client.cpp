@@ -4,13 +4,13 @@
 namespace httplib::client
 {
 
-    proxy_client::proxy_client(net::io_context& ex, std::string_view host, uint16_t port, bool ssl)
-        : proxy_client(ex.get_executor(), host, port, ssl)
+    proxy_client::proxy_client(net::io_context& ex, std::string_view host, uint16_t port, scheme s /*= scheme::plain*/)
+        : proxy_client(ex.get_executor(), host, port, s)
     {
     }
 
-    proxy_client::proxy_client(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl)
-        : impl_(std::make_shared<proxy_client::impl>(ex, host, port, ssl))
+    proxy_client::proxy_client(net::any_io_executor const& ex, std::string_view host, uint16_t port, scheme s /*= scheme::plain*/)
+        : impl_(std::make_shared<proxy_client::impl>(ex, host, port, s))
     {
     }
 

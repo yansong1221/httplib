@@ -148,7 +148,7 @@ namespace
                 auto ep = server.local_endpoint();
                 server.run();
 
-                httplib::client::http_client client(pool.get_executor(), "localhost", ep.port(), true);
+                httplib::client::http_client client(pool.get_executor(), "localhost", ep.port(), httplib::client::scheme::tls);
                 client.set_timeout(std::chrono::seconds(5));
 
                 co_await test(client);
@@ -184,7 +184,7 @@ TEST_CASE("client: pool acquire and use", "[client]")
         },
         [](auto& pool, auto& ep) -> net::awaitable<void>
         {
-            auto handle = co_await pool.async_acquire(ep.address().to_string(), ep.port(), false);
+            auto handle = co_await pool.async_acquire(ep.address().to_string(), ep.port(), httplib::client::scheme::plain);
             REQUIRE(handle);
             auto resp = UNWRAP(co_await handle->async_get("/echo", make_params()));
             REQUIRE(resp.result() == http::status::ok);
@@ -204,11 +204,11 @@ TEST_CASE("client: pool multiple acquires", "[client]")
         },
         [](auto& pool, auto& ep) -> net::awaitable<void>
         {
-            auto h1 = co_await pool.async_acquire(ep.address().to_string(), ep.port(), false);
+            auto h1 = co_await pool.async_acquire(ep.address().to_string(), ep.port(), httplib::client::scheme::plain);
             REQUIRE(h1);
-            auto h2 = co_await pool.async_acquire(ep.address().to_string(), ep.port(), false);
+            auto h2 = co_await pool.async_acquire(ep.address().to_string(), ep.port(), httplib::client::scheme::plain);
             REQUIRE(h2);
-            auto h3 = co_await pool.async_acquire(ep.address().to_string(), ep.port(), false);
+            auto h3 = co_await pool.async_acquire(ep.address().to_string(), ep.port(), httplib::client::scheme::plain);
             REQUIRE(h3);
             auto r1 = UNWRAP(co_await h1->async_get("/echo", make_params()));
             auto r2 = UNWRAP(co_await h2->async_get("/echo", make_params()));
@@ -233,10 +233,10 @@ TEST_CASE("client: pool connection reuse", "[client]")
         {
             httplib::client::http_client* raw = nullptr;
             {
-                auto h = co_await pool.async_acquire(ep.address().to_string(), ep.port(), false);
+                auto h = co_await pool.async_acquire(ep.address().to_string(), ep.port(), httplib::client::scheme::plain);
                 raw = h.get();
             }
-            auto h2 = co_await pool.async_acquire(ep.address().to_string(), ep.port(), false);
+            auto h2 = co_await pool.async_acquire(ep.address().to_string(), ep.port(), httplib::client::scheme::plain);
             REQUIRE(h2.get() == raw);
             auto resp = UNWRAP(co_await h2->async_get("/echo", make_params()));
             REQUIRE(resp.result() == http::status::ok);
@@ -256,11 +256,11 @@ TEST_CASE("client: pool closed connection reusable", "[client]")
         [](auto& pool, auto& ep) -> net::awaitable<void>
         {
             {
-                auto h = co_await pool.async_acquire(ep.address().to_string(), ep.port(), false);
+                auto h = co_await pool.async_acquire(ep.address().to_string(), ep.port(), httplib::client::scheme::plain);
                 UNWRAP(co_await h->async_get("/echo", make_params()));
                 h->close();
             }
-            auto h2 = co_await pool.async_acquire(ep.address().to_string(), ep.port(), false);
+            auto h2 = co_await pool.async_acquire(ep.address().to_string(), ep.port(), httplib::client::scheme::plain);
             auto resp = UNWRAP(co_await h2->async_get("/echo", make_params()));
             REQUIRE(resp.result() == http::status::ok);
         });

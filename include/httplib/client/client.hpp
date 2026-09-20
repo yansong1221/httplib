@@ -2,6 +2,7 @@
 #include "httplib/client/client_fwd.hpp"
 #include "httplib/client/request.hpp"
 #include "httplib/client/response.hpp"
+#include "httplib/client/scheme.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <filesystem>
 #include <future>
@@ -61,9 +62,9 @@ namespace httplib::client
         /// \param ex 客户端使用的 io_context 或其 executor。
         /// \param host 主机名，用于 DNS 解析与 Host 头。
         /// \param port 端口。
-        /// \param ssl 是否启用 TLS。
-        explicit http_client(net::io_context& ex, std::string_view host, uint16_t port, bool ssl = false);
-        explicit http_client(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl = false);
+        /// \param s 传输方案（\ref httplib::client::scheme）：\c scheme::tls 走 HTTPS，默认 \c scheme::plain。
+        explicit http_client(net::io_context& ex, std::string_view host, uint16_t port, scheme s = scheme::plain);
+        explicit http_client(net::any_io_executor const& ex, std::string_view host, uint16_t port, scheme s = scheme::plain);
 
         /// \brief 从 URL 创建客户端。
         /// \param url HTTP(S) URL（如 \c https://api.example.com:8443/base ），解析出 host、port、ssl。

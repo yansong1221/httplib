@@ -147,7 +147,7 @@ namespace httplib::util
     }
 
     std::string
-    make_host_value(std::string_view host_in, uint16_t port, bool ssl)
+    make_host_value(std::string_view host_in, uint16_t port, client::scheme s)
     {
         std::string host(host_in);
         // IPv6字面量在 Host 头/URL 中需要方括号；已带括号的 host 不重复包裹。
@@ -156,7 +156,7 @@ namespace httplib::util
             host = fmt::format("[{}]", host);
         }
 
-        if ((ssl && port != 443) || (!ssl && port != 80))
+        if (port != client::default_port(s))
         {
             return fmt::format("{}:{}", host, port);
         }
@@ -164,13 +164,13 @@ namespace httplib::util
     }
 
     std::string
-    make_url_value(std::string_view host, uint16_t port, bool ssl, std::string_view target, std::string_view scheme)
+    make_url_value(std::string_view host, uint16_t port, client::scheme s, std::string_view target, std::string_view url_scheme)
     {
         using namespace std::string_view_literals;
 
         return std::format("{}://{}{}",
-                           (scheme.empty() ? (ssl ? "https" : "http") : scheme),
-                           make_host_value(host, port, ssl),
+                           (url_scheme.empty() ? client::to_string(s) : url_scheme),
+                           make_host_value(host, port, s),
                            target);
     }
 

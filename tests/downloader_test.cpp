@@ -802,12 +802,12 @@ TEST_CASE("http_client_pool: acquire timeout", "[downloader]")
     auto pool = std::make_shared<httplib::client::http_client_pool>(ts.ioc_.get_executor(),
                                                                     httplib::client::pool_params { .max_size = 1 });
 
-    auto h1 = co_spawn(ts.ioc_, pool->async_acquire("127.0.0.1", ts.endpoint.port(), false), net::use_future).get();
+    auto h1 = co_spawn(ts.ioc_, pool->async_acquire("127.0.0.1", ts.endpoint.port(), httplib::client::scheme::plain), net::use_future).get();
     REQUIRE(h1);
 
     auto t0 = std::chrono::steady_clock::now();
     auto h2 = co_spawn(ts.ioc_,
-                       pool->async_acquire("127.0.0.1", ts.endpoint.port(), false, std::chrono::milliseconds(200)),
+                       pool->async_acquire("127.0.0.1", ts.endpoint.port(), httplib::client::scheme::plain, std::chrono::milliseconds(200)),
                        net::use_future)
                   .get();
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0);

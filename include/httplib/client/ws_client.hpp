@@ -1,5 +1,6 @@
 #pragma once
 #include "httplib/config.hpp"
+#include "httplib/client/scheme.hpp"
 #include "httplib/util/misc.hpp"
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
@@ -13,8 +14,8 @@ namespace httplib::client
     class HTTPLIB_API ws_client
     {
       public:
-        explicit ws_client(net::io_context& ex, std::string_view host, uint16_t port, bool ssl = false);
-        explicit ws_client(net::any_io_executor const& ex, std::string_view host, uint16_t port, bool ssl = false);
+        explicit ws_client(net::io_context& ex, std::string_view host, uint16_t port, scheme s = scheme::plain);
+        explicit ws_client(net::any_io_executor const& ex, std::string_view host, uint16_t port, scheme s = scheme::plain);
         ~ws_client();
 
       public:
