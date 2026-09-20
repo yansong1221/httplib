@@ -37,9 +37,8 @@ namespace httplib::util
         }
     } // namespace detail
 
-    ticker::ticker(boost::asio::any_io_executor const& executor, std::chrono::steady_clock::duration const& interval)
+    ticker::ticker(net::any_io_executor const& executor, std::chrono::steady_clock::duration const& interval)
         : executor_(executor)
-        , strand_(executor)
         , interval_(interval)
     {
     }
@@ -49,7 +48,7 @@ namespace httplib::util
     void
     ticker::start()
     {
-        std::shared_ptr<boost::asio::cancellation_signal> cs;
+        std::shared_ptr<net::cancellation_signal> cs;
         uint64_t generation = 0;
 
         {
@@ -60,13 +59,13 @@ namespace httplib::util
             }
 
             generation = ++run_id_;
-            cs = std::make_shared<boost::asio::cancellation_signal>();
+            cs = std::make_shared<net::cancellation_signal>();
             cs_ = cs;
             is_running_.store(true, std::memory_order_release);
 
-            boost::asio::co_spawn(
-                strand_,
-                [this, cs, generation, self = shared_from_this()]() -> boost::asio::awaitable<boost::system::error_code>
+            net::co_spawn(
+                executor_,
+                [this, cs, generation, self = shared_from_this()]() -> net::awaitable<boost::system::error_code>
                 {
                     auto ec = co_await co_run();
 
@@ -77,14 +76,14 @@ namespace httplib::util
 
                     co_return ec;
                 },
-                boost::asio::bind_cancellation_slot(cs->slot(), boost::asio::detached));
+                net::bind_cancellation_slot(cs->slot(), net::detached));
         }
     }
 
     void
     ticker::stop()
     {
-        std::shared_ptr<boost::asio::cancellation_signal> cs;
+        std::shared_ptr<net::cancellation_signal> cs;
 
         {
             std::lock_guard<std::mutex> lock(state_mutex_);
@@ -100,11 +99,11 @@ namespace httplib::util
 
         if (cs)
         {
-            cs->emit(boost::asio::cancellation_type::all);
+            cs->emit(net::cancellation_type::all);
         }
     }
 
-    boost::asio::any_io_executor
+    net::any_io_executor
     ticker::get_executor() const noexcept
     {
         return executor_;
@@ -122,15 +121,15 @@ namespace httplib::util
         return is_running_.load(std::memory_order_acquire);
     }
 
-    boost::asio::awaitable<boost::system::error_code>
+    net::awaitable<boost::system::error_code>
     ticker::co_run()
     {
-        co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::enable_total_cancellation(),
-                                                                  boost::asio::enable_terminal_cancellation());
+        co_await net::this_coro::reset_cancellation_state(net::enable_total_cancellation(),
+                                                          net::enable_terminal_cancellation());
 
-        co_await boost::asio::this_coro::throw_if_cancelled(false);
+        co_await net::this_coro::throw_if_cancelled(false);
 
-        auto cs = co_await boost::asio::this_coro::cancellation_state;
+        auto cs = co_await net::this_coro::cancellation_state;
 
         boost::system::error_code ec;
         bool started = false;
@@ -150,7 +149,7 @@ namespace httplib::util
 
         if (started && !static_cast<bool>(ec))
         {
-            boost::asio::steady_timer update_timer(strand_);
+            net::steady_timer update_timer(executor_);
             while (!cs.cancelled() && !static_cast<bool>(ec))
             {
                 // 先等待一个周期，与旧的维护循环语义保持一致。
