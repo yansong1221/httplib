@@ -54,6 +54,9 @@ namespace httplib::util
         /// Number of handlers currently pending in the queue.
         std::size_t pending() const;
 
+        /// The executor this queue serialises handlers on.
+        net::any_io_executor get_executor() const;
+
         /// Stop accepting work and wait, asynchronously, until the worker has
         /// drained the remaining handlers and exited.
         net::awaitable<void> async_shutdown();

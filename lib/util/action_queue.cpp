@@ -47,6 +47,12 @@ namespace httplib::util
         return impl_->pending();
     }
 
+    net::any_io_executor
+    action_queue::get_executor() const
+    {
+        return impl_->get_executor();
+    }
+
     net::awaitable<void>
     action_queue::async_shutdown()
     {
