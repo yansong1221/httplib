@@ -100,12 +100,18 @@ namespace httplib::db
         net::awaitable<session_handle> async_acquire(std::chrono::steady_clock::duration wait_timeout
                                                      = default_timeout);
 
-        /// 关闭池（终态，不可重启），唤醒所有等待者。
+        /// 关闭池（终态，不可重启），唤醒所有等待者。teardown 由 stop() 直接投递到池的
+        /// strand 上执行（on_stop 兜底，幂等）；与后续 strand 任务按 FIFO 先于其执行。
         void stop();
 
+        /// \note 计数为原子读，可从任意线程调用。
         size_t active_count() const;
         size_t idle_count() const;
         size_t total_count() const;
+
+        /// \brief 池内部串行化用的执行器（在传入 executor 上包了一层 strand）。
+        /// \details 池状态与借出的会话都只在池自身 strand 上访问；\c async_acquire
+        /// 会自行切到该 strand。
         net::any_io_executor get_executor() const noexcept;
 
         std::shared_ptr<spdlog::logger> logger() const;

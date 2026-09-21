@@ -86,16 +86,17 @@ namespace httplib::client
         net::awaitable<client_handle>
         async_acquire(std::string_view host, uint16_t port, scheme s, std::chrono::steady_clock::duration wait_timeout)
         {
-            if (!is_running())
-            {
-                co_return client_handle(boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
-            }
 
             auto self = shared_from_this();
 
             // 池状态只在自身 strand 上访问：把调用协程切到 strand 后再操作，
             // 后续 await（校验/等待唤醒）都会在 strand 上恢复，因此无需再加锁。
             co_await net::dispatch(get_executor(), net::use_awaitable);
+
+            if (!is_running())
+            {
+                co_return client_handle(boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
+            }
 
             auto url = util::make_url_value(host, port, s);
 
