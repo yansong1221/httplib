@@ -555,28 +555,33 @@ namespace httplib::client
     net::awaitable<void>
     download_scheduler::impl::async_run()
     {
-        co_await net::dispatch(ex_, net::use_awaitable);
-
-        for (;;)
-        {
-            bool done = false;
+        auto self = shared_from_this();
+        co_return co_await net::co_spawn(
+            ex_,
+            [&]() -> net::awaitable<void>
             {
-                std::lock_guard<std::mutex> lk(mtx_);
-                dispatch_pending_locked();
-
-                // All pending queued and running tasks drained.
-                if (pending_queue_.empty() && running_count_ == 0)
+                for (;;)
                 {
-                    done = tasks_.empty() || shutdown_requested_;
-                }
-            }
-            if (done)
-            {
-                co_return;
-            }
+                    bool done = false;
+                    {
+                        std::lock_guard<std::mutex> lk(mtx_);
+                        dispatch_pending_locked();
 
-            co_await scheduler_event_.wait();
-        }
+                        // All pending queued and running tasks drained.
+                        if (pending_queue_.empty() && running_count_ == 0)
+                        {
+                            done = tasks_.empty() || shutdown_requested_;
+                        }
+                    }
+                    if (done)
+                    {
+                        co_return;
+                    }
+
+                    co_await scheduler_event_.wait();
+                }
+            },
+            net::use_awaitable);
     }
     std::future<void>
     download_scheduler::impl::run()
@@ -598,76 +603,88 @@ namespace httplib::client
     net::awaitable<download_scheduler::task_status>
     download_scheduler::impl::async_wait_any()
     {
-        co_await net::dispatch(ex_, net::use_awaitable);
-
-        for (;;)
-        {
-            std::optional<task_status> result;
+        auto self = shared_from_this();
+        co_return co_await net::co_spawn(
+            ex_,
+            [&]() -> net::awaitable<download_scheduler::task_status>
             {
-                std::lock_guard<std::mutex> lk(mtx_);
-                if (!completed_queue_.empty())
+                for (;;)
                 {
-                    auto id = completed_queue_.front();
-                    completed_queue_.pop_front();
-                    result = snapshot(id);
-                }
-            }
-            if (result)
-            {
-                co_return *result;
-            }
+                    std::optional<task_status> result;
+                    {
+                        std::lock_guard<std::mutex> lk(mtx_);
+                        if (!completed_queue_.empty())
+                        {
+                            auto id = completed_queue_.front();
+                            completed_queue_.pop_front();
+                            result = snapshot(id);
+                        }
+                    }
+                    if (result)
+                    {
+                        co_return *result;
+                    }
 
-            co_await completed_event_.wait();
-        }
+                    co_await completed_event_.wait();
+                }
+            },
+            net::use_awaitable);
     }
 
     net::awaitable<download_scheduler::task_status>
     download_scheduler::impl::async_wait_one(task_id id)
     {
-        co_await net::dispatch(ex_, net::use_awaitable);
-        for (;;)
-        {
-            std::optional<task_status> result;
+        auto self = shared_from_this();
+        co_return co_await net::co_spawn(
+            ex_,
+            [&]() -> net::awaitable<download_scheduler::task_status>
             {
-                std::lock_guard<std::mutex> lk(mtx_);
-
-                // A still-unconsumed terminal completion, if present.
-                for (auto it = completed_queue_.begin(); it != completed_queue_.end(); ++it)
+                for (;;)
                 {
-                    if (*it == id)
+                    std::optional<task_status> result;
                     {
-                        completed_queue_.erase(it);
-                        result = snapshot(id);
-                        break;
-                    }
-                }
+                        std::lock_guard<std::mutex> lk(mtx_);
 
-                if (!result)
-                {
-                    auto entry = find_task(id);
-                    if (!entry)
-                    {
-                        task_status ts {};
-                        ts.id = id;
-                        ts.state = downloader::state::cancelled;
-                        ts.error = boost::system::errc::make_error_code(boost::system::errc::no_such_file_or_directory);
-                        result = ts;
-                    }
-                    else if (entry->status.state == downloader::state::completed
-                             || entry->status.state == downloader::state::failed
-                             || entry->status.state == downloader::state::cancelled)
-                    {
-                        result = entry->status;
-                    }
-                }
-            }
-            if (result)
-            {
-                co_return *result;
-            }
+                        // A still-unconsumed terminal completion, if present.
+                        for (auto it = completed_queue_.begin(); it != completed_queue_.end(); ++it)
+                        {
+                            if (*it == id)
+                            {
+                                completed_queue_.erase(it);
+                                result = snapshot(id);
+                                break;
+                            }
+                        }
 
-            co_await completed_event_.wait();
-        }
+                        if (!result)
+                        {
+                            auto entry = find_task(id);
+                            if (!entry)
+                            {
+                                task_status ts {};
+                                ts.id = id;
+                                ts.state = downloader::state::cancelled;
+                                ts.error = boost::system::errc::make_error_code(
+                                    boost::system::errc::no_such_file_or_directory);
+                                result = ts;
+                            }
+                            else if (entry->status.state == downloader::state::completed
+                                     || entry->status.state == downloader::state::failed
+                                     || entry->status.state == downloader::state::cancelled)
+                            {
+                                result = entry->status;
+                            }
+                        }
+                    }
+                    if (result)
+                    {
+                        co_return *result;
+                    }
+
+                    co_await completed_event_.wait();
+                }
+            },
+            net::use_awaitable);
     }
 
     // =========================================================================
@@ -677,45 +694,50 @@ namespace httplib::client
     net::awaitable<void>
     download_scheduler::impl::async_shutdown()
     {
-        co_await net::post(ex_, net::use_awaitable);
-
-        {
-            std::lock_guard<std::mutex> lk(mtx_);
-            shutdown_requested_ = true;
-
-            for (auto& id : pending_queue_)
+        auto self = shared_from_this();
+        co_return co_await net::co_spawn(
+            ex_,
+            [&]() -> net::awaitable<void>
             {
-                if (auto entry = find_task(id); entry)
                 {
-                    entry->cancel_requested = true;
-                }
-            }
+                    std::lock_guard<std::mutex> lk(mtx_);
+                    shutdown_requested_ = true;
 
-            for (auto& [id, entry] : tasks_)
-            {
-                if (entry->dl)
+                    for (auto& id : pending_queue_)
+                    {
+                        if (auto entry = find_task(id); entry)
+                        {
+                            entry->cancel_requested = true;
+                        }
+                    }
+
+                    for (auto& [id, entry] : tasks_)
+                    {
+                        if (entry->dl)
+                        {
+                            entry->dl->cancel();
+                        }
+                    }
+                }
+                scheduler_event_.notify_all();
+
+                for (;;)
                 {
-                    entry->dl->cancel();
+                    bool drained = false;
+                    {
+                        std::lock_guard<std::mutex> lk(mtx_);
+                        dispatch_pending_locked();
+                        drained = pending_queue_.empty() && running_count_ == 0;
+                    }
+                    if (drained)
+                    {
+                        co_return;
+                    }
+
+                    co_await scheduler_event_.wait();
                 }
-            }
-        }
-        scheduler_event_.notify_all();
-
-        for (;;)
-        {
-            bool drained = false;
-            {
-                std::lock_guard<std::mutex> lk(mtx_);
-                dispatch_pending_locked();
-                drained = pending_queue_.empty() && running_count_ == 0;
-            }
-            if (drained)
-            {
-                co_return;
-            }
-
-            co_await scheduler_event_.wait();
-        }
+            },
+            net::use_awaitable);
     }
 
 } // namespace httplib::client

@@ -151,98 +151,104 @@ namespace httplib::client
     http_client::impl::async_send_request_lazy_with_redirect(request& req)
     {
         auto self = shared_from_this();
-
-        co_await net::dispatch(executor_, net::use_awaitable);
-
-        auto max_redirects = max_redirects_.load();
-
-        if (max_redirects <= 0)
-        {
-            co_return co_await async_send_request_lazy(req);
-        }
-
-        for (int r = 0; r <= max_redirects; ++r)
-        {
-            auto result = co_await async_send_request_lazy(req);
-            if (result.has_error())
+        co_return co_await net::co_spawn(
+            executor_,
+            [&]() -> net::awaitable<http_client::response_result>
             {
-                co_return result;
-            }
-            auto& resp = result.value();
-            auto s = resp.result();
-            if (r < max_redirects
-                && (s == http::status::moved_permanently || s == http::status::found || s == http::status::see_other
-                    || s == http::status::temporary_redirect || s == http::status::permanent_redirect))
-            {
-                auto loc = resp[http::field::location];
-                if (loc.empty())
+                auto max_redirects = max_redirects_.load();
+
+                if (max_redirects <= 0)
                 {
+                    co_return co_await async_send_request_lazy(req);
+                }
+
+                for (int r = 0; r <= max_redirects; ++r)
+                {
+                    auto result = co_await async_send_request_lazy(req);
+                    if (result.has_error())
+                    {
+                        co_return result;
+                    }
+                    auto& resp = result.value();
+                    auto s = resp.result();
+                    if (r < max_redirects
+                        && (s == http::status::moved_permanently || s == http::status::found
+                            || s == http::status::see_other || s == http::status::temporary_redirect
+                            || s == http::status::permanent_redirect))
+                    {
+                        auto loc = resp[http::field::location];
+                        if (loc.empty())
+                        {
+                            co_return result;
+                        }
+
+                        get_logger()->trace("redirect {} -> {}", req.target(), std::string_view(loc));
+
+                        // 读完并丢弃 redirect 响应的 body，保证连接可复用
+                        if (auto drain_result = co_await resp.read_string(); drain_result.has_error())
+                        {
+                            co_await async_close();
+                        }
+
+                        // Full URL (cross-domain) create new impl
+                        std::string target;
+                        if (loc.starts_with("http://") || loc.starts_with("https://"))
+                        {
+                            auto u = boost::urls::url(loc);
+                            auto new_host = u.host();
+                            auto new_port = u.port_number() ? u.port_number()
+                                                            : (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
+                            auto new_ssl = u.scheme_id() == boost::urls::scheme::https;
+
+                            if (new_host != host_ || new_port != port_ || new_ssl != (scheme_ == scheme::tls))
+                            {
+                                // CL-02: 跨 origin 重定向时移除 origin-bound 敏感头，避免认证凭据泄露到新主机
+                                redirect::strip_origin_bound_headers(req.base());
+
+                                req.target(u.encoded_target().empty() ? "/" : u.encoded_target());
+
+                                auto new_impl = std::make_shared<impl>(executor_,
+                                                                       std::move(new_host),
+                                                                       new_port,
+                                                                       new_ssl ? scheme::tls : scheme::plain);
+                                new_impl->copy_settings_from(*this);
+                                new_impl->max_redirects_.store(max_redirects - r - 1);
+
+                                co_return co_await new_impl->async_send_request_lazy_with_redirect(req);
+                            }
+
+                            // 同 host/port/ssl 的完整 URL，仅取 path 作为新 target
+                            target = u.encoded_target().empty() ? "/" : u.encoded_target();
+                        }
+                        else
+                        {
+                            // 相对 Location：按 RFC 3986 针对当前 target 解析，兼容
+                            // "final"、"../a/b"、"?q=1" 等形式。
+                            auto base = req.target();
+                            target = redirect::resolve_redirect_target(std::string_view(base.data(), base.size()), loc);
+                        }
+
+                        if (s == http::status::see_other
+                            || ((s == http::status::moved_permanently || s == http::status::found)
+                                && req.method() != http::verb::head))
+                        {
+                            req.method(http::verb::get);
+                            get_impl(req).body() = body::empty_body::value_type {};
+                            req.erase(http::field::content_type);
+                            req.erase(http::field::content_length);
+                            get_impl(req).prepare_payload();
+                        }
+
+                        req.target(std::move(target));
+                        continue;
+                    }
+
                     co_return result;
                 }
 
-                get_logger()->trace("redirect {} -> {}", req.target(), std::string_view(loc));
-
-                // 读完并丢弃 redirect 响应的 body，保证连接可复用
-                if (auto drain_result = co_await resp.read_string(); drain_result.has_error())
-                {
-                    co_await async_close();
-                }
-
-                // Full URL (cross-domain) create new impl
-                std::string target;
-                if (loc.starts_with("http://") || loc.starts_with("https://"))
-                {
-                    auto u = boost::urls::url(loc);
-                    auto new_host = u.host();
-                    auto new_port
-                        = u.port_number() ? u.port_number() : (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
-                    auto new_ssl = u.scheme_id() == boost::urls::scheme::https;
-
-                    if (new_host != host_ || new_port != port_ || new_ssl != (scheme_ == scheme::tls))
-                    {
-                        // CL-02: 跨 origin 重定向时移除 origin-bound 敏感头，避免认证凭据泄露到新主机
-                        redirect::strip_origin_bound_headers(req.base());
-
-                        req.target(u.encoded_target().empty() ? "/" : u.encoded_target());
-
-                        auto new_impl = std::make_shared<impl>(
-                            executor_, std::move(new_host), new_port, new_ssl ? scheme::tls : scheme::plain);
-                        new_impl->copy_settings_from(*this);
-                        new_impl->max_redirects_.store(max_redirects - r - 1);
-
-                        co_return co_await new_impl->async_send_request_lazy_with_redirect(req);
-                    }
-
-                    // 同 host/port/ssl 的完整 URL，仅取 path 作为新 target
-                    target = u.encoded_target().empty() ? "/" : u.encoded_target();
-                }
-                else
-                {
-                    // 相对 Location：按 RFC 3986 针对当前 target 解析，兼容
-                    // "final"、"../a/b"、"?q=1" 等形式。
-                    auto base = req.target();
-                    target = redirect::resolve_redirect_target(std::string_view(base.data(), base.size()), loc);
-                }
-
-                if (s == http::status::see_other
-                    || ((s == http::status::moved_permanently || s == http::status::found)
-                        && req.method() != http::verb::head))
-                {
-                    req.method(http::verb::get);
-                    get_impl(req).body() = body::empty_body::value_type {};
-                    req.erase(http::field::content_type);
-                    req.erase(http::field::content_length);
-                    get_impl(req).prepare_payload();
-                }
-
-                req.target(std::move(target));
-                continue;
-            }
-
-            co_return result;
-        }
-
-        co_return boost::system::errc::make_error_code(boost::system::errc::too_many_symbolic_link_levels);
+                co_return boost::system::errc::make_error_code(boost::system::errc::too_many_symbolic_link_levels);
+            },
+            net::use_awaitable);
     }
 
     void
@@ -386,9 +392,7 @@ namespace httplib::client
             }
             if (ec)
             {
-                get_logger()->warn("connect [{}] error {}",
-                             util::make_url_value(host_, port_, scheme_),
-                             ec.message());
+                get_logger()->warn("connect [{}] error {}", util::make_url_value(host_, port_, scheme_), ec.message());
                 co_await async_close();
                 co_return;
             }
@@ -412,13 +416,19 @@ namespace httplib::client
     net::awaitable<void>
     http_client::impl::async_close()
     {
-        co_await net::dispatch(executor_, net::use_awaitable);
-
-        resolver_.cancel();
-        if (auto s = stream_.exchange(nullptr); s)
-        {
-            s->close();
-        }
+        auto self = shared_from_this();
+        co_return co_await net::co_spawn(
+            executor_,
+            [&]() -> net::awaitable<void>
+            {
+                resolver_.cancel();
+                if (auto s = stream_.exchange(nullptr); s)
+                {
+                    s->close();
+                }
+                co_return;
+            },
+            net::use_awaitable);
     }
     std::future<void>
     http_client::impl::close()
@@ -436,15 +446,20 @@ namespace httplib::client
     net::awaitable<bool>
     http_client::impl::async_is_alive() const
     {
-        co_await net::dispatch(executor_, net::use_awaitable);
-
-        auto s = stream_.load();
-        if (!s || !s->is_open())
-        {
-            co_return false;
-        }
-        boost::system::error_code ec;
-        co_return s->is_peer_alive(ec);
+        auto self = shared_from_this();
+        co_return co_await net::co_spawn(
+            executor_,
+            [&]() -> net::awaitable<bool>
+            {
+                auto s = stream_.load();
+                if (!s || !s->is_open())
+                {
+                    co_return false;
+                }
+                boost::system::error_code ec;
+                co_return s->is_peer_alive(ec);
+            },
+            net::use_awaitable);
     }
 
     http_client::http_client(net::io_context& ex, std::string_view host, uint16_t port, scheme s)
@@ -472,11 +487,11 @@ namespace httplib::client
         auto port = (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
         port = u.has_port() ? u.port_number() : port;
 
-        impl_ = std::make_shared<http_client::impl>(
-            ex,
-            u.host(),
-            port,
-            u.scheme_id() == boost::urls::scheme::https ? scheme::tls : scheme::plain);
+        impl_ = std::make_shared<http_client::impl>(ex,
+                                                    u.host(),
+                                                    port,
+                                                    u.scheme_id() == boost::urls::scheme::https ? scheme::tls
+                                                                                                : scheme::plain);
     }
 
     http_client::~http_client() {}

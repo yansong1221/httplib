@@ -113,30 +113,37 @@ namespace httplib::server
     httplib::net::awaitable<void>
     http_server::impl::async_stop()
     {
-        if (!running_)
-        {
-            co_return;
-        }
+        auto self = shared_from_this();
+        co_return co_await net::co_spawn(
+            ex_,
+            [&]() -> net::awaitable<void>
+            {
+                if (!running_)
+                {
+                    co_return;
+                }
 
-        boost::system::error_code ec;
-        acceptor_.cancel(ec);
-        acceptor_.close(ec);
+                boost::system::error_code ec;
+                acceptor_.cancel(ec);
+                acceptor_.close(ec);
 
-        // 先在锁内快照，避免持锁调用 abort()/net::post 造成阻塞或重入。
-        std::vector<std::shared_ptr<session>> sessions;
-        {
-            std::lock_guard lck(session_mutex_);
-            sessions.assign(sessions_.begin(), sessions_.end());
-        }
-        get_logger()->trace("[server] stopping, {} sessions remaining", sessions.size());
-        for (auto const& v : sessions)
-        {
-            v->abort();
-        }
+                // 先在锁内快照，避免持锁调用 abort()/net::post 造成阻塞或重入。
+                std::vector<std::shared_ptr<session>> sessions;
+                {
+                    std::lock_guard lck(session_mutex_);
+                    sessions.assign(sessions_.begin(), sessions_.end());
+                }
+                get_logger()->trace("[server] stopping, {} sessions remaining", sessions.size());
+                for (auto const& v : sessions)
+                {
+                    v->abort();
+                }
 
-        // `async_run()` closes `stop_event_` on exit, so every caller observes
-        // completion without polling.
-        (void)co_await stop_event_.wait();
+                // `async_run()` closes `stop_event_` on exit, so every caller observes
+                // completion without polling.
+                (void)co_await stop_event_.wait();
+            },
+            net::use_awaitable);
     }
 
     router_impl&
@@ -148,58 +155,64 @@ namespace httplib::server
     net::awaitable<boost::system::error_code>
     http_server::impl::async_run()
     {
-
-        if (running_.exchange(true))
-        {
-            co_return boost::asio::error::make_error_code(boost::asio::error::already_started);
-        }
-        // Reopen the completion event so the instance can be run again after a
-        // previous stop()/async_stop() closed it.
-        stop_event_.reset();
-        session_event_.reset();
-
-        std::vector<net::awaitable<boost::system::error_code>> ops;
-        for (int i = 0; i < acceptor_count_; ++i)
-        {
-            ops.push_back(co_accept());
-        }
-
-        auto&& results = co_await util::when_all(std::move(ops));
-
-        // stop();
-
-        // Wait for every in-flight session to finish. `handle_accept()` notifies
-        // `session_event_` when the last session leaves `sessions_`, so no timer
-        // polling is needed.
-        for (;;)
-        {
+        auto self = shared_from_this();
+        co_return co_await net::co_spawn(
+            ex_,
+            [&]() -> net::awaitable<boost::system::error_code>
             {
-                std::lock_guard lck(session_mutex_);
-                if (sessions_.empty())
+                if (running_.exchange(true))
                 {
-                    break;
+                    co_return boost::asio::error::make_error_code(boost::asio::error::already_started);
                 }
-            }
+                // Reopen the completion event so the instance can be run again after a
+                // previous stop()/async_stop() closed it.
+                stop_event_.reset();
+                session_event_.reset();
 
-            auto result = co_await session_event_.wait();
-            if (result != util::async_event::wait_result::notified)
-            {
-                break;
-            }
-        }
+                std::vector<net::awaitable<boost::system::error_code>> ops;
+                for (int i = 0; i < acceptor_count_; ++i)
+                {
+                    ops.push_back(co_accept());
+                }
 
-        router_.reset();
-        running_ = false;
-        session_event_.close();
-        stop_event_.close();
-        for (auto const& ec : results)
-        {
-            if (ec)
-            {
-                co_return ec;
-            }
-        }
-        co_return boost::system::error_code {};
+                auto&& results = co_await util::when_all(std::move(ops));
+
+                // stop();
+
+                // Wait for every in-flight session to finish. `handle_accept()` notifies
+                // `session_event_` when the last session leaves `sessions_`, so no timer
+                // polling is needed.
+                for (;;)
+                {
+                    {
+                        std::lock_guard lck(session_mutex_);
+                        if (sessions_.empty())
+                        {
+                            break;
+                        }
+                    }
+
+                    auto result = co_await session_event_.wait();
+                    if (result != util::async_event::wait_result::notified)
+                    {
+                        break;
+                    }
+                }
+
+                router_.reset();
+                running_ = false;
+                session_event_.close();
+                stop_event_.close();
+                for (auto const& ec : results)
+                {
+                    if (ec)
+                    {
+                        co_return ec;
+                    }
+                }
+                co_return boost::system::error_code {};
+            },
+            net::use_awaitable);
     }
     net::awaitable<boost::system::error_code>
     http_server::impl::co_accept()

@@ -91,104 +91,111 @@ namespace httplib::client
 
             // 池状态只在自身 strand 上访问：把调用协程切到 strand 后再操作，
             // 后续 await（校验/等待唤醒）都会在 strand 上恢复，因此无需再加锁。
-            co_await net::dispatch(get_executor(), net::use_awaitable);
-
-            if (!is_running())
-            {
-                co_return client_handle(boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
-            }
-
-            auto url = util::make_url_value(host, port, s);
-
-            // wait_timeout <= 0 means "fail fast": try once and return timed_out
-            // immediately if no connection is available without waiting. The deadline
-            // is only consulted on the waiting path (wait_timeout > 0).
-            auto deadline = std::chrono::steady_clock::now() + wait_timeout;
-
-            std::shared_ptr<waiter_node> node;
-            bool in_queue = false;
-            /// 上一轮等待是否被池唤醒（而非超时）；被唤醒者即队首，可绕过公平性检查。
-            bool serving = false;
-
-            do
-            {
-                if (!is_running())
+            co_return co_await net::co_spawn(
+                get_executor(),
+                [&]() -> net::awaitable<client_handle>
                 {
-                    if (in_queue)
+                    if (!is_running())
                     {
-                        remove_waiter(url, node);
+                        co_return client_handle(
+                            boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
                     }
-                    co_return client_handle(
-                        boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
-                }
 
-                if (in_queue && deadline <= std::chrono::steady_clock::now())
-                {
-                    remove_waiter(url, node);
-                    get_logger()->debug("client pool: acquire timed out for {}", url);
-                    co_return client_handle(boost::system::errc::make_error_code(boost::system::errc::timed_out));
-                }
+                    auto url = util::make_url_value(host, port, s);
 
-                // 被唤醒的等待者保留在队首；只有它自己能绕过“已有等待者”的公平性检查。
-                client_handle handle;
-                try
-                {
-                    handle = co_await acquire_or_create(url, serving);
-                }
-                catch (...)
-                {
-                    // 建连/配置路径抛异常时，必须先把当前 waiter 的回合交还队列，
-                    // 否则后续 waiter 可能因队首失效而迟迟不被唤醒。
-                    if (in_queue)
+                    // wait_timeout <= 0 means "fail fast": try once and return timed_out
+                    // immediately if no connection is available without waiting. The deadline
+                    // is only consulted on the waiting path (wait_timeout > 0).
+                    auto deadline = std::chrono::steady_clock::now() + wait_timeout;
+
+                    std::shared_ptr<waiter_node> node;
+                    bool in_queue = false;
+                    /// 上一轮等待是否被池唤醒（而非超时）；被唤醒者即队首，可绕过公平性检查。
+                    bool serving = false;
+
+                    do
                     {
-                        remove_waiter(url, node);
-                    }
-                    throw;
-                }
+                        if (!is_running())
+                        {
+                            if (in_queue)
+                            {
+                                remove_waiter(url, node);
+                            }
+                            co_return client_handle(
+                                boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
+                        }
 
-                if (handle)
-                {
-                    if (in_queue)
-                    {
-                        remove_waiter(url, node);
-                    }
-                    co_return std::move(handle);
-                }
+                        if (in_queue && deadline <= std::chrono::steady_clock::now())
+                        {
+                            remove_waiter(url, node);
+                            get_logger()->debug("client pool: acquire timed out for {}", url);
+                            co_return client_handle(
+                                boost::system::errc::make_error_code(boost::system::errc::timed_out));
+                        }
 
-                serving = false;
+                        // 被唤醒的等待者保留在队首；只有它自己能绕过“已有等待者”的公平性检查。
+                        client_handle handle;
+                        try
+                        {
+                            handle = co_await acquire_or_create(url, serving);
+                        }
+                        catch (...)
+                        {
+                            // 建连/配置路径抛异常时，必须先把当前 waiter 的回合交还队列，
+                            // 否则后续 waiter 可能因队首失效而迟迟不被唤醒。
+                            if (in_queue)
+                            {
+                                remove_waiter(url, node);
+                            }
+                            throw;
+                        }
 
-                if (wait_timeout <= std::chrono::steady_clock::duration::zero())
-                {
-                    if (in_queue)
-                    {
-                        remove_waiter(url, node);
-                    }
-                    get_logger()->debug("client pool: no available connection for {} (fail fast)", url);
-                    co_return client_handle(boost::system::errc::make_error_code(boost::system::errc::timed_out));
-                }
+                        if (handle)
+                        {
+                            if (in_queue)
+                            {
+                                remove_waiter(url, node);
+                            }
+                            co_return std::move(handle);
+                        }
 
-                auto& waiters = waiters_[url];
-                std::erase_if(waiters, [](auto const& w) { return w.expired(); });
+                        serving = false;
 
-                if (!in_queue)
-                {
-                    node = std::make_shared<waiter_node>(get_executor());
-                    waiters.push_back(node);
-                    in_queue = true;
-                }
+                        if (wait_timeout <= std::chrono::steady_clock::duration::zero())
+                        {
+                            if (in_queue)
+                            {
+                                remove_waiter(url, node);
+                            }
+                            get_logger()->debug("client pool: no available connection for {} (fail fast)", url);
+                            co_return client_handle(
+                                boost::system::errc::make_error_code(boost::system::errc::timed_out));
+                        }
 
-                auto remaining = deadline - std::chrono::steady_clock::now();
+                        auto& waiters = waiters_[url];
+                        std::erase_if(waiters, [](auto const& w) { return w.expired(); });
 
-                if (remaining <= std::chrono::steady_clock::duration::zero())
-                {
-                    // 截止时间已到，交给下一轮循环顶部的超时判断处理。
-                    continue;
-                }
+                        if (!in_queue)
+                        {
+                            node = std::make_shared<waiter_node>(get_executor());
+                            waiters.push_back(node);
+                            in_queue = true;
+                        }
 
-                auto result = co_await node->event.wait_for(remaining);
-                serving = (result == util::async_event::wait_result::notified);
+                        auto remaining = deadline - std::chrono::steady_clock::now();
 
-            } while (true);
+                        if (remaining <= std::chrono::steady_clock::duration::zero())
+                        {
+                            // 截止时间已到，交给下一轮循环顶部的超时判断处理。
+                            continue;
+                        }
+
+                        auto result = co_await node->event.wait_for(remaining);
+                        serving = (result == util::async_event::wait_result::notified);
+
+                    } while (true);
+                },
+                net::use_awaitable);
         }
 
         void
@@ -209,37 +216,44 @@ namespace httplib::client
         net::awaitable<void>
         async_release(std::unique_ptr<http_client> conn)
         {
-            co_await net::dispatch(get_executor(), net::use_awaitable);
+            auto self = shared_from_this();
+            co_return co_await net::co_spawn(
+                get_executor(),
+                [&]() -> net::awaitable<void>
+                {
+                    auto url = util::make_url_value(conn->host(),
+                                                    conn->port(),
+                                                    conn->is_use_ssl() ? scheme::tls : scheme::plain);
 
-            auto url
-                = util::make_url_value(conn->host(), conn->port(), conn->is_use_ssl() ? scheme::tls : scheme::plain);
+                    if (!is_running())
+                    {
+                        co_return;
+                    }
 
-            if (!is_running())
-            {
-                co_return;
-            }
+                    auto st_it = pools_.find(url);
+                    if (st_it == pools_.end())
+                    {
+                        co_return;
+                    }
+                    dec_active(st_it->second);
 
-            auto st_it = pools_.find(url);
-            if (st_it == pools_.end())
-            {
-                co_return;
-            }
-            dec_active(st_it->second);
+                    if (!conn->has_active_session() && st_it->second.active_count < static_cast<int64_t>(cfg_.max_size))
+                    {
+                        // 归池前重置为 pool 配置，避免上一个 borrower 的 timeout/redirect/SSL/logger/CA
+                        // 设置污染下一次借出。
+                        apply_client_settings(*conn);
+                        st_it->second.idle.push_back({ std::move(conn), std::chrono::steady_clock::now() });
+                        get_logger()->trace("client pool: returned connection to idle for {}", url);
+                    }
+                    else
+                    {
+                        track_destroyed();
+                        get_logger()->trace("client pool: closed connection for {}", url);
+                    }
 
-            if (!conn->has_active_session() && st_it->second.active_count < static_cast<int64_t>(cfg_.max_size))
-            {
-                // 归池前重置为 pool 配置，避免上一个 borrower 的 timeout/redirect/SSL/logger/CA 设置污染下一次借出。
-                apply_client_settings(*conn);
-                st_it->second.idle.push_back({ std::move(conn), std::chrono::steady_clock::now() });
-                get_logger()->trace("client pool: returned connection to idle for {}", url);
-            }
-            else
-            {
-                track_destroyed();
-                get_logger()->trace("client pool: closed connection for {}", url);
-            }
-
-            wake_one_waiter(url);
+                    wake_one_waiter(url);
+                },
+                net::use_awaitable);
         }
         void
         stop() override
@@ -335,8 +349,11 @@ namespace httplib::client
         net::awaitable<pool_stats>
         async_stats(std::string url) const
         {
-            co_await net::dispatch(get_executor(), net::use_awaitable);
-            co_return stats(url);
+            auto self = shared_from_this();
+            co_return co_await net::co_spawn(
+                get_executor(),
+                [&]() -> net::awaitable<pool_stats> { co_return stats(url); },
+                net::use_awaitable);
         }
 
       private:

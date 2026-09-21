@@ -139,106 +139,110 @@ namespace httplib::db
     net::awaitable<connection_pool::session_handle>
     connection_pool::impl::async_acquire(std::chrono::steady_clock::duration wait_timeout)
     {
-        // stop() 后快速失败（与 http_client_pool 一致），避免再做无谓的 strand 投递。
-        if (!is_running())
-        {
-            throw pool_closed_error();
-        }
 
         auto self = std::static_pointer_cast<impl>(shared_from_this());
 
         // 池状态只在自身 strand 上访问：把调用协程切到 strand 后再操作，
         // 后续 await（校验/等待唤醒）都会在 strand 上恢复，因此无需再加锁。
-        co_await net::dispatch(get_executor(), net::use_awaitable);
-
-        auto deadline = std::chrono::steady_clock::now() + wait_timeout;
-
-        std::shared_ptr<waiter_node> node;
-        bool in_queue = false;
-        /// 上一轮等待是否被池唤醒（而非超时）；被唤醒者即队首，可绕过公平性检查。
-        bool serving = false;
-
-        do
-        {
-            if (!is_running())
+        co_return co_await net::co_spawn(
+            get_executor(),
+            [&]() -> net::awaitable<connection_pool::session_handle>
             {
-                if (in_queue)
+                if (!is_running())
                 {
-                    remove_waiter(node);
+                    throw pool_closed_error();
                 }
-                throw pool_closed_error();
-            }
 
-            if (in_queue && deadline <= std::chrono::steady_clock::now())
-            {
-                remove_waiter(node);
-                get_logger()->warn(
-                    "db pool acquire timed out after {}ms: active={} idle={} validating={} total={} max={}",
-                    std::chrono::duration_cast<std::chrono::milliseconds>(wait_timeout).count(),
-                    active_metric_.load(std::memory_order_relaxed),
-                    idle_.size(),
-                    validating_metric_.load(std::memory_order_relaxed),
-                    total_size(),
-                    cfg_.max_connections);
-                throw pool_timeout_error();
-            }
+                auto deadline = std::chrono::steady_clock::now() + wait_timeout;
 
-            std::unique_ptr<session> sess;
-            try
-            {
-                sess = co_await acquire_or_create(serving);
-            }
-            catch (...)
-            {
-                // 建连/校验路径抛异常时，必须先把当前 waiter 的回合交还队列，
-                // 否则后续 waiter 可能因队首失效而迟迟不被唤醒。
-                if (in_queue)
+                std::shared_ptr<waiter_node> node;
+                bool in_queue = false;
+                /// 上一轮等待是否被池唤醒（而非超时）；被唤醒者即队首，可绕过公平性检查。
+                bool serving = false;
+
+                do
                 {
-                    remove_waiter(node);
-                }
-                throw;
-            }
+                    if (!is_running())
+                    {
+                        if (in_queue)
+                        {
+                            remove_waiter(node);
+                        }
+                        throw pool_closed_error();
+                    }
 
-            if (sess)
-            {
-                if (in_queue)
-                {
-                    remove_waiter(node);
-                }
-                co_return session_handle(self, std::move(sess));
-            }
+                    if (in_queue && deadline <= std::chrono::steady_clock::now())
+                    {
+                        remove_waiter(node);
+                        get_logger()->warn(
+                            "db pool acquire timed out after {}ms: active={} idle={} validating={} total={} max={}",
+                            std::chrono::duration_cast<std::chrono::milliseconds>(wait_timeout).count(),
+                            active_metric_.load(std::memory_order_relaxed),
+                            idle_.size(),
+                            validating_metric_.load(std::memory_order_relaxed),
+                            total_size(),
+                            cfg_.max_connections);
+                        throw pool_timeout_error();
+                    }
 
-            serving = false;
+                    std::unique_ptr<session> sess;
+                    try
+                    {
+                        sess = co_await acquire_or_create(serving);
+                    }
+                    catch (...)
+                    {
+                        // 建连/校验路径抛异常时，必须先把当前 waiter 的回合交还队列，
+                        // 否则后续 waiter 可能因队首失效而迟迟不被唤醒。
+                        if (in_queue)
+                        {
+                            remove_waiter(node);
+                        }
+                        throw;
+                    }
 
-            if (wait_timeout <= std::chrono::steady_clock::duration::zero())
-            {
-                if (in_queue)
-                {
-                    remove_waiter(node);
-                }
-                throw pool_timeout_error();
-            }
+                    if (sess)
+                    {
+                        if (in_queue)
+                        {
+                            remove_waiter(node);
+                        }
+                        co_return session_handle(self, std::move(sess));
+                    }
 
-            std::erase_if(waiters_, [](auto const& w) { return w.expired(); });
+                    serving = false;
 
-            if (!in_queue)
-            {
-                node = std::make_shared<waiter_node>(get_executor());
-                waiters_.push_back(node);
-                in_queue = true;
-            }
+                    if (wait_timeout <= std::chrono::steady_clock::duration::zero())
+                    {
+                        if (in_queue)
+                        {
+                            remove_waiter(node);
+                        }
+                        throw pool_timeout_error();
+                    }
 
-            auto remaining = deadline - std::chrono::steady_clock::now();
-            if (remaining <= std::chrono::steady_clock::duration::zero())
-            {
-                // 截止时间已到，交给下一轮循环顶部的超时判断处理。
-                continue;
-            }
+                    std::erase_if(waiters_, [](auto const& w) { return w.expired(); });
 
-            auto result = co_await node->event.wait_for(remaining);
-            serving = (result == util::async_event::wait_result::notified);
+                    if (!in_queue)
+                    {
+                        node = std::make_shared<waiter_node>(get_executor());
+                        waiters_.push_back(node);
+                        in_queue = true;
+                    }
 
-        } while (true);
+                    auto remaining = deadline - std::chrono::steady_clock::now();
+                    if (remaining <= std::chrono::steady_clock::duration::zero())
+                    {
+                        // 截止时间已到，交给下一轮循环顶部的超时判断处理。
+                        continue;
+                    }
+
+                    auto result = co_await node->event.wait_for(remaining);
+                    serving = (result == util::async_event::wait_result::notified);
+
+                } while (true);
+            },
+            net::use_awaitable);
     }
 
     void
@@ -264,36 +268,41 @@ namespace httplib::db
             co_return;
         }
         sess->set_query_logger({});
+        auto self = shared_from_this();
 
-        co_await net::dispatch(get_executor(), net::use_awaitable);
-
-        if (!is_running())
-        {
-            co_return;
-        }
-
-        if (!sess->is_live())
-        {
-            dec_active();
-            wake_one_waiter();
-            co_return;
-        }
-
-        if (sess->in_transaction())
-        {
-            try
+        co_return co_await net::co_spawn(
+            get_executor(),
+            [&]() -> net::awaitable<void>
             {
-                co_await sess->rollback();
-            }
-            catch (...)
-            {
-                dec_active();
-                wake_one_waiter();
-                co_return;
-            }
-        }
+                if (!is_running())
+                {
+                    co_return;
+                }
 
-        push_idle(std::move(sess));
+                if (!sess->is_live())
+                {
+                    dec_active();
+                    wake_one_waiter();
+                    co_return;
+                }
+
+                if (sess->in_transaction())
+                {
+                    try
+                    {
+                        co_await sess->rollback();
+                    }
+                    catch (...)
+                    {
+                        dec_active();
+                        wake_one_waiter();
+                        co_return;
+                    }
+                }
+
+                push_idle(std::move(sess));
+            },
+            net::use_awaitable);
     }
 
     void
