@@ -63,8 +63,14 @@ namespace httplib::client
         /// \param host 主机名，用于 DNS 解析与 Host 头。
         /// \param port 端口。
         /// \param s 传输方案（\ref httplib::client::scheme）：\c scheme::tls 走 HTTPS，默认 \c scheme::plain。
-        explicit http_client(net::io_context& ex, std::string_view host, uint16_t port, scheme s = scheme::plain);
-        explicit http_client(net::any_io_executor const& ex, std::string_view host, uint16_t port, scheme s = scheme::plain);
+        explicit http_client(net::io_context& ex,
+                             std::string_view host,
+                             uint16_t port,
+                             httplib::client::scheme s = httplib::client::scheme::plain);
+        explicit http_client(net::any_io_executor const& ex,
+                             std::string_view host,
+                             uint16_t port,
+                             httplib::client::scheme s = httplib::client::scheme::plain);
 
         /// \brief 从 URL 创建客户端。
         /// \param url HTTP(S) URL（如 \c https://api.example.com:8443/base ），解析出 host、port、ssl。
@@ -86,7 +92,7 @@ namespace httplib::client
         uint16_t port() const;
 
         /// \brief 是否使用 TLS。
-        bool is_use_ssl() const;
+        httplib::client::scheme scheme() const;
 
         /// \brief 返回当前日志器。
         std::shared_ptr<spdlog::logger> logger() const;
@@ -125,9 +131,6 @@ namespace httplib::client
         ///
         /// Contract: 同 set_download_rate_limit，请求在途时调用不安全。
         void set_upload_rate_limit(std::uint64_t bytes_per_second);
-
-        /// \brief 返回本客户端的执行器（strand）。
-        net::any_io_executor get_executor() const;
 
         /// \brief 异步关闭底层连接（阻塞式包装）。
         /// \details 可在任意线程调用，内部把关闭动作投递到 strand 执行并向 future 就绪。
@@ -272,7 +275,5 @@ namespace httplib::client
             return self.impl_;
         }
     };
-
-
 
 } // namespace httplib::client

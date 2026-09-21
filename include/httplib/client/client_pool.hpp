@@ -111,10 +111,6 @@ namespace httplib::client
         net::awaitable<client_handle> async_acquire(std::string_view url,
                                                     std::chrono::steady_clock::duration wait_timeout = default_timeout);
 
-        /// \brief 池内部串行化用的执行器（在传入 executor 上包了一层 strand）。
-        /// \details 池状态只在自身 strand 上访问；\c async_acquire 会自行切到该 strand。
-        net::any_io_executor get_executor() noexcept;
-
         std::shared_ptr<spdlog::logger> logger() const;
         void set_logger(std::shared_ptr<spdlog::logger> logger);
 

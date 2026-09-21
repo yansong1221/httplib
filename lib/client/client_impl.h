@@ -7,6 +7,7 @@
 #include "stream/http_stream.hpp"
 #include "util/logging.hpp"
 #include <atomic>
+#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/error.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/strand.hpp>
@@ -29,7 +30,7 @@ namespace httplib::client
       public:
         class lazy_request_impl;
 
-        impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, scheme s);
+        impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, httplib::client::scheme s);
 
         void
         set_timeout_policy(timeout_policy const& policy)
@@ -115,126 +116,142 @@ namespace httplib::client
         }
 
         // NOTE: async_write / async_read / async_read_some 是无锁读写原语，串行化
-        // 完全依赖 strand（executor_）：每个入口先 dispatch 到 strand，底层 socket 操作
+        // 完全依赖 strand（strand_）：每个入口先投递（co_spawn）到 strand，底层 socket 操作
         // 期间不持有任何 mutex。socket 每次操作按 `stream_->load()` 快照使用，因此并发
         // async_close() 置空 stream_ 不会造成空指针解引用，只会让在途操作以错误码返回。
         template <typename Body>
         net::awaitable<void>
         async_write(http::request_serializer<Body>& serializer, bool headers_only, boost::system::error_code& ec)
         {
-            co_await net::dispatch(executor_, net::use_awaitable);
-
-            bool header_done = serializer.is_header_done();
-            if (!header_done)
-            {
-                co_await co_connect(ec);
-                if (ec)
+            co_return co_await net::co_spawn(
+                strand_,
+                [&]() -> net::awaitable<void>
                 {
-                    co_return;
-                }
-            }
-            bool retry = !header_done;
-
-            serializer.split(headers_only);
-            while (headers_only ? !serializer.is_header_done() : !serializer.is_done())
-            {
-                co_await async_write_some(serializer, ec);
-                if (ec)
-                {
-                    if (is_retryable(ec) && retry)
+                    bool header_done = serializer.is_header_done();
+                    if (!header_done)
                     {
-                        ec = {};
-                        co_await async_close();
-                        get_logger()->trace("retrying request...");
                         co_await co_connect(ec);
                         if (ec)
                         {
                             co_return;
                         }
                     }
-                    else
+                    bool retry = !header_done;
+
+                    serializer.split(headers_only);
+                    while (headers_only ? !serializer.is_header_done() : !serializer.is_done())
                     {
-                        break;
+                        co_await async_write_some(serializer, ec);
+                        if (ec)
+                        {
+                            if (is_retryable(ec) && retry)
+                            {
+                                ec = {};
+                                co_await async_close();
+                                get_logger()->trace("retrying request...");
+                                co_await co_connect(ec);
+                                if (ec)
+                                {
+                                    co_return;
+                                }
+                            }
+                            else
+                            {
+                                break;
+                            }
+                        }
+                        retry = false;
                     }
-                }
-                retry = false;
-            }
+                },
+                net::use_awaitable);
         }
         template <typename Body>
         net::awaitable<void>
         async_write_some(http::request_serializer<Body>& serializer, boost::system::error_code& ec)
         {
-            co_await net::dispatch(executor_, net::use_awaitable);
-
-            auto s = stream_.load();
-            if (!s)
-            {
-                ec = net::error::make_error_code(net::error::not_connected);
-                co_return;
-            }
-
-            begin_io();
-            co_await http::async_write_some(*s, serializer, util::net_awaitable[ec]);
-            if (ec)
-            {
-                if (ec != http::error::need_buffer)
+            co_return co_await net::co_spawn(
+                strand_,
+                [&]() -> net::awaitable<void>
                 {
-                    close();
-                }
-            }
-            end_io();
+                    auto s = stream_.load();
+                    if (!s)
+                    {
+                        ec = net::error::make_error_code(net::error::not_connected);
+                        co_return;
+                    }
+
+                    begin_io();
+                    co_await http::async_write_some(*s, serializer, util::net_awaitable[ec]);
+                    if (ec)
+                    {
+                        if (ec != http::error::need_buffer)
+                        {
+                            co_await async_close();
+                        }
+                    }
+                    end_io();
+                },
+                net::use_awaitable);
         }
 
         template <typename Body>
         net::awaitable<void>
         async_read(http::response_parser<Body>& parser, bool headers_only, boost::system::error_code& ec)
         {
-            co_await net::dispatch(executor_, net::use_awaitable);
-
-            while (headers_only ? !parser.is_header_done() : !parser.is_done())
-            {
-                co_await async_read_some(parser, ec);
-                if (ec)
+            co_return co_await net::co_spawn(
+                strand_,
+                [&]() -> net::awaitable<void>
                 {
-                    break;
-                }
-            }
+                    while (headers_only ? !parser.is_header_done() : !parser.is_done())
+                    {
+                        co_await async_read_some(parser, ec);
+                        if (ec)
+                        {
+                            break;
+                        }
+                    }
+                },
+                net::use_awaitable);
         }
         template <typename Body>
         net::awaitable<void>
         async_read_some(http::response_parser<Body>& parser, boost::system::error_code& ec)
         {
-            co_await net::dispatch(executor_, net::use_awaitable);
-
-            auto s = stream_.load();
-            if (!s)
-            {
-                ec = net::error::make_error_code(net::error::not_connected);
-                co_return;
-            }
-            parser.eager(false);
-            begin_io();
-            co_await http::async_read_some(*s, buffer_, parser, util::net_awaitable[ec]);
-            if (ec)
-            {
-                if (ec != http::error::need_buffer)
+            co_return co_await net::co_spawn(
+                strand_,
+                [&]() -> net::awaitable<void>
                 {
-                    close();
-                }
-            }
-            end_io();
-            if (parser.is_done())
-            {
-                finish_io();
-                if (!parser.keep_alive())
-                {
-                    close();
-                }
-            }
+                    auto s = stream_.load();
+                    if (!s)
+                    {
+                        ec = net::error::make_error_code(net::error::not_connected);
+                        co_return;
+                    }
+                    parser.eager(false);
+                    begin_io();
+                    co_await http::async_read_some(*s, buffer_, parser, util::net_awaitable[ec]);
+                    if (ec)
+                    {
+                        if (ec != http::error::need_buffer)
+                        {
+                            co_await async_close();
+                        }
+                    }
+                    end_io();
+                    if (parser.is_done())
+                    {
+                        finish_io();
+                        if (!parser.keep_alive())
+                        {
+                            co_await async_close();
+                        }
+                    }
+                },
+                net::use_awaitable);
         }
 
       public:
-        net::any_io_executor executor_;
+        net::strand<net::any_io_executor> strand_;
 
         tcp::resolver resolver_;
         std::atomic<timeout_policy> timeout_policy_ { timeout_policy::overall };
@@ -244,14 +261,14 @@ namespace httplib::client
         std::string const host_;
         std::string const host_value_;
         uint16_t const port_;
-        scheme const scheme_;
+        httplib::client::scheme const scheme_;
         std::atomic<bool> verify_ssl_ { true };
         /// 原子快照：set_ca_cert / copy_settings_from 写，co_connect 读，跨线程安全。
-        std::atomic<std::shared_ptr<const std::string>> ca_cert_ { nullptr };
+        std::atomic<std::shared_ptr<std::string const>> ca_cert_ { nullptr };
 
         std::atomic<std::shared_ptr<http_stream>> stream_;
         mutable std::recursive_mutex stream_mutex_;
-        /// 仅由 strand（executor_）串行访问：所有基于 Beast parser 的读取都 dispatch 到
+        /// 仅由 strand（strand_）串行访问：所有基于 Beast parser 的读取都投递到
         /// strand 后共享该缓冲。
         beast::flat_buffer buffer_;
         /// 仅由 stream_mutex_ 保护。

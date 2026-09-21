@@ -36,9 +36,9 @@ namespace httplib::client
         struct pool_state
         {
             std::deque<pooled_conn> idle;
-            int64_t active_count = 0;
+            std::size_t active_count = 0;
             /// borrow 校验期间已移出 idle、但尚未决定保留/丢弃的连接数；占 route 容量。
-            int64_t validating_count = 0;
+            std::size_t validating_count = 0;
         };
 
         struct waiter_node
@@ -59,8 +59,9 @@ namespace httplib::client
       public:
         impl(net::any_io_executor const& ex, pool_params cfg)
             : detail::logger("httplib.client_pool")
-            , cfg_(std::move(cfg))
             , ticker(net::make_strand(ex))
+            , executor_(ex)
+            , cfg_(std::move(cfg))
         {
             auto interval = cfg_.idle_check_interval.count() > 0 ? cfg_.idle_check_interval : std::chrono::seconds(60);
             set_interval(interval);
@@ -78,7 +79,7 @@ namespace httplib::client
         on_stop() override
         {
             // ticker 的 run loop 退出后在本 strand 上执行：回收 idle 连接并唤醒等待者。
-            teardown();
+            co_await async_teardown();
             get_logger()->debug("client pool stopped");
             co_return;
         }
@@ -86,9 +87,6 @@ namespace httplib::client
         net::awaitable<client_handle>
         async_acquire(std::string_view host, uint16_t port, scheme s, std::chrono::steady_clock::duration wait_timeout)
         {
-
-            auto self = shared_from_this();
-
             // 池状态只在自身 strand 上访问：把调用协程切到 strand 后再操作，
             // 后续 await（校验/等待唤醒）都会在 strand 上恢复，因此无需再加锁。
             co_return co_await net::co_spawn(
@@ -202,12 +200,11 @@ namespace httplib::client
         release(std::unique_ptr<http_client> conn)
         {
             // 归还可能来自任意线程（client_handle 析构），投递到 strand 串行处理。
-            auto self = std::static_pointer_cast<impl>(shared_from_this());
             net::co_spawn(
                 get_executor(),
-                [self, conn = std::move(conn)]() mutable -> net::awaitable<void>
+                [this, self = shared_from_this(), conn = std::move(conn)]() mutable -> net::awaitable<void>
                 {
-                    co_await self->async_release(std::move(conn));
+                    co_await async_release(std::move(conn));
                     co_return;
                 },
                 net::detached);
@@ -216,44 +213,35 @@ namespace httplib::client
         net::awaitable<void>
         async_release(std::unique_ptr<http_client> conn)
         {
-            auto self = shared_from_this();
-            co_return co_await net::co_spawn(
-                get_executor(),
-                [&]() -> net::awaitable<void>
-                {
-                    auto url = util::make_url_value(conn->host(),
-                                                    conn->port(),
-                                                    conn->is_use_ssl() ? scheme::tls : scheme::plain);
+            co_await net::dispatch(get_executor(), net::use_awaitable);
 
-                    if (!is_running())
-                    {
-                        co_return;
-                    }
+            if (!is_running())
+            {
+                co_return;
+            }
+            auto url = util::make_url_value(conn->host(), conn->port(), conn->scheme());
+            auto st_it = pools_.find(url);
+            if (st_it == pools_.end())
+            {
+                co_return;
+            }
+            dec_active(st_it->second);
 
-                    auto st_it = pools_.find(url);
-                    if (st_it == pools_.end())
-                    {
-                        co_return;
-                    }
-                    dec_active(st_it->second);
+            if (!conn->has_active_session() && st_it->second.active_count < cfg_.max_size)
+            {
+                // 归池前重置为 pool 配置，避免上一个 borrower 的 timeout/redirect/SSL/logger/CA
+                // 设置污染下一次借出。
+                apply_client_settings(*conn);
+                st_it->second.idle.push_back({ std::move(conn), std::chrono::steady_clock::now() });
+                get_logger()->trace("client pool: returned connection to idle for {}", url);
+            }
+            else
+            {
+                track_destroyed();
+                get_logger()->trace("client pool: closed connection for {}", url);
+            }
 
-                    if (!conn->has_active_session() && st_it->second.active_count < static_cast<int64_t>(cfg_.max_size))
-                    {
-                        // 归池前重置为 pool 配置，避免上一个 borrower 的 timeout/redirect/SSL/logger/CA
-                        // 设置污染下一次借出。
-                        apply_client_settings(*conn);
-                        st_it->second.idle.push_back({ std::move(conn), std::chrono::steady_clock::now() });
-                        get_logger()->trace("client pool: returned connection to idle for {}", url);
-                    }
-                    else
-                    {
-                        track_destroyed();
-                        get_logger()->trace("client pool: closed connection for {}", url);
-                    }
-
-                    wake_one_waiter(url);
-                },
-                net::use_awaitable);
+            wake_one_waiter(url);
         }
         void
         stop() override
@@ -263,14 +251,22 @@ namespace httplib::client
             // （on_stop 里还有一次兜底，teardown 幂等）。
             ticker::stop();
 
-            auto self = std::static_pointer_cast<impl>(shared_from_this());
-            net::dispatch(get_executor(), [self]() { self->teardown(); });
+            net::co_spawn(
+                get_executor(),
+                [this, self = shared_from_this()]() -> net::awaitable<void>
+                {
+                    co_await async_teardown();
+                    co_return;
+                },
+                net::detached);
         }
 
         /// 释放所有 idle 连接并唤醒等待者；仅在 strand 上执行（或析构时独占执行）。
-        void
-        teardown()
+        net::awaitable<void>
+        async_teardown()
         {
+            co_await net::dispatch(get_executor(), net::use_awaitable);
+
             std::vector<waiters_list> pending_waiters;
             std::vector<std::unique_ptr<http_client>> to_close;
 
@@ -313,35 +309,22 @@ namespace httplib::client
             }
         }
 
-        pool_stats
-        stats(std::string const& url) const
-        {
-            pool_stats s;
-            auto it = pools_.find(url);
-            if (it != pools_.end())
-            {
-                s.idle = it->second.idle.size();
-                s.active = it->second.active_count > 0 ? static_cast<size_t>(it->second.active_count) : 0;
-            }
-            return s;
-        }
-
         size_t
         active_count() const
         {
-            return total_active_.load(std::memory_order_relaxed);
+            return total_active_.load();
         }
 
         size_t
         idle_count() const
         {
-            return total_connections_.load(std::memory_order_relaxed) - total_active_.load(std::memory_order_relaxed);
+            return total_connections_.load() - total_active_.load();
         }
 
         size_t
         total_count() const
         {
-            return total_connections_.load(std::memory_order_relaxed);
+            return total_connections_.load();
         }
 
         // ---- async 版本：先切到池执行器，再读取池状态，可从任意线程调用 ----
@@ -349,11 +332,16 @@ namespace httplib::client
         net::awaitable<pool_stats>
         async_stats(std::string url) const
         {
-            auto self = shared_from_this();
-            co_return co_await net::co_spawn(
-                get_executor(),
-                [&]() -> net::awaitable<pool_stats> { co_return stats(url); },
-                net::use_awaitable);
+            co_await net::dispatch(get_executor(), net::use_awaitable);
+
+            pool_stats s;
+            auto it = pools_.find(url);
+            if (it != pools_.end())
+            {
+                s.idle = it->second.idle.size();
+                s.active = it->second.active_count > 0 ? static_cast<size_t>(it->second.active_count) : 0;
+            }
+            co_return s;
         }
 
       private:
@@ -366,7 +354,7 @@ namespace httplib::client
         void
         track_destroyed()
         {
-            if (total_connections_.load(std::memory_order_relaxed) > 0)
+            if (total_connections_.load() > 0)
             {
                 --total_connections_;
             }
@@ -380,17 +368,15 @@ namespace httplib::client
             bool route_ok = true;
             if (auto it = pools_.find(url); it != pools_.end())
             {
-                route_ok = it->second.active_count + static_cast<int64_t>(it->second.idle.size())
-                               + it->second.validating_count
-                           < static_cast<int64_t>(cfg_.max_size);
+                route_ok
+                    = it->second.active_count + it->second.idle.size() + it->second.validating_count < cfg_.max_size;
             }
             else if (cfg_.max_size == 0)
             {
                 route_ok = false;
             }
 
-            return route_ok
-                   && (cfg_.max_total == 0 || total_connections_.load(std::memory_order_relaxed) < cfg_.max_total);
+            return route_ok && (cfg_.max_total == 0 || total_connections_.load() < cfg_.max_total);
         }
 
         void
@@ -403,7 +389,7 @@ namespace httplib::client
         void
         dec_active(pool_state& st) noexcept
         {
-            if (st.active_count > 0 && total_active_.load(std::memory_order_relaxed) > 0)
+            if (st.active_count > 0 && total_active_.load() > 0)
             {
                 --st.active_count;
                 --total_active_;
@@ -608,13 +594,14 @@ namespace httplib::client
                 try
                 {
                     // 用 host/port/ssl 构造，避免 URL 二次 parse 失败把异常抛进 acquire 路径。
-                    auto client = std::make_unique<http_client>(get_executor(), url);
-                    apply_client_settings(*client);
+                    // 传底层 executor（非池 strand）：client 各自 make_strand，连接之间互不串行。
+                    auto cli = std::make_unique<http_client>(executor_, url);
+                    apply_client_settings(*cli);
                     get_logger()->debug("client pool: created connection for {} (total={})",
                                         url,
                                         total_connections_.load(std::memory_order_relaxed));
                     co_return client_handle(std::static_pointer_cast<http_client_pool::impl>(shared_from_this()),
-                                            std::move(client));
+                                            std::move(cli));
                 }
                 catch (...)
                 {
@@ -674,6 +661,9 @@ namespace httplib::client
         }
 
       private:
+        /// 底层 executor（非 strand）：client 用它各自 make_strand，得到独立 strand，
+        /// 避免所有 client 嵌套在池 strand 上被串行化。池自身状态仍用 ticker 的 strand。
+        net::any_io_executor executor_;
         using waiters_list = std::deque<std::weak_ptr<waiter_node>>;
 
         std::unordered_map<std::string, pool_state> pools_;
@@ -846,12 +836,6 @@ namespace httplib::client
         auto port = u.port_number() ? u.port_number() : (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
         auto ssl = u.scheme_id() == boost::urls::scheme::https;
         co_return co_await impl_->async_acquire(host, port, ssl ? scheme::tls : scheme::plain, wait_timeout);
-    }
-
-    net::any_io_executor
-    http_client_pool::get_executor() noexcept
-    {
-        return impl_->get_executor();
     }
 
     std::shared_ptr<spdlog::logger>
