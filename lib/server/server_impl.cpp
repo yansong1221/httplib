@@ -53,9 +53,11 @@ namespace httplib::server
     } // namespace detail
 
     http_server::impl::impl(net::any_io_executor const& ex)
-        : ex_(ex)
-        , acceptor_(ex)
-        , httplib::detail::logger("httplib.server")
+        : httplib::detail::logger("httplib.server")
+        , strand_(net::make_strand(ex))
+        , acceptor_(strand_)
+        , stop_event_(strand_)
+        , session_event_(strand_)
     {
     }
 
@@ -64,7 +66,7 @@ namespace httplib::server
     void
     http_server::impl::listen(std::string_view host, uint16_t port)
     {
-        tcp::resolver resolver(ex_);
+        tcp::resolver resolver(strand_);
         auto results = resolver.resolve(host, std::to_string(port));
 
         tcp::endpoint endp(*results.begin());
@@ -82,17 +84,11 @@ namespace httplib::server
                            local_endpoint_.port());
     }
 
-    net::any_io_executor
-    http_server::impl::get_executor() noexcept
-    {
-        return ex_;
-    }
-
     std::future<boost::system::error_code>
     http_server::impl::run()
     {
         return net::co_spawn(
-            ex_,
+            strand_,
             [self = shared_from_this(), this]() -> net::awaitable<boost::system::error_code>
             { co_return co_await async_run(); },
             boost::asio::use_future);
@@ -102,7 +98,7 @@ namespace httplib::server
     http_server::impl::stop()
     {
         return net::co_spawn(
-            ex_,
+            strand_,
             [self = shared_from_this(), this]() -> net::awaitable<void>
             {
                 co_await async_stop();
@@ -115,7 +111,7 @@ namespace httplib::server
     {
         auto self = shared_from_this();
         co_return co_await net::co_spawn(
-            ex_,
+            strand_,
             [&]() -> net::awaitable<void>
             {
                 if (!running_)
@@ -155,9 +151,8 @@ namespace httplib::server
     net::awaitable<boost::system::error_code>
     http_server::impl::async_run()
     {
-        auto self = shared_from_this();
         co_return co_await net::co_spawn(
-            ex_,
+            strand_,
             [&]() -> net::awaitable<boost::system::error_code>
             {
                 if (running_.exchange(true))
@@ -205,7 +200,9 @@ namespace httplib::server
                 stop_event_.close();
                 for (auto const& ec : results)
                 {
-                    if (ec)
+                    // acceptor 被 cancel()/close() 关闭时，挂起的 async_accept 会以
+                    // operation_aborted 完成；这是正常停机路径，不算错误。
+                    if (ec && ec != boost::asio::error::operation_aborted)
                     {
                         co_return ec;
                     }
@@ -221,7 +218,7 @@ namespace httplib::server
         for (;;)
         {
             // 每条连接一个 strand：socket/stream 与 abort 都绑定到它，连接内串行执行。
-            auto strand = net::make_strand(ex_);
+            auto strand = net::make_strand(strand_.get_inner_executor());
             tcp::socket sock(strand);
             co_await acceptor_.async_accept(sock, util::net_awaitable[ec]);
             if (ec)
@@ -231,7 +228,7 @@ namespace httplib::server
                 {
                     ec = {};
                     using namespace std::chrono_literals;
-                    net::steady_timer retry_timer(ex_);
+                    net::steady_timer retry_timer(strand_);
                     retry_timer.expires_after(100ms);
                     co_await retry_timer.async_wait(util::net_awaitable[ec]);
                     if (!ec)
@@ -424,7 +421,7 @@ namespace httplib::server
                                          std::shared_ptr<upstream_provider> provider,
                                          http_server::proxy_interceptor_factory factory)
     {
-        auto proxy_pool = std::make_shared<client::http_client_pool>(ex_);
+        auto proxy_pool = std::make_shared<client::http_client_pool>(strand_.get_inner_executor());
 
         std::string prefix = detail::strip_proxy_prefix(location);
 
@@ -478,8 +475,11 @@ namespace httplib::server
 
         router_.set_ws_handler(
             location,
-            [ex = ex_, prefix, logger, provider = std::move(provider), factory = std::move(factory)](
-                websocket_conn::weak_ptr wp) -> net::awaitable<void>
+            [ex = strand_.get_inner_executor(),
+             prefix,
+             logger,
+             provider = std::move(provider),
+             factory = std::move(factory)](websocket_conn::weak_ptr wp) -> net::awaitable<void>
             {
                 detail::ws_forward_context ctx(ex, prefix, provider, factory, logger);
                 co_await ctx.run(wp);
@@ -501,12 +501,6 @@ namespace httplib::server
     http_server::http_server(net::any_io_executor const& ex) : impl_(std::make_shared<impl>(ex)) {}
 
     http_server::~http_server() { stop(); }
-
-    net::any_io_executor
-    http_server::get_executor() noexcept
-    {
-        return impl_->get_executor();
-    }
 
     http_server&
     http_server::listen(std::string_view host, uint16_t port)

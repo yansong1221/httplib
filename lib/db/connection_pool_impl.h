@@ -108,7 +108,7 @@ namespace httplib::db
                 --active_metric_;
             }
         }
-        net::any_io_executor base_executor_;
+        net::any_io_executor executor_;
 
         // ---- 仅在 strand 上访问的池状态 ----
         std::vector<std::unique_ptr<session>> idle_;

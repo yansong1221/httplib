@@ -32,8 +32,6 @@ namespace httplib::server
         ~impl();
 
       public:
-        net::any_io_executor get_executor() noexcept;
-
         void listen(std::string_view host, uint16_t port);
 
         std::future<boost::system::error_code> run();
@@ -125,7 +123,7 @@ namespace httplib::server
         net::awaitable<void> handle_accept(tcp::socket sock);
 
       private:
-        net::any_io_executor ex_;
+        net::strand<net::any_io_executor> strand_;
         static constexpr auto acceptor_count_ = 32;
 
         router_impl router_;
@@ -137,7 +135,7 @@ namespace httplib::server
 
         /// Notified when `sessions_` transitions to empty; awaited by
         /// `async_run()` while draining in-flight sessions.
-        util::async_event session_event_ { ex_ };
+        util::async_event session_event_;
 
         std::atomic<std::chrono::steady_clock::duration> read_timeout_ { std::chrono::seconds(30) };
         std::atomic<std::chrono::steady_clock::duration> write_timeout_ { std::chrono::seconds(30) };
@@ -153,7 +151,7 @@ namespace httplib::server
         std::atomic<bool> running_ = false;
 
         /// Closed by `async_run()` when it exits; awaited by `async_stop()`.
-        util::async_event stop_event_ { ex_ };
+        util::async_event stop_event_;
 
 #ifdef HTTPLIB_ENABLED_SSL
         std::atomic<std::shared_ptr<ssl::context>> ssl_context_;

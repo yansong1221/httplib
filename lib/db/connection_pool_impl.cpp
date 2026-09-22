@@ -35,7 +35,7 @@ namespace httplib::db
 
     connection_pool::impl::impl(net::any_io_executor ex, pool_params cfg, connection_pool::connect_fn connect)
         : ticker(net::make_strand(ex))
-        , base_executor_(ex)
+        , executor_(ex)
         , cfg_(std::move(cfg))
         , connect_(std::move(connect))
         , httplib::detail::logger("httplib.db_pool")
@@ -269,7 +269,6 @@ namespace httplib::db
             co_return;
         }
         sess->set_query_logger({});
-        auto self = shared_from_this();
 
         co_return co_await net::co_spawn(
             get_executor(),
@@ -515,7 +514,7 @@ namespace httplib::db
     connection_pool::impl::create_session()
     {
         // 借出的会话也在池 strand 上运行，与 http_client_pool 借出的 client 共 executor 一致。
-        co_return co_await connect_(base_executor_);
+        co_return co_await connect_(executor_);
     }
 
     net::awaitable<void>

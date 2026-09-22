@@ -91,16 +91,6 @@ namespace httplib::server
         ~http_server();
 
         /**
-         * @brief 获取服务器关联的执行器。
-         *
-         * @return 服务器用于异步操作的 I/O 执行器。
-         *
-         * @par 线程安全
-         * 可随时从任意线程调用。
-         */
-        net::any_io_executor get_executor() noexcept;
-
-        /**
          * @brief 绑定到本地端点并开始监听连接。
          *
          * @param host 要绑定的地址，例如 @c "127.0.0.1"。
