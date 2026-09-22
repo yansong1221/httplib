@@ -16,6 +16,7 @@
 #include "ws_forward_impl.h"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/predicate.hpp>
+#include <boost/asio/dispatch.hpp>
 #include <boost/asio/socket_base.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/use_future.hpp>
@@ -109,7 +110,6 @@ namespace httplib::server
     httplib::net::awaitable<void>
     http_server::impl::async_stop()
     {
-        auto self = shared_from_this();
         co_return co_await net::co_spawn(
             strand_,
             [&]() -> net::awaitable<void>
@@ -123,14 +123,8 @@ namespace httplib::server
                 acceptor_.cancel(ec);
                 acceptor_.close(ec);
 
-                // 先在锁内快照，避免持锁调用 abort()/net::post 造成阻塞或重入。
-                std::vector<std::shared_ptr<session>> sessions;
-                {
-                    std::lock_guard lck(session_mutex_);
-                    sessions.assign(sessions_.begin(), sessions_.end());
-                }
-                get_logger()->trace("[server] stopping, {} sessions remaining", sessions.size());
-                for (auto const& v : sessions)
+                get_logger()->trace("[server] stopping, {} sessions remaining", sessions_.size());
+                for (auto const& v : sessions_)
                 {
                     v->abort();
                 }
@@ -174,19 +168,11 @@ namespace httplib::server
 
                 // stop();
 
-                // Wait for every in-flight session to finish. `handle_accept()` notifies
-                // `session_event_` when the last session leaves `sessions_`, so no timer
-                // polling is needed.
-                for (;;)
+                // Wait for every in-flight session to finish. `remove_session()` notifies
+                // `session_event_` on `strand_` when the last session leaves `sessions_`,
+                // so no timer polling is needed.
+                while (!sessions_.empty())
                 {
-                    {
-                        std::lock_guard lck(session_mutex_);
-                        if (sessions_.empty())
-                        {
-                            break;
-                        }
-                    }
-
                     auto result = co_await session_event_.wait();
                     if (result != util::async_event::wait_result::notified)
                     {
@@ -238,10 +224,41 @@ namespace httplib::server
                 }
                 break;
             }
+            boost::system::error_code opt_ec;
+            sock.set_option(net::ip::tcp::no_delay(true), opt_ec);
+
+            boost::system::error_code ep_ec;
+            auto remote_endp = sock.remote_endpoint(ep_ec);
+            get_logger()->trace("accept new connection [{}:{}]", remote_endp.address().to_string(), remote_endp.port());
+
+            // 在 strand_ 上同步创建并注册会话（本协程本就在 strand_ 上），保证
+            // `async_run()` 的 drain 在 when_all 返回后一定能看到所有已接受的会话。
+            auto conn = std::make_shared<session>(strand, std::move(sock), shared_from_this());
+            sessions_.insert(conn);
+            get_logger()->trace("[session] running, total={}", sessions_.size());
+
             net::co_spawn(strand,
-                          handle_accept(std::move(sock)),
-                          [self = shared_from_this()](std::exception_ptr e)
+                          conn->run(),
+                          [this, self = shared_from_this(), conn, remote_endp](std::exception_ptr e)
                           {
+                              // 完成回调在连接 strand 上；注销需回到 strand_。
+                              net::dispatch(strand_,
+                                            [this, self, conn, remote_endp]()
+                                            {
+                                                get_logger()->trace("close connection [{}:{}]",
+                                                                    remote_endp.address().to_string(),
+                                                                    remote_endp.port());
+
+                                                sessions_.erase(conn);
+                                                auto session_count = sessions_.size();
+
+                                                get_logger()->trace("[session] done, total={}", session_count);
+
+                                                if (session_count == 0)
+                                                {
+                                                    session_event_.notify_all();
+                                                }
+                                            });
                               if (!e)
                               {
                                   return;
@@ -252,59 +269,16 @@ namespace httplib::server
                               }
                               catch (std::exception const& ex)
                               {
-                                  self->get_logger()->error("handle_accept exception: {}", ex.what());
+                                  self->get_logger()->error("session::run() exception: {}", ex.what());
                               }
                               catch (...)
                               {
-                                  self->get_logger()->error("handle_accept unknown exception");
+                                  self->get_logger()->error("session::run() unknown exception");
                               }
                           });
         }
         get_logger()->trace("async_accept: {}", ec.message());
         co_return ec;
-    }
-    net::awaitable<void>
-    http_server::impl::handle_accept(tcp::socket sock)
-    {
-        auto remote_endp = sock.remote_endpoint();
-        auto local_endp = sock.local_endpoint();
-        {
-            boost::system::error_code ec;
-            sock.set_option(net::ip::tcp::no_delay(true), ec);
-        }
-        get_logger()->trace("accept new connection [{}:{}]", remote_endp.address().to_string(), remote_endp.port());
-
-        auto conn = std::make_shared<session>(co_await net::this_coro::executor, std::move(sock), shared_from_this());
-        std::size_t session_count = 0;
-        {
-            std::lock_guard lck(session_mutex_);
-            sessions_.insert(conn);
-            session_count = sessions_.size();
-        }
-        get_logger()->trace("[session] running, total={}", session_count);
-        try
-        {
-            co_await conn->run();
-        }
-        catch (std::exception const& e)
-        {
-            get_logger()->error("session::run() exception: {}", e.what());
-        }
-        catch (...)
-        {
-            get_logger()->error("session::run() unknown exception");
-        }
-        {
-            std::lock_guard lck(session_mutex_);
-            sessions_.erase(conn);
-            session_count = sessions_.size();
-        }
-        get_logger()->trace("[session] done, total={}", session_count);
-
-        if (session_count == 0)
-        {
-            session_event_.notify_all();
-        }
     }
 
     void

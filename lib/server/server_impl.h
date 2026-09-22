@@ -117,10 +117,8 @@ namespace httplib::server
             return ssl_context_.load();
         }
 #endif
-
       private:
         net::awaitable<boost::system::error_code> co_accept();
-        net::awaitable<void> handle_accept(tcp::socket sock);
 
       private:
         net::strand<net::any_io_executor> strand_;
@@ -130,7 +128,7 @@ namespace httplib::server
         tcp::acceptor acceptor_;
         tcp::endpoint local_endpoint_;
 
-        std::mutex session_mutex_;
+        /// 仅在 `strand_` 上访问：accept 时在此注册、会话结束时注销。
         std::unordered_set<std::shared_ptr<session>> sessions_;
 
         /// Notified when `sessions_` transitions to empty; awaited by
