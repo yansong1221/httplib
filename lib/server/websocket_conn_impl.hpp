@@ -36,8 +36,6 @@ namespace httplib::server
         std::future<void> abort() override;
         net::awaitable<void> async_abort() override;
 
-        bool is_open() const override;
-
         request const&
         http_request() const override
         {

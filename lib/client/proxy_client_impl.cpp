@@ -130,7 +130,8 @@ namespace httplib::client
     {
         if (stream_)
         {
-            stream_->close();
+            boost::system::error_code ec;
+            stream_->close(ec);
             stream_.reset();
         }
     }

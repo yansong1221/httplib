@@ -360,7 +360,7 @@ setup_http_routes(httplib::server::router& router)
         "/api/custom-data",
         [](httplib::server::request& req, httplib::server::response& resp)
         {
-            auto& tag = req.data().fetch<early_data_tag>();
+            auto tag = req.data().fetch<early_data_tag>();
             resp.set_json_content({
                 { "data", tag.value }
             });

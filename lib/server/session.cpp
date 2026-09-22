@@ -189,15 +189,8 @@ namespace httplib::server
     void
     session::detect_ssl_task::abort()
     {
-        // 只会由 session::abort() 投递到本连接的 strand 后调用，直接操作即可。
-        try
-        {
-            stream_.cancel();
-            stream_.close();
-        }
-        catch (...)
-        {
-        }
+        boost::system::error_code ec;
+        stream_.socket().close(ec);
     }
 
     session::http_task::http_task(http_stream&& stream,
@@ -417,7 +410,8 @@ namespace httplib::server
     void
     session::http_task::abort()
     {
-        stream_.close();
+        boost::system::error_code ec;
+        stream_.close(ec);
     }
 
     net::awaitable<bool>
@@ -559,7 +553,7 @@ namespace httplib::server
     session::http_proxy_task::abort()
     {
         boost::system::error_code ec;
-        stream_.close();
+        stream_.close(ec);
         resolver_.cancel();
         proxy_socket_.close(ec);
     }

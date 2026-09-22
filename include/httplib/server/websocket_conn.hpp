@@ -28,7 +28,6 @@ namespace httplib::server
         virtual std::future<void> abort() = 0;
         virtual net::awaitable<void> async_abort() = 0;
 
-        virtual bool is_open() const = 0;
         virtual request const& http_request() const = 0;
         virtual request& http_request() = 0;
 

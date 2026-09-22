@@ -415,7 +415,8 @@ namespace httplib::client
         resolver_.cancel();
         if (auto s = stream_.exchange(nullptr); s)
         {
-            s->close();
+            boost::system::error_code ec;
+            s->close(ec);
         }
     }
     std::future<void>

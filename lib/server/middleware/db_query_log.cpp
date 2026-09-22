@@ -86,7 +86,7 @@ namespace httplib::server::middleware
 
         if (has<db_middleware>(req))
         {
-            auto& sess = fetch<db_middleware>(req);
+            auto sess = fetch<db_middleware>(req);
             sess->get()->set_query_logger({});
         }
         return true;

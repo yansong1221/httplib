@@ -45,7 +45,7 @@ namespace httplib::server
             ws_.get_executor(),
             [&]() -> net::awaitable<void>
             {
-                if (!is_open())
+                if (!ws_.is_open())
                 {
                     ec = net::error::make_error_code(net::error::not_connected);
                     co_return;
@@ -94,7 +94,7 @@ namespace httplib::server
             ws_.get_executor(),
             [&]() -> net::awaitable<void>
             {
-                if (!is_open())
+                if (!ws_.is_open())
                 {
                     ec = net::error::make_error_code(net::error::not_connected);
                     co_return;
@@ -136,7 +136,7 @@ namespace httplib::server
             ws_.get_executor(),
             [&]() -> net::awaitable<void>
             {
-                if (!is_open())
+                if (!ws_.is_open())
                 {
                     ec = net::error::make_error_code(net::error::not_connected);
                     co_return;
@@ -203,18 +203,13 @@ namespace httplib::server
                 }
 
                 boost::system::error_code ec;
-                ws_.socket().cancel(ec);
+                // 关闭底层 socket 会令在途的 beast 读写以 operation_aborted 完成，无需先 cancel。
                 ws_.socket().shutdown(net::socket_base::shutdown_both, ec);
                 ws_.socket().close(ec);
             },
             net::use_awaitable);
     }
 
-    bool
-    websocket_conn_impl::is_open() const
-    {
-        return ws_.is_open();
-    }
     httplib::net::awaitable<void>
     websocket_conn_impl::run()
     {

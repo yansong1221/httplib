@@ -474,13 +474,14 @@ namespace httplib::client
     {
         co_await net::dispatch(strand_, net::use_awaitable);
         auto s = stream_.exchange(nullptr);
-        if (s)
+        if (!s)
         {
-            boost::system::error_code ec;
-            s->socket().cancel(ec);
-            s->socket().shutdown(net::socket_base::shutdown_both, ec);
-            s->socket().close(ec);
+            co_return;
         }
+        // 关闭底层 socket 会令在途的 beast 读写以 operation_aborted 完成，无需先 cancel。
+        boost::system::error_code ec;
+        s->socket().shutdown(net::socket_base::shutdown_both, ec);
+        s->socket().close(ec);
     }
 
     std::shared_ptr<httplib::websocket_stream>

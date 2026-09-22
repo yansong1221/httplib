@@ -6,14 +6,14 @@ namespace httplib::server::middleware
 {
 
     template <typename MW>
-    auto&
+    auto
     fetch(request& req, std::string_view tag = {})
     {
         return req.data().template fetch<typename MW::value_type>(tag);
     }
 
     template <typename MW>
-    auto const&
+    auto
     fetch(request const& req, std::string_view tag = {})
     {
         return req.data().template fetch<typename MW::value_type>(tag);

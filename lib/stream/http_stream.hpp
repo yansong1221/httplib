@@ -126,9 +126,8 @@ namespace httplib
             socket().shutdown(what, ec);
         }
         void
-        close()
+        close(boost::system::error_code& ec)
         {
-            boost::system::error_code ec;
             socket().shutdown(net::socket_base::shutdown_type::shutdown_both, ec);
             socket().close(ec);
         }
@@ -159,7 +158,7 @@ namespace httplib
                     co_return;
                 },
                 stream_);
-            close();
+            close(ec);
         }
 
         template <typename EndPoints>

@@ -1,5 +1,6 @@
 #pragma once
 #include <any>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -22,30 +23,33 @@ namespace httplib::server
         void
         store(std::string_view tag, T&& val)
         {
+            std::lock_guard lock(mutex_);
             map_[make_key(std::type_index(typeid(std::decay_t<T>)), tag)] = std::any(std::forward<T>(val));
         }
         template <typename T>
-        T&
+        T
         fetch()
         {
             return fetch<T>("");
         }
         template <typename T>
-        T&
+        T
         fetch(std::string_view tag)
         {
-            return std::any_cast<T&>(map_.at(make_key(std::type_index(typeid(T)), tag)));
+            std::lock_guard lock(mutex_);
+            return std::any_cast<T>(map_.at(make_key(std::type_index(typeid(T)), tag)));
         }
         template <typename T>
-        T const&
+        T
         fetch() const
         {
             return fetch<T>("");
         }
         template <typename T>
-        T const&
+        T
         fetch(std::string_view tag) const
         {
+            std::lock_guard lock(mutex_);
             return std::any_cast<T const&>(map_.at(make_key(std::type_index(typeid(T)), tag)));
         }
         template <typename T>
@@ -58,6 +62,7 @@ namespace httplib::server
         bool
         has(std::string_view tag) const
         {
+            std::lock_guard lock(mutex_);
             return map_.contains(make_key(std::type_index(typeid(T)), tag));
         }
         template <typename T>
@@ -70,6 +75,7 @@ namespace httplib::server
         void
         erase(std::string_view tag)
         {
+            std::lock_guard lock(mutex_);
             map_.erase(make_key(std::type_index(typeid(T)), tag));
         }
 
@@ -86,6 +92,7 @@ namespace httplib::server
             return k;
         }
 
+        mutable std::mutex mutex_;
         std::unordered_map<std::string, std::any> map_;
     };
 
