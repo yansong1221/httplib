@@ -1,11 +1,13 @@
 #pragma once
 #include "httplib/client/ws_client.hpp"
-#include "httplib/util/action_queue.hpp"
+#include "httplib/util/async_mutex.hpp"
 #include "stream/websocket_stream.hpp"
 #include "util/logging.hpp"
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/strand.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/system/result.hpp>
+#include <future>
 
 namespace httplib::client
 {
@@ -17,27 +19,31 @@ namespace httplib::client
         impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, scheme s);
 
       public:
-        net::awaitable<boost::system::error_code> async_send(std::string&& data, bool binary = false);
-        net::awaitable<boost::system::error_code> async_connect(std::string_view target,
-                                                                http::fields const& headers = {});
-        net::awaitable<boost::system::error_code> async_read();
+        net::awaitable<void> async_send(std::string_view data, bool binary, boost::system::error_code& ec);
+        std::future<boost::system::error_code> send(std::string&& data, bool binary);
 
-        net::awaitable<boost::system::error_code> async_ping(std::string&& msg);
-        net::awaitable<boost::system::error_code> async_pong(std::string&& msg);
+        net::awaitable<void> async_connect(std::string_view target,
+                                           http::fields const& headers,
+                                           boost::system::error_code& ec);
 
-        net::awaitable<boost::system::error_code> async_close();
+        net::awaitable<void> async_read(boost::system::error_code& ec);
 
-        void send(std::string&& data, bool binary = false);
-        void ping(std::string&& msg = std::string());
-        void pong(std::string&& msg = std::string());
-        void close();
+        net::awaitable<void> async_ping(std::string_view msg, boost::system::error_code& ec);
+        std::future<boost::system::error_code> ping(std::string&& msg = std::string());
+
+        net::awaitable<void> async_pong(std::string_view msg, boost::system::error_code& ec);
+        std::future<boost::system::error_code> pong(std::string&& msg = std::string());
+
+        net::awaitable<void> async_close(boost::system::error_code& ec);
+        std::future<boost::system::error_code> close();
 
         bool got_binary() const noexcept;
         bool got_text() const noexcept;
         std::string_view got_data() const noexcept;
 
         bool is_open() const noexcept;
-        void abort();
+        std::future<void> abort();
+        net::awaitable<void> async_abort();
 
         void
         set_verify_ssl(bool verify)
@@ -56,28 +62,28 @@ namespace httplib::client
                  coro_close_handler_type&& close_handler,
                  http::fields const& headers = {});
 
-        net::awaitable<boost::system::error_code> async_run(std::string_view target,
-                                                            coro_message_handler_type&& message_handler,
-                                                            coro_close_handler_type&& close_handler,
-                                                            http::fields const& headers = {});
+        net::awaitable<void> async_run(std::string_view target,
+                                       http::fields const& headers,
+                                       coro_message_handler_type&& message_handler,
+                                       coro_close_handler_type&& close_handler,
+                                       boost::system::error_code& ec);
 
       private:
-        net::awaitable<boost::system::error_code> _async_connect(std::string_view target,
-                                                                 http::fields const& headers = {});
-        net::awaitable<boost::system::error_code> _async_read();
+        std::shared_ptr<websocket_stream> get_stream(boost::system::error_code& ec) const;
 
       private:
-        net::any_io_executor executor_;
+        net::strand<net::any_io_executor> strand_;
         tcp::resolver resolver_;
-        std::string host_;
-        uint16_t port_ = 0;
-        scheme scheme_ = scheme::plain;
+        std::string const host_;
+        uint16_t const port_ = 0;
+        scheme const scheme_ = scheme::plain;
         bool verify_ssl_ = true;
         std::string ca_cert_;
 
-        std::shared_ptr<websocket_stream> stream_;
+        std::atomic<std::shared_ptr<websocket_stream>> stream_;
 
         beast::flat_buffer buffer_;
-        util::action_queue ac_que_;
+        util::async_mutex write_mutex_;
+        util::async_mutex read_mutex_;
     };
 } // namespace httplib::client

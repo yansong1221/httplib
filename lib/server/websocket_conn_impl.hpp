@@ -2,6 +2,7 @@
 #include "httplib/server/request.hpp"
 #include "httplib/server/websocket_conn.hpp"
 #include "httplib/util/action_queue.hpp"
+#include "httplib/util/async_mutex.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "server_impl.h"
@@ -23,10 +24,18 @@ namespace httplib::server
         ~websocket_conn_impl();
 
       public:
-        void send(std::string&& msg, bool binary) override;
-        void ping(std::string&& msg) override;
-        void close(std::string_view reason) override;
-        void abort() override;
+        std::future<boost::system::error_code> send(std::string&& msg, bool binary) override;
+        net::awaitable<void> async_send(std::string_view msg, bool binary, boost::system::error_code& ec) override;
+
+        std::future<boost::system::error_code> ping(std::string&& msg) override;
+        net::awaitable<void> async_ping(std::string_view msg, boost::system::error_code& ec) override;
+
+        std::future<boost::system::error_code> close(std::string_view reason) override;
+        net::awaitable<void> async_close(std::string_view reason, boost::system::error_code& ec) override;
+
+        std::future<void> abort() override;
+        net::awaitable<void> async_abort() override;
+
         bool is_open() const override;
 
         request const&
@@ -44,13 +53,14 @@ namespace httplib::server
         net::awaitable<void> run();
 
       private:
+        std::shared_ptr<spdlog::logger> get_logger() const;
+
         std::shared_ptr<http_server::impl> server_impl_;
 
         request req_;
         websocket_stream ws_;
         beast::flat_buffer buffer_;
-
-        util::action_queue ac_que_;
+        util::async_mutex write_mutex_;
     };
 
 } // namespace httplib::server

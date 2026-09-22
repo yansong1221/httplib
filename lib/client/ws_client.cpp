@@ -17,7 +17,9 @@ namespace httplib::client
     net::awaitable<boost::system::error_code>
     ws_client::async_connect(std::string_view target, http::fields const& headers)
     {
-        co_return co_await impl_->async_connect(target, headers);
+        boost::system::error_code ec;
+        co_await impl_->async_connect(target, headers, ec);
+        co_return ec;
     }
 
     bool
@@ -35,31 +37,41 @@ namespace httplib::client
     httplib::net::awaitable<boost::system::error_code>
     ws_client::async_read()
     {
-        co_return co_await impl_->async_read();
+        boost::system::error_code ec;
+        co_await impl_->async_read(ec);
+        co_return ec;
     }
 
     httplib::net::awaitable<boost::system::error_code>
     ws_client::async_ping(std::string&& msg)
     {
-        co_return co_await impl_->async_ping(std::move(msg));
+        boost::system::error_code ec;
+        co_await impl_->async_ping(msg, ec);
+        co_return ec;
     }
 
     httplib::net::awaitable<boost::system::error_code>
     ws_client::async_pong(std::string&& msg)
     {
-        co_return co_await impl_->async_pong(std::move(msg));
+        boost::system::error_code ec;
+        co_await impl_->async_pong(msg, ec);
+        co_return ec;
     }
 
     httplib::net::awaitable<boost::system::error_code>
     ws_client::async_close()
     {
-        co_return co_await impl_->async_close();
+        boost::system::error_code ec;
+        co_await impl_->async_close(ec);
+        co_return ec;
     }
 
     httplib::net::awaitable<boost::system::error_code>
     ws_client::async_send(std::string&& data, bool binary /*= false*/)
     {
-        co_return co_await impl_->async_send(std::move(data), binary);
+        boost::system::error_code ec;
+        co_await impl_->async_send(data, binary, ec);
+        co_return ec;
     }
 
     std::string_view
@@ -95,25 +107,25 @@ namespace httplib::client
     void
     ws_client::send(std::string&& data, bool binary /*= false*/)
     {
-        return impl_->send(std::move(data), binary);
+        impl_->send(std::move(data), binary);
     }
 
     void
     ws_client::ping(std::string&& msg /*= std::string()*/)
     {
-        return impl_->ping(std::move(msg));
+        impl_->ping(std::move(msg));
     }
 
     void
     ws_client::pong(std::string&& msg /*= std::string()*/)
     {
-        return impl_->pong(std::move(msg));
+        impl_->pong(std::move(msg));
     }
 
     void
     ws_client::close()
     {
-        return impl_->close();
+        impl_->close();
     }
 
     net::awaitable<boost::system::error_code>
@@ -122,7 +134,9 @@ namespace httplib::client
                               coro_close_handler_type&& close_handler,
                               http::fields const& headers /*= {}*/)
     {
-        co_return co_await impl_->async_run(target, std::move(message_handler), std::move(close_handler), headers);
+        boost::system::error_code ec;
+        co_await impl_->async_run(target, headers, std::move(message_handler), std::move(close_handler), ec);
+        co_return ec;
     }
 
     void
