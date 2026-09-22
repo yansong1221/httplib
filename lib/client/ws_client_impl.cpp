@@ -5,14 +5,13 @@
 #include <boost/asio/detached.hpp>
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/use_future.hpp>
-#include <boost/beast/core/buffers_to_string.hpp>
+#include <chrono>
 #include <spdlog/spdlog.h>
 
 namespace httplib::client
 {
     ws_client::impl::impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, scheme s)
         : strand_(net::make_strand(ex))
-        , resolver_(strand_)
         , host_(host)
         , port_(port)
         , scheme_(s)
@@ -23,7 +22,10 @@ namespace httplib::client
     }
 
     net::awaitable<void>
-    ws_client::impl::async_connect(std::string_view target, http::fields const& headers, boost::system::error_code& ec)
+    ws_client::impl::async_connect(std::string_view target,
+                                   http::fields const& headers,
+                                   std::chrono::steady_clock::duration timeout,
+                                   boost::system::error_code& ec)
     {
         co_return co_await net::co_spawn(
             strand_,
@@ -36,8 +38,13 @@ namespace httplib::client
                 }
                 get_logger()->trace("connecting ws://{}:{}{}", host_, port_, target);
 
+                auto ca_cert = ca_cert_.load();
                 auto stream_result
-                    = http_stream::create_stream(strand_, host_, scheme_ == scheme::tls, verify_ssl_, ca_cert_);
+                    = http_stream::create_stream(strand_,
+                                                 host_,
+                                                 scheme_ == scheme::tls,
+                                                 verify_ssl_.load(),
+                                                 ca_cert ? std::string_view(*ca_cert) : std::string_view {});
                 if (!stream_result)
                 {
                     ec = stream_result.error();
@@ -45,8 +52,9 @@ namespace httplib::client
                     co_return;
                 }
                 http_stream stream(std::move(*stream_result));
-                auto endpoints
-                    = co_await resolver_.async_resolve(host_, std::to_string(port_), util::net_awaitable[ec]);
+                tcp::resolver resolver(strand_);
+                stream.expires_after(timeout);
+                auto endpoints = co_await resolver.async_resolve(host_, std::to_string(port_), util::net_awaitable[ec]);
                 if (ec)
                 {
                     get_logger()->error("ws connect failed {}:{}: {}", host_, port_, ec.message());
@@ -80,6 +88,7 @@ namespace httplib::client
                     get_logger()->error("ws connect failed {}:{}: {}", host_, port_, ec.message());
                     co_return;
                 }
+                s->expires_never();
                 stream_.store(s);
                 get_logger()->debug("ws connected to {}:{}{}", host_, port_, target);
                 co_return;
@@ -94,33 +103,18 @@ namespace httplib::client
         return s && s->is_open();
     }
 
-    bool
-    ws_client::impl::got_binary() const noexcept
-    {
-        auto s = stream_.load();
-        return s && s->got_binary();
-    }
-
-    bool
-    ws_client::impl::got_text() const noexcept
-    {
-        auto s = stream_.load();
-        return s && s->got_text();
-    }
-
     httplib::net::awaitable<void>
-    ws_client::impl::async_send(std::string_view data, bool binary, boost::system::error_code& ec)
+    ws_client::impl::async_send(websocket_message const& msg, boost::system::error_code& ec)
     {
         co_return co_await net::co_spawn(
             strand_,
             [&]() -> net::awaitable<void>
             {
-                if (!is_open())
+                auto s = get_stream(ec);
+                if (ec)
                 {
-                    ec = net::error::make_error_code(net::error::not_connected);
                     co_return;
                 }
-                auto s = stream_.load();
 
                 auto guard = co_await write_mutex_.lock();
                 if (!guard)
@@ -128,7 +122,7 @@ namespace httplib::client
                     ec = net::error::make_error_code(net::error::operation_aborted);
                     co_return;
                 }
-                if (binary)
+                if (msg.is_binary())
                 {
                     s->binary(true);
                 }
@@ -136,7 +130,7 @@ namespace httplib::client
                 {
                     s->text(true);
                 }
-                co_await s->async_write(net::buffer(data), util::net_awaitable[ec]);
+                co_await s->async_write(net::buffer(msg.view()), util::net_awaitable[ec]);
                 if (ec)
                 {
                     get_logger()->error("Failed to send message: {}", ec.message());
@@ -147,15 +141,14 @@ namespace httplib::client
     }
 
     std::future<boost::system::error_code>
-    ws_client::impl::send(std::string&& data, bool binary /*= false*/)
+    ws_client::impl::send(websocket_message msg)
     {
         return net::co_spawn(
             strand_,
-            [this, self = shared_from_this(), data = std::move(data), binary]()
-                -> net::awaitable<boost::system::error_code>
+            [this, self = shared_from_this(), msg = std::move(msg)]() -> net::awaitable<boost::system::error_code>
             {
                 boost::system::error_code ec;
-                co_await async_send(data, binary, ec);
+                co_await async_send(msg, ec);
                 co_return ec;
             },
             net::use_future);
@@ -204,15 +197,15 @@ namespace httplib::client
     }
 
     httplib::net::awaitable<void>
-    ws_client::impl::async_read(boost::system::error_code& ec)
+    ws_client::impl::async_read(websocket_message& msg, boost::system::error_code& ec)
     {
         co_return co_await net::co_spawn(
             strand_,
             [&]() -> net::awaitable<void>
             {
-                if (!is_open())
+                auto s = get_stream(ec);
+                if (ec)
                 {
-                    ec = boost::system::errc::make_error_code(boost::system::errc::not_connected);
                     co_return;
                 }
                 auto guard = co_await read_mutex_.lock();
@@ -221,10 +214,10 @@ namespace httplib::client
                     ec = net::error::make_error_code(net::error::operation_aborted);
                     co_return;
                 }
-                auto s = stream_.load();
 
-                buffer_.consume(buffer_.size());
-                co_await s->async_read(buffer_, util::net_awaitable[ec]);
+                msg.data().clear();
+                auto dyn = net::dynamic_buffer(msg.data());
+                co_await s->async_read(dyn, util::net_awaitable[ec]);
 
                 if (ec)
                 {
@@ -233,6 +226,10 @@ namespace httplib::client
                         get_logger()->warn("ws read failed: {}", ec.message());
                     }
                     co_await async_abort();
+                }
+                else
+                {
+                    msg.set_binary(s->got_binary());
                 }
             },
             net::use_awaitable);
@@ -333,12 +330,6 @@ namespace httplib::client
             net::use_awaitable);
     }
 
-    std::string_view
-    ws_client::impl::got_data() const noexcept
-    {
-        return util::buffer_to_string_view(buffer_.data());
-    }
-
     void
     ws_client::impl::run(std::string_view target,
                          coro_open_handler_type&& open_handler,
@@ -357,7 +348,7 @@ namespace httplib::client
              close_handler = std::move(close_handler)]() mutable -> net::awaitable<void>
             {
                 boost::system::error_code ec;
-                co_await async_connect(target, headers, ec);
+                co_await async_connect(target, headers, std::chrono::seconds(30), ec);
                 try
                 {
                     co_await open_handler(ec);
@@ -373,14 +364,15 @@ namespace httplib::client
 
                 for (;;)
                 {
-                    co_await async_read(ec);
+                    websocket_message msg;
+                    co_await async_read(msg, ec);
                     if (ec)
                     {
                         break;
                     }
                     try
                     {
-                        co_await message_handler(got_data(), got_binary());
+                        co_await message_handler(std::move(msg));
                     }
                     catch (std::exception const& e)
                     {
@@ -413,7 +405,7 @@ namespace httplib::client
                                coro_close_handler_type&& close_handler,
                                boost::system::error_code& ec)
     {
-        co_await async_connect(target, headers, ec);
+        co_await async_connect(target, headers, std::chrono::seconds(30), ec);
         if (ec)
         {
             co_return;
@@ -429,14 +421,15 @@ namespace httplib::client
                 boost::system::error_code ec;
                 for (;;)
                 {
-                    co_await async_read(ec);
+                    websocket_message msg;
+                    co_await async_read(msg, ec);
                     if (ec)
                     {
                         break;
                     }
                     try
                     {
-                        co_await message_handler(got_data(), got_binary());
+                        co_await message_handler(std::move(msg));
                     }
                     catch (std::exception const& e)
                     {

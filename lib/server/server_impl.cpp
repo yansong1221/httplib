@@ -458,8 +458,8 @@ namespace httplib::server
                 detail::ws_forward_context ctx(ex, prefix, provider, factory, logger);
                 co_await ctx.run(wp);
             },
-            [](websocket_conn::weak_ptr wp, std::string_view data, bool binary) -> net::awaitable<void>
-            { co_await detail::ws_forward_context::send_to_upstream(wp, data, binary); },
+            [](websocket_conn::weak_ptr wp, websocket_message msg) -> net::awaitable<void>
+            { co_await detail::ws_forward_context::send_to_upstream(wp, msg); },
             [](websocket_conn::weak_ptr wp) -> net::awaitable<void>
             { co_await detail::ws_forward_context::close_upstream(wp); });
     }

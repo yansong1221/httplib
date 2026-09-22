@@ -901,11 +901,11 @@ TEST_CASE("ws-forward echo", "[proxy][ws-forward]")
     upstream.router().set_ws_handler(
         "/extra-path",
         [](server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; },
-        [](server::websocket_conn::weak_ptr wp, std::string_view msg, bool binary) -> net::awaitable<void>
+        [](server::websocket_conn::weak_ptr wp, websocket_message msg) -> net::awaitable<void>
         {
             if (auto c = wp.lock())
             {
-                c->send(msg, binary);
+                c->send(std::move(msg));
             }
             co_return;
         },
@@ -926,15 +926,15 @@ TEST_CASE("ws-forward echo", "[proxy][ws-forward]")
         [&](boost::system::error_code ec) -> net::awaitable<void>
         {
             REQUIRE(!ec);
-            ws.send(std::string("hello-forward"));
-            ws.send(std::string("message-two"));
-            ws.send(std::string(large_data), true);
-            ws.send(std::string("final"));
+            ws.send(websocket_message("hello-forward", false));
+            ws.send(websocket_message("message-two", false));
+            ws.send(websocket_message(large_data, true));
+            ws.send(websocket_message("final", false));
             co_return;
         },
-        [&](std::string_view msg, bool binary) -> net::awaitable<void>
+        [&](websocket_message msg) -> net::awaitable<void>
         {
-            received.emplace_back(msg);
+            received.emplace_back(msg.data());
             if (received.size() >= 4)
             {
                 ws.close();
@@ -979,12 +979,12 @@ TEST_CASE("ws-forward stress: concurrent connections + shutdown", "[proxy][ws-fo
     upstream.router().set_ws_handler(
         "/echo",
         [](server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; },
-        [&](server::websocket_conn::weak_ptr wp, std::string_view msg, bool binary) -> net::awaitable<void>
+        [&](server::websocket_conn::weak_ptr wp, websocket_message msg) -> net::awaitable<void>
         {
             ++total_recv;
             if (auto c = wp.lock())
             {
-                c->send(msg, binary);
+                c->send(std::move(msg));
             }
             co_return;
         },
@@ -1011,13 +1011,13 @@ TEST_CASE("ws-forward stress: concurrent connections + shutdown", "[proxy][ws-fo
                 {
                     for (int j = 0; j < 2000 && !stop_flag.load(); ++j)
                     {
-                        ws->send(std::format("{}", j));
+                        ws->send(websocket_message(std::format("{}", j), false));
                         ++total_sent;
                     }
                 }
                 co_return;
             },
-            [](std::string_view, bool) -> net::awaitable<void> { co_return; },
+            [](websocket_message) -> net::awaitable<void> { co_return; },
             [&]() -> net::awaitable<void> { co_return; });
     }
 
@@ -1052,11 +1052,11 @@ TEST_CASE("ws-interceptor: messages intercepted", "[proxy][ws-forward]")
     upstream.router().set_ws_handler(
         "/echo",
         [](server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; },
-        [](server::websocket_conn::weak_ptr wp, std::string_view msg, bool binary) -> net::awaitable<void>
+        [](server::websocket_conn::weak_ptr wp, websocket_message msg) -> net::awaitable<void>
         {
             if (auto c = wp.lock())
             {
-                c->send(msg, binary);
+                c->send(std::move(msg));
             }
             co_return;
         },
@@ -1109,14 +1109,14 @@ TEST_CASE("ws-interceptor: messages intercepted", "[proxy][ws-forward]")
         [&](boost::system::error_code ec) -> net::awaitable<void>
         {
             REQUIRE(!ec);
-            ws.send(std::string("hello"));
-            ws.send(std::string("world"));
-            ws.send(std::string("done"));
+            ws.send(websocket_message("hello", false));
+            ws.send(websocket_message("world", false));
+            ws.send(websocket_message("done", false));
             co_return;
         },
-        [&](std::string_view msg, bool) -> net::awaitable<void>
+        [&](websocket_message msg) -> net::awaitable<void>
         {
-            received.emplace_back(msg);
+            received.emplace_back(msg.data());
             if (received.size() >= 3)
             {
                 ws.close();
@@ -1150,11 +1150,11 @@ TEST_CASE("ws-forward multi-backend: round-robin across upstreams", "[proxy][ws-
         srv.router().set_ws_handler(
             "/echo",
             [](server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; },
-            [tag](server::websocket_conn::weak_ptr wp, std::string_view msg, bool binary)
+            [tag](server::websocket_conn::weak_ptr wp, websocket_message msg)
             {
                 if (auto c = wp.lock())
                 {
-                    c->send(std::string(tag) + std::string(msg), binary);
+                    c->send(websocket_message(std::string(tag) + std::string(msg.view()), msg.is_binary()));
                 }
             },
             [](server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });
@@ -1194,15 +1194,15 @@ TEST_CASE("ws-forward multi-backend: round-robin across upstreams", "[proxy][ws-
             {
                 if (!ec)
                 {
-                    ws->send(std::string("hello"));
+                    ws->send(websocket_message("hello", false));
                 }
                 co_return;
             },
-            [&mu, &tags](std::string_view msg, bool) -> net::awaitable<void>
+            [&mu, &tags](websocket_message msg) -> net::awaitable<void>
             {
                 {
                     std::scoped_lock lk(mu);
-                    tags.emplace_back(msg.substr(0, 2));
+                    tags.emplace_back(msg.view().substr(0, 2));
                 }
                 co_return;
             },

@@ -258,11 +258,11 @@ Auto-detection during parsing: `content-type` header selects the correct body re
 router.set_ws_handler(
     "/ws",
     [](server::websocket_conn::weak_ptr hdl) -> net::awaitable<void> {
-        if (auto conn = hdl.lock()) conn->send("Welcome!");
+        if (auto conn = hdl.lock()) conn->send(websocket_message("Welcome!", false));
         co_return;
     },
-    [](server::websocket_conn::weak_ptr hdl, std::string_view msg, bool binary) -> net::awaitable<void> {
-        if (auto conn = hdl.lock()) conn->send(std::format("Echo: {}", msg), binary);
+    [](server::websocket_conn::weak_ptr hdl, websocket_message msg) -> net::awaitable<void> {
+        if (auto conn = hdl.lock()) conn->send(websocket_message(std::format("Echo: {}", msg.view()), msg.is_binary()));
         co_return;
     },
     [](server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });
@@ -281,16 +281,25 @@ router.set_ws_handler("/ws", open, msg, close,
 
 ```cpp
 client::ws_client ws(ex, "127.0.0.1", 8080);
-ws.set_handler(
+ws.run(
+    "/ws",
     [](boost::system::error_code ec) -> net::awaitable<void> { co_return; },
-    [](std::string_view msg, bool binary) -> net::awaitable<void> { co_return; },
+    [](websocket_message msg) -> net::awaitable<void> { co_return; },
     []() -> net::awaitable<void> { co_return; });
 
 // With custom headers
 auto hdrs = http::fields();
 hdrs.set(http::field::authorization, "Bearer my-token");
-ws.run("/ws", hdrs);
+ws.run("/ws", open, msg, close, hdrs);
 ```
+
+A received `websocket_message` owns its payload and carries the frame type
+(`msg.is_text()` / `msg.is_binary()`, payload via `msg.data()` / `msg.view()`).
+Both directions use it: read with
+`websocket_message msg; boost::system::error_code ec; co_await ws.async_read(msg, ec);`,
+send with `ws.send(websocket_message(payload, binary))` or
+`co_await ws.async_send(websocket_message(payload, binary), ec);` (`ec` is always
+an out-parameter, matching the client's `impl`).
 
 ## Built-in Middleware
 

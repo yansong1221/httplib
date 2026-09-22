@@ -9,7 +9,6 @@
 #include "stream/websocket_stream.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/strand.hpp>
-#include <boost/beast/core/flat_buffer.hpp>
 #include <memory>
 #include <queue>
 #include <span>
@@ -24,8 +23,8 @@ namespace httplib::server
         ~websocket_conn_impl();
 
       public:
-        std::future<boost::system::error_code> send(std::string&& msg, bool binary) override;
-        net::awaitable<void> async_send(std::string_view msg, bool binary, boost::system::error_code& ec) override;
+        std::future<boost::system::error_code> send(websocket_message msg) override;
+        net::awaitable<void> async_send(websocket_message const& msg, boost::system::error_code& ec) override;
 
         std::future<boost::system::error_code> ping(std::string&& msg) override;
         net::awaitable<void> async_ping(std::string_view msg, boost::system::error_code& ec) override;
@@ -57,7 +56,6 @@ namespace httplib::server
 
         request req_;
         websocket_stream ws_;
-        beast::flat_buffer buffer_;
         util::async_mutex write_mutex_;
     };
 

@@ -9,87 +9,95 @@ namespace httplib::client
     {
     }
 
-    ws_client::ws_client(net::any_io_executor const& ex, std::string_view host, uint16_t port, scheme s /*= scheme::plain*/)
+    ws_client::ws_client(net::any_io_executor const& ex,
+                         std::string_view host,
+                         uint16_t port,
+                         scheme s /*= scheme::plain*/)
         : impl_(std::make_shared<ws_client::impl>(ex, host, port, s))
     {
     }
+
     ws_client::~ws_client() { abort(); }
-    net::awaitable<boost::system::error_code>
-    ws_client::async_connect(std::string_view target, http::fields const& headers)
+
+    net::awaitable<void>
+    ws_client::async_send(websocket_message const& msg, boost::system::error_code& ec)
     {
-        boost::system::error_code ec;
-        co_await impl_->async_connect(target, headers, ec);
-        co_return ec;
+        co_await impl_->async_send(msg, ec);
     }
 
-    bool
-    ws_client::got_binary() const noexcept
+    std::future<boost::system::error_code>
+    ws_client::send(websocket_message msg)
     {
-        return impl_->got_binary();
+        return impl_->send(std::move(msg));
     }
 
-    bool
-    ws_client::got_text() const noexcept
+    net::awaitable<void>
+    ws_client::async_connect(std::string_view target,
+                             http::fields const& headers,
+                             std::chrono::steady_clock::duration timeout,
+                             boost::system::error_code& ec)
     {
-        return impl_->got_text();
+        co_await impl_->async_connect(target, headers, timeout, ec);
     }
 
-    httplib::net::awaitable<boost::system::error_code>
-    ws_client::async_read()
+    net::awaitable<void>
+    ws_client::async_read(websocket_message& msg, boost::system::error_code& ec)
     {
-        boost::system::error_code ec;
-        co_await impl_->async_read(ec);
-        co_return ec;
+        co_await impl_->async_read(msg, ec);
     }
 
-    httplib::net::awaitable<boost::system::error_code>
-    ws_client::async_ping(std::string&& msg)
+    net::awaitable<void>
+    ws_client::async_ping(std::string_view msg, boost::system::error_code& ec)
     {
-        boost::system::error_code ec;
         co_await impl_->async_ping(msg, ec);
-        co_return ec;
     }
 
-    httplib::net::awaitable<boost::system::error_code>
-    ws_client::async_pong(std::string&& msg)
+    std::future<boost::system::error_code>
+    ws_client::ping(std::string&& msg /*= std::string()*/)
     {
-        boost::system::error_code ec;
+        return impl_->ping(std::move(msg));
+    }
+
+    net::awaitable<void>
+    ws_client::async_pong(std::string_view msg, boost::system::error_code& ec)
+    {
         co_await impl_->async_pong(msg, ec);
-        co_return ec;
     }
 
-    httplib::net::awaitable<boost::system::error_code>
-    ws_client::async_close()
+    std::future<boost::system::error_code>
+    ws_client::pong(std::string&& msg /*= std::string()*/)
     {
-        boost::system::error_code ec;
+        return impl_->pong(std::move(msg));
+    }
+
+    net::awaitable<void>
+    ws_client::async_close(boost::system::error_code& ec)
+    {
         co_await impl_->async_close(ec);
-        co_return ec;
     }
 
-    httplib::net::awaitable<boost::system::error_code>
-    ws_client::async_send(std::string&& data, bool binary /*= false*/)
+    std::future<boost::system::error_code>
+    ws_client::close()
     {
-        boost::system::error_code ec;
-        co_await impl_->async_send(data, binary, ec);
-        co_return ec;
+        return impl_->close();
     }
 
-    std::string_view
-    ws_client::got_data() const noexcept
+    net::awaitable<void>
+    ws_client::async_abort()
     {
-        return impl_->got_data();
+        co_await impl_->async_abort();
     }
 
-    std::shared_ptr<spdlog::logger>
-    ws_client::logger() const
+    std::future<void>
+    ws_client::abort()
     {
-        return impl_->get_logger();
+        return impl_->abort();
     }
 
-    void
-    ws_client::set_logger(std::shared_ptr<spdlog::logger> logger)
+    bool
+    ws_client::is_open() const noexcept
     {
-        impl_->set_logger(std::move(logger));
+        return impl_->is_open();
     }
 
     void
@@ -104,39 +112,26 @@ namespace httplib::client
         impl_->set_ca_cert(cert);
     }
 
-    void
-    ws_client::send(std::string&& data, bool binary /*= false*/)
+    std::shared_ptr<spdlog::logger>
+    ws_client::logger() const
     {
-        impl_->send(std::move(data), binary);
+        return impl_->get_logger();
     }
 
     void
-    ws_client::ping(std::string&& msg /*= std::string()*/)
+    ws_client::set_logger(std::shared_ptr<spdlog::logger> logger)
     {
-        impl_->ping(std::move(msg));
+        impl_->set_logger(std::move(logger));
     }
 
-    void
-    ws_client::pong(std::string&& msg /*= std::string()*/)
-    {
-        impl_->pong(std::move(msg));
-    }
-
-    void
-    ws_client::close()
-    {
-        impl_->close();
-    }
-
-    net::awaitable<boost::system::error_code>
+    net::awaitable<void>
     ws_client::async_run_impl(std::string_view target,
+                              http::fields const& headers,
                               coro_message_handler_type&& message_handler,
                               coro_close_handler_type&& close_handler,
-                              http::fields const& headers /*= {}*/)
+                              boost::system::error_code& ec)
     {
-        boost::system::error_code ec;
         co_await impl_->async_run(target, headers, std::move(message_handler), std::move(close_handler), ec);
-        co_return ec;
     }
 
     void
@@ -147,18 +142,6 @@ namespace httplib::client
                         http::fields const& headers /*= {}*/)
     {
         impl_->run(target, std::move(open_handler), std::move(message_handler), std::move(close_handler), headers);
-    }
-
-    bool
-    ws_client::is_open() const noexcept
-    {
-        return impl_->is_open();
-    }
-
-    void
-    ws_client::abort()
-    {
-        impl_->abort();
     }
 
 } // namespace httplib::client

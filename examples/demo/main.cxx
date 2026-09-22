@@ -406,17 +406,17 @@ setup_ws(httplib::server::router& router)
             auto conn = hdl.lock();
             if (conn)
             {
-                conn->send("Welcome!"sv, false);
+                conn->send(httplib::websocket_message("Welcome!", false));
             }
             co_return;
         },
-        [](httplib::server::websocket_conn::weak_ptr hdl, std::string_view msg, bool binary) -> net::awaitable<void>
+        [](httplib::server::websocket_conn::weak_ptr hdl, httplib::websocket_message msg) -> net::awaitable<void>
         {
             auto conn = hdl.lock();
             if (conn)
             {
-                spdlog::info("WS received: {} (binary={})", msg, binary);
-                conn->send(std::format("Echo: {}", msg), binary);
+                spdlog::info("WS received: {} (binary={})", msg.view(), msg.is_binary());
+                conn->send(httplib::websocket_message(std::format("Echo: {}", msg.view()), msg.is_binary()));
             }
             co_return;
         },
@@ -626,7 +626,7 @@ run_ws_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
             if (!ec)
             {
                 spdlog::info("WS client connected");
-                ws.send("Hello from WS client");
+                ws.send(httplib::websocket_message("Hello from WS client", false));
             }
             else
             {
@@ -634,9 +634,9 @@ run_ws_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
             }
             co_return;
         },
-        [&](std::string_view msg, bool) -> net::awaitable<void>
+        [&](httplib::websocket_message msg) -> net::awaitable<void>
         {
-            spdlog::info("WS client received: {}", msg);
+            spdlog::info("WS client received: {}", msg.view());
             ws.close();
             co_return;
         },

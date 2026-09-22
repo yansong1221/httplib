@@ -24,22 +24,21 @@ namespace httplib::server
     websocket_conn_impl::~websocket_conn_impl() {}
 
     std::future<boost::system::error_code>
-    websocket_conn_impl::send(std::string&& msg, bool binary)
+    websocket_conn_impl::send(websocket_message msg)
     {
         return net::co_spawn(
             ws_.get_executor(),
-            [this, self = shared_from_this(), msg = std::move(msg), binary]()
-                -> net::awaitable<boost::system::error_code>
+            [this, self = shared_from_this(), msg = std::move(msg)]() -> net::awaitable<boost::system::error_code>
             {
                 boost::system::error_code ec;
-                co_await async_send(msg, binary, ec);
+                co_await async_send(msg, ec);
                 co_return ec;
             },
             net::use_future);
     };
 
     net::awaitable<void>
-    websocket_conn_impl::async_send(std::string_view msg, bool binary, boost::system::error_code& ec)
+    websocket_conn_impl::async_send(websocket_message const& msg, boost::system::error_code& ec)
     {
         co_return co_await net::co_spawn(
             ws_.get_executor(),
@@ -57,7 +56,7 @@ namespace httplib::server
                     ec = net::error::make_error_code(net::error::operation_aborted);
                     co_return;
                 }
-                if (binary)
+                if (msg.is_binary())
                 {
                     ws_.binary(true);
                 }
@@ -65,7 +64,7 @@ namespace httplib::server
                 {
                     ws_.text(true);
                 }
-                co_await ws_.async_write(net::buffer(msg), util::net_awaitable[ec]);
+                co_await ws_.async_write(net::buffer(msg.view()), util::net_awaitable[ec]);
                 if (ec)
                 {
                     co_await async_abort();
@@ -203,7 +202,6 @@ namespace httplib::server
                 }
 
                 boost::system::error_code ec;
-                // 关闭底层 socket 会令在途的 beast 读写以 operation_aborted 完成，无需先 cancel。
                 ws_.socket().shutdown(net::socket_base::shutdown_both, ec);
                 ws_.socket().close(ec);
             },
@@ -245,7 +243,9 @@ namespace httplib::server
 
         for (;;)
         {
-            auto bytes = co_await ws_.async_read(buffer_, util::net_awaitable[ec]);
+            websocket_message msg;
+            auto dyn = net::dynamic_buffer(msg.data());
+            co_await ws_.async_read(dyn, util::net_awaitable[ec]);
             if (ec)
             {
                 get_logger()->debug("websocket disconnect: [{}:{}] what: {}",
@@ -256,17 +256,15 @@ namespace httplib::server
                 co_await async_abort();
                 break;
             }
+            msg.set_binary(ws_.got_binary());
             try
             {
-                co_await entry->message_handler(weak_from_this(),
-                                                util::buffer_to_string_view(buffer_.data()),
-                                                ws_.got_binary());
+                co_await entry->message_handler(weak_from_this(), std::move(msg));
             }
             catch (std::exception const& e)
             {
                 get_logger()->error("websocket message handler failed: {}", e.what());
             }
-            buffer_.consume(bytes);
         }
 
         try

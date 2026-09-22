@@ -40,21 +40,26 @@ namespace httplib::server::detail
         }
 
         auto upstream
-            = std::make_shared<client::ws_client>(ex_, upstream_.host, upstream_.port, upstream_.ssl ? client::scheme::tls : client::scheme::plain);
+            = std::make_shared<client::ws_client>(ex_,
+                                                  upstream_.host,
+                                                  upstream_.port,
+                                                  upstream_.ssl ? client::scheme::tls : client::scheme::plain);
         upstream->set_logger(logger_);
 
-        auto ec = co_await upstream->async_run(
+        boost::system::error_code ec;
+        co_await upstream->async_run(
             upstream_.target_path,
-            [conn = websocket_conn::weak_ptr(conn), interceptor = interceptor_](std::string_view data,
-                                                                                bool binary) -> net::awaitable<void>
+            upstream_headers_,
+            [conn = websocket_conn::weak_ptr(conn),
+             interceptor = interceptor_](websocket_message msg) -> net::awaitable<void>
             {
                 if (interceptor)
                 {
-                    co_await interceptor->on_upstream_recv(data, binary);
+                    co_await interceptor->on_upstream_recv(msg.view(), msg.is_binary());
                 }
                 if (auto c = conn.lock())
                 {
-                    c->send(data, binary);
+                    c->send(std::move(msg));
                 }
                 co_return;
             },
@@ -66,7 +71,7 @@ namespace httplib::server::detail
                 }
                 co_return;
             },
-            upstream_headers_);
+            ec);
 
         if (ec)
         {
@@ -119,14 +124,16 @@ namespace httplib::server::detail
         upstream_headers_.erase(http::field::sec_websocket_version);
         upstream_headers_.erase(http::field::upgrade);
         upstream_headers_.erase(http::field::connection);
-        upstream_headers_.set(
-            http::field::host, util::make_host_value(upstream_.host, upstream_.port, upstream_.ssl ? client::scheme::tls : client::scheme::plain));
+        upstream_headers_.set(http::field::host,
+                              util::make_host_value(upstream_.host,
+                                                    upstream_.port,
+                                                    upstream_.ssl ? client::scheme::tls : client::scheme::plain));
 
         co_return true;
     }
 
     net::awaitable<void>
-    ws_forward_context::send_to_upstream(websocket_conn::weak_ptr wp, std::string_view data, bool binary)
+    ws_forward_context::send_to_upstream(websocket_conn::weak_ptr wp, websocket_message const& msg)
     {
         auto conn = wp.lock();
         if (!conn)
@@ -150,10 +157,11 @@ namespace httplib::server::detail
 
         if (state->interceptor)
         {
-            co_await state->interceptor->on_upstream_send(data, binary);
+            co_await state->interceptor->on_upstream_send(msg.view(), msg.is_binary());
         }
 
-        auto ec = co_await state->upstream->async_send(std::string(data), binary);
+        boost::system::error_code ec;
+        co_await state->upstream->async_send(msg, ec);
         if (ec)
         {
             conn->close();
@@ -178,7 +186,8 @@ namespace httplib::server::detail
         auto state = req.data().fetch<ws_forward_state_ptr>();
         if (state && state->upstream)
         {
-            co_await state->upstream->async_close();
+            boost::system::error_code ec;
+            co_await state->upstream->async_close(ec);
         }
         release_upstream_accounting(state);
     }

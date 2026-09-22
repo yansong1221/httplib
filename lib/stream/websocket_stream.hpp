@@ -3,6 +3,7 @@
 #include "ssl_stream.hpp"
 #endif
 #include "http_stream.hpp"
+#include <boost/asio/steady_timer.hpp>
 #include <boost/beast/websocket/stream.hpp>
 
 namespace httplib
@@ -26,6 +27,16 @@ namespace httplib
         get_executor()
         {
             return std::visit([&](auto& t) mutable { return t.get_executor(); }, stream_);
+        }
+        void
+        expires_after(net::steady_timer::duration const& expiry_time)
+        {
+            std::visit([&](auto& t) { beast::get_lowest_layer(t).expires_after(expiry_time); }, stream_);
+        }
+        void
+        expires_never()
+        {
+            std::visit([&](auto& t) { beast::get_lowest_layer(t).expires_never(); }, stream_);
         }
         bool
         is_open() const

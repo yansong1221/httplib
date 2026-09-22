@@ -67,7 +67,7 @@ namespace httplib::server::detail
         net::awaitable<void> run(websocket_conn::weak_ptr wp);
 
         /// Downstream -> upstream relay (registered as the route message handler).
-        static net::awaitable<void> send_to_upstream(websocket_conn::weak_ptr wp, std::string_view data, bool binary);
+        static net::awaitable<void> send_to_upstream(websocket_conn::weak_ptr wp, websocket_message const& msg);
 
         /// Upstream teardown on client disconnect (registered as the route close handler).
         static net::awaitable<void> close_upstream(websocket_conn::weak_ptr wp);

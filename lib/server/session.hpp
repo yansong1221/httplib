@@ -9,6 +9,7 @@
 #include <atomic>
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/empty_body.hpp>
@@ -88,22 +89,36 @@ namespace httplib::server
         // ---- 连接级读取接口（对照 client 的 http_client::impl::async_read_some）----
         // http_task 拥有 stream_/buffer_ 与本连接的读取超时，是本连接唯一的读取者；
         // request::impl 的 lazy body 读取与 header/body 解析都经由这里完成。
+        // 每个操作整体 co_spawn 到 stream_ 的 executor（本连接的 strand），因此
+        // 可从任意线程/执行器发起，实际读写始终在连接 executor 上串行执行。
         template <typename Parser>
         net::awaitable<void>
         read_header(Parser& parser, boost::system::error_code& ec)
         {
-            stream_.expires_after(read_timeout());
-            co_await http::async_read_header(stream_, buffer_, parser, util::net_awaitable[ec]);
-            stream_.expires_never();
+            co_return co_await net::co_spawn(
+                stream_.get_executor(),
+                [&]() -> net::awaitable<void>
+                {
+                    stream_.expires_after(read_timeout());
+                    co_await http::async_read_header(stream_, buffer_, parser, util::net_awaitable[ec]);
+                    stream_.expires_never();
+                },
+                net::use_awaitable);
         }
 
         template <typename Parser>
         net::awaitable<void>
         read_some(Parser& parser, boost::system::error_code& ec)
         {
-            stream_.expires_after(read_timeout());
-            co_await http::async_read_some(stream_, buffer_, parser, util::net_awaitable[ec]);
-            stream_.expires_never();
+            co_return co_await net::co_spawn(
+                stream_.get_executor(),
+                [&]() -> net::awaitable<void>
+                {
+                    stream_.expires_after(read_timeout());
+                    co_await http::async_read_some(stream_, buffer_, parser, util::net_awaitable[ec]);
+                    stream_.expires_never();
+                },
+                net::use_awaitable);
         }
 
         // ---- 连接级写入接口（与读取接口对称，内部统一带写超时）----
@@ -112,25 +127,43 @@ namespace httplib::server
         net::awaitable<void>
         write_header(Serializer& sr, boost::system::error_code& ec)
         {
-            stream_.expires_after(write_timeout());
-            co_await http::async_write_header(stream_, sr, util::net_awaitable[ec]);
-            stream_.expires_never();
+            co_return co_await net::co_spawn(
+                stream_.get_executor(),
+                [&]() -> net::awaitable<void>
+                {
+                    stream_.expires_after(write_timeout());
+                    co_await http::async_write_header(stream_, sr, util::net_awaitable[ec]);
+                    stream_.expires_never();
+                },
+                net::use_awaitable);
         }
         template <typename Serializer>
         net::awaitable<void>
         write_some(Serializer& sr, boost::system::error_code& ec)
         {
-            stream_.expires_after(write_timeout());
-            co_await http::async_write_some(stream_, sr, util::net_awaitable[ec]);
-            stream_.expires_never();
+            co_return co_await net::co_spawn(
+                stream_.get_executor(),
+                [&]() -> net::awaitable<void>
+                {
+                    stream_.expires_after(write_timeout());
+                    co_await http::async_write_some(stream_, sr, util::net_awaitable[ec]);
+                    stream_.expires_never();
+                },
+                net::use_awaitable);
         }
         template <typename Serializer>
         net::awaitable<void>
         write(Serializer& sr, boost::system::error_code& ec)
         {
-            stream_.expires_after(write_timeout());
-            co_await http::async_write(stream_, sr, util::net_awaitable[ec]);
-            stream_.expires_never();
+            co_return co_await net::co_spawn(
+                stream_.get_executor(),
+                [&]() -> net::awaitable<void>
+                {
+                    stream_.expires_after(write_timeout());
+                    co_await http::async_write(stream_, sr, util::net_awaitable[ec]);
+                    stream_.expires_never();
+                },
+                net::use_awaitable);
         }
 
         // 读取/写入配置由本连接统一提供（request 的 reader_ / response 的 task_ 均经此取值）。
