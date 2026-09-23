@@ -1,4 +1,5 @@
 #include "httplib/server/request.hpp"
+#include "body/read.hpp"
 #include "httplib/util/misc.hpp"
 #include "request_impl.hpp"
 
@@ -135,127 +136,106 @@ namespace httplib::server
     std::string const&
     request::as_string() const
     {
-        return impl_->as_string();
+        return impl_->body_state().as_string();
     }
 
     boost::json::value const&
     request::as_json() const
     {
-        return impl_->as_json();
+        return impl_->body_state().as_json();
     }
 
     html::form_data const&
     request::as_form_data() const
     {
-        return impl_->as_form_data();
+        return impl_->body_state().as_form_data();
     }
 
     html::query_params const&
     request::as_query_params() const
     {
-        return impl_->as_query_params();
+        return impl_->body_state().as_query_params();
     }
 
     bool
     request::is_empty() const
     {
-        return impl_->is_empty();
+        return impl_->body_state().is<body::empty_body>();
     }
 
     bool
     request::is_string() const
     {
-        return impl_->is_string();
+        return impl_->body_state().is<body::string_body>();
     }
 
     bool
     request::is_json() const
     {
-        return impl_->is_json();
+        return impl_->body_state().is<body::json_body>();
     }
 
     bool
     request::is_form_data() const
     {
-        return impl_->is_form_data();
+        return impl_->body_state().is<body::form_data_body>();
     }
 
     bool
     request::is_query_params() const
     {
-        return impl_->is_query_params();
+        return impl_->body_state().is<body::query_params_body>();
     }
 
     net::awaitable<std::string>
     request::read_string()
     {
-        boost::system::error_code ec;
-        co_await impl_->read_body([](http::request<body::any_body>& resp)
-                                  { resp.body() = body::string_body::value_type {}; },
-                                  ec);
-        if (ec)
+        auto result = co_await body::read_as<body::string_body>(*impl_);
+        if (!result)
         {
-            throw boost::system::system_error(ec);
+            throw boost::system::system_error(result.error());
         }
-        co_return impl_->take_body<std::string>();
+        co_return std::move(*result);
     }
 
     net::awaitable<boost::json::value>
     request::read_json()
     {
-        boost::system::error_code ec;
-        co_await impl_->read_body([](http::request<body::any_body>& resp)
-                                  { resp.body() = body::json_body::value_type {}; },
-                                  ec);
-        if (ec)
+        auto result = co_await body::read_as<body::json_body>(*impl_);
+        if (!result)
         {
-            throw boost::system::system_error(ec);
+            throw boost::system::system_error(result.error());
         }
-        co_return impl_->take_body<boost::json::value>();
+        co_return std::move(*result);
     }
 
     net::awaitable<html::form_data>
     request::read_form_data()
     {
-        boost::system::error_code ec;
-        co_await impl_->read_body([](http::request<body::any_body>& resp)
-                                  { resp.body() = body::form_data_body::value_type {}; },
-                                  ec);
-        if (ec)
+        auto result = co_await body::read_as<body::form_data_body>(*impl_);
+        if (!result)
         {
-            throw boost::system::system_error(ec);
+            throw boost::system::system_error(result.error());
         }
-        co_return impl_->take_body<html::form_data>();
+        co_return std::move(*result);
     }
 
     net::awaitable<html::query_params>
     request::read_query_params()
     {
-        boost::system::error_code ec;
-        co_await impl_->read_body([](http::request<body::any_body>& resp)
-                                  { resp.body() = body::query_params_body::value_type {}; },
-                                  ec);
-        if (ec)
+        auto result = co_await body::read_as<body::query_params_body>(*impl_);
+        if (!result)
         {
-            throw boost::system::system_error(ec);
+            throw boost::system::system_error(result.error());
         }
-        co_return impl_->take_body<html::query_params>();
-    }
-    net::awaitable<void>
-    request::read_body()
-    {
-        boost::system::error_code ec;
-        co_await read_body(ec);
-        if (ec)
-        {
-            throw boost::system::system_error(ec);
-        }
+        co_return std::move(*result);
     }
 
-    net::awaitable<void>
-    request::read_body(boost::system::error_code& ec)
+    net::awaitable<boost::system::error_code>
+    request::read_body()
     {
         auto params = impl_->form_data_params();
+        boost::system::error_code ec;
         co_await impl_->read_body(
             [params](http::request<body::any_body>& req)
             {
@@ -267,7 +247,7 @@ namespace httplib::server
                 }
             },
             ec);
-        co_return;
+        co_return ec;
     }
 
     net::awaitable<std::size_t>

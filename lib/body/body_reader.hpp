@@ -1,98 +1,98 @@
 #pragma once
-#include "body/any_body.hpp"
+#include "body/body_state.hpp"
+#include "httplib/config.hpp"
 #include "httplib/util/async_mutex.hpp"
-#include <algorithm>
 #include <boost/asio/error.hpp>
 #include <boost/beast/http/buffer_body.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/error.hpp>
 #include <boost/beast/http/message.hpp>
 #include <boost/beast/http/parser.hpp>
-#include <boost/beast/http/status.hpp>
 #include <cstdint>
 #include <cstring>
 #include <functional>
 #include <memory>
-#include <optional>
-#include <type_traits>
 #include <utility>
 
 namespace httplib::detail
 {
-    /// 按消息方向选择 header / raw / decompressed 三种 parser 类型。
-    template <bool IsRequest>
-    struct lazy_parser_traits
-    {
-        template <typename RequestParser, typename ResponseParser>
-        using select = std::conditional_t<IsRequest, RequestParser, ResponseParser>;
+    /** 通用 lazy body 读取器（非 CRTP）。
 
-        using header_parser = select<http::request_parser<http::empty_body>, http::response_parser<http::empty_body>>;
-        using raw_parser = select<http::request_parser<http::buffer_body>, http::response_parser<http::buffer_body>>;
-        using dec_parser = select<http::request_parser<body::any_body>, http::response_parser<body::any_body>>;
-    };
+        把 inbound 消息（server::request / client::response）共有的解析器状态、读取串行化
+        （read_mutex_）与读取逻辑全部收敛到本模板。方向仅由 IsRequest 决定；数据来源由构造期
+        注入的 Source 提供：
 
-    /** 通用 lazy body 读取器（CRTP）。
+            // 底层读一次（Source 需提供）
+            template <typename Parser>
+            net::awaitable<void> read_some(Parser& parser, boost::system::error_code& ec);
 
-        把 `server::request::impl`（IsRequest=true）与 `client::response::impl`
-        （IsRequest=false）共有的解析器状态、读取串行化（read_mutex_）与读取逻辑全部收敛到
-        本模板。派生类只需要提供"数据来源"与物化回调：
-
-          // 底层读一次
-          template <typename Parser>
-          net::awaitable<void> read_some(Parser& parser, boost::system::error_code& ec);
-
-          // 整体 body 读取完成后如何保存（server 赋给自身，client 存 msg_）
-          void store_body(message_t&& msg);
-
-          // body 是否已经物化（server: 非 lazy 即已在自身；client: msg_ 已就绪）
-          bool reader_is_materialized() const;
-
-        它们可以是 private，只要把本模板声明为 friend。
+        body 读取完成后写入本对象的 body_state；派生方如需副作用（如 client 清理
+        read_impl_），在 start() 时传入 on_stored 回调。
     */
-    template <bool IsRequest, typename Derived>
-    class lazy_body_reader
+    template <bool IsRequest, typename Source>
+    class body_reader
     {
       public:
-        using traits = lazy_parser_traits<IsRequest>;
-        using header_parser_t = typename traits::header_parser;
-        using raw_parser_t = typename traits::raw_parser;
-        using dec_parser_t = typename traits::dec_parser;
-        using message_t = std::conditional_t<IsRequest, http::request<body::any_body>, http::response<body::any_body>>;
+        using header_parser_t = http::parser<IsRequest, http::empty_body>;
+        using raw_parser_t = http::parser<IsRequest, http::buffer_body>;
+        using any_parser_t = http::parser<IsRequest, body::any_body>;
+        using message_t = http::message<IsRequest, body::any_body>;
         using body_setup_fn = std::function<void(message_t&)>;
+        using body_state = httplib::body::body_state;
+
+        body_reader() = default;
+        body_reader(body_reader&&) noexcept = default;
+        body_reader& operator=(body_reader&&) noexcept = default;
 
         /// 进入 lazy 状态：header 已解析完毕，保留解析器供后续流式读取。
         void
-        start(std::unique_ptr<header_parser_t> header_parser, std::uint64_t body_limit, net::any_io_executor executor)
+        start(Source* source,
+              std::unique_ptr<header_parser_t> header_parser,
+              std::uint64_t body_limit,
+              net::any_io_executor executor,
+              std::function<void()> on_stored = {})
         {
+            source_ = source;
             read_mutex_ = std::make_unique<util::async_mutex>(std::move(executor));
             header_parser_ = std::move(header_parser);
             body_limit_ = body_limit;
+            on_stored_ = std::move(on_stored);
             raw_parser_.reset();
-            dec_parser_.reset();
+            any_parser_.reset();
         }
 
-        /// 取走 header 解析器用于整体物化（read_body）。
-        std::unique_ptr<header_parser_t>
-        take_header_parser()
+        /// 物化后的 body（方向无关的访问器）。
+        body_state&
+        state()
         {
-            return std::move(header_parser_);
+            return state_;
+        }
+
+        body_state const&
+        state() const
+        {
+            return state_;
         }
 
         bool
         is_body_done() const
         {
+            if (state_.ready())
+            {
+                return true;
+            }
             if (raw_parser_)
             {
                 return raw_parser_->is_done();
             }
-            if (dec_parser_)
+            if (any_parser_)
             {
-                if (!dec_parser_->is_done())
+                if (!any_parser_->is_done())
                 {
                     return false;
                 }
                 // 解析器已读完，但解压溢出数据可能还没取完。
-                if (auto const* buf_body = std::get_if<body::buffer_body::value_type>(&dec_parser_->get().body()))
+                if (auto const* buf_body = std::get_if<body::buffer_body::value_type>(&any_parser_->get().body()))
                 {
                     return buf_body->pending.empty();
                 }
@@ -152,8 +152,8 @@ namespace httplib::detail
         net::awaitable<void>
         read_body(body_setup_fn const& body_setup, boost::system::error_code& ec)
         {
-            // server 非 lazy 请求 body 已在自身；client eager 响应 body 已在 msg_。
-            if (self().reader_is_materialized() || !started())
+            // body 已经物化（server 非 lazy / client eager）或尚未进入 lazy 状态。
+            if (state_.ready() || !started())
             {
                 ec = {};
                 co_return;
@@ -166,7 +166,7 @@ namespace httplib::detail
                 co_return;
             }
             // 加锁后再确认一次，避免并发 read_body 重复物化。
-            if (self().reader_is_materialized() || !started())
+            if (state_.ready() || !started())
             {
                 ec = {};
                 co_return;
@@ -185,7 +185,7 @@ namespace httplib::detail
                 co_return;
             }
 
-            dec_parser_t body_parser(std::move(*header_parser));
+            any_parser_t body_parser(std::move(*header_parser));
             body_parser.eager(true);
             if (body_setup)
             {
@@ -195,17 +195,41 @@ namespace httplib::detail
 
             while (!body_parser.is_done())
             {
-                co_await self().read_some(body_parser, ec);
+                co_await pull(body_parser, ec);
                 if (ec)
                 {
                     co_return;
                 }
             }
-            self().store_body(body_parser.release());
+            store_body(body_parser.release());
             ec = {};
         }
 
       private:
+        template <typename Parser>
+        net::awaitable<void>
+        pull(Parser& parser, boost::system::error_code& ec)
+        {
+            co_await source_->read_some(parser, ec);
+        }
+
+        /// 取走 header 解析器用于整体物化（read_body）。
+        std::unique_ptr<header_parser_t>
+        take_header_parser()
+        {
+            return std::move(header_parser_);
+        }
+
+        void
+        store_body(message_t&& msg)
+        {
+            state_.assign(std::move(msg.body()));
+            if (on_stored_)
+            {
+                on_stored_();
+            }
+        }
+
         /// 流式读取原始（未解压）body：把 header_parser 转成 buffer_body 解析器。
         net::awaitable<std::size_t>
         read_some_raw_locked(net::mutable_buffer const& buf, boost::system::error_code& ec)
@@ -239,7 +263,7 @@ namespace httplib::detail
                 body.data = buf.data();
                 body.size = buf.size();
 
-                co_await self().read_some(*raw_parser_, ec);
+                co_await pull(*raw_parser_, ec);
                 if (ec == http::error::need_buffer)
                 {
                     ec = {};
@@ -267,23 +291,23 @@ namespace httplib::detail
                 ec = {};
                 co_return 0;
             }
-            if (!dec_parser_)
+            if (!any_parser_)
             {
                 if (!header_parser_)
                 {
                     ec = bad_file_descriptor();
                     co_return 0;
                 }
-                dec_parser_ = std::make_unique<dec_parser_t>(std::move(*header_parser_));
-                dec_parser_->eager(false);
+                any_parser_ = std::make_unique<any_parser_t>(std::move(*header_parser_));
+                any_parser_->eager(false);
                 header_parser_.reset();
-                dec_parser_->get().body().decompressed_limit = body_limit_;
-                dec_parser_->get().body() = body::buffer_body::value_type {};
+                any_parser_->get().body().decompressed_limit = body_limit_;
+                any_parser_->get().body() = body::buffer_body::value_type {};
             }
 
             for (;;)
             {
-                auto& buf_body = std::get<body::buffer_body::value_type>(dec_parser_->get().body());
+                auto& buf_body = std::get<body::buffer_body::value_type>(any_parser_->get().body());
 
                 // 先取上一次没写完的溢出数据。
                 if (!buf_body.pending.empty())
@@ -295,7 +319,7 @@ namespace httplib::detail
                     co_return n;
                 }
 
-                if (dec_parser_->is_done())
+                if (any_parser_->is_done())
                 {
                     ec = {};
                     co_return 0;
@@ -304,7 +328,7 @@ namespace httplib::detail
                 buf_body.data = buf.data();
                 buf_body.size = buf.size();
 
-                co_await self().read_some(*dec_parser_, ec);
+                co_await pull(*any_parser_, ec);
                 if (ec == http::error::need_buffer)
                 {
                     ec = {};
@@ -322,16 +346,10 @@ namespace httplib::detail
             }
         }
 
-        Derived&
-        self()
-        {
-            return static_cast<Derived&>(*this);
-        }
-
         bool
         started() const
         {
-            return header_parser_ || raw_parser_ || dec_parser_;
+            return header_parser_ || raw_parser_ || any_parser_;
         }
 
         static boost::system::error_code
@@ -346,10 +364,13 @@ namespace httplib::detail
             return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
         }
 
+        Source* source_ = nullptr;
         std::unique_ptr<util::async_mutex> read_mutex_;
         std::unique_ptr<header_parser_t> header_parser_;
         std::unique_ptr<raw_parser_t> raw_parser_;
-        std::unique_ptr<dec_parser_t> dec_parser_;
+        std::unique_ptr<any_parser_t> any_parser_;
         std::uint64_t body_limit_ = 0;
+        std::function<void()> on_stored_;
+        body_state state_;
     };
 } // namespace httplib::detail

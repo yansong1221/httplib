@@ -323,8 +323,7 @@ namespace httplib::server
                         // lazy 路由则留给处理函数按需流式读取。
                         if (!match.lazy)
                         {
-                            boost::system::error_code ec;
-                            co_await req.read_body(ec);
+                            boost::system::error_code ec = co_await req.read_body();
                             if (ec)
                             {
                                 server_impl_->get_logger()->trace("read http body failed: {}", ec.message());

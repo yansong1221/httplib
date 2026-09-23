@@ -1,4 +1,5 @@
 #include "httplib/client/request.hpp"
+#include "body/body_state.hpp"
 #include "compress/compressor.hpp"
 #include "request_impl.h"
 #include <boost/algorithm/string/join.hpp>
@@ -169,61 +170,61 @@ namespace httplib::client
     std::string const&
     request::as_string() const
     {
-        return std::get<std::string>(impl_->body());
+        return body::access::as_string(impl_->body());
     }
 
     boost::json::value const&
     request::as_json() const
     {
-        return std::get<boost::json::value>(impl_->body());
+        return body::access::as_json(impl_->body());
     }
 
     html::form_data const&
     request::as_form_data() const
     {
-        return std::get<html::form_data>(impl_->body());
+        return body::access::as_form_data(impl_->body());
     }
 
     html::query_params const&
     request::as_query_params() const
     {
-        return std::get<html::query_params>(impl_->body());
+        return body::access::as_query_params(impl_->body());
     }
 
     bool
     request::is_empty() const
     {
-        return impl_->body().template is_body_type<body::empty_body>();
+        return body::access::is<body::empty_body>(impl_->body());
     }
 
     bool
     request::is_string() const
     {
-        return impl_->body().template is_body_type<body::string_body>();
+        return body::access::is<body::string_body>(impl_->body());
     }
 
     bool
     request::is_json() const
     {
-        return impl_->body().template is_body_type<body::json_body>();
+        return body::access::is<body::json_body>(impl_->body());
     }
 
     bool
     request::is_form_data() const
     {
-        return impl_->body().template is_body_type<body::form_data_body>();
+        return body::access::is<body::form_data_body>(impl_->body());
     }
 
     bool
     request::is_query_params() const
     {
-        return impl_->body().template is_body_type<body::query_params_body>();
+        return body::access::is<body::query_params_body>(impl_->body());
     }
 
     bool
     request::is_file() const
     {
-        return impl_->body().template is_body_type<body::file_body>();
+        return body::access::is<body::file_body>(impl_->body());
     }
 
     void

@@ -1,7 +1,8 @@
 ﻿#pragma once
 #include "body/any_body.hpp"
+#include "body/body_reader.hpp"
+#include "body/body_state.hpp"
 #include "body/empty_body.hpp"
-#include "body/lazy_body_reader.hpp"
 #include "client_impl.h"
 #include "httplib/client/response.hpp"
 #include <algorithm>
@@ -17,14 +18,15 @@
 
 namespace httplib::client
 {
-    class response::impl
-        : public std::enable_shared_from_this<response::impl>
-        , public httplib::detail::lazy_body_reader<false, response::impl>
+    class response::impl : public std::enable_shared_from_this<response::impl>
     {
-        friend class httplib::detail::lazy_body_reader<false, response::impl>;
-        using lazy_reader = httplib::detail::lazy_body_reader<false, response::impl>;
-
       public:
+        // 数据源用 response::impl 自身：它是 http_client 的 friend，可访问私有的
+        // http_client::impl；body_reader 只要求 Source 提供 read_some(parser, ec)。
+        using body_reader_t = httplib::detail::body_reader<false, response::impl>;
+        using body_setup_fn = typename body_reader_t::body_setup_fn;
+        using message_t = typename body_reader_t::message_t;
+
         impl(std::shared_ptr<http_client::impl> parent,
              std::unique_ptr<http::response_parser<http::empty_body>> header_parser)
             : parent_(std::move(parent))
@@ -35,7 +37,16 @@ namespace httplib::client
                 content_length_ = *len;
             }
 
-            start(std::move(header_parser), parent_->body_limit_.load(), parent_->get_executor());
+            body_reader_.start(
+                this,
+                std::move(header_parser),
+                parent_->body_limit_.load(),
+                parent_->get_executor(),
+                [this]
+                {
+                    std::unique_lock<std::recursive_mutex> lck(parent_->stream_mutex_);
+                    parent_->read_impl_.reset();
+                });
         }
 
         ~impl()
@@ -74,64 +85,50 @@ namespace httplib::client
             return content_length_;
         }
 
-        // ---- eager accessors ----
+        // ---- body reader ----
 
-        std::string const&
-        as_string() const
+        httplib::body::body_state&
+        body_state()
         {
-            if (!msg_)
-            {
-                throw std::bad_variant_access {};
-            }
-            return std::get<std::string>(msg_->body());
+            return body_reader_.state();
         }
 
-        boost::json::value const&
-        as_json() const
+        httplib::body::body_state const&
+        body_state() const
         {
-            if (!msg_)
-            {
-                throw std::bad_variant_access {};
-            }
-            return std::get<boost::json::value>(msg_->body());
-        }
-
-        html::form_data const&
-        as_form_data() const
-        {
-            if (!msg_)
-            {
-                throw std::bad_variant_access {};
-            }
-            return std::get<html::form_data>(msg_->body());
-        }
-
-        html::query_params const&
-        as_query_params() const
-        {
-            if (!msg_)
-            {
-                throw std::bad_variant_access {};
-            }
-            return std::get<html::query_params>(msg_->body());
+            return body_reader_.state();
         }
 
         bool
         is_body_done() const
         {
-            if (msg_)
-            {
-                return true;
-            }
-            return lazy_reader::is_body_done();
+            return body_reader_.is_body_done();
         }
 
-        // 移动取出已物化的 body（不拷贝，取出后本响应不再持有该 body）。
-        template <typename T>
-        T
-        take_body()
+        net::awaitable<void>
+        read_body(body_setup_fn const& body_setup, boost::system::error_code& ec)
         {
-            return std::move(std::get<T>(msg_->body()));
+            co_await body_reader_.read_body(body_setup, ec);
+        }
+
+        net::awaitable<std::size_t>
+        read_some_raw(net::mutable_buffer const& buffer, boost::system::error_code& ec)
+        {
+            co_return co_await body_reader_.read_some_raw(buffer, ec);
+        }
+
+        net::awaitable<std::size_t>
+        read_some_decompressed(net::mutable_buffer const& buffer, boost::system::error_code& ec)
+        {
+            co_return co_await body_reader_.read_some_decompressed(buffer, ec);
+        }
+
+        // body_reader 的数据源接口：转发到连接读取。
+        template <typename Parser>
+        net::awaitable<void>
+        read_some(Parser& parser, boost::system::error_code& ec)
+        {
+            co_await parent_->async_read_some(parser, ec);
         }
 
       private:
@@ -139,26 +136,6 @@ namespace httplib::client
         http::response_header<http::fields> header_;
 
         std::optional<std::uint64_t> content_length_;
-        std::optional<http::response<body::any_body>> msg_;
-
-        // ---- httplib::detail::lazy_body_reader data source / materialization ----
-        template <typename Parser>
-        net::awaitable<void>
-        read_some(Parser& parser, boost::system::error_code& ec)
-        {
-            co_await parent_->async_read_some(parser, ec);
-        }
-        bool
-        reader_is_materialized() const
-        {
-            return msg_.has_value();
-        }
-        void
-        store_body(http::response<body::any_body>&& msg)
-        {
-            msg_ = std::move(msg);
-            std::unique_lock<std::recursive_mutex> lck(parent_->stream_mutex_);
-            parent_->read_impl_.reset();
-        }
+        body_reader_t body_reader_;
     };
 } // namespace httplib::client

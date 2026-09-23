@@ -1,5 +1,7 @@
 #pragma once
 #include "httplib/config.hpp"
+#include <boost/asio/buffer.hpp>
+#include <boost/beast/http/error.hpp>
 #include <boost/beast/http/fields.hpp>
 #include <boost/optional.hpp>
 #include <cstdint>
@@ -44,12 +46,38 @@ namespace httplib::body
             value_type& body_;
 
           public:
-            explicit reader(http::fields const&, value_type& b);
+            explicit reader(http::fields const&, value_type& b) : body_(b) {}
 
-            void init(boost::optional<std::uint64_t> const& length, beast::error_code& ec);
-            std::size_t put(net::const_buffer const& buffers, beast::error_code& ec);
+            void
+            init(boost::optional<std::uint64_t> const&, beast::error_code& ec)
+            {
+                ec = {};
+            }
 
-            void finish(beast::error_code& ec);
+            std::size_t
+            put(net::const_buffer const& buffers, beast::error_code& ec)
+            {
+                ec = {};
+                auto const total = buffers.size();
+                auto const n = total <= body_.size ? total : body_.size;
+                if (n > 0)
+                {
+                    std::memcpy(body_.data, buffers.data(), n);
+                    body_.data = static_cast<char*>(body_.data) + n;
+                    body_.size -= n;
+                }
+                if (n < total)
+                {
+                    body_.pending.append(static_cast<char const*>(buffers.data()) + n, total - n);
+                }
+                return total;
+            }
+
+            void
+            finish(beast::error_code& ec)
+            {
+                ec = {};
+            }
         };
 
         /** The algorithm for serializing the body
@@ -64,7 +92,7 @@ namespace httplib::body
           public:
             using const_buffers_type = net::const_buffer;
 
-            explicit writer(http::fields const&, value_type const& b);
+            explicit writer(http::fields const&, value_type const& b) : body_(b) {}
 
             void
             init(beast::error_code& ec)
@@ -72,7 +100,29 @@ namespace httplib::body
                 ec = {};
             }
 
-            boost::optional<std::pair<const_buffers_type, bool>> get(beast::error_code& ec);
+            boost::optional<std::pair<const_buffers_type, bool>>
+            get(beast::error_code& ec)
+            {
+                if (done_)
+                {
+                    // 已取走当前缓冲：more 则要求调用方换上新的缓冲，否则本段即结尾。
+                    if (body_.more)
+                    {
+                        done_ = false;
+                        ec = http::error::need_buffer;
+                    }
+                    else
+                    {
+                        ec = {};
+                    }
+                    return boost::none;
+                }
+                done_ = true;
+                ec = {};
+                return {
+                    { const_buffers_type { body_.data, body_.size }, body_.more }
+                };
+            }
         };
     };
 

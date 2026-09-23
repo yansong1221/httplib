@@ -80,8 +80,7 @@ namespace httplib::server
         net::awaitable<html::query_params> read_query_params();
 
         // 读取剩余 body 并物化到本请求（按 content-type 自动派发 body 类型，用 as_* 取引用）
-        net::awaitable<void> read_body();
-        net::awaitable<void> read_body(boost::system::error_code& ec);
+        net::awaitable<boost::system::error_code> read_body();
 
         // 低层流式读：返回未解压的（原始）body 字节
         net::awaitable<std::size_t> read_some_raw(net::mutable_buffer const& buffer, boost::system::error_code& ec);
