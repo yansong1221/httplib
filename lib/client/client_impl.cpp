@@ -147,7 +147,7 @@ namespace httplib::client
                 {
                     co_return ec;
                 }
-                co_return client::response::impl::make_lazy(std::move(header_parser), shared_from_this());
+                co_return client::response::impl::create(std::move(header_parser), shared_from_this());
             },
             net::use_awaitable);
     }

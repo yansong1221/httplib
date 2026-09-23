@@ -1,4 +1,4 @@
-﻿#include "body/string_body.hpp"
+#include "body/string_body.hpp"
 #include "common.hpp"
 #include "httplib/client/lazy_request.hpp"
 #include "httplib/server/middleware/cors.hpp"
@@ -124,7 +124,7 @@ TEST_CASE("Chunked: GET coexists with chunked POST", "[chunked]")
                 "/chunked/both",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    REQUIRE(req.is_lazy());
+                    REQUIRE(!req.is_body_done());
                     std::array<char, 4096> buf;
                     co_await req.read_some_raw(net::buffer(buf));
                     resp.set_string_content("chunked-ok"sv, "text/plain");
@@ -144,7 +144,7 @@ TEST_CASE("Chunked: GET coexists with chunked POST", "[chunked]")
         });
 }
 
-TEST_CASE("Chunked: is_lazy() false for regular handler", "[chunked]")
+TEST_CASE("Chunked: is_body_done() true for regular handler", "[chunked]")
 {
     run(
         [](auto& server)
@@ -153,7 +153,7 @@ TEST_CASE("Chunked: is_lazy() false for regular handler", "[chunked]")
                 "/chunked/check",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    REQUIRE(!req.is_lazy());
+                    REQUIRE(req.is_body_done());
                     resp.set_string_content("not-chunked"sv, "text/plain");
                 });
         },
@@ -372,7 +372,7 @@ TEST_CASE("Chunked: buffer_body receives de-chunked data", "[chunked]")
                 "/chunked/read",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    REQUIRE(req.is_lazy());
+                    REQUIRE(!req.is_body_done());
                     std::string accumulated;
                     std::array<char, 8192> buf;
                     for (;;)
@@ -404,7 +404,7 @@ TEST_CASE("Chunked: multiple chunks are de-chunked into single body", "[chunked]
                 "/chunked/read-ext",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    REQUIRE(req.is_lazy());
+                    REQUIRE(!req.is_body_done());
                     std::string accumulated;
                     std::array<char, 8192> buf;
                     for (;;)
@@ -439,7 +439,7 @@ TEST_CASE("Chunked: large chunk via buffer_body", "[chunked]")
                 "/chunked/read-large",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    REQUIRE(req.is_lazy());
+                    REQUIRE(!req.is_body_done());
                     std::string accumulated;
                     std::array<char, 8192> buf;
                     for (;;)
@@ -472,7 +472,7 @@ TEST_CASE("Chunked: empty chunks via buffer_body", "[chunked]")
                 "/chunked/read-empty",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    REQUIRE(req.is_lazy());
+                    REQUIRE(!req.is_body_done());
                     std::string accumulated;
                     std::array<char, 4096> buf;
                     co_await req.read_some_raw(net::buffer(buf));
@@ -487,7 +487,7 @@ TEST_CASE("Chunked: empty chunks via buffer_body", "[chunked]")
         });
 }
 
-TEST_CASE("Chunked: is_lazy() is true", "[chunked]")
+TEST_CASE("Chunked: is_body_done() is false", "[chunked]")
 {
     run(
         [](auto& server)
@@ -496,7 +496,7 @@ TEST_CASE("Chunked: is_lazy() is true", "[chunked]")
                 "/chunked/read-is-chunked",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    bool was_body = req.is_lazy();
+                    bool was_body = !req.is_body_done();
                     std::array<char, 8192> buf;
                     auto bytes = co_await req.read_some_raw(net::buffer(buf));
                     resp.set_string_content(std::string(was_body ? "yes:" : "no:") + std::string(buf.data(), bytes),
@@ -520,7 +520,7 @@ TEST_CASE("Chunked: with path parameters via buffer_body", "[chunked]")
                 "/chunked/read/:id",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    REQUIRE(req.is_lazy());
+                    REQUIRE(!req.is_body_done());
                     auto id = std::string(req.path_param("id"));
                     std::string accumulated;
                     std::array<char, 8192> buf;
@@ -553,7 +553,7 @@ TEST_CASE("Chunked: with wildcard path via buffer_body", "[chunked]")
                 "/chunked/read-ws/*",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    REQUIRE(req.is_lazy());
+                    REQUIRE(!req.is_body_done());
                     auto wild = std::string(req.path_param("*"));
                     std::string accumulated;
                     std::array<char, 8192> buf;
@@ -586,7 +586,7 @@ TEST_CASE("Chunked: PUT via buffer_body", "[chunked]")
                 "/chunked/read-put",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    REQUIRE(req.is_lazy());
+                    REQUIRE(!req.is_body_done());
                     std::string accumulated;
                     std::array<char, 8192> buf;
                     for (;;)
@@ -618,7 +618,7 @@ TEST_CASE("Chunked: multi-verb via buffer_body", "[chunked]")
                 "/chunked/read-multi",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    REQUIRE(req.is_lazy());
+                    REQUIRE(!req.is_body_done());
                     std::string accumulated;
                     std::array<char, 8192> buf;
                     for (;;)
@@ -655,7 +655,7 @@ TEST_CASE("Chunked: sync send_chunked_request via buffer_body", "[chunked]")
                 "/chunked/sync",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    REQUIRE(req.is_lazy());
+                    REQUIRE(!req.is_body_done());
                     std::string accumulated;
                     std::array<char, 8192> buf;
                     for (;;)

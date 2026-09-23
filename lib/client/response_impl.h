@@ -29,8 +29,7 @@ namespace httplib::client
              std::unique_ptr<http::response_parser<http::empty_body>> header_parser)
             : parent_(std::move(parent))
         {
-            headers_ = header_parser->get().base();
-            status_ = header_parser->get().result();
+            header_ = header_parser->get().base();
             if (auto len = header_parser->content_length(); len)
             {
                 content_length_ = *len;
@@ -47,8 +46,8 @@ namespace httplib::client
             }
         }
         static response
-        make_lazy(std::unique_ptr<http::response_parser<http::empty_body>> header_parser,
-                  std::shared_ptr<http_client::impl> parent)
+        create(std::unique_ptr<http::response_parser<http::empty_body>> header_parser,
+               std::shared_ptr<http_client::impl> parent)
         {
             auto impl = std::make_shared<response::impl>(std::move(parent), std::move(header_parser));
             {
@@ -58,28 +57,15 @@ namespace httplib::client
             return response(std::move(impl));
         }
 
-        http::status
-        result() const
+        http::response_header<http::fields> const&
+        header() const
         {
-            return status_;
+            return header_;
         }
-
-        unsigned
-        result_int() const
+        http::response_header<http::fields>&
+        header()
         {
-            return static_cast<unsigned>(status_);
-        }
-
-        http::fields const&
-        headers() const
-        {
-            return headers_;
-        }
-
-        http::fields&
-        headers()
-        {
-            return headers_;
+            return header_;
         }
 
         std::optional<std::uint64_t>
@@ -148,13 +134,11 @@ namespace httplib::client
             return std::move(std::get<T>(msg_->body()));
         }
 
-        std::shared_ptr<http_client::impl> parent_;
-
       private:
-        http::fields headers_;
-        http::status status_;
-        std::optional<std::uint64_t> content_length_;
+        std::shared_ptr<http_client::impl> parent_;
+        http::response_header<http::fields> header_;
 
+        std::optional<std::uint64_t> content_length_;
         std::optional<http::response<body::any_body>> msg_;
 
         // ---- httplib::detail::lazy_body_reader data source / materialization ----

@@ -252,30 +252,23 @@ namespace httplib::server
                 server_impl_->get_logger()->trace("read http header failed: {}", ec.message());
                 co_return nullptr;
             }
-
             auto start_time = std::chrono::steady_clock::now();
-            auto const& header = header_parser->get();
-            auto req_target = std::string(header.target());
-
-            if (websocket::is_upgrade(header.base()))
-            {
-                server_impl_->get_logger()->trace("ws upgrade {}", req_target);
-                auto req = request::impl::make_request(local_endp,
-                                                       remote_endp,
-                                                       std::move(header_parser->release()),
-                                                       stream_.is_ssl());
-                co_return std::make_shared<websocket_task>(websocket_stream(std::move(stream_)),
-                                                           std::move(req),
-                                                           server_impl_);
-            }
-
             auto self = std::static_pointer_cast<http_task>(shared_from_this());
-            auto resp = response::impl::make_response(header.version(), header.keep_alive(), self);
+
             auto req = request::impl::make_request(self,
                                                    local_endp,
                                                    remote_endp,
                                                    std::move(header_parser),
                                                    stream_.is_ssl());
+
+            if (websocket::is_upgrade(get_impl(req).header()))
+            {
+                server_impl_->get_logger()->trace("ws upgrade {}", req.target());
+                co_return std::make_shared<websocket_task>(websocket_stream(std::move(stream_)),
+                                                           std::move(req),
+                                                           server_impl_);
+            }
+            auto resp = response::impl::create(get_impl(req).header().version(), get_impl(req).keep_alive(), self);
 
             auto h_start = std::chrono::steady_clock::time_point {};
             auto handler_ms = std::chrono::milliseconds::zero();
@@ -306,18 +299,18 @@ namespace httplib::server
                         resp.set_error_content(httplib::http::status::not_found);
                     }
                     server_impl_->get_logger()->debug("{} {} {} {} not matched",
-                                                      header.method_string(),
-                                                      req_target,
+                                                      req.method_string(),
+                                                      req.target(),
                                                       resp.result_int(),
                                                       log_endp_format);
                 }
                 else
                 {
-                    if (header.method() != http::verb::connect)
+                    if (req.method() != http::verb::connect)
                     {
-                        if (beast::iequals(header[http::field::expect], "100-continue"))
+                        if (beast::iequals(req[http::field::expect], "100-continue"))
                         {
-                            auto cont_resp = response::impl::make_response(header.version(), true);
+                            auto cont_resp = response::impl::create(get_impl(req).header().version(), true, self);
                             cont_resp.set_empty_content(http::status::continue_);
                             if (!co_await async_write(req, cont_resp))
                             {
@@ -347,7 +340,7 @@ namespace httplib::server
                 }
                 co_await _router.post_routing(req, resp);
 
-                if (req.is_lazy() && !req.is_body_done())
+                if (!req.is_body_done())
                 {
                     get_impl(resp).keep_alive(false);
                 }
@@ -356,7 +349,7 @@ namespace httplib::server
             {
                 server_impl_->get_logger()->error("exception in handler for {} {} {}: {}",
                                                   req.method_string(),
-                                                  req_target,
+                                                  req.target(),
                                                   log_endp_format,
                                                   e.what());
                 get_impl(resp).keep_alive(false);
@@ -366,13 +359,13 @@ namespace httplib::server
             {
                 server_impl_->get_logger()->error("unknown exception in handler for {} {} {}",
                                                   req.method_string(),
-                                                  req_target,
+                                                  req.target(),
                                                   log_endp_format);
                 get_impl(resp).keep_alive(false);
                 resp.set_error_content(http::status::internal_server_error);
             }
 
-            if (header.method() == http::verb::connect)
+            if (req.method() == http::verb::connect)
             {
                 // 放行(<300)进入隧道；否则回写拒绝响应后结束本会话（不再继续读下一个请求）。
                 if (resp.result_int() < 300)
@@ -392,7 +385,7 @@ namespace httplib::server
             using namespace std::chrono_literals;
             server_impl_->get_logger()->debug("{} {} {} {} handler={}ms total={}ms",
                                               req.method_string(),
-                                              req_target,
+                                              req.target(),
                                               resp.result_int(),
                                               log_endp_format,
                                               handler_ms.count(),
@@ -530,7 +523,7 @@ namespace httplib::server
             co_return nullptr;
         }
 
-        auto resp = response::impl::make_response(get_impl(req_).version(), get_impl(req_).keep_alive());
+        auto resp = response::impl::create(get_impl(req_).header().version(), get_impl(req_).keep_alive(), nullptr);
         get_impl(resp).reason("Connection Established");
         get_impl(resp).result(http::status::ok);
         co_await http::async_write(stream_, (get_impl(resp)), util::net_awaitable[ec]);

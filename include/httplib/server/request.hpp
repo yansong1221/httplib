@@ -47,10 +47,6 @@ namespace httplib::server
 
         bool has(http::field name) const;
         bool has(std::string_view name) const;
-        void set(http::field name, std::string_view value);
-        void set(std::string_view name, std::string_view value);
-        void erase(http::field name);
-        void erase(std::string_view name);
 
         std::string_view path() const;
         html::query_params const& query_params() const;
@@ -74,10 +70,6 @@ namespace httplib::server
         bool is_json() const;
         bool is_form_data() const;
         bool is_query_params() const;
-
-        // ---- body 懒读取（lazy handler）----
-        // 是否为懒读取请求：body 尚未读入，需通过 read_* 系列异步读取。
-        bool is_lazy() const;
 
         // ---- 未读完 body（lazy）：异步读取 ----
         // 读取剩余 body 并按指定类型物化后移动返回（不拷贝，request 不再持有该 body）；

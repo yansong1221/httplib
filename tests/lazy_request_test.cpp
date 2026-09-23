@@ -44,7 +44,7 @@ TEST_CASE("server lazy: read_string", "[server-lazy]")
                 "/string",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    REQUIRE(req.is_lazy());
+                    REQUIRE(!req.is_body_done());
                     auto data = co_await req.read_string();
                     resp.set_string_content(std::move(data), "text/plain");
                 });
@@ -230,7 +230,7 @@ TEST_CASE("server lazy: regular handler takes precedence", "[server-lazy]")
                 "/both",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    REQUIRE(!req.is_lazy());
+                    REQUIRE(req.is_body_done());
                     resp.set_string_content(std::string("regular"), "text/plain");
                 });
             server.router().template set_lazy_http_handler<http::verb::post>(

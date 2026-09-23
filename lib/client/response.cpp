@@ -21,37 +21,37 @@ namespace httplib::client
     http::status
     response::result() const
     {
-        return impl_->result();
+        return impl_->header().result();
     }
 
     unsigned
     response::result_int() const
     {
-        return impl_->result_int();
+        return impl_->header().result_int();
     }
 
     std::string_view
     response::operator[](http::field name) const
     {
-        return impl_->headers()[name];
+        return impl_->header()[name];
     }
 
     std::string_view
     response::operator[](std::string_view name) const
     {
-        return impl_->headers()[name];
+        return impl_->header()[name];
     }
 
     http::fields const&
     response::headers() const
     {
-        return impl_->headers();
+        return impl_->header();
     }
 
     http::fields&
     response::headers()
     {
-        return impl_->headers();
+        return impl_->header();
     }
 
     http::fields const&

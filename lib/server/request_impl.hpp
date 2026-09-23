@@ -18,53 +18,55 @@
 namespace httplib::server
 {
 
-    class request::impl
-        : public http::request<body::any_body>
-        , public httplib::detail::lazy_body_reader<true, request::impl>
+    class request::impl : public httplib::detail::lazy_body_reader<true, request::impl>
     {
         friend class httplib::detail::lazy_body_reader<true, request::impl>;
+
+        using lazy_reader = httplib::detail::lazy_body_reader<true, request::impl>;
 
       public:
         impl(tcp::endpoint const& local_endpoint,
              tcp::endpoint const& remote_endpoint,
-             http::request<body::any_body>&& other,
-             bool is_ssl = false)
-            : http::request<body::any_body>(std::move(other))
-            , local_endpoint_(local_endpoint)
+             std::unique_ptr<http::request_parser<http::empty_body>> header_parser,
+             std::shared_ptr<session::http_task> task,
+             bool is_ssl)
+            : local_endpoint_(local_endpoint)
             , remote_endpoint_(remote_endpoint)
             , is_ssl_(is_ssl)
+            , reader_(std::move(task))
         {
-            if (auto pos = this->target().find("?"); pos == std::string_view::npos)
+            header_ = header_parser->get().base();
+            keep_alive_ = header_parser->get().keep_alive();
+
+            if (auto pos = header_.target().find("?"); pos == std::string_view::npos)
             {
-                this->decoded_path_ = url::url_decode(this->target());
+                decoded_path_ = url::url_decode(header_.target());
             }
             else
             {
-                this->decoded_path_ = url::url_decode(this->target().substr(0, pos));
-                this->query_params_.decode(this->target().substr(pos + 1));
+                decoded_path_ = url::url_decode(header_.target().substr(0, pos));
+                query_params_.decode(header_.target().substr(pos + 1));
             }
-        }
-
-        impl(tcp::endpoint const& local_endpoint,
-             tcp::endpoint const& remote_endpoint,
-             http::request<http::empty_body>&& other,
-             bool is_ssl = false)
-            : impl(local_endpoint, remote_endpoint, http::request<body::any_body>(other), is_ssl)
-        {
+            start(std::move(header_parser), reader_->body_limit(), reader_->executor());
         }
 
         impl& operator=(impl&& other) noexcept = default;
         impl(impl&& other) noexcept = default;
 
+        bool
+        keep_alive() const
+        {
+            return keep_alive_;
+        }
+
         std::string_view
         path() const
         {
-            if (this->decoded_path_.empty())
+            if (decoded_path_.empty())
             {
-                return std::string_view(this->target());
+                return header_.target();
             }
-
-            return this->decoded_path_;
+            return decoded_path_;
         }
         html::query_params const&
         query_params() const
@@ -75,8 +77,8 @@ namespace httplib::server
         net::ip::address
         get_client_ip() const
         {
-            auto iter = this->find("X-Forwarded-For");
-            if (iter == this->end())
+            auto iter = header_.find("X-Forwarded-For");
+            if (iter == header_.end())
             {
                 return this->remote_endpoint_.address();
             }
@@ -121,74 +123,102 @@ namespace httplib::server
         {
             return data_;
         }
+        // ---- eager accessors ----
 
-        // ---- lazy body reader（对照 client::response::impl）----
-        // 读取栈统一在 make_request 里初始化（reader_/form_data_params/start）。
-
-        bool
-        is_lazy() const
+        std::string const&
+        as_string() const
         {
-            // body 尚未读尽才视为 lazy（读尽后等价于已物化，不再需要 read_*）。
-            // 普通处理同样走 setup_lazy_reading，但全量读入后 is_body_done() 为真。
-            return reader_ != nullptr && !is_body_done();
+            if (!msg_)
+            {
+                throw std::bad_variant_access {};
+            }
+            return std::get<std::string>(msg_->body());
         }
 
-        html::form_data::param const&
+        boost::json::value const&
+        as_json() const
+        {
+            if (!msg_)
+            {
+                throw std::bad_variant_access {};
+            }
+            return std::get<boost::json::value>(msg_->body());
+        }
+
+        html::form_data const&
+        as_form_data() const
+        {
+            if (!msg_)
+            {
+                throw std::bad_variant_access {};
+            }
+            return std::get<html::form_data>(msg_->body());
+        }
+
+        html::query_params const&
+        as_query_params() const
+        {
+            if (!msg_)
+            {
+                throw std::bad_variant_access {};
+            }
+            return std::get<html::query_params>(msg_->body());
+        }
+
+        bool
+        is_empty() const
+        {
+            return msg_ && msg_->body().template is_body_type<body::empty_body>();
+        }
+
+        bool
+        is_string() const
+        {
+            return msg_ && msg_->body().template is_body_type<body::string_body>();
+        }
+
+        bool
+        is_json() const
+        {
+            return msg_ && msg_->body().template is_body_type<body::json_body>();
+        }
+
+        bool
+        is_form_data() const
+        {
+            return msg_ && msg_->body().template is_body_type<body::form_data_body>();
+        }
+
+        bool
+        is_query_params() const
+        {
+            return msg_ && msg_->body().template is_body_type<body::query_params_body>();
+        }
+
+        bool
+        is_body_done()
+        {
+            if (msg_)
+            {
+                return true;
+            }
+            return lazy_reader::is_body_done();
+        }
+
+        html::form_data::param
         form_data_params() const
         {
-            return form_data_params_;
+            return reader_->form_data_params();
         }
-
-        std::string_view
-        operator[](http::field name) const
+        http::request_header<http::fields>&
+        header()
         {
-            return this->base()[name];
+            return header_;
         }
-        std::string_view
-        operator[](std::string_view name) const
+        http::request_header<http::fields> const&
+        header() const
         {
-            return this->base()[name];
-        }
-        std::string_view
-        at(http::field name) const
-        {
-            return this->base().at(name);
-        }
-        std::string_view
-        at(std::string_view name) const
-        {
-            return this->base().at(name);
-        }
-
-        bool
-        has(http::field name) const
-        {
-            return this->base().find(name) != this->base().end();
-        }
-        bool
-        has(std::string_view name) const
-        {
-            return this->base().find(name) != this->base().end();
-        }
-        void
-        set(http::field name, std::string_view value)
-        {
-            this->base().set(name, value);
-        }
-        void
-        set(std::string_view name, std::string_view value)
-        {
-            this->base().set(name, value);
-        }
-        void
-        erase(http::field name)
-        {
-            this->base().erase(name);
-        }
-        void
-        erase(std::string_view name)
-        {
-            this->base().erase(name);
+            return header_;
         }
 
         std::string_view
@@ -212,6 +242,14 @@ namespace httplib::server
             path_params_ = std::move(params);
         }
 
+        // 移动取出已物化的 body（不拷贝，取出后本响应不再持有该 body）。
+        template <typename T>
+        T
+        take_body()
+        {
+            return std::move(std::get<T>(msg_->body()));
+        }
+
         // 常规请求：header_parser 归入 lazy 读取栈，随时可流式读取或全量物化
         // （http_task 提供连接读取接口，作用同 client 的 parent_）。
         static request
@@ -223,25 +261,16 @@ namespace httplib::server
         {
             auto _impl = std::make_unique<request::impl>(local_endpoint,
                                                          remote_endpoint,
-                                                         http::request<http::empty_body>(header_parser->get()),
+                                                         std::move(header_parser),
+                                                         std::move(task),
                                                          is_ssl);
-            _impl->reader_ = std::move(task);
-            _impl->form_data_params_ = _impl->reader_->form_data_params();
-            _impl->start(std::move(header_parser), _impl->reader_->body_limit(), _impl->reader_->executor());
-            return request(std::move(_impl));
-        }
-        // 已完成解析的需求（如 websocket 升级）：body 无待读，不进入 lazy 栈。
-        static request
-        make_request(tcp::endpoint const& local_endpoint,
-                     tcp::endpoint const& remote_endpoint,
-                     http::request<http::empty_body>&& other,
-                     bool is_ssl = false)
-        {
-            auto _impl = std::make_unique<request::impl>(local_endpoint, remote_endpoint, std::move(other), is_ssl);
             return request(std::move(_impl));
         }
 
       private:
+        http::request_header<http::fields> header_;
+        bool keep_alive_;
+
         std::string decoded_path_;
         html::query_params query_params_;
 
@@ -256,7 +285,8 @@ namespace httplib::server
         // 连接所有者（http_task），作用同 client 的 parent_（http_client::impl）。
         // 共享所有权：请求对其所依赖的连接读取栈保持强引用，避免裸指针悬空。
         std::shared_ptr<session::http_task> reader_;
-        html::form_data::param form_data_params_;
+
+        std::optional<http::request<body::any_body>> msg_;
 
         // ---- httplib::detail::lazy_body_reader data source / materialization ----
         template <typename Parser>
@@ -274,7 +304,7 @@ namespace httplib::server
         void
         store_body(http::request<body::any_body>&& msg)
         {
-            this->body() = std::move(msg.body());
+            msg_ = std::move(msg);
         }
     };
 } // namespace httplib::server

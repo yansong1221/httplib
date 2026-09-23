@@ -19,76 +19,64 @@ namespace httplib::server
     http::verb
     request::method() const
     {
-        return impl_->method();
+        return impl_->header().method();
     }
     std::string_view
     request::method_string() const
     {
-        return impl_->method_string();
+        return impl_->header().method_string();
     }
     std::string_view
     request::target() const
     {
-        return impl_->target();
+        return impl_->header().target();
     }
     httplib::http::fields&
     request::base()
     {
-        return impl_->base();
+        return impl_->header();
     }
 
     httplib::http::fields const&
     request::base() const
     {
-        return impl_->base();
+        return impl_->header();
     }
 
     std::string_view
     request::operator[](http::field name) const
     {
-        return (*impl_)[name];
+        return impl_->header()[name];
     }
 
     std::string_view
     request::operator[](std::string_view name) const
     {
-        return (*impl_)[name];
+        return impl_->header()[name];
     }
 
     std::string_view
     request::at(http::field name) const
     {
-        return impl_->at(name);
+        return impl_->header().at(name);
     }
 
     std::string_view
     request::at(std::string_view name) const
     {
-        return impl_->at(name);
+        return impl_->header().at(name);
     }
 
     bool
     request::has(http::field name) const
     {
-        return impl_->has(name);
+        return impl_->header().find(name) != impl_->header().end();
     }
 
     bool
     request::has(std::string_view name) const
     {
-        return impl_->has(name);
-    }
-
-    void
-    request::set(http::field name, std::string_view value)
-    {
-        impl_->set(name, value);
-    }
-
-    void
-    request::set(std::string_view name, std::string_view value)
-    {
-        impl_->set(name, value);
+        return impl_->header().find(name) != impl_->header().end();
     }
 
     std::string_view
@@ -147,123 +135,111 @@ namespace httplib::server
     std::string const&
     request::as_string() const
     {
-        return std::get<std::string>(impl_->body());
+        return impl_->as_string();
     }
 
     boost::json::value const&
     request::as_json() const
     {
-        return std::get<boost::json::value>(impl_->body());
+        return impl_->as_json();
     }
 
     html::form_data const&
     request::as_form_data() const
     {
-        return std::get<html::form_data>(impl_->body());
+        return impl_->as_form_data();
     }
 
     html::query_params const&
     request::as_query_params() const
     {
-        return std::get<html::query_params>(impl_->body());
+        return impl_->as_query_params();
     }
 
     bool
     request::is_empty() const
     {
-        return impl_->body().template is_body_type<body::empty_body>();
+        return impl_->is_empty();
     }
 
     bool
     request::is_string() const
     {
-        return impl_->body().template is_body_type<body::string_body>();
+        return impl_->is_string();
     }
 
     bool
     request::is_json() const
     {
-        return impl_->body().template is_body_type<body::json_body>();
+        return impl_->is_json();
     }
 
     bool
     request::is_form_data() const
     {
-        return impl_->body().template is_body_type<body::form_data_body>();
+        return impl_->is_form_data();
     }
 
     bool
     request::is_query_params() const
     {
-        return impl_->body().template is_body_type<body::query_params_body>();
-    }
-
-    bool
-    request::is_lazy() const
-    {
-        return impl_->is_lazy();
+        return impl_->is_query_params();
     }
 
     net::awaitable<std::string>
     request::read_string()
     {
         boost::system::error_code ec;
-        co_await impl_->read_body([](http::request<body::any_body>& req)
-                                  { req.body() = body::string_body::value_type {}; },
+        co_await impl_->read_body([](http::request<body::any_body>& resp)
+                                  { resp.body() = body::string_body::value_type {}; },
                                   ec);
         if (ec)
         {
             throw boost::system::system_error(ec);
         }
-        co_return std::move(std::get<std::string>(impl_->body()));
+        co_return impl_->take_body<std::string>();
     }
 
     net::awaitable<boost::json::value>
     request::read_json()
     {
         boost::system::error_code ec;
-        co_await impl_->read_body([](http::request<body::any_body>& req)
-                                  { req.body() = body::json_body::value_type {}; },
+        co_await impl_->read_body([](http::request<body::any_body>& resp)
+                                  { resp.body() = body::json_body::value_type {}; },
                                   ec);
         if (ec)
         {
             throw boost::system::system_error(ec);
         }
-        co_return std::move(std::get<boost::json::value>(impl_->body()));
+        co_return impl_->take_body<boost::json::value>();
     }
 
     net::awaitable<html::form_data>
     request::read_form_data()
     {
         boost::system::error_code ec;
-        auto params = impl_->form_data_params();
-        co_await impl_->read_body(
-            [params](http::request<body::any_body>& req)
-            {
-                body::form_data_body::value_type value {};
-                value.params = params;
-                req.body() = std::move(value);
-            },
-            ec);
+        co_await impl_->read_body([](http::request<body::any_body>& resp)
+                                  { resp.body() = body::form_data_body::value_type {}; },
+                                  ec);
         if (ec)
         {
             throw boost::system::system_error(ec);
         }
-        co_return std::move(std::get<html::form_data>(impl_->body()));
+        co_return impl_->take_body<html::form_data>();
     }
 
     net::awaitable<html::query_params>
     request::read_query_params()
     {
         boost::system::error_code ec;
-        co_await impl_->read_body([](http::request<body::any_body>& req)
-                                  { req.body() = body::query_params_body::value_type {}; },
+        co_await impl_->read_body([](http::request<body::any_body>& resp)
+                                  { resp.body() = body::query_params_body::value_type {}; },
                                   ec);
         if (ec)
         {
             throw boost::system::system_error(ec);
         }
-        co_return std::move(std::get<html::query_params>(impl_->body()));
+        co_return impl_->take_body<html::query_params>();
     }
     net::awaitable<void>
     request::read_body()

@@ -31,7 +31,7 @@ namespace httplib::server
     class response::impl : public http::response<body::any_body>
     {
       public:
-        impl(unsigned int version, bool keep_alive)
+        impl(unsigned int version, bool keep_alive, std::shared_ptr<session::http_task> task) : task_(std::move(task))
         {
             this->result(http::status::not_found);
             this->version(version);
@@ -213,10 +213,9 @@ namespace httplib::server
         }
 
         static response
-        make_response(unsigned int version, bool keep_alive, std::shared_ptr<session::http_task> task = {})
+        create(unsigned int version, bool keep_alive, std::shared_ptr<session::http_task> task)
         {
-            auto _impl = std::make_unique<response::impl>(version, keep_alive);
-            _impl->task_ = std::move(task);
+            auto _impl = std::make_unique<response::impl>(version, keep_alive, std::move(task));
             return response(std::move(_impl));
         }
 
