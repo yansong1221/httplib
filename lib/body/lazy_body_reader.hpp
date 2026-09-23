@@ -69,26 +69,6 @@ namespace httplib::detail
             body_limit_ = body_limit;
             raw_parser_.reset();
             dec_parser_.reset();
-            if (header_parser_)
-            {
-                // beast 已在解析头时解析好 Content-Length，这里只缓存其结果。
-                if (auto len = header_parser_->content_length())
-                {
-                    content_length_ = *len;
-                }
-                if constexpr (!IsRequest)
-                {
-                    status_ = header_parser_->get().result();
-                }
-                header_ = header_parser_->get().base();
-            }
-        }
-
-        /// Content-Length（由 beast 解析器解析所得），无该字段或非法时为 nullopt。
-        std::optional<std::uint64_t>
-        content_length() const
-        {
-            return content_length_;
         }
 
         /// 取走 header 解析器用于整体物化（read_body）。
@@ -96,55 +76,6 @@ namespace httplib::detail
         take_header_parser()
         {
             return std::move(header_parser_);
-        }
-
-        http::fields&
-        headers()
-        {
-            if (raw_parser_)
-            {
-                return raw_parser_->get().base();
-            }
-            if (dec_parser_)
-            {
-                return dec_parser_->get().base();
-            }
-            if (header_parser_)
-            {
-                return header_parser_->get().base();
-            }
-            return header_;
-        }
-
-        http::fields const&
-        headers() const
-        {
-            return const_cast<lazy_body_reader*>(this)->headers();
-        }
-
-        http::status
-        result() const
-        {
-            if constexpr (IsRequest)
-            {
-                return {};
-            }
-            else
-            {
-                if (raw_parser_)
-                {
-                    return raw_parser_->get().result();
-                }
-                if (dec_parser_)
-                {
-                    return dec_parser_->get().result();
-                }
-                if (header_parser_)
-                {
-                    return header_parser_->get().result();
-                }
-                return status_;
-            }
         }
 
         bool
@@ -420,8 +351,5 @@ namespace httplib::detail
         std::unique_ptr<raw_parser_t> raw_parser_;
         std::unique_ptr<dec_parser_t> dec_parser_;
         std::uint64_t body_limit_ = 0;
-        std::optional<std::uint64_t> content_length_;
-        http::fields header_;
-        http::status status_ { http::status::unknown };
     };
 } // namespace httplib::detail

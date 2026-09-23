@@ -26,9 +26,16 @@ namespace httplib::client
 
       public:
         impl(std::shared_ptr<http_client::impl> parent,
-             std::unique_ptr<http::response_parser<http::empty_body>>&& header_parser)
+             std::unique_ptr<http::response_parser<http::empty_body>> header_parser)
             : parent_(std::move(parent))
         {
+            headers_ = header_parser->get().base();
+            status_ = header_parser->get().result();
+            if (auto len = header_parser->content_length(); len)
+            {
+                content_length_ = *len;
+            }
+
             start(std::move(header_parser), parent_->body_limit_.load(), parent_->get_executor());
         }
 
@@ -40,7 +47,7 @@ namespace httplib::client
             }
         }
         static response
-        make_lazy(std::unique_ptr<http::response_parser<http::empty_body>>&& header_parser,
+        make_lazy(std::unique_ptr<http::response_parser<http::empty_body>> header_parser,
                   std::shared_ptr<http_client::impl> parent)
         {
             auto impl = std::make_shared<response::impl>(std::move(parent), std::move(header_parser));
@@ -54,43 +61,31 @@ namespace httplib::client
         http::status
         result() const
         {
-            if (msg_)
-            {
-                return msg_->result();
-            }
-            return lazy_reader::result();
+            return status_;
         }
 
         unsigned
         result_int() const
         {
-            return static_cast<unsigned>(result());
+            return static_cast<unsigned>(status_);
         }
 
         http::fields const&
         headers() const
         {
-            if (msg_)
-            {
-                return msg_->base();
-            }
-            return lazy_reader::headers();
+            return headers_;
         }
 
         http::fields&
         headers()
         {
-            if (msg_)
-            {
-                return msg_->base();
-            }
-            return lazy_reader::headers();
+            return headers_;
         }
 
         std::optional<std::uint64_t>
         content_length() const
         {
-            return lazy_reader::content_length();
+            return content_length_;
         }
 
         // ---- eager accessors ----
@@ -156,6 +151,10 @@ namespace httplib::client
         std::shared_ptr<http_client::impl> parent_;
 
       private:
+        http::fields headers_;
+        http::status status_;
+        std::optional<std::uint64_t> content_length_;
+
         std::optional<http::response<body::any_body>> msg_;
 
         // ---- httplib::detail::lazy_body_reader data source / materialization ----
