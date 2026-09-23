@@ -1,5 +1,5 @@
 #pragma once
-#include "httplib/client/scheme.hpp"
+#include "httplib/url/scheme.hpp"
 #include "httplib/config.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/websocket_message.hpp"
@@ -43,21 +43,21 @@ namespace httplib::client
          * @param ex 客户端用于其异步操作的执行上下文。
          * @param host 目标主机，例如 @c "127.0.0.1"。
          * @param port 目标端口。
-         * @param s 连接方案，@ref scheme::plain 或 @ref scheme::tls。
+         * @param s 连接方案，@ref url::scheme::plain 或 @ref url::scheme::tls。
          */
-        explicit ws_client(net::io_context& ex, std::string_view host, uint16_t port, scheme s = scheme::plain);
+        explicit ws_client(net::io_context& ex, std::string_view host, uint16_t port, url::scheme s = url::scheme::plain);
         /**
          * @brief 构造一个绑定到 I/O 执行器的 WebSocket 客户端。
          *
          * @param ex 客户端用于其异步操作的执行器。
          * @param host 目标主机，例如 @c "127.0.0.1"。
          * @param port 目标端口。
-         * @param s 连接方案，@ref scheme::plain 或 @ref scheme::tls。
+         * @param s 连接方案，@ref url::scheme::plain 或 @ref url::scheme::tls。
          */
         explicit ws_client(net::any_io_executor const& ex,
                            std::string_view host,
                            uint16_t port,
-                           scheme s = scheme::plain);
+                           url::scheme s = url::scheme::plain);
         /**
          * @brief 销毁 WebSocket 客户端。
          *

@@ -42,7 +42,7 @@ namespace httplib::server::detail
             = std::make_shared<client::ws_client>(conn->get_executor(),
                                                   upstream_.host,
                                                   upstream_.port,
-                                                  upstream_.ssl ? client::scheme::tls : client::scheme::plain);
+                                                  upstream_.ssl ? url::scheme::tls : url::scheme::plain);
         upstream->set_logger(get_logger());
 
         boost::system::error_code ec;
@@ -124,9 +124,9 @@ namespace httplib::server::detail
         upstream_headers_.erase(http::field::upgrade);
         upstream_headers_.erase(http::field::connection);
         upstream_headers_.set(http::field::host,
-                              util::make_host_value(upstream_.host,
+                              url::make_host_value(upstream_.host,
                                                     upstream_.port,
-                                                    upstream_.ssl ? client::scheme::tls : client::scheme::plain));
+                                                    upstream_.ssl ? url::scheme::tls : url::scheme::plain));
 
         co_return true;
     }

@@ -66,6 +66,12 @@ namespace httplib::client
         return headers();
     }
 
+    std::optional<std::uint64_t>
+    response::content_length() const
+    {
+        return impl_->content_length();
+    }
+
     std::string const&
     response::as_string() const
     {

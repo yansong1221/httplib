@@ -1,5 +1,6 @@
 #include "httplib/html/form_data.hpp"
 #include "httplib/html/query_params.hpp"
+#include "httplib/url/url.hpp"
 #include "httplib/util/misc.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <string>
@@ -168,56 +169,56 @@ TEST_CASE("form_data: dump", "[body-utils]")
     REQUIRE(d.find("file.txt") != std::string::npos);
 }
 
-TEST_CASE("util::url_decode", "[body-utils]")
+TEST_CASE("url::url_decode", "[body-utils]")
 {
-    REQUIRE(httplib::util::url_decode("hello%20world") == "hello world");
-    REQUIRE(httplib::util::url_decode("%2Fpath%2Fto%2Ffile") == "/path/to/file");
-    REQUIRE(httplib::util::url_decode("noencoding") == "noencoding");
-    REQUIRE(httplib::util::url_decode("%41%42%43") == "ABC");
+    REQUIRE(httplib::url::url_decode("hello%20world") == "hello world");
+    REQUIRE(httplib::url::url_decode("%2Fpath%2Fto%2Ffile") == "/path/to/file");
+    REQUIRE(httplib::url::url_decode("noencoding") == "noencoding");
+    REQUIRE(httplib::url::url_decode("%41%42%43") == "ABC");
 }
 
-TEST_CASE("util::url_decode rejects malformed percent encoding", "[body-utils]")
+TEST_CASE("url::url_decode rejects malformed percent encoding", "[body-utils]")
 {
-    REQUIRE(httplib::util::url_decode("trailing%") == "trailing%");
-    REQUIRE(httplib::util::url_decode("incomplete%2") == "incomplete%2");
-    REQUIRE(httplib::util::url_decode("%ZZ") == "%ZZ");
-    REQUIRE(httplib::util::url_decode("%%") == "%%");
-    REQUIRE(httplib::util::url_decode("%GG") == "%GG");
-    REQUIRE(httplib::util::url_decode("a%20b%c") == "a b%c");
-    REQUIRE(httplib::util::url_decode("%") == "%");
-    REQUIRE(httplib::util::url_decode("") == "");
+    REQUIRE(httplib::url::url_decode("trailing%") == "trailing%");
+    REQUIRE(httplib::url::url_decode("incomplete%2") == "incomplete%2");
+    REQUIRE(httplib::url::url_decode("%ZZ") == "%ZZ");
+    REQUIRE(httplib::url::url_decode("%%") == "%%");
+    REQUIRE(httplib::url::url_decode("%GG") == "%GG");
+    REQUIRE(httplib::url::url_decode("a%20b%c") == "a b%c");
+    REQUIRE(httplib::url::url_decode("%") == "%");
+    REQUIRE(httplib::url::url_decode("") == "");
 }
 
-TEST_CASE("util::url_decode does not read out of bounds", "[body-utils]")
+TEST_CASE("url::url_decode does not read out of bounds", "[body-utils]")
 {
     std::string s("%");
-    httplib::util::url_decode(s);
+    httplib::url::url_decode(s);
     REQUIRE(s == "%");
 
     std::string s2("%A");
-    httplib::util::url_decode(s2);
+    httplib::url::url_decode(s2);
     REQUIRE(s2 == "%A");
 
     std::string s3("%20%");
-    httplib::util::url_decode(s3);
+    httplib::url::url_decode(s3);
     REQUIRE(s3 == " %");
 
     std::string s4("%20%A");
-    httplib::util::url_decode(s4);
+    httplib::url::url_decode(s4);
     REQUIRE(s4 == " %A");
 }
 
-TEST_CASE("util::url_encode", "[body-utils]")
+TEST_CASE("url::url_encode", "[body-utils]")
 {
-    REQUIRE(httplib::util::url_encode("hello world") == "hello+world");
-    REQUIRE(httplib::util::url_encode("/path/to/file") == "%2fpath%2fto%2ffile");
-    REQUIRE(httplib::util::url_encode("alpha123-_.~") == "alpha123-_.~");
+    REQUIRE(httplib::url::url_encode("hello world") == "hello+world");
+    REQUIRE(httplib::url::url_encode("/path/to/file") == "%2fpath%2fto%2ffile");
+    REQUIRE(httplib::url::url_encode("alpha123-_.~") == "alpha123-_.~");
 }
 
-TEST_CASE("util::url_encode round-trip", "[body-utils]")
+TEST_CASE("url::url_encode round-trip", "[body-utils]")
 {
     std::string original = "hello%20world%21";
-    auto decoded = httplib::util::url_decode(std::string_view(original));
+    auto decoded = httplib::url::url_decode(std::string_view(original));
     REQUIRE(decoded == "hello world!");
 }
 

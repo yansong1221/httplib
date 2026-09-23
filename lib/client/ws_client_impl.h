@@ -16,7 +16,7 @@ namespace httplib::client
         , public std::enable_shared_from_this<impl>
     {
       public:
-        impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, scheme s);
+        impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, url::scheme s);
 
       public:
         net::awaitable<void> async_send(websocket_message const& msg, boost::system::error_code& ec);
@@ -72,7 +72,7 @@ namespace httplib::client
         net::strand<net::any_io_executor> strand_;
         std::string const host_;
         uint16_t const port_ = 0;
-        scheme const scheme_ = scheme::plain;
+        url::scheme const scheme_ = url::scheme::plain;
         std::atomic<bool> verify_ssl_ = true;
         std::atomic<std::shared_ptr<std::string const>> ca_cert_;
 

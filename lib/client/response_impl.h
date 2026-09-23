@@ -25,16 +25,13 @@ namespace httplib::client
         using lazy_reader = httplib::detail::lazy_body_reader<false, response::impl>;
 
       public:
-        impl(net::any_io_executor ex,
-             std::shared_ptr<http_client::impl> parent,
+        impl(std::shared_ptr<http_client::impl> parent,
              std::unique_ptr<http::response_parser<http::empty_body>>&& header_parser)
             : parent_(std::move(parent))
         {
-            start(std::move(header_parser), parent_->body_limit_.load(), std::move(ex));
+            start(std::move(header_parser), parent_->body_limit_.load(), parent_->get_executor());
         }
 
-        // eager：直接构造已完成读入的响应
-        explicit impl(net::any_io_executor, http::response<body::any_body>&& msg) : msg_(std::move(msg)) {}
         ~impl()
         {
             if (parent_ && !is_body_done())
@@ -42,11 +39,16 @@ namespace httplib::client
                 parent_->close();
             }
         }
-
         static response
-        make(net::any_io_executor ex, http::response<body::any_body>&& msg)
+        make_lazy(std::unique_ptr<http::response_parser<http::empty_body>>&& header_parser,
+                  std::shared_ptr<http_client::impl> parent)
         {
-            return response(std::make_shared<impl>(std::move(ex), std::move(msg)));
+            auto impl = std::make_shared<response::impl>(std::move(parent), std::move(header_parser));
+            {
+                std::unique_lock<std::recursive_mutex> lck(impl->parent_->stream_mutex_);
+                impl->parent_->read_impl_ = impl;
+            }
+            return response(std::move(impl));
         }
 
         http::status
@@ -83,6 +85,12 @@ namespace httplib::client
                 return msg_->base();
             }
             return lazy_reader::headers();
+        }
+
+        std::optional<std::uint64_t>
+        content_length() const
+        {
+            return lazy_reader::content_length();
         }
 
         // ---- eager accessors ----
@@ -125,22 +133,6 @@ namespace httplib::client
                 throw std::bad_variant_access {};
             }
             return std::get<html::query_params>(msg_->body());
-        }
-
-        // ---- lazy reader state ----
-
-        // 构造 lazy 响应（body 未读）
-        static response
-        make_lazy(net::any_io_executor ex,
-                  std::unique_ptr<http::response_parser<http::empty_body>>&& header_parser,
-                  std::shared_ptr<http_client::impl> parent)
-        {
-            auto impl = std::make_shared<response::impl>(std::move(ex), std::move(parent), std::move(header_parser));
-            {
-                std::unique_lock<std::recursive_mutex> lck(impl->parent_->stream_mutex_);
-                impl->parent_->read_impl_ = impl;
-            }
-            return response(std::move(impl));
         }
 
         bool

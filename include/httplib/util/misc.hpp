@@ -1,6 +1,5 @@
 #pragma once
 #include "httplib/config.hpp"
-#include "httplib/client/scheme.hpp"
 #include "httplib/util/type_traits.h"
 #include <boost/asio/buffer.hpp>
 #include <charconv>
@@ -40,34 +39,12 @@ namespace httplib::util
         }
         return val;
     }
-    /**
-     * Decodes an URL.
-     *
-     * @details This function replaces %<hex> with the corresponding characters.
-     *          See https://en.wikipedia.org/wiki/Percent-encoding
-     *
-     * @note As the replaced characters are "shorter" than the original input we can perform
-     * the replacement in-place as long as we're somewhat careful not to fuck up.
-     *
-     * @param str The string to decode.
+    /** 按 delimiter 切分字符串；compress=true 时对每段做 trim，并跳过空段。
      */
-    // NOTE: boost.url's pct_encode/pct_decode API requires charset+token,
-    // overengineered for simple standalone string percent encoding.
-    // Keeping hand-rolled version for simplicity.
-    HTTPLIB_API void url_decode(std::string& str);
-    HTTPLIB_API std::string url_decode(std::string_view str);
-    HTTPLIB_API std::string url_encode(std::string_view value);
     HTTPLIB_API std::vector<std::string_view> split(std::string_view str,
                                                     std::string_view delimiter,
                                                     bool compress = true);
 
     HTTPLIB_API std::string_view buffer_to_string_view(boost::asio::const_buffer const& buffer);
-
-    HTTPLIB_API std::string make_host_value(std::string_view host, uint16_t port, client::scheme s);
-    HTTPLIB_API std::string make_url_value(std::string_view host,
-                                           uint16_t port,
-                                           client::scheme s,
-                                           std::string_view target = {},
-                                           std::string_view url_scheme = {});
 
 } // namespace httplib::util

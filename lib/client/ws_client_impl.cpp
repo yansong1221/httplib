@@ -1,4 +1,5 @@
 #include "ws_client_impl.h"
+#include "httplib/url/url.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "util/logging.hpp"
@@ -10,7 +11,7 @@
 
 namespace httplib::client
 {
-    ws_client::impl::impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, scheme s)
+    ws_client::impl::impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, url::scheme s)
         : strand_(net::make_strand(ex))
         , host_(host)
         , port_(port)
@@ -41,7 +42,7 @@ namespace httplib::client
                 auto ca_cert = ca_cert_.load();
                 auto stream_result = http_stream::create(strand_,
                                                          host_,
-                                                         scheme_ == scheme::tls,
+                                                         scheme_ == url::scheme::tls,
                                                          verify_ssl_.load(),
                                                          ca_cert ? std::string_view(*ca_cert) : std::string_view {});
                 if (!stream_result)
@@ -70,8 +71,8 @@ namespace httplib::client
                 s->set_option(websocket::stream_base::decorator(
                     [&](websocket::request_type& req)
                     {
-                        req.set(http::field::origin, util::make_url_value(host_, port_, scheme_));
-                        req.set(http::field::host, util::make_host_value(host_, port_, scheme_));
+                        req.set(http::field::origin, url::make_url_value(host_, port_, scheme_));
+                        req.set(http::field::host, url::make_host_value(host_, port_, scheme_));
                         req.set(http::field::user_agent,
                                 std::string(BOOST_BEAST_VERSION_STRING) + "websocket-client-coro");
                         for (auto const& field : headers)
@@ -487,7 +488,7 @@ namespace httplib::client
         return nullptr;
     }
 
-    ws_client::ws_client(net::io_context& ex, std::string_view host, uint16_t port, scheme s /*= scheme::plain*/)
+    ws_client::ws_client(net::io_context& ex, std::string_view host, uint16_t port, url::scheme s /*= url::scheme::plain*/)
         : ws_client(ex.get_executor(), host, port, s)
     {
     }
@@ -495,7 +496,7 @@ namespace httplib::client
     ws_client::ws_client(net::any_io_executor const& ex,
                          std::string_view host,
                          uint16_t port,
-                         scheme s /*= scheme::plain*/)
+                         url::scheme s /*= url::scheme::plain*/)
         : impl_(std::make_shared<ws_client::impl>(ex, host, port, s))
     {
     }

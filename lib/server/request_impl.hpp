@@ -2,6 +2,7 @@
 #include "body/any_body.hpp"
 #include "body/lazy_body_reader.hpp"
 #include "httplib/server/request.hpp"
+#include "httplib/url/url.hpp"
 #include "httplib/util/misc.hpp"
 #include "session.hpp"
 #include <algorithm>
@@ -35,11 +36,11 @@ namespace httplib::server
         {
             if (auto pos = this->target().find("?"); pos == std::string_view::npos)
             {
-                this->decoded_path_ = util::url_decode(this->target());
+                this->decoded_path_ = url::url_decode(this->target());
             }
             else
             {
-                this->decoded_path_ = util::url_decode(this->target().substr(0, pos));
+                this->decoded_path_ = url::url_decode(this->target().substr(0, pos));
                 this->query_params_.decode(this->target().substr(pos + 1));
             }
         }

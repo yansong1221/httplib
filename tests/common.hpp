@@ -229,7 +229,7 @@ namespace test_common
             client = std::make_unique<httplib::client::http_client>(workers_.get_executor(),
                                                                     "localhost",
                                                                     endpoint.port(),
-                                                                    httplib::client::scheme::tls);
+                                                                    httplib::url::scheme::tls);
             client->set_timeout(std::chrono::seconds(5));
         }
 

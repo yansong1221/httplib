@@ -2,8 +2,8 @@
 #include "httplib/server/request.hpp"
 #include "httplib/server/server.hpp"
 #include "httplib/util/misc.hpp"
+#include "httplib/url/url.hpp"
 #include <boost/asio/awaitable.hpp>
-#include <boost/url.hpp>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -125,7 +125,7 @@ namespace httplib::server::detail
         auto url = co_await provider->url(req);
         out.value.raw_url = url;
 
-        auto r = boost::urls::parse_uri(url);
+        auto r = url::parse_url(url);
         if (!r)
         {
             out.rc = upstream_resolve_rc::bad_url;
@@ -134,14 +134,14 @@ namespace httplib::server::detail
 
         auto const& u = *r;
         auto& v = out.value;
-        v.host = std::string(u.host());
-        v.scheme = std::string(u.scheme());
-        v.ssl = websocket ? (v.scheme == "wss" || v.scheme == "https") : (v.scheme == "https");
-        v.port = u.port_number() ? u.port_number() : (v.ssl ? 443 : 80);
-        v.prefix_path = std::string(u.encoded_path());
+        v.host = u.host;
+        v.scheme = u.scheme;
+        v.ssl = websocket ? u.is_ssl() : (v.scheme == "https");
+        v.port = u.effective_port();
+        v.prefix_path = u.path;
         v.target_path = make_upstream_path(req.target(), prefix, v.prefix_path);
-        v.url = websocket ? util::make_url_value(v.host, v.port, v.ssl ? client::scheme::tls : client::scheme::plain, v.target_path, v.scheme)
-                          : util::make_url_value(v.host, v.port, v.ssl ? client::scheme::tls : client::scheme::plain, v.target_path);
+        v.url = websocket ? url::make_url_value(v.host, v.port, v.ssl ? url::scheme::tls : url::scheme::plain, v.target_path, v.scheme)
+                          : url::make_url_value(v.host, v.port, v.ssl ? url::scheme::tls : url::scheme::plain, v.target_path);
 
         co_return out;
     }

@@ -2,6 +2,7 @@
 #include "httplib/client/cache.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/downloader.hpp"
+#include "httplib/url/url.hpp"
 #include "httplib/util/async_event.hpp"
 #include <atomic>
 #include <boost/system/error_code.hpp>
@@ -35,27 +36,10 @@ namespace httplib::client
             std::vector<std::uint64_t> seg_downloaded;
         };
 
-        struct url_info
-        {
-            std::string host;
-            uint16_t port = 0;
-            scheme scheme = client::scheme::plain;
-            std::string path;
-        };
-
         struct probe_result
         {
             std::uint64_t content_length = 0;
             http::fields headers;
-        };
-
-        struct redirect_target
-        {
-            std::string host;
-            uint16_t port = 0;
-            scheme scheme = client::scheme::plain;
-            std::string path;
-            bool valid = false;
         };
 
         struct request_result
@@ -72,7 +56,7 @@ namespace httplib::client
             /// Origin/target actually reached after following redirects. Used as
             /// the cache identity so a URL that redirects elsewhere cannot serve
             /// stale cached content.
-            url_info final_ui;
+            url::url_info final_ui;
         };
 
         /// HTTP-specific cache bookkeeping. The downloader serializes this into
@@ -121,26 +105,24 @@ namespace httplib::client
         net::any_io_executor executor_;
 
       private:
-        static boost::system::result<url_info> parse_url(std::string_view url);
-        static std::string make_url_string(url_info const& ui);
-        std::string make_cache_key(url_info const& ui) const;
+        std::string make_cache_key(url::url_info const& ui) const;
         static std::string cache_auth_scope(http::fields const& headers);
         static bool response_is_cacheable(http::fields const& headers);
         static http_meta make_http_meta(http::fields const& response,
                                         http::fields const& probe,
-                                        url_info const& final_ui,
+                                        url::url_info const& final_ui,
                                         bool has_final_ui);
         static std::string serialize_http_meta(http_meta const& meta);
         static std::optional<http_meta> parse_http_meta(std::string_view blob);
         static std::uint64_t parse_content_range_total(http::fields const& headers);
         static std::optional<std::uint64_t> parse_content_range_start(http::fields const& headers);
         static std::string parse_content_disposition_filename(http::fields const& headers);
-        static std::optional<redirect_target> parse_redirect(http::fields const& headers);
+        static std::optional<url::url_info> parse_redirect(http::fields const& headers);
 
         void set_state(downloader::state st, boost::system::error_code ec);
         void update_progress(std::uint64_t delta_bytes);
         void store_suggested_filename(http::fields const& headers);
-        void record_final_ui(url_info const& ui);
+        void record_final_ui(url::url_info const& ui);
         void record_resource_headers(http::fields const& headers);
 
         void save_state(fs::path const& save_path);
@@ -148,23 +130,23 @@ namespace httplib::client
         void del_state(fs::path const& save_path) const;
         static fs::path state_path(fs::path const& save_path);
 
-        net::awaitable<bool> check_remote_cache(url_info const& ui, http_meta const& meta);
-        net::awaitable<probe_result> probe_content_length(url_info const& ui);
+        net::awaitable<bool> check_remote_cache(url::url_info const& ui, http_meta const& meta);
+        net::awaitable<probe_result> probe_content_length(url::url_info const& ui);
 
-        net::awaitable<request_result> send_request(url_info const& ui,
+        net::awaitable<request_result> send_request(url::url_info const& ui,
                                                     http::verb method,
                                                     http::fields const& req_headers = {});
 
         net::awaitable<boost::system::error_code> co_wait_if_paused();
 
-        net::awaitable<boost::system::error_code> co_download_single(url_info const& ui, fs::path const& save_path);
+        net::awaitable<boost::system::error_code> co_download_single(url::url_info const& ui, fs::path const& save_path);
 
-        net::awaitable<boost::system::error_code> co_download_segment(url_info const& ui,
+        net::awaitable<boost::system::error_code> co_download_segment(url::url_info const& ui,
                                                                       std::uint64_t start,
                                                                       std::uint64_t end,
                                                                       fs::path const& part_path);
 
-        net::awaitable<boost::system::error_code> co_download_multi_segment(url_info const& ui,
+        net::awaitable<boost::system::error_code> co_download_multi_segment(url::url_info const& ui,
                                                                             fs::path const& save_path,
                                                                             std::uint64_t content_length,
                                                                             http::fields const& probe_headers);
@@ -220,7 +202,7 @@ namespace httplib::client
         /// can be written to the cache.
         mutable std::mutex resource_mutex_;
         http::fields resource_headers_;
-        url_info final_ui_;
+        url::url_info final_ui_;
         bool has_final_ui_ = false;
 
         mutable std::mutex filename_mutex_;

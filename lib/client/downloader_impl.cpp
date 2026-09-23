@@ -3,20 +3,24 @@
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/lazy_request.hpp"
 #include "httplib/util/misc.hpp"
+#include "httplib/util/sleep.hpp"
 #include "httplib/util/when_all.hpp"
 #include "redirect_util.hpp"
+#include "httplib/url/url.hpp"
 #include <algorithm>
+#include <boost/algorithm/string/predicate.hpp>
+#include <boost/algorithm/string/trim.hpp>
 #include <boost/asio/io_context.hpp>
-#include <boost/asio/redirect_error.hpp>
-#include <boost/asio/steady_timer.hpp>
 #include <boost/asio/use_future.hpp>
-#include <boost/url.hpp>
 #include <format>
 #include <fstream>
 #include <stdexcept>
 
 namespace httplib::client
 {
+
+    using boost::algorithm::iequals;
+    using boost::algorithm::trim;
 
     namespace
     {
@@ -35,68 +39,18 @@ namespace httplib::client
         }
 
         bool
-        ascii_iequals(std::string_view a, std::string_view b)
-        {
-            if (a.size() != b.size())
-            {
-                return false;
-            }
-            for (std::size_t i = 0; i < a.size(); ++i)
-            {
-                auto ca = static_cast<unsigned char>(a[i]);
-                auto cb = static_cast<unsigned char>(b[i]);
-                if (ca >= 'A' && ca <= 'Z')
-                {
-                    ca = static_cast<unsigned char>(ca - 'A' + 'a');
-                }
-                if (cb >= 'A' && cb <= 'Z')
-                {
-                    cb = static_cast<unsigned char>(cb - 'A' + 'a');
-                }
-                if (ca != cb)
-                {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        /// True if the comma-separated `value` contains `token` as a directive
-        /// name, case-insensitively (ignoring any `=value` suffix).
-        bool
         header_has_token(std::string_view value, std::string_view token)
         {
-            std::size_t i = 0;
-            while (i <= value.size())
+            for (auto part : httplib::util::split(value, ","))
             {
-                auto next = value.find(',', i);
-                auto end = (next == std::string_view::npos) ? value.size() : next;
-                auto part = value.substr(i, end - i);
-                while (!part.empty() && (part.front() == ' ' || part.front() == '\t'))
-                {
-                    part.remove_prefix(1);
-                }
-                while (!part.empty() && (part.back() == ' ' || part.back() == '\t'))
-                {
-                    part.remove_suffix(1);
-                }
                 if (auto eq = part.find('='); eq != std::string_view::npos)
                 {
-                    part = part.substr(0, eq);
-                    while (!part.empty() && (part.back() == ' ' || part.back() == '\t'))
-                    {
-                        part.remove_suffix(1);
-                    }
+                    part = boost::algorithm::trim_copy(part.substr(0, eq));
                 }
-                if (ascii_iequals(part, token))
+                if (iequals(part, token))
                 {
                     return true;
                 }
-                if (next == std::string_view::npos)
-                {
-                    break;
-                }
-                i = next + 1;
             }
             return false;
         }
@@ -106,69 +60,29 @@ namespace httplib::client
         std::optional<std::int64_t>
         header_directive_int(std::string_view value, std::string_view name)
         {
-            std::size_t i = 0;
-            while (i <= value.size())
+            for (auto part : httplib::util::split(value, ","))
             {
-                auto next = value.find(',', i);
-                auto end = (next == std::string_view::npos) ? value.size() : next;
-                auto part = value.substr(i, end - i);
-                while (!part.empty() && (part.front() == ' ' || part.front() == '\t'))
-                {
-                    part.remove_prefix(1);
-                }
                 auto eq = part.find('=');
-                if (eq != std::string_view::npos)
+                if (eq == std::string_view::npos)
                 {
-                    auto key = part.substr(0, eq);
-                    while (!key.empty() && (key.back() == ' ' || key.back() == '\t'))
-                    {
-                        key.remove_suffix(1);
-                    }
-                    if (ascii_iequals(key, name))
-                    {
-                        auto val = part.substr(eq + 1);
-                        while (!val.empty() && (val.front() == ' ' || val.front() == '\t'))
-                        {
-                            val.remove_prefix(1);
-                        }
-                        while (!val.empty() && (val.back() == ' ' || val.back() == '\t'))
-                        {
-                            val.remove_suffix(1);
-                        }
-                        try
-                        {
-                            return std::stoll(std::string(val));
-                        }
-                        catch (...)
-                        {
-                            return std::nullopt;
-                        }
-                    }
+                    continue;
                 }
-                if (next == std::string_view::npos)
+                auto key = boost::algorithm::trim_copy(part.substr(0, eq));
+                if (!iequals(key, name))
                 {
-                    break;
+                    continue;
                 }
-                i = next + 1;
-            }
-            return std::nullopt;
-        }
-
-        std::uint64_t
-        parse_content_length(http::fields const& headers)
-        {
-            auto cl = headers[http::field::content_length];
-            if (!cl.empty())
-            {
+                auto val = boost::algorithm::trim_copy(part.substr(eq + 1));
                 try
                 {
-                    return std::stoull(std::string(cl));
+                    return std::stoll(std::string(val));
                 }
                 catch (...)
                 {
+                    return std::nullopt;
                 }
             }
-            return 0;
+            return std::nullopt;
         }
 
         /// True when the body is content-encoded (e.g. gzip). The decompressed
@@ -182,77 +96,10 @@ namespace httplib::client
             {
                 return false;
             }
-            return !ascii_iequals(ce, "identity");
+            return !iequals(ce, "identity");
         }
 
-        void
-        trim(std::string& s)
-        {
-            while (!s.empty() && (s.front() == ' ' || s.front() == '\t' || s.front() == '\r' || s.front() == '\n'))
-            {
-                s.erase(0, 1);
-            }
-            while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r' || s.back() == '\n'))
-            {
-                s.pop_back();
-            }
-        }
-
-        /// Suspend the current coroutine for `delay`. Used between retry attempts
-        /// so a flapping server is not hammered in a tight loop.
-        net::awaitable<void>
-        co_backoff(net::any_io_executor ex, std::chrono::milliseconds delay)
-        {
-            if (delay.count() <= 0)
-            {
-                co_return;
-            }
-            net::steady_timer timer(ex);
-            timer.expires_after(delay);
-            boost::system::error_code ec;
-            co_await timer.async_wait(net::redirect_error(net::use_awaitable, ec));
-        }
-    } // namespace
-
-    boost::system::result<downloader::impl::url_info>
-    downloader::impl::parse_url(std::string_view url)
-    {
-        url_info ui;
-        auto r = boost::urls::parse_uri(url);
-        if (!r)
-        {
-            return boost::system::errc::make_error_code(boost::system::errc::invalid_argument);
-        }
-        auto const& u = *r;
-        ui.host = u.host();
-        ui.port = u.port_number() ? u.port_number() : (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
-        ui.scheme = u.scheme_id() == boost::urls::scheme::https ? scheme::tls : scheme::plain;
-        std::string ep(u.encoded_path().data(), u.encoded_path().size());
-        ui.path = ep.empty() ? "/" : ep;
-        if (u.has_query())
-        {
-            ui.path += "?";
-            ui.path += u.encoded_query();
-        }
-        return ui;
-    }
-
-    std::string
-    downloader::impl::make_url_string(url_info const& ui)
-    {
-        std::string key;
-        key.reserve(ui.host.size() + ui.path.size() + 32);
-        key.append(client::to_string(ui.scheme));
-        key.append("://");
-        key.append(ui.host);
-        if (ui.port != client::default_port(ui.scheme))
-        {
-            key.push_back(':');
-            key.append(std::to_string(ui.port));
-        }
-        key.append(ui.path);
-        return key;
-    }
+        } // namespace
 
     std::string
     downloader::impl::cache_auth_scope(http::fields const& headers)
@@ -284,9 +131,9 @@ namespace httplib::client
     }
 
     std::string
-    downloader::impl::make_cache_key(url_info const& ui) const
+    downloader::impl::make_cache_key(url::url_info const& ui) const
     {
-        auto key = make_url_string(ui);
+        auto key = ui.to_url();
         if (!auth_scope_.empty())
         {
             key.append("|auth=");
@@ -314,7 +161,7 @@ namespace httplib::client
     downloader::impl::http_meta
     downloader::impl::make_http_meta(http::fields const& response,
                                      http::fields const& probe,
-                                     url_info const& final_ui,
+                                     url::url_info const& final_ui,
                                      bool has_final_ui)
     {
         // Explicit whitelist of HTTP bookkeeping the downloader needs; the rest
@@ -335,7 +182,7 @@ namespace httplib::client
         meta.last_modified = take(http::field::last_modified);
         if (has_final_ui)
         {
-            meta.final_url = make_url_string(final_ui);
+            meta.final_url = final_ui.to_url();
         }
 
         std::string cache_control = take(http::field::cache_control);
@@ -543,7 +390,7 @@ namespace httplib::client
                     trim(val);
                     if (!val.empty())
                     {
-                        return util::url_decode(std::string_view(val));
+                        return url::url_decode(std::string_view(val));
                     }
                 }
             }
@@ -569,7 +416,7 @@ namespace httplib::client
         return {};
     }
 
-    std::optional<downloader::impl::redirect_target>
+    std::optional<url::url_info>
     downloader::impl::parse_redirect(http::fields const& headers)
     {
         auto loc = headers[http::field::location];
@@ -577,25 +424,24 @@ namespace httplib::client
         {
             return std::nullopt;
         }
-        redirect_target t;
         std::string location(loc);
         if (location.starts_with("http://") || location.starts_with("https://"))
         {
-            auto ui = parse_url(location);
-            if (!ui)
+            auto r = url::parse_url(location);
+            if (!r)
             {
                 return std::nullopt;
             }
-            t.host = ui->host;
-            t.port = ui->port;
-            t.scheme = ui->scheme;
-            t.path = ui->path;
+            url::url_info t = *r;
+            t.port = t.effective_port();
+            t.path = r->target(false);
+            t.query.clear();
+            return t;
         }
-        else
-        {
-            t.path = location;
-        }
-        t.valid = true;
+        // Relative reference：host 为空，Location 保存原样，由调用方在
+        // resolve_redirect_target 中按当前 target 解析。
+        url::url_info t;
+        t.path = location;
         return t;
     }
 
@@ -911,7 +757,7 @@ namespace httplib::client
     }
 
     void
-    downloader::impl::record_final_ui(url_info const& ui)
+    downloader::impl::record_final_ui(url::url_info const& ui)
     {
         std::lock_guard lk(resource_mutex_);
         final_ui_ = ui;
@@ -930,7 +776,7 @@ namespace httplib::client
     // =========================================================================
 
     net::awaitable<bool>
-    downloader::impl::check_remote_cache(url_info const& ui, http_meta const& meta)
+    downloader::impl::check_remote_cache(url::url_info const& ui, http_meta const& meta)
     {
         if (!cache_)
         {
@@ -958,7 +804,7 @@ namespace httplib::client
         }
         // Revalidate the final origin too: a URL that now redirects elsewhere
         // must not be served from an entry recorded against the old target.
-        if (!meta.final_url.empty() && make_url_string(result.final_ui) != meta.final_url)
+        if (!meta.final_url.empty() && result.final_ui.to_url() != meta.final_url)
         {
             co_return false;
         }
@@ -970,14 +816,14 @@ namespace httplib::client
     // =========================================================================
 
     net::awaitable<downloader::impl::probe_result>
-    downloader::impl::probe_content_length(url_info const& ui)
+    downloader::impl::probe_content_length(url::url_info const& ui)
     {
         probe_result res;
         auto result = co_await send_request(ui, http::verb::head);
         if (result.status == http::status::ok)
         {
             res.headers = result.headers;
-            res.content_length = parse_content_length(result.headers);
+            res.content_length = result.response.content_length().value_or(0);
         }
         co_return res;
     }
@@ -987,7 +833,7 @@ namespace httplib::client
     // =========================================================================
 
     net::awaitable<downloader::impl::request_result>
-    downloader::impl::send_request(url_info const& ui, http::verb method, http::fields const& req_headers)
+    downloader::impl::send_request(url::url_info const& ui, http::verb method, http::fields const& req_headers)
     {
         http::fields merged = custom_headers_;
         for (auto const& f : req_headers)
@@ -998,9 +844,13 @@ namespace httplib::client
         merged.set(http::field::accept_encoding, "identity");
 
         auto h = ui.host;
-        auto p = ui.port;
-        auto s = ui.scheme;
-        auto t = ui.path;
+        auto p = ui.effective_port();
+        auto s = ui.transport();
+        auto t = ui.target(false);
+        if (t.empty())
+        {
+            t = "/";
+        }
 
         for (int redir = 0; redir <= active_config_.max_redirects; ++redir)
         {
@@ -1042,7 +892,7 @@ namespace httplib::client
                 && redir < active_config_.max_redirects)
             {
                 auto rt = parse_redirect(resp.headers());
-                if (rt.has_value() && rt->valid)
+                if (rt.has_value())
                 {
                     // Drain the redirect body before the handle returns to the
                     // pool; otherwise the leftover bytes corrupt the next
@@ -1057,13 +907,13 @@ namespace httplib::client
                     {
                         // CL-02: 仅当 Location 为绝对 URL 且 origin 变化时移除敏感头，避免凭据泄露；
                         // 同 origin 重定向保留原头。
-                        if (rt->host != h || rt->port != p || rt->scheme != s)
+                        if (rt->host != h || rt->port != p || rt->transport() != s)
                         {
                             redirect::strip_origin_bound_headers(merged);
                         }
                         h = rt->host;
                         p = rt->port == 0 ? p : rt->port;
-                        s = rt->scheme;
+                        s = rt->transport();
                         t = rt->path.empty() ? "/" : rt->path;
                     }
                     else
@@ -1081,7 +931,7 @@ namespace httplib::client
             rr.response = std::move(resp);
             rr.headers = rr.response.headers();
             rr.status = status;
-            rr.final_ui = url_info { h, p, s, t };
+            rr.final_ui = url::url_info { std::string(url::to_string(s)), h, p, t, {}, {} };
             record_final_ui(rr.final_ui);
             co_return rr;
         }
@@ -1096,7 +946,7 @@ namespace httplib::client
     // =========================================================================
 
     net::awaitable<boost::system::error_code>
-    downloader::impl::co_download_single(url_info const& ui, fs::path const& save_path)
+    downloader::impl::co_download_single(url::url_info const& ui, fs::path const& save_path)
     {
         for (int attempt = 0; attempt <= active_config_.max_retries; ++attempt)
         {
@@ -1140,7 +990,7 @@ namespace httplib::client
                     co_return result.error ? result.error
                                            : boost::system::errc::make_error_code(boost::system::errc::timed_out);
                 }
-                co_await co_backoff(executor_, active_config_.retry_backoff * (attempt + 1));
+                co_await httplib::util::sleep(active_config_.retry_backoff * (attempt + 1));
                 continue;
             }
 
@@ -1156,11 +1006,11 @@ namespace httplib::client
                     std::error_code ec;
                     fs::remove(save_path, ec);
                 }
-                co_await co_backoff(executor_, active_config_.retry_backoff * (attempt + 1));
+                co_await httplib::util::sleep(active_config_.retry_backoff * (attempt + 1));
                 continue;
             }
 
-            auto content_length = parse_content_length(result.headers);
+            auto content_length = result.response.content_length().value_or(0);
             auto content_range_total = parse_content_range_total(result.headers);
             if (status == http::status::ok && existing_size > 0)
             {
@@ -1180,7 +1030,7 @@ namespace httplib::client
                     std::error_code ec;
                     fs::remove(save_path, ec);
                     existing_size = 0;
-                    co_await co_backoff(executor_, active_config_.retry_backoff * (attempt + 1));
+                    co_await httplib::util::sleep(active_config_.retry_backoff * (attempt + 1));
                     continue;
                 }
             }
@@ -1261,7 +1111,7 @@ namespace httplib::client
                 {
                     co_return boost::system::errc::make_error_code(boost::system::errc::message_size);
                 }
-                co_await co_backoff(executor_, active_config_.retry_backoff * (attempt + 1));
+                co_await httplib::util::sleep(active_config_.retry_backoff * (attempt + 1));
                 continue;
             }
 
@@ -1292,7 +1142,7 @@ namespace httplib::client
     // =========================================================================
 
     net::awaitable<boost::system::error_code>
-    downloader::impl::co_download_segment(url_info const& ui,
+    downloader::impl::co_download_segment(url::url_info const& ui,
                                           std::uint64_t start,
                                           std::uint64_t end,
                                           fs::path const& part_path)
@@ -1352,7 +1202,7 @@ namespace httplib::client
                     co_return result.error ? result.error
                                            : boost::system::errc::make_error_code(boost::system::errc::timed_out);
                 }
-                co_await co_backoff(executor_, active_config_.retry_backoff * (attempt + 1));
+                co_await httplib::util::sleep(active_config_.retry_backoff * (attempt + 1));
                 continue;
             }
 
@@ -1369,7 +1219,7 @@ namespace httplib::client
                 {
                     co_return boost::system::errc::make_error_code(boost::system::errc::protocol_error);
                 }
-                co_await co_backoff(executor_, active_config_.retry_backoff * (attempt + 1));
+                co_await httplib::util::sleep(active_config_.retry_backoff * (attempt + 1));
                 continue;
             }
 
@@ -1384,7 +1234,7 @@ namespace httplib::client
                 }
                 std::error_code rm_ec;
                 fs::remove(part_path, rm_ec);
-                co_await co_backoff(executor_, active_config_.retry_backoff * (attempt + 1));
+                co_await httplib::util::sleep(active_config_.retry_backoff * (attempt + 1));
                 continue;
             }
 
@@ -1445,7 +1295,7 @@ namespace httplib::client
                 {
                     co_return boost::system::errc::make_error_code(boost::system::errc::message_size);
                 }
-                co_await co_backoff(executor_, active_config_.retry_backoff * (attempt + 1));
+                co_await httplib::util::sleep(active_config_.retry_backoff * (attempt + 1));
                 continue;
             }
 
@@ -1460,7 +1310,7 @@ namespace httplib::client
     // =========================================================================
 
     net::awaitable<boost::system::error_code>
-    downloader::impl::co_download_multi_segment(url_info const& ui,
+    downloader::impl::co_download_multi_segment(url::url_info const& ui,
                                                 fs::path const& save_path,
                                                 std::uint64_t content_length,
                                                 http::fields const& probe_headers)
@@ -1790,15 +1640,16 @@ namespace httplib::client
             has_final_ui_ = false;
         }
 
-        auto ui = parse_url(url);
-        if (!ui)
+        auto r = url::parse_url(url);
+        if (!r)
         {
-            auto ec = ui.error();
+            auto ec = boost::system::errc::make_error_code(boost::system::errc::invalid_argument);
             set_state(downloader::state::failed, ec);
             co_return ec;
         }
+        auto ui = *r;
 
-        state_url_ = make_cache_key(ui.value());
+        state_url_ = make_cache_key(ui);
 
         set_state(downloader::state::connecting, {});
 
@@ -1824,7 +1675,7 @@ namespace httplib::client
                         }
                         else
                         {
-                            usable = co_await check_remote_cache(ui.value(), *meta);
+                            usable = co_await check_remote_cache(ui, *meta);
                         }
                         if (usable)
                         {
@@ -1863,7 +1714,7 @@ namespace httplib::client
                 }
             }
 
-            auto probe = co_await probe_content_length(ui.value());
+            auto probe = co_await probe_content_length(ui);
             auto content_length = probe.content_length;
 
             store_suggested_filename(probe.headers);
@@ -1879,24 +1730,24 @@ namespace httplib::client
                     auto segs = static_cast<std::uint64_t>(std::clamp(active_config_.segments, 2, 32));
                     per_connection_rate_ = std::max<std::uint64_t>(1, per_connection_rate_ / segs);
                 }
-                ec = co_await co_download_multi_segment(ui.value(), save_path, content_length, probe.headers);
+                ec = co_await co_download_multi_segment(ui, save_path, content_length, probe.headers);
                 if (ec == boost::system::errc::make_error_code(boost::system::errc::operation_not_supported))
                 {
                     // Server does not honor Range requests; fall back to a plain
                     // single-stream download.
                     per_connection_rate_ = active_config_.max_speed_bytes_per_sec;
-                    ec = co_await co_download_single(ui.value(), save_path);
+                    ec = co_await co_download_single(ui, save_path);
                 }
             }
             else
             {
-                ec = co_await co_download_single(ui.value(), save_path);
+                ec = co_await co_download_single(ui, save_path);
             }
 
             if (!ec && cache_ && !save_path.empty())
             {
                 http::fields response_headers;
-                url_info final_ui;
+                url::url_info final_ui;
                 bool has_final = false;
                 {
                     std::lock_guard lk(resource_mutex_);

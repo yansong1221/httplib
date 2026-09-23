@@ -1,5 +1,5 @@
 #pragma once
-#include "httplib/client/scheme.hpp"
+#include "httplib/url/scheme.hpp"
 #include "httplib/config.hpp"
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
@@ -17,11 +17,11 @@ namespace httplib::client
     class HTTPLIB_API proxy_client
     {
       public:
-        explicit proxy_client(net::io_context& ex, std::string_view host, uint16_t port, scheme s = scheme::plain);
+        explicit proxy_client(net::io_context& ex, std::string_view host, uint16_t port, url::scheme s = url::scheme::plain);
         explicit proxy_client(net::any_io_executor const& ex,
                               std::string_view host,
                               uint16_t port,
-                              scheme s = scheme::plain);
+                              url::scheme s = url::scheme::plain);
         ~proxy_client();
 
         net::awaitable<void> async_connect(std::string_view target,

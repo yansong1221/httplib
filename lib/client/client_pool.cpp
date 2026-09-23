@@ -4,6 +4,7 @@
 #include "httplib/util/misc.hpp"
 #include "httplib/util/ticker.hpp"
 #include "util/logging.hpp"
+#include "httplib/url/url.hpp"
 #include <atomic>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
@@ -12,7 +13,6 @@
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/use_future.hpp>
 #include <boost/system/system_error.hpp>
-#include <boost/url.hpp>
 #include <deque>
 #include <mutex>
 #include <spdlog/spdlog.h>
@@ -85,7 +85,7 @@ namespace httplib::client
         }
 
         net::awaitable<client_handle>
-        async_acquire(std::string_view host, uint16_t port, scheme s, std::chrono::steady_clock::duration wait_timeout)
+        async_acquire(std::string_view host, uint16_t port, url::scheme s, std::chrono::steady_clock::duration wait_timeout)
         {
             // 池状态只在自身 strand 上访问：把调用协程切到 strand 后再操作，
             // 后续 await（校验/等待唤醒）都会在 strand 上恢复，因此无需再加锁。
@@ -99,7 +99,7 @@ namespace httplib::client
                             boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
                     }
 
-                    auto url = util::make_url_value(host, port, s);
+                    auto url = url::make_url_value(host, port, s);
 
                     // wait_timeout <= 0 means "fail fast": try once and return timed_out
                     // immediately if no connection is available without waiting. The deadline
@@ -219,7 +219,7 @@ namespace httplib::client
             {
                 co_return;
             }
-            auto url = util::make_url_value(conn->host(), conn->port(), conn->scheme());
+            auto url = url::make_url_value(conn->host(), conn->port(), conn->scheme());
             auto st_it = pools_.find(url);
             if (st_it == pools_.end())
             {
@@ -816,7 +816,7 @@ namespace httplib::client
     net::awaitable<http_client_pool::client_handle>
     http_client_pool::async_acquire(std::string_view host,
                                     uint16_t port,
-                                    scheme s /*= scheme::plain*/,
+                                    url::scheme s /*= url::scheme::plain*/,
                                     std::chrono::steady_clock::duration wait_timeout /*= default_timeout*/)
     {
         co_return co_await impl_->async_acquire(host, port, s, wait_timeout);
@@ -826,16 +826,13 @@ namespace httplib::client
     http_client_pool::async_acquire(std::string_view url,
                                     std::chrono::steady_clock::duration wait_timeout /*= default_timeout*/)
     {
-        auto r = boost::urls::parse_uri(url);
+        auto r = url::parse_url(url);
         if (!r)
         {
             co_return client_handle(r.error());
         }
         auto const& u = *r;
-        auto host = u.host();
-        auto port = u.port_number() ? u.port_number() : (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
-        auto ssl = u.scheme_id() == boost::urls::scheme::https;
-        co_return co_await impl_->async_acquire(host, port, ssl ? scheme::tls : scheme::plain, wait_timeout);
+        co_return co_await impl_->async_acquire(u.host, u.effective_port(), u.transport(), wait_timeout);
     }
 
     std::shared_ptr<spdlog::logger>
@@ -877,7 +874,7 @@ namespace httplib::client
     }
 
     std::future<http_client_pool::pool_stats>
-    http_client_pool::stats(std::string_view host, uint16_t port, scheme s /*= scheme::plain*/) const
+    http_client_pool::stats(std::string_view host, uint16_t port, url::scheme s /*= url::scheme::plain*/) const
     {
         auto impl = impl_;
         return net::co_spawn(impl->get_executor(), async_stats(host, port, s), net::use_future);
@@ -891,26 +888,23 @@ namespace httplib::client
     }
 
     net::awaitable<http_client_pool::pool_stats>
-    http_client_pool::async_stats(std::string_view host, uint16_t port, scheme s /*= scheme::plain*/) const
+    http_client_pool::async_stats(std::string_view host, uint16_t port, url::scheme s /*= url::scheme::plain*/) const
     {
         auto impl = impl_;
-        co_return co_await impl->async_stats(util::make_url_value(host, port, s));
+        co_return co_await impl->async_stats(url::make_url_value(host, port, s));
     }
 
     net::awaitable<http_client_pool::pool_stats>
     http_client_pool::async_stats(std::string_view url) const
     {
         auto impl = impl_;
-        auto r = boost::urls::parse_uri(url);
+        auto r = url::parse_url(url);
         if (!r)
         {
             co_return pool_stats {};
         }
         auto const& u = *r;
-        auto host = u.host();
-        auto port = u.port_number() ? u.port_number() : (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
-        auto ssl = u.scheme_id() == boost::urls::scheme::https;
-        co_return co_await impl->async_stats(util::make_url_value(host, port, ssl ? scheme::tls : scheme::plain));
+        co_return co_await impl->async_stats(url::make_url_value(u.host, u.effective_port(), u.transport()));
     }
 
 } // namespace httplib::client

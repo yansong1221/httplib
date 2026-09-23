@@ -13,6 +13,7 @@
 #include <cstring>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <type_traits>
 #include <utility>
 
@@ -70,12 +71,24 @@ namespace httplib::detail
             dec_parser_.reset();
             if (header_parser_)
             {
+                // beast 已在解析头时解析好 Content-Length，这里只缓存其结果。
+                if (auto len = header_parser_->content_length())
+                {
+                    content_length_ = *len;
+                }
                 if constexpr (!IsRequest)
                 {
                     status_ = header_parser_->get().result();
                 }
                 header_ = header_parser_->get().base();
             }
+        }
+
+        /// Content-Length（由 beast 解析器解析所得），无该字段或非法时为 nullopt。
+        std::optional<std::uint64_t>
+        content_length() const
+        {
+            return content_length_;
         }
 
         /// 取走 header 解析器用于整体物化（read_body）。
@@ -407,6 +420,7 @@ namespace httplib::detail
         std::unique_ptr<raw_parser_t> raw_parser_;
         std::unique_ptr<dec_parser_t> dec_parser_;
         std::uint64_t body_limit_ = 0;
+        std::optional<std::uint64_t> content_length_;
         http::fields header_;
         http::status status_ { http::status::unknown };
     };

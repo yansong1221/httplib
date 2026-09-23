@@ -1,10 +1,10 @@
 #include "reverse_proxy_impl.h"
 #include "httplib/util/misc.hpp"
 #include "proxy_util.hpp"
+#include "httplib/url/url.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string/trim.hpp>
-#include <boost/url.hpp>
 #include <spdlog/spdlog.h>
 #include <string_view>
 
@@ -215,13 +215,14 @@ namespace httplib::server::detail
         upstream_headers.set("X-Forwarded-Proto", req.is_ssl() ? "https" : "http");
         upstream_headers.set("X-Forwarded-Host", req["Host"]);
 
-        // Rewrite Referer to upstream
+// Rewrite Referer to upstream
         if (auto ref = req[http::field::referer]; !ref.empty())
         {
-            auto r = boost::urls::parse_uri(ref);
+            auto r = url::parse_url(ref);
             if (r)
             {
-                auto ref_path = std::string(r->encoded_path());
+                auto const& u = *r;
+                auto ref_path = u.path;
                 if (ref_path.starts_with(prefix_))
                 {
                     ref_path = ref_path.substr(prefix_.size());
@@ -237,17 +238,17 @@ namespace httplib::server::detail
 
                 auto new_ref = std::format("{}://{}{}",
                                            upstream_.scheme,
-util::make_host_value(upstream_.host,
-                                                                  upstream_.port,
-                                                                  upstream_.ssl ? client::scheme::tls : client::scheme::plain),
+ url::make_host_value(upstream_.host,
+                                                                   upstream_.port,
+                                                                   upstream_.ssl ? url::scheme::tls : url::scheme::plain),
                                            ref_path);
-                if (!r->encoded_query().empty())
+                if (!u.query.empty())
                 {
-                    new_ref += std::format("?{}", std::string(r->encoded_query()));
+                    new_ref += std::format("?{}", u.query);
                 }
-                if (!r->encoded_fragment().empty())
+                if (!u.fragment.empty())
                 {
-                    new_ref += std::format("#{}", std::string(r->encoded_fragment()));
+                    new_ref += std::format("#{}", u.fragment);
                 }
                 upstream_headers.set(http::field::referer, new_ref);
             }
@@ -264,7 +265,7 @@ util::make_host_value(upstream_.host,
             co_await interceptor_->on_upstream_request(req, upstream_headers_, upstream_.url);
         }
 
-        client_ = co_await pool_->async_acquire(upstream_.host, upstream_.port, upstream_.ssl ? client::scheme::tls : client::scheme::plain);
+        client_ = co_await pool_->async_acquire(upstream_.host, upstream_.port, upstream_.ssl ? url::scheme::tls : url::scheme::plain);
         if (!client_)
         {
             logger_->trace("[proxy] acquire client failed for {}:{}", upstream_.host, upstream_.port);
@@ -359,7 +360,7 @@ util::make_host_value(upstream_.host,
             && result != http::status::not_modified)
         {
             auto upstream_base
-                = util::make_url_value(upstream_.host, upstream_.port, upstream_.ssl ? client::scheme::tls : client::scheme::plain);
+                = url::make_url_value(upstream_.host, upstream_.port, upstream_.ssl ? url::scheme::tls : url::scheme::plain);
             std::string location(response_hdrs[http::field::location]);
             if (location.starts_with(upstream_base))
             {

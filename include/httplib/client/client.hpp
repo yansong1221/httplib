@@ -2,7 +2,7 @@
 #include "httplib/client/client_fwd.hpp"
 #include "httplib/client/request.hpp"
 #include "httplib/client/response.hpp"
-#include "httplib/client/scheme.hpp"
+#include "httplib/url/scheme.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <filesystem>
 #include <future>
@@ -62,15 +62,15 @@ namespace httplib::client
         /// \param ex 客户端使用的 io_context 或其 executor。
         /// \param host 主机名，用于 DNS 解析与 Host 头。
         /// \param port 端口。
-        /// \param s 传输方案（\ref httplib::client::scheme）：\c scheme::tls 走 HTTPS，默认 \c scheme::plain。
+        /// \param s 传输方案（\ref httplib::url::scheme）：\c url::scheme::tls 走 HTTPS，默认 \c url::scheme::plain。
         explicit http_client(net::io_context& ex,
                              std::string_view host,
                              uint16_t port,
-                             httplib::client::scheme s = httplib::client::scheme::plain);
+                             httplib::url::scheme s = httplib::url::scheme::plain);
         explicit http_client(net::any_io_executor const& ex,
                              std::string_view host,
                              uint16_t port,
-                             httplib::client::scheme s = httplib::client::scheme::plain);
+                             httplib::url::scheme s = httplib::url::scheme::plain);
 
         /// \brief 从 URL 创建客户端。
         /// \param url HTTP(S) URL（如 \c https://api.example.com:8443/base ），解析出 host、port、ssl。
@@ -92,7 +92,7 @@ namespace httplib::client
         uint16_t port() const;
 
         /// \brief 是否使用 TLS。
-        httplib::client::scheme scheme() const;
+        httplib::url::scheme scheme() const;
 
         /// \brief 返回当前日志器。
         std::shared_ptr<spdlog::logger> logger() const;

@@ -1,4 +1,5 @@
 #include "httplib/html/query_params.hpp"
+#include "httplib/url/url.hpp"
 #include "httplib/util/misc.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <stdexcept>
@@ -49,13 +50,13 @@ namespace httplib::html
 
             if (key_val.size() == 1)
             {
-                auto key = util::url_decode(key_val[0]);
+                auto key = url::url_decode(key_val[0]);
                 params_.emplace(key, std::string {});
             }
             else if (key_val.size() == 2)
             {
-                auto key = util::url_decode(key_val[0]);
-                auto val = util::url_decode(key_val[1]);
+                auto key = url::url_decode(key_val[0]);
+                auto val = url::url_decode(key_val[1]);
                 params_.emplace(key, val);
             }
         }
@@ -68,9 +69,9 @@ namespace httplib::html
         std::vector<std::string> tokens;
         for (auto const& item : params_)
         {
-            auto token = util::url_encode(item.first);
+            auto token = url::url_encode(item.first);
             token += "=";
-            token += util::url_encode(item.second);
+            token += url::url_encode(item.second);
 
             tokens.push_back(token);
         }

@@ -30,7 +30,7 @@ namespace httplib::client
       public:
         class lazy_request_impl;
 
-        impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, httplib::client::scheme s);
+        impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, httplib::url::scheme s);
 
         void
         set_timeout_policy(timeout_policy const& policy)
@@ -250,6 +250,12 @@ namespace httplib::client
                 net::use_awaitable);
         }
 
+        net::any_io_executor
+        get_executor() const noexcept
+        {
+            return strand_;
+        }
+
       public:
         net::strand<net::any_io_executor> strand_;
 
@@ -261,7 +267,7 @@ namespace httplib::client
         std::string const host_;
         std::string const host_value_;
         uint16_t const port_;
-        httplib::client::scheme const scheme_;
+        httplib::url::scheme const scheme_;
         std::atomic<bool> verify_ssl_ { true };
         /// 原子快照：set_ca_cert / copy_settings_from 写，co_connect 读，跨线程安全。
         std::atomic<std::shared_ptr<std::string const>> ca_cert_ { nullptr };

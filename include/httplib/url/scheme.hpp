@@ -5,7 +5,7 @@
 // 参照 boost::url/scheme.hpp 依赖 boost/url/detail/config.hpp，本头同样依赖 config.hpp。
 #include "httplib/config.hpp"
 
-namespace httplib::client
+namespace httplib::url
 {
 
     // 传输方案：显式枚举而非 bool，避免隐式转换（如 int/指针 -> bool）误传。
@@ -41,4 +41,4 @@ namespace httplib::client
         return 80;
     }
 
-} // namespace httplib::client
+} // namespace httplib::url

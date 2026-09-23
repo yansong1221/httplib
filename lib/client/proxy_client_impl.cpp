@@ -17,7 +17,7 @@
 namespace httplib::client
 {
 
-    proxy_client::impl::impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, scheme s)
+    proxy_client::impl::impl(net::any_io_executor const& ex, std::string_view host, uint16_t port, url::scheme s)
         : strand_(net::make_strand(ex))
         , resolver_(strand_)
         , host_(host)
@@ -43,7 +43,7 @@ namespace httplib::client
                 }
                 get_logger()->trace("connecting proxy {}:{} -> {}", host_, port_, target);
 
-                auto stream_result = http_stream::create(strand_, host_, scheme_ == scheme::tls, verify_ssl_, ca_cert_);
+                auto stream_result = http_stream::create(strand_, host_, scheme_ == url::scheme::tls, verify_ssl_, ca_cert_);
                 if (!stream_result)
                 {
                     ec = stream_result.error();
@@ -191,7 +191,7 @@ namespace httplib::client
         return nullptr;
     }
 
-    proxy_client::proxy_client(net::io_context& ex, std::string_view host, uint16_t port, scheme s /*= scheme::plain*/)
+    proxy_client::proxy_client(net::io_context& ex, std::string_view host, uint16_t port, url::scheme s /*= url::scheme::plain*/)
         : proxy_client(ex.get_executor(), host, port, s)
     {
     }
@@ -199,7 +199,7 @@ namespace httplib::client
     proxy_client::proxy_client(net::any_io_executor const& ex,
                                std::string_view host,
                                uint16_t port,
-                               scheme s /*= scheme::plain*/)
+                               url::scheme s /*= url::scheme::plain*/)
         : impl_(std::make_shared<proxy_client::impl>(ex, host, port, s))
     {
     }

@@ -1,7 +1,7 @@
 #pragma once
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_fwd.hpp"
-#include "httplib/client/scheme.hpp"
+#include "httplib/url/scheme.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <boost/system/error_code.hpp>
 #include <chrono>
@@ -105,7 +105,7 @@ namespace httplib::client
 
         net::awaitable<client_handle> async_acquire(std::string_view host,
                                                     uint16_t port,
-                                                    scheme s,
+                                                    url::scheme s,
                                                     std::chrono::steady_clock::duration wait_timeout = default_timeout);
 
         net::awaitable<client_handle> async_acquire(std::string_view url,
@@ -124,11 +124,11 @@ namespace httplib::client
         void stop();
 
         /// \return 在池执行器上完成读取后变为 ready 的 future；不阻塞调用线程。
-        std::future<pool_stats> stats(std::string_view host, uint16_t port, scheme s) const;
+        std::future<pool_stats> stats(std::string_view host, uint16_t port, url::scheme s) const;
         std::future<pool_stats> stats(std::string_view url) const;
 
         /// \brief stats 的异步版本：先切到池执行器再读取，可从任意线程调用。
-        net::awaitable<pool_stats> async_stats(std::string_view host, uint16_t port, scheme s) const;
+        net::awaitable<pool_stats> async_stats(std::string_view host, uint16_t port, url::scheme s) const;
         net::awaitable<pool_stats> async_stats(std::string_view url) const;
 
       private:

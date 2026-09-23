@@ -1,89 +1,8 @@
 #include "httplib/util/misc.hpp"
 #include <boost/algorithm/string/trim.hpp>
-#include <fmt/format.h>
-#include <iomanip>
-#include <sstream>
 
 namespace httplib::util
 {
-
-    namespace detail
-    {
-        static bool
-        is_hex_digit(uint8_t c)
-        {
-            return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
-        }
-        static std::uint8_t
-        hex_to_dec(std::uint8_t c)
-        {
-            if (c >= '0' && c <= '9')
-            {
-                c -= '0';
-            }
-            else if (c >= 'a' && c <= 'f')
-            {
-                c -= 'a' - 10;
-            }
-            else if (c >= 'A' && c <= 'F')
-            {
-                c -= 'A' - 10;
-            }
-            return c;
-        }
-    } // namespace detail
-
-    void
-    url_decode(std::string& str)
-    {
-        size_t w = 0;
-        for (size_t r = 0; r < str.size(); ++r)
-        {
-            uint8_t v = str[r];
-            if (str[r] == '%' && r + 2 < str.size() && detail::is_hex_digit(str[r + 1])
-                && detail::is_hex_digit(str[r + 2]))
-            {
-                v = detail::hex_to_dec(str[++r]) << 4;
-                v |= detail::hex_to_dec(str[++r]);
-            }
-            str[w++] = v;
-        }
-        str.resize(w);
-    }
-
-    std::string
-    url_decode(std::string_view str)
-    {
-        std::string decode_str(str);
-        url_decode(decode_str);
-        return decode_str;
-    }
-
-    std::string
-    url_encode(std::string_view value)
-    {
-        std::ostringstream escaped;
-        escaped.fill('0');
-        escaped << std::hex;
-
-        for (char c : value)
-        {
-            if (std::isalnum(static_cast<unsigned char>(c)) || c == '-' || c == '_' || c == '.' || c == '~')
-            {
-                escaped << c;
-            }
-            else if (c == ' ')
-            {
-                escaped << '+';
-            }
-            else
-            {
-                escaped << '%' << std::setw(2) << int(static_cast<unsigned char>(c));
-            }
-        }
-
-        return escaped.str();
-    }
 
     std::vector<std::string_view>
     split(std::string_view str, std::string_view delimiter, bool compress)
@@ -144,34 +63,6 @@ namespace httplib::util
     buffer_to_string_view(boost::asio::const_buffer const& buffer)
     {
         return std::string_view(static_cast<char const*>(buffer.data()), buffer.size());
-    }
-
-    std::string
-    make_host_value(std::string_view host_in, uint16_t port, client::scheme s)
-    {
-        std::string host(host_in);
-        // IPv6字面量在 Host 头/URL 中需要方括号；已带括号的 host 不重复包裹。
-        if (host.find(':') != std::string::npos && !(host.front() == '[' && host.back() == ']'))
-        {
-            host = fmt::format("[{}]", host);
-        }
-
-        if (port != client::default_port(s))
-        {
-            return fmt::format("{}:{}", host, port);
-        }
-        return host;
-    }
-
-    std::string
-    make_url_value(std::string_view host, uint16_t port, client::scheme s, std::string_view target, std::string_view url_scheme)
-    {
-        using namespace std::string_view_literals;
-
-        return std::format("{}://{}{}",
-                           (url_scheme.empty() ? client::to_string(s) : url_scheme),
-                           make_host_value(host, port, s),
-                           target);
     }
 
 } // namespace httplib::util

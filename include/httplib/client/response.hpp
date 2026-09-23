@@ -7,8 +7,10 @@
 #include <boost/beast/http/fields.hpp>
 #include <boost/json/value.hpp>
 #include <boost/system/result.hpp>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -31,6 +33,9 @@ namespace httplib::client
         http::fields& headers();
         http::fields const& base() const;
         http::fields& base();
+
+        /// Content-Length（由 beast 解析所得），无该字段或非法时为空。
+        std::optional<std::uint64_t> content_length() const;
 
         // ---- 已读完 body（eager）：同步转换 ----
         // 按内容类型取响应体（引用，不拷贝）；body 非该类型或尚未读取时抛 std::bad_variant_access
