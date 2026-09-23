@@ -196,7 +196,7 @@ namespace httplib::server
                     auto state = req_.data().fetch<detail::ws_forward_state_ptr>();
                     if (state && state->upstream)
                     {
-                        state->upstream->abort();
+                        co_await state->upstream->async_abort();
                     }
                     detail::release_upstream_accounting(state);
                 }

@@ -45,6 +45,15 @@ namespace httplib::server
         virtual ~websocket_conn() = default;
 
         /**
+         * @brief 获取连接专属执行器。
+         *
+         * 连接的所有读写操作都在该执行器上串行推进；执行器由服务器执行器
+         * 派生，可在其上调度连接级任务。
+         *
+         * @return 承载连接操作的执行器。
+         */
+        virtual net::any_io_executor get_executor() noexcept = 0;
+        /**
          * @brief 优雅关闭连接，发送带原因文本的 close 帧。
          *
          * @param reason 关闭原因文本。

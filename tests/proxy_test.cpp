@@ -1494,18 +1494,19 @@ TEST_CASE("CONNECT: tunnel forwards data bidirectionally", "[proxy]")
         {
             httplib::client::proxy_client pc(ioc.get_executor(), proxy_ep.address().to_string(), proxy_ep.port());
 
-            auto ec = co_await pc.async_connect(std::format("127.0.0.1:{}", echo_port));
+            boost::system::error_code ec;
+            co_await pc.async_connect(std::format("127.0.0.1:{}", echo_port), {}, ec);
             if (ec)
             {
                 proxy.stop();
                 co_return;
             }
 
-            co_await pc.async_write(net::buffer(std::string("ping")));
+            co_await pc.async_write(net::buffer(std::string("ping")), ec);
 
             std::vector<char> recv(64);
-            auto result = co_await pc.async_read_some(net::buffer(recv));
-            if (result.has_value() && result.value() == 4 && std::string_view(recv.data(), 4) == "ping")
+            auto n = co_await pc.async_read_some(net::buffer(recv), ec);
+            if (!ec && n == 4 && std::string_view(recv.data(), 4) == "ping")
             {
                 tunnel_ok = true;
             }

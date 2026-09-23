@@ -131,15 +131,17 @@ namespace httplib::server
          * @brief 启动服务器，不阻塞。
          *
          * 等价于 @ref run "run()"，但返回一个可被任意线程 co_await 的
-         * awaitable。
+         * awaitable；结果错误码经 @p ec 输出而非作为返回值。
          *
-         * @return 一个 awaitable，在服务器停止后解析为结果错误码。若服务器
-         * 已在运行，则解析为 @c already_started 错误码。
+         * @param ec 输出参数。若服务器已在运行，写入 @c already_started；若
+         *           某个监听（accept）循环以非 @c operation_aborted 的错误
+         *           结束，写入该错误。正常运行停止时不会改写此值，调用前请
+         *           先清零。
          *
          * @par 线程安全
          * 可从任意线程 co_await；每个实例只允许一个运行周期。
          */
-        net::awaitable<boost::system::error_code> async_run();
+        net::awaitable<void> async_run(boost::system::error_code& ec);
 
         /**
          * @brief 请求服务器停止。

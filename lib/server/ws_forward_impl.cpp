@@ -2,20 +2,19 @@
 #include "httplib/client/ws_client.hpp"
 #include "httplib/util/misc.hpp"
 #include "proxy_util.hpp"
+#include "server_impl.h"
 
 namespace httplib::server::detail
 {
 
-    ws_forward_context::ws_forward_context(net::any_io_executor const& ex,
-                                           std::string prefix,
+    ws_forward_context::ws_forward_context(std::string prefix,
                                            std::shared_ptr<upstream_provider> provider,
                                            http_server::ws_interceptor_factory factory,
-                                           std::shared_ptr<spdlog::logger> logger)
-        : ex_(ex)
-        , prefix_(std::move(prefix))
+                                           std::shared_ptr<http_server::impl> ser)
+        : prefix_(std::move(prefix))
         , provider_(std::move(provider))
         , factory_(std::move(factory))
-        , logger_(std::move(logger))
+        , ser_(std::move(ser))
     {
     }
 
@@ -40,11 +39,11 @@ namespace httplib::server::detail
         }
 
         auto upstream
-            = std::make_shared<client::ws_client>(ex_,
+            = std::make_shared<client::ws_client>(conn->get_executor(),
                                                   upstream_.host,
                                                   upstream_.port,
                                                   upstream_.ssl ? client::scheme::tls : client::scheme::plain);
-        upstream->set_logger(logger_);
+        upstream->set_logger(get_logger());
 
         boost::system::error_code ec;
         co_await upstream->async_run(
@@ -75,7 +74,7 @@ namespace httplib::server::detail
 
         if (ec)
         {
-            logger_->trace("[ws-forward] upstream connect failed: {}", ec.message());
+            get_logger()->trace("[ws-forward] upstream connect failed: {}", ec.message());
             conn->close(ec.message());
             co_return;
         }
@@ -102,20 +101,20 @@ namespace httplib::server::detail
         auto result = co_await resolve_upstream(provider_, req, prefix_, true);
         if (result.rc == upstream_resolve_rc::no_target)
         {
-            logger_->warn("[ws-forward] provider is null");
+            get_logger()->warn("[ws-forward] provider is null");
             conn.close("resolver failed");
             co_return false;
         }
         if (result.rc == upstream_resolve_rc::bad_url)
         {
-            logger_->warn("[ws-forward] invalid upstream url: {}", result.value.raw_url);
+            get_logger()->warn("[ws-forward] invalid upstream url: {}", result.value.raw_url);
             conn.close("bad upstream");
             co_return false;
         }
 
         upstream_ = std::move(result.value);
 
-        logger_->debug("[ws-forward] {} -> {}", req.target(), upstream_.url);
+        get_logger()->debug("[ws-forward] {} -> {}", req.target(), upstream_.url);
 
         upstream_headers_ = http::fields(req.base());
         upstream_headers_.erase(http::field::host);
@@ -133,7 +132,7 @@ namespace httplib::server::detail
     }
 
     net::awaitable<void>
-    ws_forward_context::send_to_upstream(websocket_conn::weak_ptr wp, websocket_message const& msg)
+    ws_forward_context::send_to_upstream(websocket_conn::weak_ptr wp, const websocket_message& msg)
     {
         auto conn = wp.lock();
         if (!conn)
@@ -190,6 +189,12 @@ namespace httplib::server::detail
             co_await state->upstream->async_close(ec);
         }
         release_upstream_accounting(state);
+    }
+
+    std::shared_ptr<spdlog::logger>
+    ws_forward_context::get_logger() const
+    {
+        return ser_->get_logger();
     }
 
 } // namespace httplib::server::detail

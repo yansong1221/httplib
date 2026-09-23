@@ -57,17 +57,16 @@ namespace httplib::server::detail
     class ws_forward_context
     {
       public:
-        ws_forward_context(net::any_io_executor const& ex,
-                           std::string prefix,
+        ws_forward_context(std::string prefix,
                            std::shared_ptr<upstream_provider> provider,
                            http_server::ws_interceptor_factory factory,
-                           std::shared_ptr<spdlog::logger> logger);
+                           std::shared_ptr<http_server::impl> ser);
 
         /// Entry point invoked from the route's open handler.
         net::awaitable<void> run(websocket_conn::weak_ptr wp);
 
         /// Downstream -> upstream relay (registered as the route message handler).
-        static net::awaitable<void> send_to_upstream(websocket_conn::weak_ptr wp, websocket_message const& msg);
+        static net::awaitable<void> send_to_upstream(websocket_conn::weak_ptr wp, const websocket_message& msg);
 
         /// Upstream teardown on client disconnect (registered as the route close handler).
         static net::awaitable<void> close_upstream(websocket_conn::weak_ptr wp);
@@ -78,13 +77,12 @@ namespace httplib::server::detail
         /// Create the interceptor, resolve + parse the upstream URL, build the
         /// rewritten path and upstream headers. Closes the connection on failure.
         net::awaitable<bool> prepare_upstream(websocket_conn& conn);
-
+      std::shared_ptr<spdlog::logger> get_logger() const;
       private:
-        net::any_io_executor ex_;
         std::string prefix_;
         std::shared_ptr<upstream_provider> provider_;
         http_server::ws_interceptor_factory factory_;
-        std::shared_ptr<spdlog::logger> logger_;
+       std::shared_ptr<http_server::impl> ser_;
 
         // ---- per-connection state (set by prepare_upstream) ----
         std::shared_ptr<ws_interceptor> interceptor_;

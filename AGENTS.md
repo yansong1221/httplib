@@ -26,7 +26,7 @@ Tests use Catch2 via `Catch2::Catch2WithMain` (auto-generated main). Each test s
 - **Implementation**: `lib/` — `*_impl.h`/`*_impl.cpp` files. They include the public headers + Boost internals.
 - **Namespace aliases** (from `config.hpp`): `net = boost::asio`, `http = beast::http`, `websocket = beast::websocket`, `ssl = boost::asio::ssl`, `fs = std::filesystem`. Always use these aliases; never write `boost::asio` directly.
 - **Router**: `server::router` is an abstract base; real implementation is `server::router_impl` in `lib/server/router_impl.h`. Template methods live in `include/httplib/server/router.inl`.
-- **Server**: `server::http_server` holds a shared_ptr to `http_server::impl` (PIMPL). Start with `listen()` + `async_run()`.
+- **Server**: `server::http_server` holds a shared_ptr to `http_server::impl` (PIMPL). Start with `listen()` + `run()`/`async_run(ec)`.
 - **Middleware**: Per-route, passed as trailing variadic args to `set_http_handler`. Each middleware must have `bool before(request&, response&)` and optionally `bool after(request&, response&)`. Return `false` to short-circuit (no handler run).
 - **Body types**: `any_body::value_type` variant. Access via `req.body().as<body::string_body>()`, etc. Body types: `string_body`, `json_body`, `form_data_body`, `query_params_body`, `empty_body`, `file_body`.
 - **Examples**: `examples/demo/` (server + client demo) and `examples/stress_test/` (wrk-like benchmark). Both auto-built via `GLOB_RECURSE` within their own `CMakeLists.txt` when `HTTPLIB_ENABLED_EXAMPLES=ON`. Stress test additionally links `Boost::program_options`.

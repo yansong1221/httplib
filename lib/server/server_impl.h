@@ -35,7 +35,7 @@ namespace httplib::server
         void listen(std::string_view host, uint16_t port);
 
         std::future<boost::system::error_code> run();
-        net::awaitable<boost::system::error_code> async_run();
+        net::awaitable<void> async_run(boost::system::error_code& ec);
 
         std::future<void> stop();
         net::awaitable<void> async_stop();

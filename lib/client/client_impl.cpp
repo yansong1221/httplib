@@ -355,11 +355,11 @@ namespace httplib::client
             co_await async_close();
 
             auto ca_cert = ca_cert_.load();
-            auto stream_result = http_stream::create_stream(strand_,
-                                                            host_,
-                                                            scheme_ == scheme::tls,
-                                                            verify_ssl_.load(),
-                                                            ca_cert ? std::string_view(*ca_cert) : std::string_view {});
+            auto stream_result = http_stream::create(strand_,
+                                                     host_,
+                                                     scheme_ == scheme::tls,
+                                                     verify_ssl_.load(),
+                                                     ca_cert ? std::string_view(*ca_cert) : std::string_view {});
             if (!stream_result)
             {
                 ec = stream_result.error();

@@ -23,6 +23,13 @@ namespace httplib::server
         ~websocket_conn_impl();
 
       public:
+        net::any_io_executor
+        get_executor() noexcept override
+        {
+
+            return ws_.get_executor();
+        }
+
         std::future<boost::system::error_code> send(websocket_message msg) override;
         net::awaitable<void> async_send(websocket_message const& msg, boost::system::error_code& ec) override;
 

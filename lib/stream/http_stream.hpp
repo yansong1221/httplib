@@ -214,11 +214,11 @@ namespace httplib
         http_stream(stream_t&& stream) : stream_(std::move(stream)) {}
 
         static boost::system::result<stream_t>
-        create_stream(net::any_io_executor const& executor,
-                      std::string const& host,
-                      bool use_ssl,
-                      bool verify_ssl = true,
-                      std::string_view ca_cert = {})
+        create(net::any_io_executor const& executor,
+               std::string const& host,
+               bool use_ssl,
+               bool verify_ssl = true,
+               std::string_view ca_cert = {})
         {
             if (use_ssl)
             {

@@ -91,7 +91,11 @@ namespace httplib::server
         return net::co_spawn(
             strand_,
             [self = shared_from_this(), this]() -> net::awaitable<boost::system::error_code>
-            { co_return co_await async_run(); },
+            {
+                boost::system::error_code ec;
+                co_await async_run(ec);
+                co_return ec;
+            },
             boost::asio::use_future);
     }
 
@@ -142,16 +146,17 @@ namespace httplib::server
         return router_;
     }
 
-    net::awaitable<boost::system::error_code>
-    http_server::impl::async_run()
+    net::awaitable<void>
+    http_server::impl::async_run(boost::system::error_code& ec)
     {
         co_return co_await net::co_spawn(
             strand_,
-            [&]() -> net::awaitable<boost::system::error_code>
+            [&]() -> net::awaitable<void>
             {
                 if (running_.exchange(true))
                 {
-                    co_return boost::asio::error::make_error_code(boost::asio::error::already_started);
+                    ec = net::error::make_error_code(net::error::already_started);
+                    co_return;
                 }
                 // Reopen the completion event so the instance can be run again after a
                 // previous stop()/async_stop() closed it.
@@ -184,16 +189,16 @@ namespace httplib::server
                 running_ = false;
                 session_event_.close();
                 stop_event_.close();
-                for (auto const& ec : results)
+                for (auto const& ac_ec : results)
                 {
                     // acceptor 被 cancel()/close() 关闭时，挂起的 async_accept 会以
                     // operation_aborted 完成；这是正常停机路径，不算错误。
-                    if (ec && ec != boost::asio::error::operation_aborted)
+                    if (ac_ec && ac_ec != boost::asio::error::operation_aborted)
                     {
-                        co_return ec;
+                        ec = ac_ec;
+                        co_return;
                     }
                 }
-                co_return boost::system::error_code {};
             },
             net::use_awaitable);
     }
@@ -214,7 +219,7 @@ namespace httplib::server
                 {
                     ec = {};
                     using namespace std::chrono_literals;
-                    net::steady_timer retry_timer(strand_);
+                    net::steady_timer retry_timer(co_await net::this_coro::executor);
                     retry_timer.expires_after(100ms);
                     co_await retry_timer.async_wait(util::net_awaitable[ec]);
                     if (!ec)
@@ -445,23 +450,24 @@ namespace httplib::server
                                       http_server::ws_interceptor_factory factory)
     {
         std::string prefix = detail::strip_proxy_prefix(location);
-        auto logger = this->get_logger();
 
         router_.set_ws_handler(
             location,
-            [ex = strand_.get_inner_executor(),
-             prefix,
-             logger,
-             provider = std::move(provider),
-             factory = std::move(factory)](websocket_conn::weak_ptr wp) -> net::awaitable<void>
+            [prefix, provider, factory, self = shared_from_this()](websocket_conn::weak_ptr wp) -> net::awaitable<void>
             {
-                detail::ws_forward_context ctx(ex, prefix, provider, factory, logger);
+                detail::ws_forward_context ctx(prefix, provider, factory, self);
                 co_await ctx.run(wp);
             },
             [](websocket_conn::weak_ptr wp, websocket_message msg) -> net::awaitable<void>
-            { co_await detail::ws_forward_context::send_to_upstream(wp, msg); },
+            {
+                co_await detail::ws_forward_context::send_to_upstream(wp, msg);
+                co_return;
+            },
             [](websocket_conn::weak_ptr wp) -> net::awaitable<void>
-            { co_await detail::ws_forward_context::close_upstream(wp); });
+            {
+                co_await detail::ws_forward_context::close_upstream(wp);
+                co_return;
+            });
     }
 
     bool
@@ -489,10 +495,10 @@ namespace httplib::server
         return listen("0.0.0.0", port);
     }
 
-    net::awaitable<boost::system::error_code>
-    http_server::async_run()
+    net::awaitable<void>
+    http_server::async_run(boost::system::error_code& ec)
     {
-        co_return co_await impl_->async_run();
+        co_return co_await impl_->async_run(ec);
     }
 
     std::future<boost::system::error_code>
