@@ -23,12 +23,12 @@ namespace httplib::client
                 auto lf = buf_.find('\n');
                 if (lf == std::string::npos)
                 {
-                    if (impl_->is_body_done())
+                    if (impl_->reader().is_body_done())
                     {
                         co_return boost::json::value {};
                     }
 
-                    auto bytes = co_await impl_->read_some_decompressed(net::buffer(read_buf_), ec);
+                    auto bytes = co_await impl_->reader().read_some_decompressed(net::buffer(read_buf_), ec);
                     if (ec)
                     {
                         co_return ec;
@@ -59,7 +59,7 @@ namespace httplib::client
         bool
         is_done() const override
         {
-            return impl_->is_body_done() && buf_.empty();
+            return impl_->reader().is_body_done() && buf_.empty();
         }
 
       private:

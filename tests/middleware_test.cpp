@@ -1,5 +1,4 @@
-﻿#include "body/string_body.hpp"
-#include "common.hpp"
+﻿#include "common.hpp"
 #include "httplib/server/middleware/auth.hpp"
 #include "httplib/server/middleware/cors.hpp"
 #include "httplib/server/middleware/rate_limit.hpp"
@@ -7,7 +6,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 
-namespace body = httplib::body;
 namespace mw = httplib::server::middleware;
 namespace net = httplib::net;
 namespace http = httplib::http;

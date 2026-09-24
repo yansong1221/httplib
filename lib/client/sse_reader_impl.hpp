@@ -14,10 +14,10 @@ namespace httplib::client
         read_event() override
         {
             boost::system::error_code ec;
-            while (!parser_.has_event() && !impl_->is_body_done())
+            while (!parser_.has_event() && !impl_->reader().is_body_done())
             {
 
-                auto bytes = co_await impl_->read_some_decompressed(net::buffer(read_buf_), ec);
+                auto bytes = co_await impl_->reader().read_some_decompressed(net::buffer(read_buf_), ec);
                 if (ec)
                 {
                     co_return ec;
@@ -38,7 +38,7 @@ namespace httplib::client
         bool
         is_done() const override
         {
-            return impl_->is_body_done() && !parser_.has_event();
+            return impl_->reader().is_body_done() && !parser_.has_event();
         }
 
       private:

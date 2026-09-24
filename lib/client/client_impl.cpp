@@ -1,4 +1,5 @@
 #include "client_impl.h"
+#include "body/write.hpp"
 #include "compress/compressor.hpp"
 #include "httplib/url/url.hpp"
 #include "httplib/util/misc.hpp"
@@ -112,14 +113,40 @@ namespace httplib::client
         return !read_impl_.expired() || !write_impl_.expired();
     }
 
+    net::awaitable<void>
+    http_client::impl::write_request(http::request_serializer<http::buffer_body>& serializer,
+                                     http::buffer_body::value_type* body,
+                                     body::source* src,
+                                     boost::system::error_code& ec)
+    {
+        if (!serializer.is_header_done())
+        {
+            co_await co_connect(ec);
+            if (ec)
+            {
+                co_return;
+            }
+        }
+        auto write_some_fn = [&](auto& sr, auto& e) -> net::awaitable<void> { co_await async_write_some(sr, e); };
+        co_await body::write_message(&serializer, body, src, write_some_fn, ec);
+    }
+
     net::awaitable<http_client::response_result>
     http_client::impl::async_send_request_lazy(request& req)
     {
         prepare_request(req);
-        http::request_serializer<body::any_body> serializer(get_impl(req));
+        http::request_serializer<http::buffer_body> serializer(get_impl(req));
 
         boost::system::error_code ec;
-        co_await async_write(serializer, false, ec);
+        co_await write_request(serializer, &get_impl(req).body(), get_impl(req).source(), ec);
+        // 复用连接池里的死连接：header 尚未写出时透明重连并重发一次。
+        if (ec && is_retryable(ec) && !serializer.is_header_done())
+        {
+            ec = {};
+            co_await async_close();
+            http::request_serializer<http::buffer_body> retry_serializer(get_impl(req));
+            co_await write_request(retry_serializer, &get_impl(req).body(), get_impl(req).source(), ec);
+        }
         if (ec)
         {
             co_return ec;
@@ -232,7 +259,7 @@ namespace httplib::client
                         && req.method() != http::verb::head))
                 {
                     req.method(http::verb::get);
-                    get_impl(req).body() = body::empty_body::value_type {};
+                    get_impl(req).reset_body();
                     req.erase(http::field::content_type);
                     req.erase(http::field::content_length);
                     get_impl(req).prepare_payload();
@@ -308,7 +335,7 @@ namespace httplib::client
         {
             get_impl(req).set(http::field::host, host_value_);
         }
-        // 声明了不支持的 Content-Encoding：any_body writer 不会真的压缩，头却留在线上会让对端误判，
+        // 声明了不支持的 Content-Encoding：不会被真正压缩，头却留在线上会让对端误判，
         // 这里删掉头并告警。
         auto content_encoding = get_impl(req)[http::field::content_encoding];
         if (!content_encoding.empty()
@@ -320,9 +347,9 @@ namespace httplib::client
         }
         if (!get_impl(req).has_content_length())
         {
-            // any_body 不是 sized body，prepare_payload() 对空 body 也会设 Transfer-Encoding: chunked，
-            // 导致服务端把空 POST 解析成 chunked body 而非 empty_body。空 body 显式设 Content-Length: 0。
-            if (std::holds_alternative<body::empty_body::value_type>(get_impl(req).body()))
+            // buffer_body 不是 sized body，prepare_payload() 对空 body 也会设 Transfer-Encoding: chunked，
+            // 导致服务端把空 POST 解析成 chunked body 而非空 body。空 body 显式设 Content-Length: 0。
+            if (!get_impl(req).source())
             {
                 get_impl(req).content_length(0);
             }
@@ -333,13 +360,13 @@ namespace httplib::client
         }
         else
         {
-            // 请求带 Content-Encoding 时，any_body writer 在序列化阶段会压缩 body，set_body()
-            // 预先写入的 Content-Length 是明文长度，与压缩后的实际长度不一致。参照服务端压缩响应时
-            // 的处理（session::http_task::async_write 中 chunked(true)），改用 chunked 传输。
+            // 请求带 Content-Encoding 时，write 阶段会压缩 body，set_body() 预先写入的
+            // Content-Length 是明文长度，与压缩后的实际长度不一致。改用 chunked + stream encoder。
             auto content_encoding = get_impl(req)[http::field::content_encoding];
             if (!content_encoding.empty()
                 && compress::compressor_factory::instance().is_transform_encoding(content_encoding))
             {
+                get_impl(req).apply_encoding(content_encoding);
                 get_impl(req).chunked(true);
             }
         }

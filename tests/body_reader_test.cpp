@@ -1,5 +1,5 @@
 #include "body/body_reader.hpp"
-#include "body/string_body.hpp"
+#include "body/sink.hpp"
 #include <array>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
@@ -71,9 +71,7 @@ namespace
                 std::uint64_t body_limit,
                 net::any_io_executor ex)
     {
-        response_reader reader;
-        reader.start(source.get(), std::move(header_parser), body_limit, ex);
-        return reader;
+        return response_reader(ex, source.get(), std::move(*header_parser), body_limit);
     }
 } // namespace
 
@@ -95,17 +93,14 @@ TEST_CASE("body_reader: materialize string body via fake source", "[body-reader]
         ioc,
         [&]() -> net::awaitable<void>
         {
-            co_await reader.read_body(
-                [](http::response<httplib::body::any_body>& msg)
-                { msg.body() = httplib::body::string_body::value_type {}; },
-                read_ec);
+            read_ec = co_await reader.read_body(std::make_unique<httplib::body::string_sink>());
         },
         net::use_future);
     ioc.run();
     fut.get();
 
     REQUIRE_FALSE(read_ec);
-    REQUIRE(reader.state().is<httplib::body::string_body>());
+    REQUIRE(reader.state().type() == httplib::body::body_state::kind::string);
     REQUIRE(reader.state().as_string() == "hello world");
     REQUIRE(reader.is_body_done());
 }

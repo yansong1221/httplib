@@ -1,4 +1,4 @@
-#include "body/any_body.hpp"
+#include "body/codec.hpp"
 #include "compress/compressor.hpp"
 #include <boost/asio/buffer.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -92,18 +92,14 @@ namespace
     void
     feed_corrupt(std::string const& wire, httplib::compress::error expected, std::string_view encoding = "gzip")
     {
-        body::any_body::value_type body = std::string {};
-        http::fields fields;
-        fields.set(http::field::content_encoding, encoding);
-
-        body::any_body::reader reader(fields, body);
+        body::stream_decoder decoder;
         boost::system::error_code ec;
-        reader.init(boost::none, ec);
+        decoder.reset(encoding, std::nullopt, 0, ec);
         REQUIRE_FALSE(ec);
-        reader.put(boost::asio::buffer(wire), ec);
+        decoder.feed(boost::asio::buffer(wire), ec);
         if (!ec)
         {
-            reader.finish(ec);
+            decoder.flush(ec);
         }
         REQUIRE(ec == httplib::compress::make_error_code(expected));
     }
@@ -139,27 +135,36 @@ TEST_CASE("Compressor: zstd bad magic maps to bad_header", "[compressor]")
     feed_corrupt(wire, httplib::compress::error::bad_header, "zstd");
 }
 
-TEST_CASE("Compressor: brotli roundtrip via any_body reader", "[compressor]")
+TEST_CASE("Compressor: brotli roundtrip via stream_decoder", "[compressor]")
 {
     std::string original = "brotli roundtrip payload 0123456789";
     auto wire = encode("br", original);
     REQUIRE_FALSE(wire.empty());
 
-    body::any_body::value_type body = std::string {};
-    http::fields fields;
-    fields.set(http::field::content_encoding, "br");
-
-    body::any_body::reader reader(fields, body);
+    body::stream_decoder decoder;
     boost::system::error_code ec;
-    reader.init(boost::none, ec);
+    decoder.reset("br", std::nullopt, 0, ec);
     REQUIRE_FALSE(ec);
-    reader.put(boost::asio::buffer(wire), ec);
+    decoder.feed(boost::asio::buffer(wire), ec);
     if (!ec)
     {
-        reader.finish(ec);
+        decoder.flush(ec);
     }
     REQUIRE_FALSE(ec);
-    REQUIRE(std::get<std::string>(body) == original);
+
+    std::string out;
+    char buf[64];
+    for (;;)
+    {
+        auto n = decoder.drain(boost::asio::buffer(buf), ec);
+        REQUIRE_FALSE(ec);
+        if (n == 0)
+        {
+            break;
+        }
+        out.append(buf, n);
+    }
+    REQUIRE(out == original);
 }
 
 TEST_CASE("Compressor: brotli corrupt input maps to error_code, not exception", "[compressor]")

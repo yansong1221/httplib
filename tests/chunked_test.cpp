@@ -1,4 +1,3 @@
-#include "body/string_body.hpp"
 #include "common.hpp"
 #include "httplib/client/lazy_request.hpp"
 #include "httplib/server/middleware/cors.hpp"
@@ -7,7 +6,6 @@
 #include <array>
 #include <catch2/catch_test_macros.hpp>
 
-namespace body = httplib::body;
 namespace net = httplib::net;
 namespace http = httplib::http;
 namespace mw = httplib::server::middleware;

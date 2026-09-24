@@ -1,132 +1,173 @@
 #pragma once
-#include "body/any_body.hpp"
+#include "httplib/config.hpp"
+#include "httplib/html/form_data.hpp"
+#include "httplib/html/query_params.hpp"
 #include <boost/json/value.hpp>
-#include <optional>
 #include <string>
+#include <utility>
+#include <variant>
 
 namespace httplib::body
 {
-    /// 物化后的 body 值类型（`any_body` 的 variant 实例）。
-    using body_value = any_body::value_type;
-
-    /// 方向无关的 body 访问原语：直接作用于 `any_body::value_type`。
-    /// 任意持有 body 的容器（server::request / client::response / client::request）
-    /// 都复用这一份语义，避免各处重复 std::get / is_body_type。
-    namespace access
+    /// 尚未读取（默认态）。
+    struct none_tag
     {
-        template <typename Body>
-        bool
-        is(body_value const& v)
-        {
-            return v.template is_body_type<Body>();
-        }
+    };
 
-        inline std::string const&
-        as_string(body_value const& v)
-        {
-            return std::get<std::string>(v);
-        }
+    /// 显式空 body（无 body，is_empty() == true）。
+    struct empty_tag
+    {
+    };
 
-        inline boost::json::value const&
-        as_json(body_value const& v)
-        {
-            return std::get<boost::json::value>(v);
-        }
+    /// 文件型 body 的标记（set_file_body：只标记，不存路径）。
+    struct file_tag
+    {
+    };
 
-        inline html::form_data const&
-        as_form_data(body_value const& v)
-        {
-            return std::get<html::form_data>(v);
-        }
+    /** 物化后的业务 body 结果容器。
 
-        inline html::query_params const&
-        as_query_params(body_value const& v)
-        {
-            return std::get<html::query_params>(v);
-        }
+        与传输层（`http::buffer_body`）解耦：同一时刻只承载一种已解析的业务类型，
+        用共用体 `std::variant` 存储（取代旧 `any_body::value_type`），由 sink 写入，
+        公共 API 以 `as_*` / `take_*` 取回。
+    */
+    using body_variant = std::variant<
+        none_tag, // 0: 尚未读取
+        empty_tag, // 1: 显式空
+        std::string, // 2: string
+        boost::json::value, // 3: json
+        html::query_params, // 4: query_params
+        html::form_data, // 5: form_data
+        file_tag>; // 6: file 标记
 
-        template <typename T>
-        T
-        take(body_value& v)
-        {
-            return std::move(std::get<T>(v));
-        }
-    } // namespace access
-
-    /// 持有物化后 body 的状态容器。
-    /// server::request 与 client::response 共用，替代各自私有的 optional<message>。
+    /** 方向无关的读取结果（server request / client request / client response 共用）。
+    */
     class body_state
     {
       public:
-        bool
-        ready() const
+        /// 与 @ref body_variant 分支下标一一对应。
+        enum class kind
         {
-            return body_.has_value();
+            none,
+            empty,
+            string,
+            json,
+            query_params,
+            form_data,
+            file,
+        };
+
+        bool
+        has() const
+        {
+            return state_.index() != static_cast<std::size_t>(kind::none);
         }
 
-        template <typename Body>
-        bool
-        is() const
+        kind
+        type() const
         {
-            return body_ && access::is<Body>(*body_);
+            return static_cast<kind>(state_.index());
         }
 
-        template <typename T>
-        T
-        take()
+        bool
+        is_empty() const
         {
-            auto value = access::take<T>(*body_);
-            body_.reset();
-            return value;
+            return state_.index() == static_cast<std::size_t>(kind::empty);
         }
 
         std::string const&
         as_string() const
         {
-            if (!body_)
-            {
-                throw std::bad_variant_access {};
-            }
-            return access::as_string(*body_);
+            return std::get<std::string>(state_);
         }
 
         boost::json::value const&
         as_json() const
         {
-            if (!body_)
-            {
-                throw std::bad_variant_access {};
-            }
-            return access::as_json(*body_);
-        }
-
-        html::form_data const&
-        as_form_data() const
-        {
-            if (!body_)
-            {
-                throw std::bad_variant_access {};
-            }
-            return access::as_form_data(*body_);
+            return std::get<boost::json::value>(state_);
         }
 
         html::query_params const&
         as_query_params() const
         {
-            if (!body_)
-            {
-                throw std::bad_variant_access {};
-            }
-            return access::as_query_params(*body_);
+            return std::get<html::query_params>(state_);
+        }
+
+        html::form_data const&
+        as_form_data() const
+        {
+            return std::get<html::form_data>(state_);
         }
 
         void
-        assign(body_value v)
+        set_empty()
         {
-            body_ = std::move(v);
+            state_ = empty_tag {};
+        }
+
+        void
+        set_file()
+        {
+            state_ = file_tag {};
+        }
+
+        void
+        set_string(std::string v)
+        {
+            state_ = std::move(v);
+        }
+
+        void
+        set_json(boost::json::value v)
+        {
+            state_ = std::move(v);
+        }
+
+        void
+        set_query_params(html::query_params v)
+        {
+            state_ = std::move(v);
+        }
+
+        void
+        set_form_data(html::form_data v)
+        {
+            state_ = std::move(v);
+        }
+
+        void
+        reset()
+        {
+            state_ = none_tag {};
+        }
+
+        std::string
+        take_string()
+        {
+            return std::get<std::string>(std::move(state_));
+        }
+
+        boost::json::value
+        take_json()
+        {
+            return std::get<boost::json::value>(std::move(state_));
+        }
+
+        html::query_params
+        take_query_params()
+        {
+            return std::get<html::query_params>(std::move(state_));
+        }
+
+        html::form_data
+        take_form_data()
+        {
+            return std::get<html::form_data>(std::move(state_));
         }
 
       private:
-        std::optional<body_value> body_;
+        body_variant state_;
     };
+
+    static_assert(static_cast<std::size_t>(body_state::kind::none) == 0);
+    static_assert(static_cast<std::size_t>(body_state::kind::file) == 6);
 } // namespace httplib::body

@@ -1,5 +1,4 @@
-#include "httplib/server/request.hpp"
-#include "body/read.hpp"
+﻿#include "httplib/server/request.hpp"
 #include "httplib/util/misc.hpp"
 #include "request_impl.hpp"
 
@@ -136,61 +135,61 @@ namespace httplib::server
     std::string const&
     request::as_string() const
     {
-        return impl_->body_state().as_string();
+        return impl_->reader().state().as_string();
     }
 
     boost::json::value const&
     request::as_json() const
     {
-        return impl_->body_state().as_json();
+        return impl_->reader().state().as_json();
     }
 
     html::form_data const&
     request::as_form_data() const
     {
-        return impl_->body_state().as_form_data();
+        return impl_->reader().state().as_form_data();
     }
 
     html::query_params const&
     request::as_query_params() const
     {
-        return impl_->body_state().as_query_params();
+        return impl_->reader().state().as_query_params();
     }
 
     bool
     request::is_empty() const
     {
-        return impl_->body_state().is<body::empty_body>();
+        return impl_->reader().state().is_empty();
     }
 
     bool
     request::is_string() const
     {
-        return impl_->body_state().is<body::string_body>();
+        return impl_->reader().state().type() == body::body_state::kind::string;
     }
 
     bool
     request::is_json() const
     {
-        return impl_->body_state().is<body::json_body>();
+        return impl_->reader().state().type() == body::body_state::kind::json;
     }
 
     bool
     request::is_form_data() const
     {
-        return impl_->body_state().is<body::form_data_body>();
+        return impl_->reader().state().type() == body::body_state::kind::form_data;
     }
 
     bool
     request::is_query_params() const
     {
-        return impl_->body_state().is<body::query_params_body>();
+        return impl_->reader().state().type() == body::body_state::kind::query_params;
     }
 
     net::awaitable<std::string>
     request::read_string()
     {
-        auto result = co_await body::read_as<body::string_body>(*impl_);
+        auto result = co_await impl_->reader().read_string();
         if (!result)
         {
             throw boost::system::system_error(result.error());
@@ -201,7 +200,7 @@ namespace httplib::server
     net::awaitable<boost::json::value>
     request::read_json()
     {
-        auto result = co_await body::read_as<body::json_body>(*impl_);
+        auto result = co_await impl_->reader().read_json();
         if (!result)
         {
             throw boost::system::system_error(result.error());
@@ -212,7 +211,7 @@ namespace httplib::server
     net::awaitable<html::form_data>
     request::read_form_data()
     {
-        auto result = co_await body::read_as<body::form_data_body>(*impl_);
+        auto result = co_await impl_->reader().read_form_data();
         if (!result)
         {
             throw boost::system::system_error(result.error());
@@ -223,7 +222,7 @@ namespace httplib::server
     net::awaitable<html::query_params>
     request::read_query_params()
     {
-        auto result = co_await body::read_as<body::query_params_body>(*impl_);
+        auto result = co_await impl_->reader().read_query_params();
         if (!result)
         {
             throw boost::system::system_error(result.error());
@@ -234,26 +233,13 @@ namespace httplib::server
     net::awaitable<boost::system::error_code>
     request::read_body()
     {
-        auto params = impl_->form_data_params();
-        boost::system::error_code ec;
-        co_await impl_->read_body(
-            [params](http::request<body::any_body>& req)
-            {
-                if (req[http::field::content_type].starts_with("multipart/form-data"))
-                {
-                    body::form_data_body::value_type value {};
-                    value.params = params;
-                    req.body() = std::move(value);
-                }
-            },
-            ec);
-        co_return ec;
+        co_return co_await impl_->reader().read_body();
     }
 
     net::awaitable<std::size_t>
     request::read_some_raw(net::mutable_buffer const& buffer, boost::system::error_code& ec)
     {
-        co_return co_await impl_->read_some_raw(buffer, ec);
+        co_return co_await impl_->reader().read_some_raw(buffer, ec);
     }
     httplib::net::awaitable<std::size_t>
     request::read_some_raw(net::mutable_buffer const& buffer)
@@ -270,7 +256,7 @@ namespace httplib::server
     net::awaitable<std::size_t>
     request::read_some_decompressed(net::mutable_buffer const& buffer, boost::system::error_code& ec)
     {
-        co_return co_await impl_->read_some_decompressed(buffer, ec);
+        co_return co_await impl_->reader().read_some_decompressed(buffer, ec);
     }
     net::awaitable<std::size_t>
     request::read_some_decompressed(net::mutable_buffer const& buffer)
@@ -287,7 +273,7 @@ namespace httplib::server
     bool
     request::is_body_done() const
     {
-        return impl_->is_body_done();
+        return impl_->reader().is_body_done();
     }
 
 } // namespace httplib::server

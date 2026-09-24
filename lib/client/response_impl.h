@@ -1,8 +1,7 @@
 ﻿#pragma once
-#include "body/any_body.hpp"
 #include "body/body_reader.hpp"
 #include "body/body_state.hpp"
-#include "body/empty_body.hpp"
+#include "body/sink.hpp"
 #include "client_impl.h"
 #include "httplib/client/response.hpp"
 #include <algorithm>
@@ -24,34 +23,37 @@ namespace httplib::client
         // 数据源用 response::impl 自身：它是 http_client 的 friend，可访问私有的
         // http_client::impl；body_reader 只要求 Source 提供 read_some(parser, ec)。
         using body_reader_t = httplib::detail::body_reader<false, response::impl>;
-        using body_setup_fn = typename body_reader_t::body_setup_fn;
-        using message_t = typename body_reader_t::message_t;
+
+        static std::optional<std::uint64_t>
+        header_content_length(http::response_parser<http::empty_body> const& parser)
+        {
+            if (auto len = parser.content_length())
+            {
+                return *len;
+            }
+            return std::nullopt;
+        }
 
         impl(std::shared_ptr<http_client::impl> parent,
              std::unique_ptr<http::response_parser<http::empty_body>> header_parser)
             : parent_(std::move(parent))
+            , header_(header_parser->get().base())
+            , content_length_(header_content_length(*header_parser))
+            , body_reader_(parent_->get_executor(),
+                           this,
+                           std::move(*header_parser),
+                           parent_->body_limit_.load(),
+                           [this]
+                           {
+                               std::unique_lock<std::recursive_mutex> lck(parent_->stream_mutex_);
+                               parent_->read_impl_.reset();
+                           })
         {
-            header_ = header_parser->get().base();
-            if (auto len = header_parser->content_length(); len)
-            {
-                content_length_ = *len;
-            }
-
-            body_reader_.start(
-                this,
-                std::move(header_parser),
-                parent_->body_limit_.load(),
-                parent_->get_executor(),
-                [this]
-                {
-                    std::unique_lock<std::recursive_mutex> lck(parent_->stream_mutex_);
-                    parent_->read_impl_.reset();
-                });
         }
 
         ~impl()
         {
-            if (parent_ && !is_body_done())
+            if (parent_ && !body_reader_.is_body_done())
             {
                 parent_->close();
             }
@@ -87,40 +89,16 @@ namespace httplib::client
 
         // ---- body reader ----
 
-        httplib::body::body_state&
-        body_state()
+        body_reader_t&
+        reader()
         {
-            return body_reader_.state();
+            return body_reader_;
         }
 
-        httplib::body::body_state const&
-        body_state() const
+        body_reader_t const&
+        reader() const
         {
-            return body_reader_.state();
-        }
-
-        bool
-        is_body_done() const
-        {
-            return body_reader_.is_body_done();
-        }
-
-        net::awaitable<void>
-        read_body(body_setup_fn const& body_setup, boost::system::error_code& ec)
-        {
-            co_await body_reader_.read_body(body_setup, ec);
-        }
-
-        net::awaitable<std::size_t>
-        read_some_raw(net::mutable_buffer const& buffer, boost::system::error_code& ec)
-        {
-            co_return co_await body_reader_.read_some_raw(buffer, ec);
-        }
-
-        net::awaitable<std::size_t>
-        read_some_decompressed(net::mutable_buffer const& buffer, boost::system::error_code& ec)
-        {
-            co_return co_await body_reader_.read_some_decompressed(buffer, ec);
+            return body_reader_;
         }
 
         // body_reader 的数据源接口：转发到连接读取。

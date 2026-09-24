@@ -1,6 +1,6 @@
 #pragma once
 
-#include "body/any_body.hpp"
+#include "body/source.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/util/async_mutex.hpp"
 #include "httplib/util/use_awaitable.hpp"
@@ -12,6 +12,7 @@
 #include <boost/asio/post.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
+#include <boost/beast/http/buffer_body.hpp>
 #include <boost/beast/http/read.hpp>
 #include <boost/beast/http/serializer.hpp>
 #include <boost/beast/http/write.hpp>
@@ -94,6 +95,10 @@ namespace httplib::client
         void prepare_request(request& req);
         net::awaitable<void> co_connect(boost::system::error_code& ec);
         net::awaitable<http_client::response_result> async_send_request_lazy(request& req);
+        net::awaitable<void> write_request(http::request_serializer<http::buffer_body>& serializer,
+                                           http::buffer_body::value_type* body,
+                                           body::source* src,
+                                           boost::system::error_code& ec);
 
         /// Apply the stored read/write rate limits to the current stream（`stream_`）。
         /// 可在任意线程调用：内部把 rate_policy 的修改投递到 strand 上执行，与 Beast

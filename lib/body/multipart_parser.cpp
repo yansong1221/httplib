@@ -1,21 +1,22 @@
-﻿#include "body/form_data_body.hpp"
+#include "body/multipart_parser.hpp"
 #include "html/html.h"
 #include "httplib/util/misc.hpp"
-#include <fmt/format.h>
-#include <random>
-#include <string_view>
+#include <algorithm>
+#include <boost/algorithm/string/trim.hpp>
+#include <boost/beast/http/error.hpp>
+#include <cctype>
+#include <cstddef>
+#include <utility>
 
 namespace httplib::body
 {
     using namespace std::string_view_literals;
 
-    namespace detail
+    namespace
     {
-        // Returns the length of the longest suffix of `sv` that is a prefix of
-        // `a` or `b`. Used to keep a possible half-split multipart boundary
-        // delimiter in the reader's pending buffer instead of committing it as
-        // part content.
-        static std::size_t
+        // 返回 sv 的最长后缀，且该后缀是 a 或 b 的前缀。用于把可能被切开的
+        // multipart boundary 分隔符保留在 pending 中，而不是当成正文提交。
+        std::size_t
         longest_suffix_prefix(std::string_view sv, std::string_view a, std::string_view b)
         {
             auto const max_len = (std::max)(a.size(), b.size());
@@ -34,7 +35,8 @@ namespace httplib::body
             }
             return 0;
         }
-        static auto
+
+        auto
         parse_content_disposition(std::string_view header)
         {
             std::vector<std::pair<std::string_view, std::string_view>> results;
@@ -102,11 +104,10 @@ namespace httplib::body
             }
             return results;
         }
-        static auto
+
+        auto
         split_header_field_value(std::string_view header, boost::system::error_code& ec)
         {
-            using namespace std::string_view_literals;
-
             std::vector<std::pair<std::string_view, std::string_view>> results;
             auto lines = util::split(header, "\r\n"sv);
 
@@ -120,7 +121,7 @@ namespace httplib::body
                 auto pos = line.find(":");
                 if (pos == std::string_view::npos)
                 {
-                    ec = boost::beast::http::error::unexpected_body;
+                    ec = http::error::unexpected_body;
                     return decltype(results) {};
                 }
 
@@ -131,153 +132,35 @@ namespace httplib::body
 
             return results;
         }
+    } // namespace
 
-    } // namespace detail
-
-    form_data_body::writer::writer(http::fields const&, value_type& b) : body_(b) {}
-
-    boost::optional<std::pair<form_data_body::writer::const_buffers_type, bool>>
-    form_data_body::writer::get(boost::system::error_code& ec)
+    multipart_parser::multipart_parser(std::string content_type, html::form_data::param params)
+        : content_type_(std::move(content_type))
     {
-        ec = {};
-        if (field_data_index_ >= body_.fields.size())
-        {
-            return boost::none;
-        }
-        buffer_.consume(buffer_.size());
-
-        auto& field_data = body_.fields[field_data_index_];
-        switch (step_)
-        {
-            case step::header:
-            {
-                std::string header = fmt::format("--{}\r\n", body_.boundary);
-
-                header += fmt::format(R"(Content-Disposition: form-data; name="{}")", field_data.name);
-                if (!field_data.filename.empty())
-                {
-                    header += fmt::format(R"(; filename="{}")", field_data.filename);
-                }
-                header += "\r\n";
-                if (!field_data.content_type.empty())
-                {
-                    header += fmt::format("Content-Type: {}\r\n", field_data.content_type);
-                }
-                header += "\r\n";
-                net::buffer_copy(buffer_.prepare(header.size()), net::buffer(header));
-                buffer_.commit(header.size());
-
-                step_ = step::content;
-                return std::make_pair(buffer_.cdata(), true);
-            }
-            break;
-            case step::content:
-            {
-                if (field_data.file_path)
-                {
-                    if (!file_stream_.is_open())
-                    {
-                        file_stream_.open(*field_data.file_path, std::ios::in | std::ios::binary);
-                        if (!file_stream_.is_open())
-                        {
-                            ec = boost::system::errc::make_error_code(boost::system::errc::no_such_file_or_directory);
-                            return boost::none;
-                        }
-                        std::error_code fs_ec;
-                        file_remaining_ = fs::file_size(*field_data.file_path, fs_ec);
-                        if (fs_ec)
-                        {
-                            file_stream_.close();
-                            ec = fs_ec;
-                            return boost::none;
-                        }
-                    }
-                    if (file_remaining_ == 0)
-                    {
-                        file_stream_.close();
-                        step_ = step::content_end;
-                        return get(ec);
-                    }
-                    auto n = std::min<std::uintmax_t>(file_buf_size_, file_remaining_);
-                    file_stream_.read(file_buf_.data(), static_cast<std::streamsize>(n));
-                    auto read = static_cast<std::uintmax_t>(file_stream_.gcount());
-                    file_remaining_ -= read;
-                    if (file_remaining_ == 0)
-                    {
-                        file_stream_.close();
-                        step_ = step::content_end;
-                    }
-                    return std::make_pair<const_buffers_type>(net::buffer(file_buf_.data(), read), true);
-                }
-                step_ = step::content_end;
-                return std::make_pair<const_buffers_type>(net::buffer(field_data.content), true);
-            }
-            break;
-            case step::content_end:
-            {
-                bool is_eof = field_data_index_ == body_.fields.size() - 1;
-                std::string end("\r\n");
-                if (is_eof)
-                {
-                    end += fmt::format("--{}--\r\n", body_.boundary);
-                    step_ = step::eof;
-                }
-                else
-                {
-                    step_ = step::header;
-                    field_data_index_++;
-                }
-                net::buffer_copy(buffer_.prepare(end.size()), net::buffer(end));
-                buffer_.commit(end.size());
-                return std::make_pair(buffer_.cdata(), !is_eof);
-            }
-            break;
-            default:
-                break;
-        }
-        return boost::none;
+        body_.params = std::move(params);
     }
 
     void
-    form_data_body::writer::init(boost::system::error_code& ec)
+    multipart_parser::reset(boost::system::error_code& ec)
     {
-        ec.clear();
-        field_data_index_ = 0;
-        file_stream_.close();
-        file_remaining_ = 0;
-    }
-
-    form_data_body::reader::reader(http::fields const& h, value_type& b) : body_(b)
-    {
-        content_type_ = h[http::field::content_type];
-    }
-
-    void
-    form_data_body::reader::init(boost::optional<std::uint64_t> const& content_length, boost::system::error_code& ec)
-    {
-        boost::ignore_unused(content_length);
         ec = {};
 
         auto content_type_parts = util::split(content_type_, ";"sv);
 
-        // Look for boundary
         for (auto const& part : content_type_parts)
         {
-            auto trimed_part = boost::trim_copy(part);
-            // Look for part containing boundary
-            if (!trimed_part.starts_with("boundary"))
+            auto trimmed_part = boost::trim_copy(part);
+            if (!trimmed_part.starts_with("boundary"))
             {
                 continue;
             }
 
-            // Extract boundary
-            auto const& boundary_pair = util::split(trimed_part, "="sv);
+            auto const& boundary_pair = util::split(trimmed_part, "="sv);
             if (boundary_pair.size() != 2)
             {
                 continue;
             }
 
-            // Assign
             boundary_ = boost::trim_copy(boundary_pair[1]);
         }
         if (boundary_.empty())
@@ -286,6 +169,7 @@ namespace httplib::body
         }
         else
         {
+            body_.boundary = boundary_;
             boundary_line_ = "--" + boundary_ + "\r\n";
             boundary_line_last_ = "--" + boundary_ + "--\r\n";
             delim_field_ = "\r\n--" + boundary_ + "\r\n";
@@ -294,8 +178,9 @@ namespace httplib::body
             combined_.clear();
         }
     }
-    std::size_t
-    form_data_body::reader::put(const_buffers_type const& buffers, boost::system::error_code& ec)
+
+    void
+    multipart_parser::put(net::const_buffer const& buffers, boost::system::error_code& ec)
     {
         ec = {};
         auto incoming = util::buffer_to_string_view(buffers);
@@ -323,7 +208,7 @@ namespace httplib::body
             {
                 ec = http::error::unexpected_body;
             }
-            return incoming.size();
+            return;
         }
 
         for (;;)
@@ -366,7 +251,7 @@ namespace httplib::body
                         break;
                     }
                     auto header = sv.substr(0, pos + 4);
-                    auto results = detail::split_header_field_value(header, ec);
+                    auto results = split_header_field_value(header, ec);
                     if (ec)
                     {
                         break;
@@ -392,7 +277,7 @@ namespace httplib::body
                             }
                             value.remove_prefix(semi + 1);
 
-                            auto result = detail::parse_content_disposition(value);
+                            auto result = parse_content_disposition(value);
                             for (auto const& pair : result)
                             {
                                 if (pair.first == "name")
@@ -485,7 +370,7 @@ namespace httplib::body
                         continue;
                     }
 
-                    auto keep = detail::longest_suffix_prefix(sv, delim_field_, delim_final_);
+                    auto keep = longest_suffix_prefix(sv, delim_field_, delim_final_);
                     auto emit_size = sv.size() - keep;
                     if (emit_size > 0)
                     {
@@ -514,18 +399,16 @@ namespace httplib::body
         }
         if (ec)
         {
-            return incoming.size();
+            return;
         }
         if (need_more_data)
         {
             pending_.assign(sv);
-            //ec = http::error::need_more;
         }
-        return incoming.size();
     }
 
     void
-    form_data_body::reader::finish(boost::system::error_code& ec)
+    multipart_parser::finish(boost::system::error_code& ec)
     {
         ec.clear();
         if (file_stream_.is_open())
@@ -539,7 +422,7 @@ namespace httplib::body
     }
 
     void
-    form_data_body::reader::write_content(std::string_view data, boost::system::error_code& ec)
+    multipart_parser::write_content(std::string_view data, boost::system::error_code& ec)
     {
         if (!file_stream_.is_open())
         {

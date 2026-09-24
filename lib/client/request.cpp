@@ -1,5 +1,4 @@
-#include "httplib/client/request.hpp"
-#include "body/body_state.hpp"
+﻿#include "httplib/client/request.hpp"
 #include "compress/compressor.hpp"
 #include "request_impl.h"
 #include <boost/algorithm/string/join.hpp>
@@ -170,61 +169,61 @@ namespace httplib::client
     std::string const&
     request::as_string() const
     {
-        return body::access::as_string(impl_->body());
+        return impl_->payload().as_string();
     }
 
     boost::json::value const&
     request::as_json() const
     {
-        return body::access::as_json(impl_->body());
+        return impl_->payload().as_json();
     }
 
     html::form_data const&
     request::as_form_data() const
     {
-        return body::access::as_form_data(impl_->body());
+        return impl_->payload().as_form_data();
     }
 
     html::query_params const&
     request::as_query_params() const
     {
-        return body::access::as_query_params(impl_->body());
+        return impl_->payload().as_query_params();
     }
 
     bool
     request::is_empty() const
     {
-        return body::access::is<body::empty_body>(impl_->body());
+        return impl_->payload().is_empty();
     }
 
     bool
     request::is_string() const
     {
-        return body::access::is<body::string_body>(impl_->body());
+        return impl_->payload().type() == body::body_state::kind::string;
     }
 
     bool
     request::is_json() const
     {
-        return body::access::is<body::json_body>(impl_->body());
+        return impl_->payload().type() == body::body_state::kind::json;
     }
 
     bool
     request::is_form_data() const
     {
-        return body::access::is<body::form_data_body>(impl_->body());
+        return impl_->payload().type() == body::body_state::kind::form_data;
     }
 
     bool
     request::is_query_params() const
     {
-        return body::access::is<body::query_params_body>(impl_->body());
+        return impl_->payload().type() == body::body_state::kind::query_params;
     }
 
     bool
     request::is_file() const
     {
-        return body::access::is<body::file_body>(impl_->body());
+        return impl_->payload().type() == body::body_state::kind::file;
     }
 
     void
@@ -256,14 +255,16 @@ namespace httplib::client
     {
         impl_->set(http::field::content_type, content_type);
         impl_->content_length(data.size());
-        impl_->body() = std::move(data);
+        impl_->payload().set_string(std::move(data));
+        impl_->set_source(std::make_unique<body::string_source>(impl_->payload().as_string()));
     }
 
     void
     request::set_body(boost::json::value&& data)
     {
         impl_->set(http::field::content_type, "application/json");
-        impl_->body() = std::move(data);
+        impl_->payload().set_json(std::move(data));
+        impl_->set_source(std::make_unique<body::json_source>(impl_->payload().as_json()));
         impl_->prepare_payload();
     }
 
@@ -271,7 +272,8 @@ namespace httplib::client
     request::set_body(html::form_data&& data)
     {
         impl_->set(http::field::content_type, fmt::format("multipart/form-data; boundary={}", data.boundary));
-        impl_->body() = std::move(data);
+        impl_->payload().set_form_data(std::move(data));
+        impl_->set_source(std::make_unique<body::form_data_source>(impl_->payload().as_form_data()));
         impl_->prepare_payload();
     }
 
@@ -279,16 +281,16 @@ namespace httplib::client
     request::set_body(html::query_params&& data)
     {
         impl_->set(http::field::content_type, "application/x-www-form-urlencoded");
-        impl_->body() = std::move(data);
+        impl_->payload().set_query_params(std::move(data));
+        impl_->set_source(std::make_unique<body::query_params_source>(impl_->payload().as_query_params()));
         impl_->prepare_payload();
     }
 
     void
     request::set_file_body(fs::path const& path)
     {
-        body::file_body::value_type file_body;
-        file_body.open(path, std::ios::in | std::ios::binary);
-        impl_->body() = std::move(file_body);
+        impl_->payload().set_file();
+        impl_->set_source(std::make_unique<body::file_source>(path, html::http_ranges {}, "", ""));
         impl_->prepare_payload();
     }
 

@@ -1,7 +1,3 @@
-#include "body/file_body.hpp"
-#include "body/form_data_body.hpp"
-#include "body/json_body.hpp"
-#include "body/string_body.hpp"
 #include "common.hpp"
 #include "compress/compressor.hpp"
 #include "httplib/client/lazy_request.hpp"
@@ -20,7 +16,6 @@
 #include <fstream>
 #include <string>
 
-namespace body = httplib::body;
 namespace http = httplib::http;
 namespace net = httplib::net;
 using test_common::run;

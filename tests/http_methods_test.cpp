@@ -1,8 +1,4 @@
-﻿#include "body/form_data_body.hpp"
-#include "body/json_body.hpp"
-#include "body/query_params_body.hpp"
-#include "body/string_body.hpp"
-#include "common.hpp"
+﻿#include "common.hpp"
 #include "httplib/html/query_params.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
@@ -15,7 +11,6 @@
 #include <random>
 #include <string>
 
-namespace body = httplib::body;
 namespace http = httplib::http;
 namespace net = httplib::net;
 using test_common::run;

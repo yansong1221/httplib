@@ -1,12 +1,19 @@
 #pragma once
-#include "body/any_body.hpp"
+#include "body/body_state.hpp"
+#include "body/source.hpp"
 #include "html/html.h"
 #include "httplib/server/response.hpp"
 #include "httplib/server/stream_writer.hpp"
 #include "session.hpp"
 #include "util/mime_types.hpp"
+#include <boost/beast/http/buffer_body.hpp>
 #include <boost/beast/version.hpp>
 #include <fmt/format.h>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 namespace httplib::server
 {
@@ -28,7 +35,7 @@ namespace httplib::server
         }
     } // namespace detail
 
-    class response::impl : public http::response<body::any_body>
+    class response::impl : public http::response<http::buffer_body>
     {
       public:
         impl(unsigned int version, bool keep_alive, std::shared_ptr<session::http_task> task) : task_(std::move(task))
@@ -39,14 +46,15 @@ namespace httplib::server
             this->set(http::field::date, detail::get_current_gmt_date());
             this->keep_alive(keep_alive);
         }
+
         void
         set_empty_content(http::status status)
         {
             reset_content();
             this->result(status);
-            this->body() = body::empty_body::value_type {};
             this->content_length(0);
         }
+
         void
         set_error_content(http::status status)
         {
@@ -77,7 +85,8 @@ namespace httplib::server
             this->content_length(data.size());
             this->set(http::field::content_type, content_type);
             this->result(status);
-            this->body() = std::move(data);
+            payload_.set_string(std::move(data));
+            source_ = std::make_unique<body::string_source>(payload_.as_string());
         }
 
         void
@@ -92,8 +101,10 @@ namespace httplib::server
             this->result(status);
             this->set(http::field::content_type, "application/json; charset=utf-8");
             this->set(http::field::cache_control, "no-store");
-            this->body() = std::move(data);
+            payload_.set_json(std::move(data));
+            source_ = std::make_unique<body::json_source>(payload_.as_json());
         }
+
         void
         set_file_content(fs::path const& path, http::fields const& req_header = {})
         {
@@ -134,59 +145,58 @@ namespace httplib::server
                 return;
             }
 
-            body::file_body::value_type file;
-            file.open(path, std::ios::in | std::ios::binary);
-            if (!file.is_open())
+            std::string content_type(mime::get_mime_type(path.extension().string()));
+            bool const multipart = ranges.size() > 1;
+            std::string boundary = multipart ? html::generate_boundary() : std::string {};
+
+            auto file_source
+                = std::make_unique<body::file_source>(path, ranges, content_type, boundary);
+            if (!file_source->ok())
             {
                 set_error_content(http::status::forbidden);
                 return;
             }
 
-            file.content_type = mime::get_mime_type(path.extension().string());
-            file.ranges = std::move(ranges);
-
             this->set(http::field::etag, file_etag_str);
             this->set(http::field::last_modified, file_gmt_date_str);
 
-            if (file.ranges.empty())
+            if (ranges.empty())
             {
                 this->set(http::field::accept_ranges, "bytes");
-                this->set(http::field::content_type, file.content_type);
-                // set(http::field::content_disposition,
-                //     fmt::format("attachment;filename={}", (const
-                //     char*)path.filename().u8string().c_str()));
+                this->set(http::field::content_type, content_type);
                 this->result(http::status::ok);
                 this->content_length(file_size);
             }
-            else if (file.ranges.size() == 1)
+            else if (ranges.size() == 1)
             {
-                auto const& range = file.ranges.front();
+                auto const& range = ranges.front();
                 size_t part_size = range.second + 1 - range.first;
                 this->set(http::field::content_range,
                           fmt::format("bytes {}-{}/{}", range.first, range.second, file_size));
-                this->set(http::field::content_type, file.content_type);
+                this->set(http::field::content_type, content_type);
                 this->result(http::status::partial_content);
                 this->content_length(part_size);
             }
             else
             {
-                file.boundary = html::generate_boundary();
-                this->set(http::field::content_type, fmt::format("multipart/byteranges; boundary={}", file.boundary));
+                this->set(http::field::content_type, fmt::format("multipart/byteranges; boundary={}", boundary));
                 this->result(http::status::partial_content);
             }
-            body() = std::move(file);
+            source_ = std::move(file_source);
         }
+
         void
         set_form_data_content(std::vector<html::form_data::field>&& data)
         {
             reset_content();
-            body::form_data_body::value_type value;
+            html::form_data value;
             value.boundary = html::generate_boundary();
             value.fields = std::move(data);
 
             this->result(http::status::ok);
             this->set(http::field::content_type, fmt::format("multipart/form-data; boundary={}", value.boundary));
-            this->body() = std::move(value);
+            payload_.set_form_data(std::move(value));
+            source_ = std::make_unique<body::form_data_source>(payload_.as_form_data());
         }
 
         void
@@ -195,10 +205,30 @@ namespace httplib::server
             this->set(http::field::location, url);
             set_empty_content(status);
         }
+
         void
         reset_content()
         {
-            this->body() = body::empty_body::value_type {};
+            payload_.reset();
+            source_.reset();
+            this->body() = http::buffer_body::value_type {};
+        }
+
+        /// 按 Content-Encoding 在现有 source 上叠加编码（压缩）。
+        void
+        apply_encoding(std::string_view encoding)
+        {
+            if (!source_)
+            {
+                source_ = std::make_unique<body::empty_source>();
+            }
+            source_ = std::make_unique<body::encoded_source>(std::move(source_), encoding);
+        }
+
+        body::source*
+        source()
+        {
+            return source_.get();
         }
 
         void
@@ -223,6 +253,10 @@ namespace httplib::server
         // 连接所有者（http_task）：提供写流与写超时，作用同 request 的 reader_。
         std::shared_ptr<session::http_task> task_;
         bool stream_header_sent_ = false;
+
+        // 业务数据容器（字符串 / json / form_data），source_ 引用它产出发送字节。
+        body::body_state payload_;
+        body::source_ptr source_;
     };
 
 } // namespace httplib::server

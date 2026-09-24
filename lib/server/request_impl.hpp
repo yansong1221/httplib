@@ -1,7 +1,7 @@
 #pragma once
-#include "body/any_body.hpp"
 #include "body/body_reader.hpp"
 #include "body/body_state.hpp"
+#include "body/sink.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/url/url.hpp"
 #include "httplib/util/misc.hpp"
@@ -23,22 +23,23 @@ namespace httplib::server
     {
       public:
         using body_reader_t = httplib::detail::body_reader<true, session::http_task>;
-        using body_setup_fn = typename body_reader_t::body_setup_fn;
-        using message_t = typename body_reader_t::message_t;
 
         impl(tcp::endpoint const& local_endpoint,
              tcp::endpoint const& remote_endpoint,
              std::unique_ptr<http::request_parser<http::empty_body>> header_parser,
              std::shared_ptr<session::http_task> task,
              bool is_ssl)
-            : local_endpoint_(local_endpoint)
+            : header_(header_parser->get().base())
+            , keep_alive_(header_parser->get().keep_alive())
+            , local_endpoint_(local_endpoint)
             , remote_endpoint_(remote_endpoint)
             , is_ssl_(is_ssl)
             , reader_(std::move(task))
+            , body_reader_(reader_->executor(),
+                           reader_.get(),
+                           std::move(*header_parser),
+                           reader_->body_limit())
         {
-            header_ = header_parser->get().base();
-            keep_alive_ = header_parser->get().keep_alive();
-
             if (auto pos = header_.target().find("?"); pos == std::string_view::npos)
             {
                 decoded_path_ = url::url_decode(header_.target());
@@ -48,10 +49,7 @@ namespace httplib::server
                 decoded_path_ = url::url_decode(header_.target().substr(0, pos));
                 query_params_.decode(header_.target().substr(pos + 1));
             }
-            body_reader_.start(reader_.get(),
-                               std::move(header_parser),
-                               reader_->body_limit(),
-                               reader_->executor());
+            body_reader_.set_form_data_params(reader_->form_data_params());
         }
 
         impl& operator=(impl&& other) noexcept = default;
@@ -129,46 +127,16 @@ namespace httplib::server
         }
         // ---- body reader ----
 
-        httplib::body::body_state&
-        body_state()
+        body_reader_t&
+        reader()
         {
-            return body_reader_.state();
+            return body_reader_;
         }
 
-        httplib::body::body_state const&
-        body_state() const
+        body_reader_t const&
+        reader() const
         {
-            return body_reader_.state();
-        }
-
-        bool
-        is_body_done() const
-        {
-            return body_reader_.is_body_done();
-        }
-
-        net::awaitable<void>
-        read_body(body_setup_fn const& body_setup, boost::system::error_code& ec)
-        {
-            co_await body_reader_.read_body(body_setup, ec);
-        }
-
-        net::awaitable<std::size_t>
-        read_some_raw(net::mutable_buffer const& buffer, boost::system::error_code& ec)
-        {
-            co_return co_await body_reader_.read_some_raw(buffer, ec);
-        }
-
-        net::awaitable<std::size_t>
-        read_some_decompressed(net::mutable_buffer const& buffer, boost::system::error_code& ec)
-        {
-            co_return co_await body_reader_.read_some_decompressed(buffer, ec);
-        }
-
-        html::form_data::param
-        form_data_params() const
-        {
-            return reader_->form_data_params();
+            return body_reader_;
         }
         http::request_header<http::fields>&
         header()

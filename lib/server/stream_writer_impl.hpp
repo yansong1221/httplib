@@ -1,9 +1,11 @@
 #pragma once
-#include "body/any_body.hpp"
+#include "body/codec.hpp"
+#include "compress/compressor.hpp"
 #include "httplib/server/stream_writer.hpp"
 #include "httplib/util/async_mutex.hpp"
 #include "response_impl.hpp"
 #include <boost/beast/http/buffer_body.hpp>
+#include <boost/beast/http/field.hpp>
 #include <boost/beast/http/serializer.hpp>
 #include <memory>
 #include <string>
@@ -57,10 +59,24 @@ namespace httplib::server
             }
             else
             {
-                resp_.body() = body::buffer_body::value_type {};
+                resp_.body() = http::buffer_body::value_type {};
                 resp_.chunked(true);
 
-                sr_ = std::make_unique<http::response_serializer<body::any_body>>(resp_);
+                // 调用方声明的 Content-Encoding 由流式写入侧逐块压缩。
+                auto encoding = resp_[http::field::content_encoding];
+                if (!encoding.empty()
+                    && compress::compressor_factory::instance().is_transform_encoding(encoding))
+                {
+                    encoder_ = std::make_unique<body::stream_encoder>();
+                    encoder_->reset(encoding, ec);
+                    if (ec)
+                    {
+                        resp_.keep_alive(false);
+                        co_return;
+                    }
+                }
+
+                sr_ = std::make_unique<http::response_serializer<http::buffer_body>>(resp_);
                 co_await resp_.task_->write_header(*sr_, ec);
             }
             if (ec)
@@ -98,9 +114,40 @@ namespace httplib::server
                 co_return;
             }
 
+            if (sr_ && encoder_)
+            {
+                encoder_->consume_all();
+                encoder_->feed(data, more, ec);
+                if (ec)
+                {
+                    resp_.keep_alive(false);
+                    co_return;
+                }
+                auto buffer = encoder_->buffer();
+                if (buffer.size() == 0 && more)
+                {
+                    co_return;
+                }
+                static char const empty_byte = 0;
+                auto& body = resp_.body();
+                if (buffer.size() == 0)
+                {
+                    body.data = const_cast<char*>(&empty_byte);
+                    body.size = 0;
+                }
+                else
+                {
+                    body.data = const_cast<void*>(buffer.data());
+                    body.size = buffer.size();
+                }
+                body.more = more;
+                co_await write_buffer(*sr_, ec);
+                co_return;
+            }
+
             if (sr_)
             {
-                auto& body = std::get<body::buffer_body::value_type>(sr_->get().body());
+                auto& body = resp_.body();
                 body.data = (void*)data.data();
                 body.size = data.size();
                 body.more = more;
@@ -135,8 +182,10 @@ namespace httplib::server
         response::impl& resp_;
         // 串行化所有写入，保证一次只有一个协程操作序列化器/流。
         util::async_mutex write_mutex_;
-        // 直连流式：any_body 序列化（支持 Content-Encoding 压缩）。
-        std::unique_ptr<http::response_serializer<body::any_body>> sr_;
+        // 直连流式：buffer_body 序列化（调用方逐块喂入）。
+        std::unique_ptr<http::response_serializer<http::buffer_body>> sr_;
+        // 直连流式压缩（Content-Encoding），无则逐块透传。
+        std::unique_ptr<body::stream_encoder> encoder_;
         // 代理转发：beast buffer_body 原样透传。
         std::unique_ptr<http::response<http::buffer_body>> relay_msg_;
         std::unique_ptr<http::response_serializer<http::buffer_body>> relay_sr_;

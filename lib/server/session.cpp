@@ -1,4 +1,5 @@
 ﻿#include "session.hpp"
+#include "body/write.hpp"
 #include "compress/compressor.hpp"
 #include "html/accept_content.hpp"
 #include "httplib/server/response.hpp"
@@ -416,7 +417,7 @@ namespace httplib::server
 
         if (!get_impl(resp).has_content_length())
         {
-            if (std::holds_alternative<body::empty_body::value_type>(get_impl(resp).body()))
+            if (!get_impl(resp).source())
             {
                 get_impl(resp).content_length(0);
             }
@@ -437,6 +438,7 @@ namespace httplib::server
                         (*server_impl_).should_compress_content_type(content_type))
                     {
                         resp.set(http::field::content_encoding, encoding);
+                        get_impl(resp).apply_encoding(encoding);
                         get_impl(resp).chunked(true);
                     }
                 }
@@ -448,16 +450,13 @@ namespace httplib::server
         }
 
         boost::system::error_code ec;
-        http::response_serializer<body::any_body> serializer((get_impl(resp)));
-
-        while (!serializer.is_done())
+        http::response_serializer<http::buffer_body> serializer((get_impl(resp)));
+        auto write_some_fn = [&](auto& sr, auto& e) -> net::awaitable<void> { co_await write_some(sr, e); };
+        co_await body::write_message(&serializer, &get_impl(resp).body(), get_impl(resp).source(), write_some_fn, ec);
+        if (ec)
         {
-            co_await write_some(serializer, ec);
-            if (ec)
-            {
-                server_impl_->get_logger()->trace("write http body failed: {}", ec.message());
-                co_return false;
-            }
+            server_impl_->get_logger()->trace("write http body failed: {}", ec.message());
+            co_return false;
         }
         co_return true;
     }
@@ -525,7 +524,12 @@ namespace httplib::server
         auto resp = response::impl::create(get_impl(req_).header().version(), get_impl(req_).keep_alive(), nullptr);
         get_impl(resp).reason("Connection Established");
         get_impl(resp).result(http::status::ok);
-        co_await http::async_write(stream_, (get_impl(resp)), util::net_awaitable[ec]);
+        get_impl(resp).content_length(0);
+        get_impl(resp).body() = http::buffer_body::value_type {};
+        http::response_serializer<http::buffer_body> hs(get_impl(resp));
+        auto tunnel_write = [&](auto& sr, auto& e) -> net::awaitable<void>
+        { co_await http::async_write_some(stream_, sr, util::net_awaitable[e]); };
+        co_await body::write_message(&hs, &get_impl(resp).body(), nullptr, tunnel_write, ec);
         if (ec)
         {
             server_impl_->get_logger()->trace("http_proxy: write response failed: {}", ec.message());

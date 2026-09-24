@@ -39,6 +39,7 @@ add_httplib_test(httplib_test_core core
     aspect_test.cpp
     async_event_test.cpp
     async_mutex_test.cpp
+    body_pipeline_test.cpp
     body_reader_test.cpp
     body_utils_test.cpp
     chunked_test.cpp

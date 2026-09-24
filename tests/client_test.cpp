@@ -1,7 +1,3 @@
-#include "body/form_data_body.hpp"
-#include "body/json_body.hpp"
-#include "body/query_params_body.hpp"
-#include "body/string_body.hpp"
 #include "common.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/lazy_request.hpp"
@@ -18,7 +14,6 @@
 #include <random>
 #include <thread>
 
-namespace body = httplib::body;
 namespace html = httplib::html;
 namespace net = httplib::net;
 
