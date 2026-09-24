@@ -184,3 +184,56 @@ TEST_CASE("body_reader: stream decompressed body via fake source", "[body-reader
     REQUIRE(got == body);
     REQUIRE(reader.is_body_done());
 }
+
+#ifdef HTTPLIB_ENABLED_COMPRESS
+// 回归：SSE/NDJSON reader 会先判 is_body_done() 再读。若实现让 is_body_done() 在解压器
+// flush 之前就变 true，调用方会提前退出并丢掉 flush 才吐出的尾部解压数据。
+TEST_CASE("body_reader: is_body_done() does not preempt decoder flush", "[body-reader]")
+{
+    net::io_context ioc;
+    auto ex = ioc.get_executor();
+
+    std::string body;
+    for (int i = 0; i < 20000; ++i)
+    {
+        body += "payload-" + std::to_string(i) + "-abcdefghijklmnop\n";
+    }
+
+    auto wire = httplib::body::encode(body, "gzip");
+    REQUIRE(wire.has_value());
+
+    auto source = std::make_unique<memory_source>(ex, make_response(*wire, "Content-Encoding: gzip\r\n"));
+    auto hp = std::make_unique<http::response_parser<http::empty_body>>();
+    boost::system::error_code hec;
+    source->read_header(*hp, hec);
+    REQUIRE_FALSE(hec);
+
+    auto reader = make_reader(source, std::move(hp), 1 << 20, ex);
+
+    // 整段压缩数据一次读完（buf 远大于 wire），复现"最后一块原始数据读到即完成"的场景。
+    std::string got;
+    boost::system::error_code read_ec;
+    auto fut = net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            std::array<char, 1 << 16> buf {};
+            while (!reader.is_body_done())
+            {
+                auto n = co_await reader.read_some_decompressed(net::buffer(buf), read_ec);
+                if (read_ec || n == 0)
+                {
+                    break;
+                }
+                got.append(buf.data(), n);
+            }
+        },
+        net::use_future);
+    ioc.run();
+    fut.get();
+
+    REQUIRE_FALSE(read_ec);
+    REQUIRE(got == body);
+    REQUIRE(reader.is_body_done());
+}
+#endif

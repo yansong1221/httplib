@@ -232,7 +232,6 @@ namespace httplib::client
                         ec = net::error::make_error_code(net::error::not_connected);
                         co_return;
                     }
-                    parser.eager(false);
                     begin_io();
                     co_await http::async_read_some(*s, buffer_, parser, util::net_awaitable[ec]);
                     if (ec)

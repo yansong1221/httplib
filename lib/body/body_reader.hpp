@@ -4,6 +4,7 @@
 #include "body/sink.hpp"
 #include "httplib/config.hpp"
 #include "httplib/util/async_mutex.hpp"
+#include <array>
 #include <boost/asio/error.hpp>
 #include <boost/beast/http/buffer_body.hpp>
 #include <boost/beast/http/empty_body.hpp>
@@ -65,7 +66,6 @@ namespace httplib::detail
             , body_limit_(body_limit)
             , on_stored_(std::move(on_stored))
         {
-            staging_.resize(staging_size);
         }
         body_reader(body_reader&&) noexcept = default;
         body_reader& operator=(body_reader&&) noexcept = default;
@@ -97,15 +97,15 @@ namespace httplib::detail
             {
                 return true;
             }
+            if (!raw_parser_.is_done())
+            {
+                return false;
+            }
             if (stream_decoder_)
             {
-                if (!raw_parser_.is_done())
-                {
-                    return false;
-                }
-                return !stream_decoder_ || stream_decoder_->buffered() == 0;
+                return stream_decoder_->buffered() == 0;
             }
-            return raw_parser_.is_done();
+            return true;
         }
 
         /// 流式读取原始（未解压）body。
@@ -138,14 +138,14 @@ namespace httplib::detail
         net::awaitable<boost::system::error_code>
         read_body()
         {
-            co_return co_await read_body_impl(nullptr, true);
+            co_return co_await read_body_impl(nullptr);
         }
 
         /// 读剩余 body 进指定 sink 并物化（强制类型，即使无 body 也产出该类型）。
         net::awaitable<boost::system::error_code>
         read_body(body::sink_ptr sink)
         {
-            co_return co_await read_body_impl(std::move(sink), false);
+            co_return co_await read_body_impl(std::move(sink));
         }
 
         net::awaitable<boost::system::result<std::string>>
@@ -208,31 +208,8 @@ namespace httplib::detail
             co_await source_->read_some(parser, ec);
         }
 
-        /// 把 decoder 内部缓冲里的解压结果全部喂给 sink。
-        net::awaitable<void>
-        drain_to_sink(body::sink& sink, body::stream_decoder& decoder, boost::system::error_code& ec)
-        {
-            for (;;)
-            {
-                auto n = decoder.drain(net::buffer(staging_.data(), staging_.size()), ec);
-                if (ec)
-                {
-                    co_return;
-                }
-                if (n == 0)
-                {
-                    co_return;
-                }
-                sink.put(net::buffer(staging_.data(), n), ec);
-                if (ec)
-                {
-                    co_return;
-                }
-            }
-        }
-
         net::awaitable<boost::system::error_code>
-        read_body_impl(body::sink_ptr sink, bool auto_dispatch)
+        read_body_impl(body::sink_ptr sink)
         {
             // body 已经物化。
             if (state_.has())
@@ -265,18 +242,13 @@ namespace httplib::detail
                 co_return bad_file_descriptor();
             }
 
-            raw_parser_.eager(true);
-
             std::optional<std::uint64_t> content_length;
             if (auto len = raw_parser_.content_length())
             {
                 content_length = *len;
             }
-            auto content_type = raw_parser_.get()[http::field::content_type];
-            auto encoding = raw_parser_.get()[http::field::content_encoding];
-
-            // 无 body：自动分发时记为 empty（与旧 any_body 行为一致）。
-            if (auto_dispatch && raw_parser_.is_done())
+            // 无 sink（自动分发）：无 body 时记为 empty（与旧 any_body 行为一致）。
+            if (!sink && raw_parser_.is_done())
             {
                 state_.set_empty();
                 if (on_stored_)
@@ -288,6 +260,7 @@ namespace httplib::detail
 
             if (!sink)
             {
+                auto content_type = raw_parser_.get()[http::field::content_type];
                 sink = body::make_sink_for(content_type, std::move(form_params_));
             }
 
@@ -298,54 +271,26 @@ namespace httplib::detail
                 co_return ec;
             }
 
-            body::stream_decoder decoder;
-            decoder.reset(encoding, content_length, body_limit_, ec);
-            if (ec)
+            // 复用流式解压读取（其内部 raw 读走协程局部缓冲，不与本输出的 out_buf 冲突）：
+            // 逐块取解压结果喂给 sink，读到 0（body 已读尽）后收尾。out_buf 在协程帧内，
+            // 可安全跨 co_await。
+            std::array<char, staging_size> out_buf {};
+            for (;;)
             {
-                co_return ec;
-            }
-
-            while (!raw_parser_.is_done())
-            {
-                auto& body = raw_parser_.get().body();
-                body.data = staging_.data();
-                body.size = staging_.size();
-
-                co_await pull(raw_parser_, ec);
-                if (ec == http::error::need_buffer)
-                {
-                    ec = {};
-                }
-
-                auto const consumed = staging_.size() - body.size;
-                if (consumed > 0)
-                {
-                    decoder.feed(net::buffer(staging_.data(), consumed), ec);
-                    if (ec)
-                    {
-                        co_return ec;
-                    }
-                    co_await drain_to_sink(*sink, decoder, ec);
-                    if (ec)
-                    {
-                        co_return ec;
-                    }
-                }
+                auto const n = co_await read_some_decompressed_locked(net::buffer(out_buf), ec);
                 if (ec)
                 {
                     co_return ec;
                 }
-            }
-
-            decoder.flush(ec);
-            if (ec)
-            {
-                co_return ec;
-            }
-            co_await drain_to_sink(*sink, decoder, ec);
-            if (ec)
-            {
-                co_return ec;
+                if (n == 0)
+                {
+                    break;
+                }
+                sink->put(net::buffer(out_buf.data(), n), ec);
+                if (ec)
+                {
+                    co_return ec;
+                }
             }
 
             sink->finish(ec);
@@ -399,7 +344,9 @@ namespace httplib::detail
             }
         }
 
-        /// 流式读取解压后的 body：raw parser 逐块读，自写 decoder 解压，内部缓冲兜住放不下的字节。
+        /// 流式读取解压后的 body：复用 read_some_raw_locked 逐块读原始字节到调用方 buf，
+        /// feed 同步消费掉后再 drain 把解压结果写回同一 buf —— 解压多少就取走多少，
+        /// 每轮解压量受调用方缓冲大小约束；内部缓冲只兜住单个 buf 装不下的产出。
         net::awaitable<std::size_t>
         read_some_decompressed_locked(net::mutable_buffer const& buf, boost::system::error_code& ec)
         {
@@ -436,45 +383,40 @@ namespace httplib::detail
                     co_return stream_decoder_->drain(buf, ec);
                 }
 
-                if (raw_parser_.is_done())
+                // 读一块原始字节进 buf；feed 会立即把 raw 消费进内部缓冲，
+                // 循环回到顶部再把解压结果 drain 写回 buf。
+                auto const n = co_await read_some_raw_locked(buf, ec);
+                if (ec)
                 {
-                    if (!decomp_flushed_)
-                    {
-                        stream_decoder_->flush(ec);
-                        decomp_flushed_ = true;
-                        if (ec)
-                        {
-                            co_return 0;
-                        }
-                        continue;
-                    }
-                    ec = {};
                     co_return 0;
                 }
-
-                auto& body = raw_parser_.get().body();
-                body.data = staging_.data();
-                body.size = staging_.size();
-
-                co_await pull(raw_parser_, ec);
-                if (ec == http::error::need_buffer)
+                if (n > 0)
                 {
-                    ec = {};
-                }
-
-                auto const consumed = staging_.size() - body.size;
-                if (consumed > 0)
-                {
-                    stream_decoder_->feed(net::buffer(staging_.data(), consumed), ec);
+                    stream_decoder_->feed(net::buffer(buf.data(), n), ec);
                     if (ec)
                     {
                         co_return 0;
                     }
                 }
-                else if (ec)
+
+                // 原始 body 读尽就冲刷解压器（幂等，内部 finished_ 保证只生效一次）：
+                // 必须在本轮也读到数据（n>0 且 parser 恰好完成）时同样触发，否则
+                // is_body_done() 会在 flush 前先返回 true，调用方丢掉 flush 出的尾部数据。
+                if (!raw_parser_.is_done())
+                {
+                    continue;
+                }
+                stream_decoder_->flush(ec);
+                if (ec)
                 {
                     co_return 0;
                 }
+                if (stream_decoder_->buffered() == 0)
+                {
+                    ec = {};
+                    co_return 0;
+                }
+                // 有 flush 出的残余，回到顶部 drain 交给调用方。
             }
         }
 
@@ -496,10 +438,8 @@ namespace httplib::detail
         bool stream_started_ = false;
 
         std::unique_ptr<body::stream_decoder> stream_decoder_;
-        bool decomp_flushed_ = false;
         std::uint64_t body_limit_ = 0;
         std::function<void()> on_stored_;
-        std::string staging_;
         html::form_data::param form_params_;
         state_t state_;
     };

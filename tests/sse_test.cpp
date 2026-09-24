@@ -355,4 +355,48 @@ TEST_CASE("SSE: reader decodes gzip-compressed event stream", "[sse]")
             co_return;
         });
 }
+
+// 回归：大体积 gzip 流必须完整解出。此前 read_some_decompressed_locked 在最后一块
+// 原始数据读到且 parser 恰好完成时不会 flush 解压器，而 is_body_done() 会先返回 true，
+// 导致 SSE reader 提前结束、丢掉 flush 才吐出的尾部数据。
+TEST_CASE("SSE: reader decodes large gzip event stream without truncation", "[sse]")
+{
+    constexpr int kCount = 5000;
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/events-gzip-large",
+                [](httplib::server::request&, httplib::server::response& resp)
+                {
+                    std::string body;
+                    body.reserve(std::size_t(kCount) * 24);
+                    for (int i = 0; i < kCount; ++i)
+                    {
+                        body += "data: data-" + std::to_string(i) + "\n\n";
+                    }
+                    resp.set_string_content(body, "text/event-stream");
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            httplib::http::fields headers;
+            headers.set(http::field::accept_encoding, "gzip");
+            httplib::client::request req(http::verb::get, "/events-gzip-large", headers);
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
+            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp[http::field::content_encoding] == "gzip");
+
+            auto sse = resp.create_sse_reader();
+            std::vector<httplib::client::sse_reader::sse_event> events;
+            co_await collect_sse_events(*sse, events);
+
+            REQUIRE(events.size() == kCount);
+            for (int i = 0; i < kCount; ++i)
+            {
+                REQUIRE(events[i].data == "data-" + std::to_string(i));
+            }
+            co_return;
+        });
+}
 #endif
