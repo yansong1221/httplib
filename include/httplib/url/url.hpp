@@ -36,40 +36,35 @@ namespace httplib::url
             return is_ssl() ? url::scheme::tls : url::scheme::plain;
         }
 
-        /// 显式端口；缺省时按 is_ssl() 返回 443/80。
+        /// 显式端口；缺省时按 scheme 返回默认端口（plain=80 / tls=443）。
         uint16_t
         effective_port() const noexcept
         {
-            return port ? port : static_cast<uint16_t>(is_ssl() ? 443 : 80);
+            return port ? port : default_port(transport());
         }
 
         /// origin-form：path + "?" + query + ["#" + fragment]。
         /// include_fragment=true 时含 fragment（仿 boost::urls::url::target()）；
         /// 置 false 得到请求目标（fragment 不进请求行，RFC 9110）。
-        std::string
-        target(bool include_fragment = true) const;
+        std::string target(bool include_fragment = true) const;
 
         /// 拼回完整 URL：scheme://host[:port]path[?query][#fragment]。
-        /// port==0（未显式指定）时省略端口；IPv6 字面量自动补方括号。
-        std::string
-        to_url() const;
+        /// port==0（未显式指定）或等于该 scheme 默认端口（80/443）时省略端口；IPv6 字面量自动补方括号。
+        std::string to_url() const;
     };
 
     /// 解析绝对 URL。失败时返回 boost::urls 的解析错误码。
-    HTTPLIB_API std::expected<url_info, boost::system::error_code>
-    parse_url(std::string_view url);
+    HTTPLIB_API std::expected<url_info, boost::system::error_code> parse_url(std::string_view url);
 
     /// 拼装 Host 头 / 连接地址：host[:port]，非默认端口省略端口；IPv6 字面量自动加方括号。
-    HTTPLIB_API std::string
-    make_host_value(std::string_view host, uint16_t port, url::scheme s);
+    HTTPLIB_API std::string make_host_value(std::string_view host, uint16_t port, url::scheme s);
 
     /// 拼装完整 URL：scheme://host[:port]target。url_scheme 非空时覆盖默认协议名。
-    HTTPLIB_API std::string
-    make_url_value(std::string_view host,
-                   uint16_t port,
-                   url::scheme s,
-                   std::string_view target = {},
-                   std::string_view url_scheme = {});
+    HTTPLIB_API std::string make_url_value(std::string_view host,
+                                           uint16_t port,
+                                           url::scheme s,
+                                           std::string_view target = {},
+                                           std::string_view url_scheme = {});
 
     /**
      * Decodes an URL, replacing %<hex> with the corresponding characters.
@@ -81,11 +76,8 @@ namespace httplib::url
     // NOTE: boost.url's pct_encode/pct_decode API requires charset+token,
     // overengineered for simple standalone string percent encoding.
     // Keeping hand-rolled version for simplicity.
-    HTTPLIB_API void
-    url_decode(std::string& str);
-    HTTPLIB_API std::string
-    url_decode(std::string_view str);
-    HTTPLIB_API std::string
-    url_encode(std::string_view value);
+    HTTPLIB_API void url_decode(std::string& str);
+    HTTPLIB_API std::string url_decode(std::string_view str);
+    HTTPLIB_API std::string url_encode(std::string_view value);
 
 } // namespace httplib::url

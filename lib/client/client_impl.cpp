@@ -21,7 +21,6 @@
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/write.hpp>
 #include <boost/beast/version.hpp>
-#include <boost/url.hpp>
 #include <fmt/format.h>
 #include <limits>
 #include <optional>
@@ -213,21 +212,26 @@ namespace httplib::client
                 std::string target;
                 if (loc.starts_with("http://") || loc.starts_with("https://"))
                 {
-                    auto u = boost::urls::url(loc);
-                    auto new_host = u.host();
-                    auto new_port
-                        = u.port_number() ? u.port_number() : (u.scheme_id() == boost::urls::scheme::https ? 443 : 80);
-                    auto new_ssl = u.scheme_id() == boost::urls::scheme::https;
+                    auto parsed = url::parse_url(loc);
+                    if (!parsed)
+                    {
+                        co_return result;
+                    }
+                    auto& u = *parsed;
+                    std::string new_host = u.host;
+                    auto new_port = u.effective_port();
+                    auto new_ssl = u.is_ssl();
+                    auto new_target = u.target(false);
 
                     if (new_host != host_ || new_port != port_ || new_ssl != (scheme_ == url::scheme::tls))
                     {
                         // CL-02: 跨 origin 重定向时移除 origin-bound 敏感头，避免认证凭据泄露到新主机
                         redirect::strip_origin_bound_headers(req.base());
 
-                        req.target(u.encoded_target().empty() ? "/" : u.encoded_target());
+                        req.target(new_target.empty() ? "/" : new_target);
 
                         auto new_impl = std::make_shared<impl>(strand_.get_inner_executor(),
-                                                               std::move(new_host),
+                                                               new_host,
                                                                new_port,
                                                                new_ssl ? url::scheme::tls : url::scheme::plain);
                         new_impl->copy_settings_from(*this);
@@ -237,14 +241,13 @@ namespace httplib::client
                     }
 
                     // 同 host/port/ssl 的完整 URL，仅取 path 作为新 target
-                    target = u.encoded_target().empty() ? "/" : u.encoded_target();
+                    target = new_target.empty() ? "/" : new_target;
                 }
                 else
                 {
                     // 相对 Location：按 RFC 3986 针对当前 target 解析，兼容
                     // "final"、"../a/b"、"?q=1" 等形式。
-                    auto base = req.target();
-                    target = redirect::resolve_redirect_target(std::string_view(base.data(), base.size()), loc);
+                    target = redirect::resolve_redirect_target(req.target(), loc);
                 }
 
                 if (s == http::status::see_other

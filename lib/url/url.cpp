@@ -130,7 +130,7 @@ namespace httplib::url
         {
             s += host;
         }
-        if (port != 0)
+        if (port != 0 && port != default_port(transport()))
         {
             s += ':';
             s += std::to_string(port);
