@@ -89,16 +89,38 @@ namespace httplib::client
 
         net::awaitable<http_client::response_result> read_response_lazy(http::verb method);
 
+        // body_writer 的连接写入原语：
+        //   write_header 只写头；write_some 单步写；write 写到 need_buffer/完成。
+        template <typename Serializer>
+        net::awaitable<void>
+        write_header(Serializer& sr, boost::system::error_code& ec)
+        {
+            co_await async_write(sr, true, ec);
+        }
+        template <typename Serializer>
+        net::awaitable<void>
+        write_some(Serializer& sr, boost::system::error_code& ec)
+        {
+            co_await async_write_some(sr, ec);
+        }
+        template <typename Serializer>
+        net::awaitable<void>
+        write(Serializer& sr, boost::system::error_code& ec)
+        {
+            co_await async_write(sr, false, ec);
+            if (ec == http::error::need_buffer)
+            {
+                ec = {};
+            }
+        }
+
       private:
         friend class ::httplib::client::response::impl;
 
         void prepare_request(request& req);
         net::awaitable<void> co_connect(boost::system::error_code& ec);
         net::awaitable<http_client::response_result> async_send_request_lazy(request& req);
-        net::awaitable<void> write_request(http::request_serializer<http::buffer_body>& serializer,
-                                           http::buffer_body::value_type* body,
-                                           body::source* src,
-                                           boost::system::error_code& ec);
+        net::awaitable<void> write_request(request& req, boost::system::error_code& ec);
 
         /// Apply the stored read/write rate limits to the current stream（`stream_`）。
         /// 可在任意线程调用：内部把 rate_policy 的修改投递到 strand 上执行，与 Beast

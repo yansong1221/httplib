@@ -1,5 +1,6 @@
 #pragma once
 #include "body/body_state.hpp"
+#include "body/body_writer.hpp"
 #include "body/source.hpp"
 #include "html/html.h"
 #include "httplib/server/response.hpp"
@@ -38,7 +39,11 @@ namespace httplib::server
     class response::impl : public http::response<http::buffer_body>
     {
       public:
-        impl(unsigned int version, bool keep_alive, std::shared_ptr<session::http_task> task) : task_(std::move(task))
+        using body_writer_t = httplib::detail::body_writer<false, session::http_task>;
+
+        impl(unsigned int version, bool keep_alive, std::shared_ptr<session::http_task> task)
+            : task_(std::move(task))
+            , writer_(*this, task_.get(), task_ ? task_->executor() : net::any_io_executor {})
         {
             this->result(http::status::not_found);
             this->version(version);
@@ -50,7 +55,7 @@ namespace httplib::server
         void
         set_empty_content(http::status status)
         {
-            reset_content();
+            writer_.set_empty();
             this->result(status);
             this->content_length(0);
         }
@@ -81,12 +86,8 @@ namespace httplib::server
         void
         set_string_content(std::string&& data, std::string_view content_type, http::status status = http::status::ok)
         {
-            reset_content();
-            this->content_length(data.size());
-            this->set(http::field::content_type, content_type);
+            writer_.set_string(std::move(data), content_type);
             this->result(status);
-            payload_.set_string(std::move(data));
-            source_ = std::make_unique<body::string_source>(payload_.as_string());
         }
 
         void
@@ -97,18 +98,14 @@ namespace httplib::server
         void
         set_json_content(boost::json::value&& data, http::status status = http::status::ok)
         {
-            reset_content();
+            writer_.set_json(std::move(data), "application/json; charset=utf-8", true);
             this->result(status);
-            this->set(http::field::content_type, "application/json; charset=utf-8");
-            this->set(http::field::cache_control, "no-store");
-            payload_.set_json(std::move(data));
-            source_ = std::make_unique<body::json_source>(payload_.as_json());
         }
 
         void
         set_file_content(fs::path const& path, http::fields const& req_header = {})
         {
-            reset_content();
+            writer_.reset();
             std::error_code ec;
             auto file_size = fs::file_size(path, ec);
             if (ec)
@@ -182,21 +179,17 @@ namespace httplib::server
                 this->set(http::field::content_type, fmt::format("multipart/byteranges; boundary={}", boundary));
                 this->result(http::status::partial_content);
             }
-            source_ = std::move(file_source);
+            writer_.set_file(std::move(file_source));
         }
 
         void
         set_form_data_content(std::vector<html::form_data::field>&& data)
         {
-            reset_content();
             html::form_data value;
             value.boundary = html::generate_boundary();
             value.fields = std::move(data);
-
+            writer_.set_form_data(std::move(value));
             this->result(http::status::ok);
-            this->set(http::field::content_type, fmt::format("multipart/form-data; boundary={}", value.boundary));
-            payload_.set_form_data(std::move(value));
-            source_ = std::make_unique<body::form_data_source>(payload_.as_form_data());
         }
 
         void
@@ -209,37 +202,32 @@ namespace httplib::server
         void
         reset_content()
         {
-            payload_.reset();
-            source_.reset();
-            this->body() = http::buffer_body::value_type {};
+            writer_.reset();
         }
 
         /// 按 Content-Encoding 在现有 source 上叠加编码（压缩）。
         void
         apply_encoding(std::string_view encoding)
         {
-            if (!source_)
-            {
-                source_ = std::make_unique<body::empty_source>();
-            }
-            source_ = std::make_unique<body::encoded_source>(std::move(source_), encoding);
+            writer_.apply_encoding(encoding);
         }
 
         body::source*
         source()
         {
-            return source_.get();
+            return writer_.source();
         }
 
-        void
-        set_stream_header_sent(bool sent)
+        body_writer_t&
+        writer()
         {
-            stream_header_sent_ = sent;
+            return writer_;
         }
+
         bool
         stream_header_sent() const
         {
-            return stream_header_sent_;
+            return writer_.header_sent();
         }
 
         static response
@@ -252,11 +240,9 @@ namespace httplib::server
         std::shared_ptr<stream_writer> stream_writer_;
         // 连接所有者（http_task）：提供写流与写超时，作用同 request 的 reader_。
         std::shared_ptr<session::http_task> task_;
-        bool stream_header_sent_ = false;
 
-        // 业务数据容器（字符串 / json / form_data），source_ 引用它产出发送字节。
-        body::body_state payload_;
-        body::source_ptr source_;
+        // 写方向统一入口：业务数据容器 + source + 序列化/编码/分帧状态。
+        body_writer_t writer_;
     };
 
 } // namespace httplib::server

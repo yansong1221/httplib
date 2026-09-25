@@ -70,6 +70,17 @@ namespace httplib::detail
         body_reader(body_reader&&) noexcept = default;
         body_reader& operator=(body_reader&&) noexcept = default;
 
+        auto&
+        get()
+        {
+            return raw_parser_.get();
+        }
+        auto&
+        get() const
+        {
+            return raw_parser_.get();
+        }
+
         /// 预设自动分发时 form_data sink 的解析参数（服务端由 router 配置注入）。
         void
         set_form_data_params(html::form_data::param params)

@@ -37,7 +37,6 @@ namespace httplib::client
         impl(std::shared_ptr<http_client::impl> parent,
              std::unique_ptr<http::response_parser<http::empty_body>> header_parser)
             : parent_(std::move(parent))
-            , header_(header_parser->get().base())
             , content_length_(header_content_length(*header_parser))
             , body_reader_(parent_->get_executor(),
                            this,
@@ -70,17 +69,6 @@ namespace httplib::client
             return response(std::move(impl));
         }
 
-        http::response_header<http::fields> const&
-        header() const
-        {
-            return header_;
-        }
-        http::response_header<http::fields>&
-        header()
-        {
-            return header_;
-        }
-
         std::optional<std::uint64_t>
         content_length() const
         {
@@ -111,7 +99,6 @@ namespace httplib::client
 
       private:
         std::shared_ptr<http_client::impl> parent_;
-        http::response_header<http::fields> header_;
 
         std::optional<std::uint64_t> content_length_;
         body_reader_t body_reader_;

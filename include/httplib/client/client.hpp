@@ -263,6 +263,7 @@ namespace httplib::client
         std::shared_ptr<impl> impl_;
 
         friend class ::httplib::client::response::impl;
+        friend class ::httplib::client::request::impl;
 
         friend std::shared_ptr<impl>&
         get_impl(http_client& self)

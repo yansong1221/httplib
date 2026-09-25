@@ -253,44 +253,34 @@ namespace httplib::client
     void
     request::set_body(std::string&& data, std::string_view content_type)
     {
-        impl_->set(http::field::content_type, content_type);
-        impl_->content_length(data.size());
-        impl_->payload().set_string(std::move(data));
-        impl_->set_source(std::make_unique<body::string_source>(impl_->payload().as_string()));
+        impl_->writer().set_string(std::move(data), content_type);
     }
 
     void
     request::set_body(boost::json::value&& data)
     {
-        impl_->set(http::field::content_type, "application/json");
-        impl_->payload().set_json(std::move(data));
-        impl_->set_source(std::make_unique<body::json_source>(impl_->payload().as_json()));
+        impl_->writer().set_json(std::move(data), "application/json");
         impl_->prepare_payload();
     }
 
     void
     request::set_body(html::form_data&& data)
     {
-        impl_->set(http::field::content_type, fmt::format("multipart/form-data; boundary={}", data.boundary));
-        impl_->payload().set_form_data(std::move(data));
-        impl_->set_source(std::make_unique<body::form_data_source>(impl_->payload().as_form_data()));
+        impl_->writer().set_form_data(std::move(data));
         impl_->prepare_payload();
     }
 
     void
     request::set_body(html::query_params&& data)
     {
-        impl_->set(http::field::content_type, "application/x-www-form-urlencoded");
-        impl_->payload().set_query_params(std::move(data));
-        impl_->set_source(std::make_unique<body::query_params_source>(impl_->payload().as_query_params()));
+        impl_->writer().set_query_params(std::move(data));
         impl_->prepare_payload();
     }
 
     void
     request::set_file_body(fs::path const& path)
     {
-        impl_->payload().set_file();
-        impl_->set_source(std::make_unique<body::file_source>(path, html::http_ranges {}, "", ""));
+        impl_->writer().set_file(std::make_unique<body::file_source>(path, html::http_ranges {}, "", ""));
         impl_->prepare_payload();
     }
 

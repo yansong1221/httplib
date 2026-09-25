@@ -1,5 +1,6 @@
 #pragma once
 
+#include "body/body_writer.hpp"
 #include "client_impl.h"
 #include "httplib/client/lazy_request.hpp"
 #include "response_impl.h"
@@ -16,8 +17,10 @@ namespace httplib::client
     class http_client::impl::lazy_request_impl final : public lazy_request
     {
       public:
+        using body_writer_t = httplib::detail::body_writer<true, http_client::impl>;
+
         explicit lazy_request_impl(net::any_io_executor ex, std::shared_ptr<http_client::impl> parent)
-            : write_mutex_(std::move(ex))
+            : executor_(std::move(ex))
             , parent_(std::move(parent))
         {
         }
@@ -44,16 +47,8 @@ namespace httplib::client
                 co_return;
             }
 
-            auto write_lock = co_await write_mutex_.lock();
-            if (!write_lock)
-            {
-                ec = net::error::make_error_code(net::error::operation_aborted);
-                co_return;
-            }
-
             method_ = method;
             req_msg_ = std::make_unique<http::request<http::buffer_body>>(method, target, 11);
-            req_sr_ = std::make_unique<http::request_serializer<http::buffer_body>>(*req_msg_);
             req_msg_->set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
             for (auto const& f : headers)
             {
@@ -61,11 +56,11 @@ namespace httplib::client
             }
             req_msg_->set(http::field::host, parent_->host_value_);
             req_msg_->keep_alive(true);
-            if (m == mode::chunked)
-            {
-                req_msg_->chunked(true);
-            }
-            co_await parent_->async_write(*req_sr_, true, ec);
+
+            writer_ = std::make_unique<body_writer_t>(*req_msg_, parent_.get(), executor_);
+            auto writer_mode
+                = m == mode::chunked ? body_writer_t::stream_mode::chunked : body_writer_t::stream_mode::relay;
+            ec = co_await writer_->begin_stream(writer_mode);
         }
 
         net::awaitable<void>
@@ -82,34 +77,12 @@ namespace httplib::client
         net::awaitable<void>
         write_body(net::const_buffer const& data, bool more, boost::system::error_code& ec) override
         {
-            if (!parent_)
+            if (!parent_ || !writer_)
             {
                 ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
                 co_return;
             }
-            auto write_lock = co_await write_mutex_.lock();
-            if (!write_lock)
-            {
-                ec = net::error::make_error_code(net::error::operation_aborted);
-                co_return;
-            }
-
-            if (!req_msg_)
-            {
-                ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
-                co_return;
-            }
-
-            auto& body = req_msg_->body();
-            body.data = data.size() > 0 ? const_cast<void*>(data.data()) : nullptr;
-            body.size = data.size();
-            body.more = more;
-
-            co_await parent_->async_write(*req_sr_, false, ec);
-            if (ec == http::error::need_buffer)
-            {
-                ec = {};
-            }
+            ec = co_await writer_->write_some(data, more);
         }
 
         net::awaitable<boost::system::result<client::response>>
@@ -140,11 +113,12 @@ namespace httplib::client
             }
             co_return result;
         }
-        util::async_mutex write_mutex_;
 
+      private:
+        net::any_io_executor executor_;
         std::shared_ptr<http_client::impl> parent_;
         http::verb method_ = http::verb::unknown;
         std::unique_ptr<http::request<http::buffer_body>> req_msg_;
-        std::unique_ptr<http::request_serializer<http::buffer_body>> req_sr_;
+        std::unique_ptr<body_writer_t> writer_;
     };
 } // namespace httplib::client

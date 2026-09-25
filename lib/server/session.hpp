@@ -14,6 +14,7 @@
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/beast/http/empty_body.hpp>
 #include <boost/beast/http/read.hpp>
+#include <boost/beast/http/write.hpp>
 #include <cstdint>
 #include <memory>
 
@@ -214,6 +215,26 @@ namespace httplib::server
       public:
         net::awaitable<task::ptr> then() override;
         void abort() override;
+
+        // 连接级写入原语：CONNECT 隧道握手响应经 body_writer 走这里。
+        template <typename Serializer>
+        net::awaitable<void>
+        write_header(Serializer& sr, boost::system::error_code& ec)
+        {
+            co_await http::async_write_header(stream_, sr, util::net_awaitable[ec]);
+        }
+        template <typename Serializer>
+        net::awaitable<void>
+        write_some(Serializer& sr, boost::system::error_code& ec)
+        {
+            co_await http::async_write_some(stream_, sr, util::net_awaitable[ec]);
+        }
+        template <typename Serializer>
+        net::awaitable<void>
+        write(Serializer& sr, boost::system::error_code& ec)
+        {
+            co_await http::async_write(stream_, sr, util::net_awaitable[ec]);
+        }
 
       private:
         http_stream stream_;

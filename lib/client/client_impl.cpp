@@ -1,5 +1,4 @@
 #include "client_impl.h"
-#include "body/write.hpp"
 #include "compress/compressor.hpp"
 #include "httplib/url/url.hpp"
 #include "httplib/util/misc.hpp"
@@ -114,38 +113,32 @@ namespace httplib::client
     }
 
     net::awaitable<void>
-    http_client::impl::write_request(http::request_serializer<http::buffer_body>& serializer,
-                                     http::buffer_body::value_type* body,
-                                     body::source* src,
-                                     boost::system::error_code& ec)
+    http_client::impl::write_request(request& req, boost::system::error_code& ec)
     {
-        if (!serializer.is_header_done())
+        co_await co_connect(ec);
+        if (ec)
         {
-            co_await co_connect(ec);
-            if (ec)
-            {
-                co_return;
-            }
+            co_return;
         }
-        auto write_some_fn = [&](auto& sr, auto& e) -> net::awaitable<void> { co_await async_write_some(sr, e); };
-        co_await body::write_message(&serializer, body, src, write_some_fn, ec);
+        ec = co_await get_impl(req).writer().write_message();
     }
 
     net::awaitable<http_client::response_result>
     http_client::impl::async_send_request_lazy(request& req)
     {
         prepare_request(req);
-        http::request_serializer<http::buffer_body> serializer(get_impl(req));
+        auto& writer = get_impl(req).writer();
+        writer.attach(this, strand_);
 
         boost::system::error_code ec;
-        co_await write_request(serializer, &get_impl(req).body(), get_impl(req).source(), ec);
+        co_await write_request(req, ec);
         // 复用连接池里的死连接：header 尚未写出时透明重连并重发一次。
-        if (ec && is_retryable(ec) && !serializer.is_header_done())
+        if (ec && is_retryable(ec) && !writer.header_done())
         {
             ec = {};
             co_await async_close();
-            http::request_serializer<http::buffer_body> retry_serializer(get_impl(req));
-            co_await write_request(retry_serializer, &get_impl(req).body(), get_impl(req).source(), ec);
+            writer.reset_serializer();
+            co_await write_request(req, ec);
         }
         if (ec)
         {
@@ -347,16 +340,7 @@ namespace httplib::client
         }
         if (!get_impl(req).has_content_length())
         {
-            // buffer_body 不是 sized body，prepare_payload() 对空 body 也会设 Transfer-Encoding: chunked，
-            // 导致服务端把空 POST 解析成 chunked body 而非空 body。空 body 显式设 Content-Length: 0。
-            if (!get_impl(req).source())
-            {
-                get_impl(req).content_length(0);
-            }
-            else
-            {
-                get_impl(req).prepare_payload();
-            }
+            get_impl(req).writer().prepare_payload();
         }
         else
         {
@@ -366,7 +350,7 @@ namespace httplib::client
             if (!content_encoding.empty()
                 && compress::compressor_factory::instance().is_transform_encoding(content_encoding))
             {
-                get_impl(req).apply_encoding(content_encoding);
+                get_impl(req).writer().apply_encoding(content_encoding);
                 get_impl(req).chunked(true);
             }
         }

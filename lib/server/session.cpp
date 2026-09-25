@@ -1,5 +1,4 @@
 ﻿#include "session.hpp"
-#include "body/write.hpp"
 #include "compress/compressor.hpp"
 #include "html/accept_content.hpp"
 #include "httplib/server/response.hpp"
@@ -410,22 +409,13 @@ namespace httplib::server
     net::awaitable<bool>
     session::http_task::async_write(request const& req, response& resp)
     {
-        if (get_impl(resp).stream_header_sent())
+        auto& writer = get_impl(resp).writer();
+        if (writer.header_sent())
         {
             co_return true;
         }
 
-        if (!get_impl(resp).has_content_length())
-        {
-            if (!get_impl(resp).source())
-            {
-                get_impl(resp).content_length(0);
-            }
-            else
-            {
-                get_impl(resp).prepare_payload();
-            }
-        }
+        writer.prepare_payload();
 
         if (auto accept_encoding = req[http::field::accept_encoding]; !accept_encoding.empty())
         {
@@ -438,21 +428,18 @@ namespace httplib::server
                         (*server_impl_).should_compress_content_type(content_type))
                     {
                         resp.set(http::field::content_encoding, encoding);
-                        get_impl(resp).apply_encoding(encoding);
-                        get_impl(resp).chunked(true);
+                        writer.apply_encoding(encoding);
+                        writer.chunked(true);
                     }
                 }
             }
         }
         if (req.method() == http::verb::head)
         {
-            get_impl(resp).reset_content();
+            writer.reset();
         }
 
-        boost::system::error_code ec;
-        http::response_serializer<http::buffer_body> serializer((get_impl(resp)));
-        auto write_some_fn = [&](auto& sr, auto& e) -> net::awaitable<void> { co_await write_some(sr, e); };
-        co_await body::write_message(&serializer, &get_impl(resp).body(), get_impl(resp).source(), write_some_fn, ec);
+        auto ec = co_await writer.write_message();
         if (ec)
         {
             server_impl_->get_logger()->trace("write http body failed: {}", ec.message());
@@ -525,11 +512,9 @@ namespace httplib::server
         get_impl(resp).reason("Connection Established");
         get_impl(resp).result(http::status::ok);
         get_impl(resp).content_length(0);
-        get_impl(resp).body() = http::buffer_body::value_type {};
-        http::response_serializer<http::buffer_body> hs(get_impl(resp));
-        auto tunnel_write = [&](auto& sr, auto& e) -> net::awaitable<void>
-        { co_await http::async_write_some(stream_, sr, util::net_awaitable[e]); };
-        co_await body::write_message(&hs, &get_impl(resp).body(), nullptr, tunnel_write, ec);
+        httplib::detail::body_writer<false, http_proxy_task> writer(get_impl(resp), this, stream_.get_executor());
+        writer.set_empty();
+        ec = co_await writer.write_message();
         if (ec)
         {
             server_impl_->get_logger()->trace("http_proxy: write response failed: {}", ec.message());
