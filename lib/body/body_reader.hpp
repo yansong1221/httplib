@@ -81,6 +81,12 @@ namespace httplib::detail
             return raw_parser_.get();
         }
 
+        auto
+        content_length() const
+        {
+            return raw_parser_.content_length();
+        }
+
         /// 预设自动分发时 form_data sink 的解析参数（服务端由 router 配置注入）。
         void
         set_form_data_params(httplib::form_data::param params)

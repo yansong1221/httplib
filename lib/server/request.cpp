@@ -19,64 +19,64 @@ namespace httplib::server
     http::verb
     request::method() const
     {
-        return impl_->header().method();
+        return impl_->get().method();
     }
     std::string_view
     request::method_string() const
     {
-        return impl_->header().method_string();
+        return impl_->get().method_string();
     }
     std::string_view
     request::target() const
     {
-        return impl_->header().target();
+        return impl_->get().target();
     }
     httplib::http::fields&
     request::base()
     {
-        return impl_->header();
+        return impl_->get();
     }
 
     httplib::http::fields const&
     request::base() const
     {
-        return impl_->header();
+        return impl_->get();
     }
 
     std::string_view
     request::operator[](http::field name) const
     {
-        return impl_->header()[name];
+        return impl_->get()[name];
     }
 
     std::string_view
     request::operator[](std::string_view name) const
     {
-        return impl_->header()[name];
+        return impl_->get()[name];
     }
 
     std::string_view
     request::at(http::field name) const
     {
-        return impl_->header().at(name);
+        return impl_->get().at(name);
     }
 
     std::string_view
     request::at(std::string_view name) const
     {
-        return impl_->header().at(name);
+        return impl_->get().at(name);
     }
 
     bool
     request::has(http::field name) const
     {
-        return impl_->header().find(name) != impl_->header().end();
+        return impl_->get().find(name) != impl_->get().end();
     }
 
     bool
     request::has(std::string_view name) const
     {
-        return impl_->header().find(name) != impl_->header().end();
+        return impl_->get().find(name) != impl_->get().end();
     }
 
     std::string_view
@@ -135,37 +135,37 @@ namespace httplib::server
     std::string const&
     request::as_string() const
     {
-        return impl_->reader().state().as<std::string>();
+        return impl_->state().as<std::string>();
     }
 
     boost::json::value const&
     request::as_json() const
     {
-        return impl_->reader().state().as<boost::json::value>();
+        return impl_->state().as<boost::json::value>();
     }
 
     httplib::form_data const&
     request::as_form_data() const
     {
-        return impl_->reader().state().as<httplib::form_data>();
+        return impl_->state().as<httplib::form_data>();
     }
 
     httplib::query_params const&
     request::as_query_params() const
     {
-        return impl_->reader().state().as<httplib::query_params>();
+        return impl_->state().as<httplib::query_params>();
     }
 
     body_type
     request::type() const
     {
-        return impl_->reader().state().type();
+        return impl_->state().type();
     }
 
     net::awaitable<std::string>
     request::read_string()
     {
-        auto result = co_await impl_->reader().read_string();
+        auto result = co_await impl_->read_string();
         if (!result)
         {
             throw boost::system::system_error(result.error());
@@ -176,7 +176,7 @@ namespace httplib::server
     net::awaitable<boost::json::value>
     request::read_json()
     {
-        auto result = co_await impl_->reader().read_json();
+        auto result = co_await impl_->read_json();
         if (!result)
         {
             throw boost::system::system_error(result.error());
@@ -187,7 +187,7 @@ namespace httplib::server
     net::awaitable<httplib::form_data>
     request::read_form_data()
     {
-        auto result = co_await impl_->reader().read_form_data();
+        auto result = co_await impl_->read_form_data();
         if (!result)
         {
             throw boost::system::system_error(result.error());
@@ -198,7 +198,7 @@ namespace httplib::server
     net::awaitable<httplib::query_params>
     request::read_query_params()
     {
-        auto result = co_await impl_->reader().read_query_params();
+        auto result = co_await impl_->read_query_params();
         if (!result)
         {
             throw boost::system::system_error(result.error());
@@ -209,13 +209,13 @@ namespace httplib::server
     net::awaitable<boost::system::error_code>
     request::read_body()
     {
-        co_return co_await impl_->reader().read_body();
+        co_return co_await impl_->read_body();
     }
 
     net::awaitable<std::size_t>
     request::read_some_raw(net::mutable_buffer const& buffer, boost::system::error_code& ec)
     {
-        co_return co_await impl_->reader().read_some_raw(buffer, ec);
+        co_return co_await impl_->read_some_raw(buffer, ec);
     }
     httplib::net::awaitable<std::size_t>
     request::read_some_raw(net::mutable_buffer const& buffer)
@@ -232,7 +232,7 @@ namespace httplib::server
     net::awaitable<std::size_t>
     request::read_some_decompressed(net::mutable_buffer const& buffer, boost::system::error_code& ec)
     {
-        co_return co_await impl_->reader().read_some_decompressed(buffer, ec);
+        co_return co_await impl_->read_some_decompressed(buffer, ec);
     }
     net::awaitable<std::size_t>
     request::read_some_decompressed(net::mutable_buffer const& buffer)
@@ -249,7 +249,7 @@ namespace httplib::server
     bool
     request::is_body_done() const
     {
-        return impl_->reader().is_body_done();
+        return impl_->is_body_done();
     }
 
 } // namespace httplib::server

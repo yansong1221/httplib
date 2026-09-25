@@ -222,8 +222,7 @@ namespace httplib::server
 
         ws_.set_option(websocket::permessage_deflate {});
 
-        http::request<http::empty_body> req(get_impl(req_).header());
-        co_await ws_.async_accept(req, util::net_awaitable[ec]);
+        co_await ws_.async_accept(get_impl(req_).get(), util::net_awaitable[ec]);
         if (ec)
         {
             get_logger()->error("websocket handshake failed: {}", ec.message());

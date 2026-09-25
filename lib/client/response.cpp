@@ -21,37 +21,37 @@ namespace httplib::client
     http::status
     response::result() const
     {
-        return impl_->reader().get().result();
+        return impl_->get().result();
     }
 
     unsigned
     response::result_int() const
     {
-        return impl_->reader().get().result_int();
+        return impl_->get().result_int();
     }
 
     std::string_view
     response::operator[](http::field name) const
     {
-        return impl_->reader().get()[name];
+        return impl_->get()[name];
     }
 
     std::string_view
     response::operator[](std::string_view name) const
     {
-        return impl_->reader().get()[name];
+        return impl_->get()[name];
     }
 
     http::fields const&
     response::headers() const
     {
-        return impl_->reader().get();
+        return impl_->get();
     }
 
     http::fields&
     response::headers()
     {
-        return impl_->reader().get();
+        return impl_->get();
     }
 
     http::fields const&
@@ -69,37 +69,42 @@ namespace httplib::client
     std::optional<std::uint64_t>
     response::content_length() const
     {
-        return impl_->content_length();
+        auto len = impl_->content_length();
+        if (!len)
+        {
+            return std::nullopt;
+        }
+        return len.value();
     }
 
     std::string const&
     response::as_string() const
     {
-        return impl_->reader().state().as<std::string>();
+        return impl_->state().as<std::string>();
     }
 
     boost::json::value const&
     response::as_json() const
     {
-        return impl_->reader().state().as<boost::json::value>();
+        return impl_->state().as<boost::json::value>();
     }
 
     httplib::form_data const&
     response::as_form_data() const
     {
-        return impl_->reader().state().as<httplib::form_data>();
+        return impl_->state().as<httplib::form_data>();
     }
 
     httplib::query_params const&
     response::as_query_params() const
     {
-        return impl_->reader().state().as<httplib::query_params>();
+        return impl_->state().as<httplib::query_params>();
     }
 
     body_type
     response::type() const
     {
-        return impl_->reader().state().type();
+        return impl_->state().type();
     }
 
     std::unique_ptr<sse_reader>
@@ -117,37 +122,37 @@ namespace httplib::client
     net::awaitable<boost::system::result<std::string>>
     response::read_string()
     {
-        co_return co_await impl_->reader().read_string();
+        co_return co_await impl_->read_string();
     }
 
     net::awaitable<boost::system::result<boost::json::value>>
     response::read_json()
     {
-        co_return co_await impl_->reader().read_json();
+        co_return co_await impl_->read_json();
     }
 
     net::awaitable<boost::system::result<httplib::form_data>>
     response::read_form_data()
     {
-        co_return co_await impl_->reader().read_form_data();
+        co_return co_await impl_->read_form_data();
     }
 
     net::awaitable<boost::system::result<httplib::query_params>>
     response::read_query_params()
     {
-        co_return co_await impl_->reader().read_query_params();
+        co_return co_await impl_->read_query_params();
     }
 
     net::awaitable<boost::system::error_code>
     response::read_body()
     {
-        co_return co_await impl_->reader().read_body();
+        co_return co_await impl_->read_body();
     }
 
     net::awaitable<boost::system::error_code>
     response::read_to_file(fs::path const& save_path)
     {
-        co_return co_await impl_->reader().read_to_file(save_path);
+        co_return co_await impl_->read_to_file(save_path);
     }
 
     net::awaitable<std::size_t>
@@ -158,7 +163,7 @@ namespace httplib::client
             ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
             co_return 0;
         }
-        co_return co_await impl_->reader().read_some_raw(buffer, ec);
+        co_return co_await impl_->read_some_raw(buffer, ec);
     }
     net::awaitable<std::size_t>
     response::read_some_raw(net::mutable_buffer const& buffer)
@@ -180,7 +185,7 @@ namespace httplib::client
             ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
             co_return 0;
         }
-        co_return co_await impl_->reader().read_some_decompressed(buffer, ec);
+        co_return co_await impl_->read_some_decompressed(buffer, ec);
     }
 
     net::awaitable<std::size_t>
@@ -198,7 +203,7 @@ namespace httplib::client
     bool
     response::is_body_done() const
     {
-        return impl_ && impl_->reader().is_body_done();
+        return impl_ && impl_->is_body_done();
     }
 
 } // namespace httplib::client

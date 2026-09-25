@@ -17,42 +17,31 @@
 
 namespace httplib::client
 {
-    class response::impl : public std::enable_shared_from_this<response::impl>
+    class response::impl
+        : public std::enable_shared_from_this<response::impl>
+        , public httplib::detail::body_reader<false, response::impl>
     {
       public:
         // 数据源用 response::impl 自身：它是 http_client 的 friend，可访问私有的
         // http_client::impl；body_reader 只要求 Source 提供 read_some(parser, ec)。
         using body_reader_t = httplib::detail::body_reader<false, response::impl>;
-
-        static std::optional<std::uint64_t>
-        header_content_length(http::response_parser<http::empty_body> const& parser)
-        {
-            if (auto len = parser.content_length())
-            {
-                return *len;
-            }
-            return std::nullopt;
-        }
-
         impl(std::shared_ptr<http_client::impl> parent,
              std::unique_ptr<http::response_parser<http::empty_body>> header_parser)
-            : parent_(std::move(parent))
-            , content_length_(header_content_length(*header_parser))
-            , body_reader_(parent_->get_executor(),
-                           this,
-                           std::move(*header_parser),
-                           parent_->body_limit_.load(),
-                           [this]
-                           {
-                               std::unique_lock<std::recursive_mutex> lck(parent_->stream_mutex_);
-                               parent_->read_impl_.reset();
-                           })
+            : body_reader_t(parent->get_executor(),
+                            this,
+                            std::move(*header_parser),
+                            parent->body_limit_.load(),
+                            [this]
+                            {
+                                std::unique_lock<std::recursive_mutex> lck(parent_->stream_mutex_);
+                                parent_->read_impl_.reset();
+                            })
+            , parent_(std::move(parent))
         {
         }
-
         ~impl()
         {
-            if (parent_ && !body_reader_.is_body_done())
+            if (parent_ && !is_body_done())
             {
                 parent_->close();
             }
@@ -69,26 +58,6 @@ namespace httplib::client
             return response(std::move(impl));
         }
 
-        std::optional<std::uint64_t>
-        content_length() const
-        {
-            return content_length_;
-        }
-
-        // ---- body reader ----
-
-        body_reader_t&
-        reader()
-        {
-            return body_reader_;
-        }
-
-        body_reader_t const&
-        reader() const
-        {
-            return body_reader_;
-        }
-
         // body_reader 的数据源接口：转发到连接读取。
         template <typename Parser>
         net::awaitable<void>
@@ -99,8 +68,5 @@ namespace httplib::client
 
       private:
         std::shared_ptr<http_client::impl> parent_;
-
-        std::optional<std::uint64_t> content_length_;
-        body_reader_t body_reader_;
     };
 } // namespace httplib::client

@@ -261,14 +261,14 @@ namespace httplib::server
                                                    std::move(header_parser),
                                                    stream_.is_ssl());
 
-            if (websocket::is_upgrade(get_impl(req).header()))
+            if (websocket::is_upgrade(get_impl(req).get()))
             {
                 server_impl_->get_logger()->trace("ws upgrade {}", req.target());
                 co_return std::make_shared<websocket_task>(websocket_stream(std::move(stream_)),
                                                            std::move(req),
                                                            server_impl_);
             }
-            auto resp = response::impl::create(get_impl(req).header().version(), get_impl(req).keep_alive(), self);
+            auto resp = response::impl::create(get_impl(req).get().version(), get_impl(req).get().keep_alive(), self);
 
             auto h_start = std::chrono::steady_clock::time_point {};
             auto handler_ms = std::chrono::milliseconds::zero();
@@ -310,7 +310,7 @@ namespace httplib::server
                     {
                         if (beast::iequals(req[http::field::expect], "100-continue"))
                         {
-                            auto cont_resp = response::impl::create(get_impl(req).header().version(), true, self);
+                            auto cont_resp = response::impl::create(get_impl(req).get().version(), true, self);
                             cont_resp.set_empty_content(http::status::continue_);
                             if (!co_await async_write(req, cont_resp))
                             {
@@ -508,7 +508,7 @@ namespace httplib::server
             co_return nullptr;
         }
 
-        auto resp = response::impl::create(get_impl(req_).header().version(), get_impl(req_).keep_alive(), nullptr);
+        auto resp = response::impl::create(get_impl(req_).get().version(), get_impl(req_).get().keep_alive(), nullptr);
         get_impl(resp).reason("Connection Established");
         get_impl(resp).result(http::status::ok);
         get_impl(resp).content_length(0);
