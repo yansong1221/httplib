@@ -44,6 +44,7 @@ namespace httplib::url
         }
 
         /// origin-form：path + "?" + query + ["#" + fragment]。
+        /// path 缺省时补 "/"（authority-form 规范化）。
         /// include_fragment=true 时含 fragment（仿 boost::urls::url::target()）；
         /// 置 false 得到请求目标（fragment 不进请求行，RFC 9110）。
         std::string target(bool include_fragment = true) const;
@@ -55,6 +56,12 @@ namespace httplib::url
 
     /// 解析绝对 URL。失败时返回 boost::urls 的解析错误码。
     HTTPLIB_API std::expected<url_info, boost::system::error_code> parse_url(std::string_view url);
+
+    /// 以 base_target（绝对 path[?query]）为基准，按 RFC 3986 §5.2 解析（可能相对的）location，
+    /// 返回同 authority 的请求目标 path[?query]（不含 fragment）。location 为空时返回 base_target 的
+    /// target；无法解析时回退返回 base_target。location 为绝对/scheme-relative 时其 authority 变化
+    /// 不在此函数契约内（仅取其 path）。
+    HTTPLIB_API std::string resolve(std::string_view base_target, std::string_view location);
 
     /// 拼装 Host 头 / 连接地址：host[:port]，非默认端口省略端口；IPv6 字面量自动加方括号。
     HTTPLIB_API std::string make_host_value(std::string_view host, uint16_t port, url::scheme s);

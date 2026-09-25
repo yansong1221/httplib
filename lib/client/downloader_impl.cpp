@@ -2,11 +2,11 @@
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/lazy_request.hpp"
+#include "httplib/url/url.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/sleep.hpp"
 #include "httplib/util/when_all.hpp"
 #include "redirect_util.hpp"
-#include "httplib/url/url.hpp"
 #include <algorithm>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string/trim.hpp>
@@ -99,7 +99,7 @@ namespace httplib::client
             return !iequals(ce, "identity");
         }
 
-        } // namespace
+    } // namespace
 
     std::string
     downloader::impl::cache_auth_scope(http::fields const& headers)
@@ -439,7 +439,7 @@ namespace httplib::client
             return t;
         }
         // Relative reference：host 为空，Location 保存原样，由调用方在
-        // resolve_redirect_target 中按当前 target 解析。
+        // url::resolve 中按当前 target 解析。
         url::url_info t;
         t.path = location;
         return t;
@@ -920,7 +920,7 @@ namespace httplib::client
                     {
                         // Relative reference: resolve against the current target so
                         // Location values like "final" or "../a/b" work correctly.
-                        t = redirect::resolve_redirect_target(t, rt->path);
+                        t = url::resolve(t, rt->path);
                     }
                     continue;
                 }

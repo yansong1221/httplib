@@ -83,7 +83,7 @@ namespace httplib::client
 
         net::awaitable<bool> async_is_alive() const;
 
-        net::awaitable<http_client::response_result> async_send_request_lazy_with_redirect(request& req);
+        net::awaitable<http_client::response_result> async_send_request_lazy_with_redirect(request::impl& req);
 
         std::shared_ptr<lazy_request> create_lazy_request();
 
@@ -117,10 +117,10 @@ namespace httplib::client
       private:
         friend class ::httplib::client::response::impl;
 
-        void prepare_request(request& req);
+        void prepare_request(request::impl& req);
         net::awaitable<void> co_connect(boost::system::error_code& ec);
-        net::awaitable<http_client::response_result> async_send_request_lazy(request& req);
-        net::awaitable<void> write_request(request& req, boost::system::error_code& ec);
+        net::awaitable<http_client::response_result> async_send_request_lazy(request::impl& req);
+        net::awaitable<void> write_request(request::impl& req, boost::system::error_code& ec);
 
         /// Apply the stored read/write rate limits to the current stream（`stream_`）。
         /// 可在任意线程调用：内部把 rate_policy 的修改投递到 strand 上执行，与 Beast

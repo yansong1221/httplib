@@ -112,21 +112,21 @@ namespace httplib::client
     }
 
     net::awaitable<void>
-    http_client::impl::write_request(request& req, boost::system::error_code& ec)
+    http_client::impl::write_request(request::impl& req, boost::system::error_code& ec)
     {
         co_await co_connect(ec);
         if (ec)
         {
             co_return;
         }
-        ec = co_await get_impl(req).writer().write_message();
+        ec = co_await req.writer().write_message();
     }
 
     net::awaitable<http_client::response_result>
-    http_client::impl::async_send_request_lazy(request& req)
+    http_client::impl::async_send_request_lazy(request::impl& req)
     {
         prepare_request(req);
-        auto& writer = get_impl(req).writer();
+        auto& writer = req.writer();
         writer.attach(this, strand_);
 
         boost::system::error_code ec;
@@ -172,7 +172,7 @@ namespace httplib::client
     }
 
     net::awaitable<http_client::response_result>
-    http_client::impl::async_send_request_lazy_with_redirect(request& req)
+    http_client::impl::async_send_request_lazy_with_redirect(request::impl& req)
     {
         auto max_redirects = max_redirects_.load();
 
@@ -228,7 +228,7 @@ namespace httplib::client
                         // CL-02: 跨 origin 重定向时移除 origin-bound 敏感头，避免认证凭据泄露到新主机
                         redirect::strip_origin_bound_headers(req.base());
 
-                        req.target(new_target.empty() ? "/" : new_target);
+                        req.target(new_target);
 
                         auto new_impl = std::make_shared<impl>(strand_.get_inner_executor(),
                                                                new_host,
@@ -241,13 +241,13 @@ namespace httplib::client
                     }
 
                     // 同 host/port/ssl 的完整 URL，仅取 path 作为新 target
-                    target = new_target.empty() ? "/" : new_target;
+                    target = new_target;
                 }
                 else
                 {
                     // 相对 Location：按 RFC 3986 针对当前 target 解析，兼容
                     // "final"、"../a/b"、"?q=1" 等形式。
-                    target = redirect::resolve_redirect_target(req.target(), loc);
+                    target = url::resolve(req.target(), loc);
                 }
 
                 if (s == http::status::see_other
@@ -255,10 +255,10 @@ namespace httplib::client
                         && req.method() != http::verb::head))
                 {
                     req.method(http::verb::get);
-                    get_impl(req).reset_body();
+                    req.reset_body();
                     req.erase(http::field::content_type);
                     req.erase(http::field::content_length);
-                    get_impl(req).prepare_payload();
+                    req.content_length(0);
                 }
 
                 req.target(std::move(target));
@@ -325,15 +325,15 @@ namespace httplib::client
         }
     }
     void
-    http_client::impl::prepare_request(request& req)
+    http_client::impl::prepare_request(request::impl& req)
     {
-        if (!req.has(http::field::host))
+        if (req.find(http::field::host) == req.end())
         {
-            get_impl(req).set(http::field::host, host_value_);
+            req.set(http::field::host, host_value_);
         }
         // 声明了不支持的 Content-Encoding：不会被真正压缩，头却留在线上会让对端误判，
         // 这里删掉头并告警。
-        auto content_encoding = get_impl(req)[http::field::content_encoding];
+        auto content_encoding = req[http::field::content_encoding];
         if (!content_encoding.empty()
             && !compress::compressor_factory::instance().is_supported_encoding(content_encoding))
         {
@@ -341,20 +341,17 @@ namespace httplib::client
                                std::string(content_encoding));
             req.erase(http::field::content_encoding);
         }
-        if (!get_impl(req).has_content_length())
+        req.writer().prepare_payload();
+
+        // 请求带 Content-Encoding 时，write 阶段会压缩 body，set_body() 预先写入的
+        // Content-Length 是明文长度，与压缩后的实际长度不一致。改用 chunked + stream encoder。
         {
-            get_impl(req).writer().prepare_payload();
-        }
-        else
-        {
-            // 请求带 Content-Encoding 时，write 阶段会压缩 body，set_body() 预先写入的
-            // Content-Length 是明文长度，与压缩后的实际长度不一致。改用 chunked + stream encoder。
-            auto content_encoding = get_impl(req)[http::field::content_encoding];
+            auto content_encoding = req[http::field::content_encoding];
             if (!content_encoding.empty()
                 && compress::compressor_factory::instance().is_transform_encoding(content_encoding))
             {
-                get_impl(req).writer().apply_encoding(content_encoding);
-                get_impl(req).chunked(true);
+                req.writer().apply_encoding(content_encoding);
+                req.chunked(true);
             }
         }
     }
@@ -539,7 +536,7 @@ namespace httplib::client
     net::awaitable<http_client::response_result>
     http_client::async_send_request(request& req, http_client::body_mode mode)
     {
-        auto result = co_await impl_->async_send_request_lazy_with_redirect(req);
+        auto result = co_await impl_->async_send_request_lazy_with_redirect(get_impl(req));
         if (result.has_error())
         {
             co_return result.error();
@@ -707,7 +704,7 @@ namespace httplib::client
                                 http::fields const& headers)
     {
         auto req = request(method, path, headers);
-        auto result = co_await impl_->async_send_request_lazy_with_redirect(req);
+        auto result = co_await impl_->async_send_request_lazy_with_redirect(get_impl(req));
         if (result.has_error())
         {
             co_return result.error();

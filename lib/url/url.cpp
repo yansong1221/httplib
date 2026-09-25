@@ -98,8 +98,9 @@ namespace httplib::url
     url_info::target(bool include_fragment) const
     {
         std::string s;
-        s.reserve(path.size() + query.size() + fragment.size() + 2);
-        s += path;
+        s.reserve(path.size() + query.size() + fragment.size() + 3);
+        // origin-form 必须以 '/' 开头：authority 在但 path 缺省时补 "/"（“http://h?a=1” -> "/?a=1"）。
+        s += path.empty() ? "/" : path;
         if (!query.empty())
         {
             s += '?';
@@ -157,6 +158,28 @@ namespace httplib::url
         out.query = u.has_query() ? std::string(u.encoded_query()) : std::string {};
         out.fragment = u.has_fragment() ? std::string(u.encoded_fragment()) : std::string {};
         return out;
+    }
+
+    std::string
+    resolve(std::string_view base_target, std::string_view location)
+    {
+        // boost::urls 的 reference resolution（RFC 3986 §5.2）需要带 scheme/authority 的绝对
+        // base；用占位 authority 合成，解析后只取 path?query（同 authority，fragment 不入 target）。
+        std::string base = "http://x";
+        if (base_target.empty() || base_target.front() != '/')
+        {
+            base += '/';
+        }
+        base += base_target;
+
+        boost::urls::url dest;
+        auto r = boost::urls::resolve(boost::urls::url_view(base), boost::urls::url_view(location), dest);
+        if (!r)
+        {
+            return std::string(base_target);
+        }
+        auto target = dest.encoded_target();
+        return target.empty() ? std::string("/") : std::string(target);
     }
 
     std::string
