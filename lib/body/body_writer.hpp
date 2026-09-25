@@ -83,7 +83,6 @@ namespace httplib::detail
         set_string(std::string data, std::string_view content_type)
         {
             reset();
-            msg_.content_length(data.size());
             msg_.set(http::field::content_type, content_type);
             payload_.set<std::string>(std::move(data));
             source_ = std::make_unique<body::string_source>(payload_.as<std::string>());
@@ -156,7 +155,7 @@ namespace httplib::detail
             source_ = std::make_unique<body::encoded_source>(std::move(source_), encoding);
         }
 
-        /// 未显式设置 Content-Length 时，无 source 记 CL:0，否则走 chunked。
+        /// 未显式设置 Content-Length 时：优先用 source 已知长度，其次空 source 记 CL:0，否则走 chunked。
         void
         prepare_payload()
         {
@@ -164,14 +163,24 @@ namespace httplib::detail
             {
                 return;
             }
-            if (!source_)
+
+            std::optional<std::uint64_t> length;
+            if (source_)
             {
-                msg_.content_length(0);
+                length = source_->content_length();
             }
             else
             {
-                msg_.prepare_payload();
+                length = 0;
             }
+
+            if (length)
+            {
+                msg_.chunked(false);
+                msg_.content_length(*length);
+                return;
+            }
+            msg_.prepare_payload();
         }
 
         void

@@ -37,6 +37,13 @@ namespace httplib::body
 
         virtual ~source() = default;
         virtual chunk_t next(boost::system::error_code& ec) = 0;
+
+        /// 已知整体字节数时返回（供 body_writer 自动设置 Content-Length）；流式/压缩等未知时 nullopt。
+        virtual std::optional<std::uint64_t>
+        content_length() const
+        {
+            return std::nullopt;
+        }
     };
 
     using source_ptr = std::unique_ptr<source>;
@@ -57,6 +64,12 @@ namespace httplib::body
             }
             done_ = true;
             return std::make_pair(net::buffer(*data_), false);
+        }
+
+        std::optional<std::uint64_t>
+        content_length() const override
+        {
+            return data_->size();
         }
 
       private:
@@ -113,6 +126,12 @@ namespace httplib::body
             return std::make_pair(net::buffer(buffer_), false);
         }
 
+        std::optional<std::uint64_t>
+        content_length() const override
+        {
+            return buffer_.size();
+        }
+
       private:
         std::string buffer_;
         bool done_ = false;
@@ -127,6 +146,12 @@ namespace httplib::body
         {
             ec = {};
             return std::nullopt;
+        }
+
+        std::optional<std::uint64_t>
+        content_length() const override
+        {
+            return 0;
         }
     };
 
@@ -168,6 +193,26 @@ namespace httplib::body
         ok() const
         {
             return !open_ec_;
+        }
+
+        std::optional<std::uint64_t>
+        content_length() const override
+        {
+            if (open_ec_)
+            {
+                return std::nullopt;
+            }
+            if (ranges_.empty())
+            {
+                return static_cast<std::uint64_t>(file_size_);
+            }
+            if (ranges_.size() == 1)
+            {
+                auto const& range = ranges_.front();
+                return static_cast<std::uint64_t>(range.second - range.first + 1);
+            }
+            // multipart/byteranges：帧开销未计入，交由 chunked。
+            return std::nullopt;
         }
 
         chunk_t next(boost::system::error_code& ec) override;
