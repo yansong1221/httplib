@@ -134,7 +134,7 @@ namespace httplib::body
         }
     } // namespace
 
-    multipart_parser::multipart_parser(std::string content_type, html::form_data::param params)
+    multipart_parser::multipart_parser(std::string content_type, httplib::form_data::param params)
         : content_type_(std::move(content_type))
     {
         body_.params = std::move(params);
@@ -257,7 +257,7 @@ namespace httplib::body
                         break;
                     }
 
-                    html::form_data::field field_data;
+                    httplib::form_data::field field_data;
                     for (auto const& item : results)
                     {
                         if (item.first == "Content-Disposition"sv)

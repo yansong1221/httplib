@@ -1,4 +1,4 @@
-﻿#include "httplib/client/request.hpp"
+#include "httplib/client/request.hpp"
 #include "compress/compressor.hpp"
 #include "request_impl.h"
 #include <boost/algorithm/string/join.hpp>
@@ -13,7 +13,7 @@ namespace httplib::client
     {
 
         static std::string
-        make_target(std::string_view path, html::query_params const& params)
+        make_target(std::string_view path, httplib::query_params const& params)
         {
             std::string target(path);
             if (!params.empty())
@@ -53,7 +53,7 @@ namespace httplib::client
 
     request::request(http::verb method,
                      std::string_view path,
-                     html::query_params const& params,
+                     httplib::query_params const& params,
                      http::fields const& headers /*= http::fields()*/)
         : request(method, detail::make_target(path, params), headers)
     {
@@ -169,25 +169,25 @@ namespace httplib::client
     std::string const&
     request::as_string() const
     {
-        return impl_->payload().as_string();
+        return impl_->payload().as<std::string>();
     }
 
     boost::json::value const&
     request::as_json() const
     {
-        return impl_->payload().as_json();
+        return impl_->payload().as<boost::json::value>();
     }
 
-    html::form_data const&
+    httplib::form_data const&
     request::as_form_data() const
     {
-        return impl_->payload().as_form_data();
+        return impl_->payload().as<httplib::form_data>();
     }
 
-    html::query_params const&
+    httplib::query_params const&
     request::as_query_params() const
     {
-        return impl_->payload().as_query_params();
+        return impl_->payload().as<httplib::query_params>();
     }
 
     body_type
@@ -234,14 +234,14 @@ namespace httplib::client
     }
 
     void
-    request::set_body(html::form_data&& data)
+    request::set_body(httplib::form_data&& data)
     {
         impl_->writer().set_form_data(std::move(data));
         impl_->prepare_payload();
     }
 
     void
-    request::set_body(html::query_params&& data)
+    request::set_body(httplib::query_params&& data)
     {
         impl_->writer().set_query_params(std::move(data));
         impl_->prepare_payload();

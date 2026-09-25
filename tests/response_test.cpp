@@ -179,7 +179,7 @@ TEST_CASE("Response: set_form_data_content", "[response]")
                 "/form-resp",
                 [](httplib::server::request&, httplib::server::response& resp)
                 {
-                    std::vector<httplib::html::form_data::field> fields;
+                    std::vector<httplib::form_data::field> fields;
                     fields.push_back({ "name", "", "text/plain", "test-value" });
                     resp.set_form_data_content(std::move(fields));
                 });
@@ -209,7 +209,7 @@ TEST_CASE("Response: set_form_data_content with file_path", "[response]")
                 "/form-file",
                 [&](httplib::server::request&, httplib::server::response& resp)
                 {
-                    std::vector<httplib::html::form_data::field> fields;
+                    std::vector<httplib::form_data::field> fields;
                     auto& fld = fields.emplace_back();
                     fld.name = "file";
                     fld.filename = "test.bin";

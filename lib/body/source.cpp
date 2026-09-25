@@ -83,7 +83,7 @@ namespace httplib::body
 
     // ---- form_data_source ----
 
-    form_data_source::form_data_source(html::form_data const& body) : body_(&body) {}
+    form_data_source::form_data_source(httplib::form_data const& body) : body_(&body) {}
 
     source::chunk_t
     form_data_source::next(boost::system::error_code& ec)
@@ -237,8 +237,9 @@ namespace httplib::body
                 pos_ = static_cast<std::uint64_t>(range.first);
                 file_.seekg(range.first);
             }
-            std::size_t const n =
-                (std::min)(sizeof(buf_), static_cast<std::size_t>(beast::detail::clamp(range.second - static_cast<std::int64_t>(*pos_))));
+            std::size_t const n = (std::min)(
+                sizeof(buf_),
+                static_cast<std::size_t>(beast::detail::clamp(range.second - static_cast<std::int64_t>(*pos_))));
             if (n == 0)
             {
                 ec = {};

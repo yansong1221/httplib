@@ -572,49 +572,49 @@ namespace httplib::client
     // =============================================================================
 
     net::awaitable<http_client::response_result>
-    http_client::async_get(std::string_view path, html::query_params const& params, http::fields const& headers)
+    http_client::async_get(std::string_view path, httplib::query_params const& params, http::fields const& headers)
     {
         request req(http::verb::get, path, params, headers);
         co_return co_await async_send_request(req);
     }
 
     net::awaitable<http_client::response_result>
-    http_client::async_head(std::string_view path, html::query_params const& params, http::fields const& headers)
+    http_client::async_head(std::string_view path, httplib::query_params const& params, http::fields const& headers)
     {
         request req(http::verb::head, path, params, headers);
         co_return co_await async_send_request(req);
     }
 
     net::awaitable<http_client::response_result>
-    http_client::async_post(std::string_view path, html::query_params const& params, http::fields const& headers)
+    http_client::async_post(std::string_view path, httplib::query_params const& params, http::fields const& headers)
     {
         request req(http::verb::post, path, params, headers);
         co_return co_await async_send_request(req);
     }
 
     net::awaitable<http_client::response_result>
-    http_client::async_put(std::string_view path, html::query_params const& params, http::fields const& headers)
+    http_client::async_put(std::string_view path, httplib::query_params const& params, http::fields const& headers)
     {
         request req(http::verb::put, path, params, headers);
         co_return co_await async_send_request(req);
     }
 
     net::awaitable<http_client::response_result>
-    http_client::async_patch(std::string_view path, html::query_params const& params, http::fields const& headers)
+    http_client::async_patch(std::string_view path, httplib::query_params const& params, http::fields const& headers)
     {
         request req(http::verb::patch, path, params, headers);
         co_return co_await async_send_request(req);
     }
 
     net::awaitable<http_client::response_result>
-    http_client::async_del(std::string_view path, html::query_params const& params, http::fields const& headers)
+    http_client::async_del(std::string_view path, httplib::query_params const& params, http::fields const& headers)
     {
         request req(http::verb::delete_, path, params, headers);
         co_return co_await async_send_request(req);
     }
 
     net::awaitable<http_client::response_result>
-    http_client::async_options(std::string_view path, html::query_params const& params, http::fields const& headers)
+    http_client::async_options(std::string_view path, httplib::query_params const& params, http::fields const& headers)
     {
         request req(http::verb::options, path, params, headers);
         co_return co_await async_send_request(req);
@@ -628,7 +628,7 @@ namespace httplib::client
     http_client::async_post(std::string_view path,
                             std::string_view body,
                             std::string_view content_type,
-                            html::query_params const& params,
+                            httplib::query_params const& params,
                             http::fields const& headers)
     {
         auto req = request(http::verb::post, path, params, headers);
@@ -639,7 +639,7 @@ namespace httplib::client
     net::awaitable<http_client::response_result>
     http_client::async_post(std::string_view path,
                             boost::json::value&& body,
-                            html::query_params const& params,
+                            httplib::query_params const& params,
                             http::fields const& headers)
     {
         auto req = request(http::verb::post, path, params, headers);
@@ -651,7 +651,7 @@ namespace httplib::client
     http_client::async_put(std::string_view path,
                            std::string_view body,
                            std::string_view content_type,
-                           html::query_params const& params,
+                           httplib::query_params const& params,
                            http::fields const& headers)
     {
         auto req = request(http::verb::put, path, params, headers);
@@ -662,7 +662,7 @@ namespace httplib::client
     net::awaitable<http_client::response_result>
     http_client::async_put(std::string_view path,
                            boost::json::value&& body,
-                           html::query_params const& params,
+                           httplib::query_params const& params,
                            http::fields const& headers)
     {
         auto req = request(http::verb::put, path, params, headers);
@@ -674,7 +674,7 @@ namespace httplib::client
     http_client::async_patch(std::string_view path,
                              std::string_view body,
                              std::string_view content_type,
-                             html::query_params const& params,
+                             httplib::query_params const& params,
                              http::fields const& headers)
     {
         auto req = request(http::verb::patch, path, params, headers);
@@ -685,7 +685,7 @@ namespace httplib::client
     net::awaitable<http_client::response_result>
     http_client::async_patch(std::string_view path,
                              boost::json::value&& body,
-                             html::query_params const& params,
+                             httplib::query_params const& params,
                              http::fields const& headers)
     {
         auto req = request(http::verb::patch, path, params, headers);

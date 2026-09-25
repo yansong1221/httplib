@@ -83,7 +83,7 @@ namespace httplib::detail
 
         /// 预设自动分发时 form_data sink 的解析参数（服务端由 router 配置注入）。
         void
-        set_form_data_params(html::form_data::param params)
+        set_form_data_params(httplib::form_data::param params)
         {
             form_params_ = std::move(params);
         }
@@ -167,7 +167,7 @@ namespace httplib::detail
             {
                 co_return ec;
             }
-            co_return state_.take_string();
+            co_return state_.take<std::string>();
         }
 
         net::awaitable<boost::system::result<boost::json::value>>
@@ -178,10 +178,10 @@ namespace httplib::detail
             {
                 co_return ec;
             }
-            co_return state_.take_json();
+            co_return state_.take<boost::json::value>();
         }
 
-        net::awaitable<boost::system::result<html::query_params>>
+        net::awaitable<boost::system::result<httplib::query_params>>
         read_query_params()
         {
             auto ec = co_await read_body(std::make_unique<body::query_params_sink>());
@@ -189,11 +189,11 @@ namespace httplib::detail
             {
                 co_return ec;
             }
-            co_return state_.take_query_params();
+            co_return state_.take<httplib::query_params>();
         }
 
-        net::awaitable<boost::system::result<html::form_data>>
-        read_form_data(html::form_data::param params = {})
+        net::awaitable<boost::system::result<httplib::form_data>>
+        read_form_data(httplib::form_data::param params = {})
         {
             std::string content_type = raw_parser_.get()[http::field::content_type];
             auto ec = co_await read_body(
@@ -202,7 +202,7 @@ namespace httplib::detail
             {
                 co_return ec;
             }
-            co_return state_.take_form_data();
+            co_return state_.take<httplib::form_data>();
         }
 
         net::awaitable<boost::system::error_code>
@@ -261,7 +261,7 @@ namespace httplib::detail
             // 无 sink（自动分发）：无 body 时记为 empty（与旧 any_body 行为一致）。
             if (!sink && raw_parser_.is_done())
             {
-                state_.set_empty();
+                state_.set<body::empty_tag>();
                 if (on_stored_)
                 {
                     on_stored_();
@@ -451,7 +451,7 @@ namespace httplib::detail
         std::unique_ptr<body::stream_decoder> stream_decoder_;
         std::uint64_t body_limit_ = 0;
         std::function<void()> on_stored_;
-        html::form_data::param form_params_;
+        httplib::form_data::param form_params_;
         state_t state_;
     };
 } // namespace httplib::detail

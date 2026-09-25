@@ -1,4 +1,4 @@
-﻿#include "server_impl.h"
+#include "server_impl.h"
 #include "client/client_impl.h"
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
@@ -566,7 +566,7 @@ namespace httplib::server
     }
 
     void
-    http_server::set_form_data_config(html::form_data::param const& params)
+    http_server::set_form_data_config(httplib::form_data::param const& params)
     {
         impl_->set_form_data_params(params);
     }

@@ -2,13 +2,13 @@
 #include "body/codec.hpp"
 #include "html/http_ranges.hpp"
 #include "httplib/config.hpp"
-#include "httplib/html/form_data.hpp"
-#include "httplib/html/query_params.hpp"
+#include "httplib/form_data.hpp"
+#include "httplib/query_params.hpp"
+#include <array>
 #include <boost/asio/buffer.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <boost/json/serializer.hpp>
 #include <boost/json/value.hpp>
-#include <array>
 #include <cstdint>
 #include <fstream>
 #include <memory>
@@ -68,10 +68,7 @@ namespace httplib::body
     class json_source : public source
     {
       public:
-        explicit json_source(boost::json::value const& value) : value_(&value)
-        {
-            serializer_.reset(value_);
-        }
+        explicit json_source(boost::json::value const& value) : value_(&value) { serializer_.reset(value_); }
 
         chunk_t
         next(boost::system::error_code& ec) override
@@ -102,7 +99,7 @@ namespace httplib::body
     class query_params_source : public source
     {
       public:
-        explicit query_params_source(html::query_params const& value) : buffer_(value.encoded()) {}
+        explicit query_params_source(httplib::query_params const& value) : buffer_(value.encoded()) {}
 
         chunk_t
         next(boost::system::error_code& ec) override
@@ -137,12 +134,12 @@ namespace httplib::body
     class form_data_source : public source
     {
       public:
-        explicit form_data_source(html::form_data const& body);
+        explicit form_data_source(httplib::form_data const& body);
 
         chunk_t next(boost::system::error_code& ec) override;
 
       private:
-        html::form_data const* body_;
+        httplib::form_data const* body_;
         std::size_t field_index_ = 0;
         beast::flat_buffer buffer_;
 

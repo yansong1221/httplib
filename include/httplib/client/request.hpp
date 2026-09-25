@@ -1,8 +1,8 @@
 #pragma once
 #include "httplib/body_type.hpp"
 #include "httplib/config.hpp"
-#include "httplib/html/form_data.hpp"
-#include "httplib/html/query_params.hpp"
+#include "httplib/form_data.hpp"
+#include "httplib/query_params.hpp"
 #include <boost/beast/http/fields.hpp>
 #include <boost/json/value.hpp>
 #include <cstdint>
@@ -20,7 +20,7 @@ namespace httplib::client
         request(http::verb method, std::string_view target, http::fields const& headers = http::fields());
         request(http::verb method,
                 std::string_view path,
-                html::query_params const& params,
+                httplib::query_params const& params,
                 http::fields const& headers = http::fields());
 
         request(request&&) noexcept;
@@ -53,8 +53,8 @@ namespace httplib::client
 
         std::string const& as_string() const;
         boost::json::value const& as_json() const;
-        html::form_data const& as_form_data() const;
-        html::query_params const& as_query_params() const;
+        httplib::form_data const& as_form_data() const;
+        httplib::query_params const& as_query_params() const;
 
         body_type type() const;
 
@@ -67,8 +67,8 @@ namespace httplib::client
         void set_body(std::string_view data, std::string_view content_type);
         void set_body(std::string&& data, std::string_view content_type);
         void set_body(boost::json::value&& data);
-        void set_body(html::form_data&& data);
-        void set_body(html::query_params&& data);
+        void set_body(httplib::form_data&& data);
+        void set_body(httplib::query_params&& data);
         void set_file_body(fs::path const& path);
 
         class impl;

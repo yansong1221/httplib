@@ -1,7 +1,7 @@
 
-#include "httplib/html/form_data.hpp"
+#include "httplib/form_data.hpp"
 #include <sstream>
-namespace httplib::html
+namespace httplib
 {
 
     std::optional<form_data::field>
@@ -86,4 +86,4 @@ namespace httplib::html
         return ss.str();
     }
 
-} // namespace httplib::html
+} // namespace httplib

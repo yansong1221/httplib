@@ -1,10 +1,10 @@
-#include "body/codec.hpp"
 #include "body/body_state.hpp"
+#include "body/codec.hpp"
 #include "body/sink.hpp"
 #include "body/source.hpp"
+#include <algorithm>
 #include <boost/asio/buffer.hpp>
 #include <catch2/catch_test_macros.hpp>
-#include <algorithm>
 #include <cstddef>
 #include <fstream>
 #include <optional>
@@ -67,17 +67,17 @@ TEST_CASE("payload: set and get", "[body_pipeline]")
     body::body_state p;
     REQUIRE_FALSE(p.has());
 
-    p.set_string("hello");
+    p.set<std::string>("hello");
     REQUIRE(p.has());
     REQUIRE(p.type() == body::body_state::kind::string);
-    REQUIRE(p.as_string() == "hello");
-    REQUIRE(p.take_string() == "hello");
+    REQUIRE(p.as<std::string>() == "hello");
+    REQUIRE(p.take<std::string>() == "hello");
 
-    p.set_empty();
+    p.set<body::empty_tag>();
     REQUIRE(p.is_empty());
 
-    p.set_json(json::value { 42 });
-    REQUIRE(p.as_json().as_int64() == 42);
+    p.set<boost::json::value>(json::value { 42 });
+    REQUIRE(p.as<boost::json::value>().as_int64() == 42);
 }
 
 TEST_CASE("source: string_source once", "[body_pipeline]")
@@ -98,7 +98,7 @@ TEST_CASE("source: json_source serializes incrementally", "[body_pipeline]")
 
 TEST_CASE("source: query_params_source encodes", "[body_pipeline]")
 {
-    httplib::html::query_params params;
+    httplib::query_params params;
     params.add("a", "1");
     params.add("b", "2");
     body::query_params_source src(params);
@@ -115,56 +115,55 @@ TEST_CASE("sink: string_sink accumulates chunked", "[body_pipeline]")
 {
     body::string_sink s;
     auto p = push(s, "abcdefghij", 3);
-    REQUIRE(p.as_string() == "abcdefghij");
+    REQUIRE(p.as<std::string>() == "abcdefghij");
 }
 
 TEST_CASE("sink: json_sink parses chunked", "[body_pipeline]")
 {
     body::json_sink s;
     auto p = push(s, R"({"a":1,"b":[2,3]})", 4);
-    REQUIRE(p.as_json().at("a").as_int64() == 1);
-    REQUIRE(p.as_json().at("b").as_array().size() == 2);
+    REQUIRE(p.as<boost::json::value>().at("a").as_int64() == 1);
+    REQUIRE(p.as<boost::json::value>().at("b").as_array().size() == 2);
 }
 
 TEST_CASE("sink: query_params_sink decodes", "[body_pipeline]")
 {
     body::query_params_sink s;
     auto p = push(s, "a=1&b=2", 2);
-    REQUIRE(p.as_query_params().at<std::string>("a") == "1");
-    REQUIRE(p.as_query_params().at<std::string>("b") == "2");
+    REQUIRE(p.as<httplib::query_params>().at<std::string>("a") == "1");
+    REQUIRE(p.as<httplib::query_params>().at<std::string>("b") == "2");
 }
 
 TEST_CASE("form_data_source builds, form_data_sink parses", "[body_pipeline]")
 {
     std::string boundary = "----testboundary";
-    std::vector<httplib::html::form_data::field> fields;
+    std::vector<httplib::form_data::field> fields;
     {
-        httplib::html::form_data::field f;
+        httplib::form_data::field f;
         f.name = "a";
         f.content = "1";
         fields.push_back(f);
     }
     {
-        httplib::html::form_data::field f;
+        httplib::form_data::field f;
         f.name = "b";
         f.content = "2";
         fields.push_back(f);
     }
 
-    httplib::html::form_data form;
+    httplib::form_data form;
     form.boundary = boundary;
     form.fields = std::move(fields);
     body::form_data_source src(form);
     auto wire = pull(src);
 
-    std::string expected = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--"
-                           + boundary + "\r\nContent-Disposition: form-data; name=\"b\"\r\n\r\n2\r\n--" + boundary
-                           + "--\r\n";
+    std::string expected = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--" + boundary
+                           + "\r\nContent-Disposition: form-data; name=\"b\"\r\n\r\n2\r\n--" + boundary + "--\r\n";
     REQUIRE(wire == expected);
 
     body::form_data_sink sink("multipart/form-data; boundary=" + boundary);
     auto p = push(sink, wire, 7);
-    auto const& fd = p.as_form_data();
+    auto const& fd = p.as<httplib::form_data>();
     REQUIRE(fd.fields.size() == 2);
     REQUIRE(fd.fields[0].name == "a");
     REQUIRE(fd.fields[0].content == "1");
@@ -286,7 +285,7 @@ TEST_CASE("codec: encoded_source chains compression", "[body_pipeline]")
     REQUIRE_FALSE(ec);
     body::body_state p;
     sink.commit(p);
-    REQUIRE(p.as_string() == original);
+    REQUIRE(p.as<std::string>() == original);
 }
 
 TEST_CASE("codec: identity passthrough", "[body_pipeline]")

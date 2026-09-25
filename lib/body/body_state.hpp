@@ -1,8 +1,8 @@
 #pragma once
 #include "httplib/body_type.hpp"
 #include "httplib/config.hpp"
-#include "httplib/html/form_data.hpp"
-#include "httplib/html/query_params.hpp"
+#include "httplib/form_data.hpp"
+#include "httplib/query_params.hpp"
 #include <boost/json/value.hpp>
 #include <string>
 #include <type_traits>
@@ -30,19 +30,18 @@ namespace httplib::body
 
         与传输层（`http::buffer_body`）解耦：同一时刻只承载一种已解析的业务类型，
         用共用体 `std::variant` 存储（取代旧 `any_body::value_type`），由 sink 写入，
-        公共 API 以 `as_*` / `take_*` 取回。
+        内部以模板存取：`as<T>()` / `take<T>()` 取回、`set<T>()` 写入。
     */
-    using body_variant = std::variant<
-        none_tag, // 尚未读取
-        empty_tag, // 显式空
-        std::string, // string
-        boost::json::value, // json
-        html::query_params, // query_params
-        html::form_data, // form_data
-        file_tag>; // file 标记
+    using body_variant = std::variant<none_tag,              // 尚未读取
+                                      empty_tag,             // 显式空
+                                      std::string,           // string
+                                      boost::json::value,    // json
+                                      httplib::query_params, // query_params
+                                      httplib::form_data,    // form_data
+                                      file_tag>;             // file 标记
 
     /** 方向无关的读取结果（server request / client request / client response 共用）。
-    */
+     */
     class body_state
     {
       public:
@@ -78,11 +77,11 @@ namespace httplib::body
                     {
                         return kind::json;
                     }
-                    else if constexpr (std::is_same_v<T, html::query_params>)
+                    else if constexpr (std::is_same_v<T, httplib::query_params>)
                     {
                         return kind::query_params;
                     }
-                    else if constexpr (std::is_same_v<T, html::form_data>)
+                    else if constexpr (std::is_same_v<T, httplib::form_data>)
                     {
                         return kind::form_data;
                     }
@@ -100,64 +99,20 @@ namespace httplib::body
             return type() == kind::empty;
         }
 
-        std::string const&
-        as_string() const
+        /// 按类型取回当前分支的 const 引用（类型需为 variant 的某个存储类型）。
+        template <class T>
+        T const&
+        as() const
         {
-            return std::get<std::string>(state_);
+            return std::get<T>(state_);
         }
 
-        boost::json::value const&
-        as_json() const
-        {
-            return std::get<boost::json::value>(state_);
-        }
-
-        html::query_params const&
-        as_query_params() const
-        {
-            return std::get<html::query_params>(state_);
-        }
-
-        html::form_data const&
-        as_form_data() const
-        {
-            return std::get<html::form_data>(state_);
-        }
-
+        /// 按类型写入并覆盖当前分支；tag 类型不带参数（如 `set<empty_tag>()`）。
+        template <class T>
         void
-        set_empty()
+        set(T value = {})
         {
-            state_ = empty_tag {};
-        }
-
-        void
-        set_file()
-        {
-            state_ = file_tag {};
-        }
-
-        void
-        set_string(std::string v)
-        {
-            state_ = std::move(v);
-        }
-
-        void
-        set_json(boost::json::value v)
-        {
-            state_ = std::move(v);
-        }
-
-        void
-        set_query_params(html::query_params v)
-        {
-            state_ = std::move(v);
-        }
-
-        void
-        set_form_data(html::form_data v)
-        {
-            state_ = std::move(v);
+            state_ = std::move(value);
         }
 
         void
@@ -166,28 +121,12 @@ namespace httplib::body
             state_ = none_tag {};
         }
 
-        std::string
-        take_string()
+        /// 按类型取走当前分支并移交所有权（variant 仍保留该分支，值为 moved-from）。
+        template <class T>
+        T
+        take()
         {
-            return std::get<std::string>(std::move(state_));
-        }
-
-        boost::json::value
-        take_json()
-        {
-            return std::get<boost::json::value>(std::move(state_));
-        }
-
-        html::query_params
-        take_query_params()
-        {
-            return std::get<html::query_params>(std::move(state_));
-        }
-
-        html::form_data
-        take_form_data()
-        {
-            return std::get<html::form_data>(std::move(state_));
+            return std::get<T>(std::move(state_));
         }
 
       private:

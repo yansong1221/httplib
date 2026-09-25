@@ -1,6 +1,6 @@
 #pragma once
 #include "httplib/config.hpp"
-#include "httplib/html/form_data.hpp"
+#include "httplib/form_data.hpp"
 #include "httplib/server/proxy_interceptor.hpp"
 #include "httplib/server/proxy_strategy.hpp"
 #include "httplib/server/server_fwd.hpp"
@@ -252,7 +252,7 @@ namespace httplib::server
          * @par 线程安全
          * 可随时从任意线程调用；对后续请求立即生效。
          */
-        void set_form_data_config(html::form_data::param const& params);
+        void set_form_data_config(httplib::form_data::param const& params);
 
         /**
          * @brief 设置允许的最大 header 大小。

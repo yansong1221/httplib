@@ -2,8 +2,8 @@
 #include "httplib/body_type.hpp"
 #include "httplib/client/stream_reader.hpp"
 #include "httplib/config.hpp"
-#include "httplib/html/form_data.hpp"
-#include "httplib/html/query_params.hpp"
+#include "httplib/form_data.hpp"
+#include "httplib/query_params.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <boost/beast/http/fields.hpp>
 #include <boost/json/value.hpp>
@@ -42,8 +42,8 @@ namespace httplib::client
         // 按内容类型取响应体（引用，不拷贝）；body 非该类型或尚未读取时抛 std::bad_variant_access
         std::string const& as_string() const;
         boost::json::value const& as_json() const;
-        html::form_data const& as_form_data() const;
-        html::query_params const& as_query_params() const;
+        httplib::form_data const& as_form_data() const;
+        httplib::query_params const& as_query_params() const;
 
         /// 已物化 body 的类型（未读取时为 body_type::none）。
         body_type type() const;
@@ -51,8 +51,8 @@ namespace httplib::client
         // ---- 未读完 body（lazy）：异步读取 ----
         net::awaitable<boost::system::result<std::string>> read_string();
         net::awaitable<boost::system::result<boost::json::value>> read_json();
-        net::awaitable<boost::system::result<html::form_data>> read_form_data();
-        net::awaitable<boost::system::result<html::query_params>> read_query_params();
+        net::awaitable<boost::system::result<httplib::form_data>> read_form_data();
+        net::awaitable<boost::system::result<httplib::query_params>> read_query_params();
 
         // 读取剩余 body 并物化到本响应（eager）
         net::awaitable<boost::system::error_code> read_body();

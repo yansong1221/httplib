@@ -1,5 +1,5 @@
-﻿#pragma once
-#include "httplib/html/form_data.hpp"
+#pragma once
+#include "httplib/form_data.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/server/server.hpp"
 #include "httplib/util/async_event.hpp"
@@ -55,11 +55,11 @@ namespace httplib::server
         bool should_compress_content_type(std::string_view content_type) const;
 
         void
-        set_form_data_params(html::form_data::param const& params)
+        set_form_data_params(httplib::form_data::param const& params)
         {
-            form_data_params_.store(std::make_shared<html::form_data::param>(params));
+            form_data_params_.store(std::make_shared<httplib::form_data::param>(params));
         }
-        html::form_data::param
+        httplib::form_data::param
         form_data_params() const
         {
             return *form_data_params_.load();
@@ -140,8 +140,8 @@ namespace httplib::server
 
         std::atomic<std::shared_ptr<http_server::compress_predicate>> compress_predicate_;
 
-        std::atomic<std::shared_ptr<html::form_data::param>> form_data_params_ {
-            std::make_shared<html::form_data::param>(html::form_data::param { .max_file_size = 10 * 1024 * 1024 })
+        std::atomic<std::shared_ptr<httplib::form_data::param>> form_data_params_ {
+            std::make_shared<httplib::form_data::param>(httplib::form_data::param { .max_file_size = 10 * 1024 * 1024 })
         };
 
         std::atomic<std::uint32_t> header_limit_ = 65536;

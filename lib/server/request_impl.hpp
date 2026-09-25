@@ -35,10 +35,7 @@ namespace httplib::server
             , remote_endpoint_(remote_endpoint)
             , is_ssl_(is_ssl)
             , reader_(std::move(task))
-            , body_reader_(reader_->executor(),
-                           reader_.get(),
-                           std::move(*header_parser),
-                           reader_->body_limit())
+            , body_reader_(reader_->executor(), reader_.get(), std::move(*header_parser), reader_->body_limit())
         {
             if (auto pos = header_.target().find("?"); pos == std::string_view::npos)
             {
@@ -70,7 +67,7 @@ namespace httplib::server
             }
             return decoded_path_;
         }
-        html::query_params const&
+        httplib::query_params const&
         query_params() const
         {
             return query_params_;
@@ -192,7 +189,7 @@ namespace httplib::server
         bool keep_alive_;
 
         std::string decoded_path_;
-        html::query_params query_params_;
+        httplib::query_params query_params_;
 
         tcp::endpoint local_endpoint_;
         tcp::endpoint remote_endpoint_;

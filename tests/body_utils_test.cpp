@@ -1,5 +1,5 @@
-#include "httplib/html/form_data.hpp"
-#include "httplib/html/query_params.hpp"
+#include "httplib/form_data.hpp"
+#include "httplib/query_params.hpp"
 #include "httplib/url/url.hpp"
 #include "httplib/util/misc.hpp"
 #include <catch2/catch_test_macros.hpp>
@@ -10,7 +10,7 @@ using namespace std::string_view_literals;
 
 TEST_CASE("query_params: decode URL-encoded string", "[body-utils]")
 {
-    httplib::html::query_params qp;
+    httplib::query_params qp;
     REQUIRE(qp.decode("name=John+Doe&age=30&active=true"));
 
     REQUIRE(qp.at("name") == "John+Doe");
@@ -20,7 +20,7 @@ TEST_CASE("query_params: decode URL-encoded string", "[body-utils]")
 
 TEST_CASE("query_params: at_number returns integer", "[body-utils]")
 {
-    httplib::html::query_params qp;
+    httplib::query_params qp;
     REQUIRE(qp.decode("count=42&neg=-17"));
 
     REQUIRE(qp.at<int64_t>("count") == 42);
@@ -29,7 +29,7 @@ TEST_CASE("query_params: at_number returns integer", "[body-utils]")
 
 TEST_CASE("query_params: at_bool returns boolean", "[body-utils]")
 {
-    httplib::html::query_params qp;
+    httplib::query_params qp;
     REQUIRE(qp.decode("flag=true&off=false&yes=1&no=0"));
 
     REQUIRE(qp.at<bool>("flag"));
@@ -40,7 +40,7 @@ TEST_CASE("query_params: at_bool returns boolean", "[body-utils]")
 
 TEST_CASE("query_params: all returns multiple values", "[body-utils]")
 {
-    httplib::html::query_params qp;
+    httplib::query_params qp;
     REQUIRE(qp.decode("tag=cpp&tag=rust&tag=python"));
 
     auto tags = qp.all("tag");
@@ -52,7 +52,7 @@ TEST_CASE("query_params: all returns multiple values", "[body-utils]")
 
 TEST_CASE("query_params: exists check", "[body-utils]")
 {
-    httplib::html::query_params qp;
+    httplib::query_params qp;
     REQUIRE(qp.decode("key=val"));
 
     REQUIRE(qp.has("key"));
@@ -61,7 +61,7 @@ TEST_CASE("query_params: exists check", "[body-utils]")
 
 TEST_CASE("query_params: empty check", "[body-utils]")
 {
-    httplib::html::query_params qp;
+    httplib::query_params qp;
     REQUIRE(qp.empty());
 
     qp.decode("a=1");
@@ -70,7 +70,7 @@ TEST_CASE("query_params: empty check", "[body-utils]")
 
 TEST_CASE("query_params: add and encode round-trip", "[body-utils]")
 {
-    httplib::html::query_params qp;
+    httplib::query_params qp;
     qp.add("hello", "world");
     qp.add("foo", "bar");
 
@@ -78,7 +78,7 @@ TEST_CASE("query_params: add and encode round-trip", "[body-utils]")
     REQUIRE(encoded.find("hello=world") != std::string::npos);
     REQUIRE(encoded.find("foo=bar") != std::string::npos);
 
-    httplib::html::query_params qp2;
+    httplib::query_params qp2;
     REQUIRE(qp2.decode(encoded));
     REQUIRE(qp2.at("hello") == "world");
     REQUIRE(qp2.at("foo") == "bar");
@@ -86,7 +86,7 @@ TEST_CASE("query_params: add and encode round-trip", "[body-utils]")
 
 TEST_CASE("query_params: at_number throws on invalid input", "[body-utils]")
 {
-    httplib::html::query_params qp;
+    httplib::query_params qp;
     REQUIRE(qp.decode("val=not-a-number"));
 
     REQUIRE_THROWS(qp.at<int64_t>("val"));
@@ -94,7 +94,7 @@ TEST_CASE("query_params: at_number throws on invalid input", "[body-utils]")
 
 TEST_CASE("form_data: field has_data and is_file", "[body-utils]")
 {
-    httplib::html::form_data::field f;
+    httplib::form_data::field f;
     f.name = "username";
     f.content = "john";
     f.filename = "";
@@ -102,7 +102,7 @@ TEST_CASE("form_data: field has_data and is_file", "[body-utils]")
     REQUIRE(f.has_data());
     REQUIRE_FALSE(f.is_file());
 
-    httplib::html::form_data::field f2;
+    httplib::form_data::field f2;
     f2.name = "avatar";
     f2.filename = "photo.png";
     f2.content = "binary-data";
@@ -114,7 +114,7 @@ TEST_CASE("form_data: field has_data and is_file", "[body-utils]")
 
 TEST_CASE("form_data: field_by_name lookup", "[body-utils]")
 {
-    httplib::html::form_data fd;
+    httplib::form_data fd;
     fd.fields.push_back({ "name", "", "text/plain", "Alice" });
     fd.fields.push_back({ "email", "", "text/plain", "alice@example.com" });
 
@@ -132,7 +132,7 @@ TEST_CASE("form_data: field_by_name lookup", "[body-utils]")
 
 TEST_CASE("form_data: has_data and has_content", "[body-utils]")
 {
-    httplib::html::form_data fd;
+    httplib::form_data fd;
     fd.fields.push_back({ "key1", "", "", "value1" });
     fd.fields.push_back({ "key2", "f.txt", "", "file content" });
 
@@ -146,7 +146,7 @@ TEST_CASE("form_data: has_data and has_content", "[body-utils]")
 
 TEST_CASE("form_data: content retrieval", "[body-utils]")
 {
-    httplib::html::form_data fd;
+    httplib::form_data fd;
     fd.fields.push_back({ "greeting", "", "", "hello world" });
 
     auto c = fd.content("greeting");
@@ -159,7 +159,7 @@ TEST_CASE("form_data: content retrieval", "[body-utils]")
 
 TEST_CASE("form_data: dump", "[body-utils]")
 {
-    httplib::html::form_data fd;
+    httplib::form_data fd;
     fd.fields.push_back({ "key1", "", "", "val1" });
     fd.fields.push_back({ "key2", "file.txt", "text/plain", "content" });
 

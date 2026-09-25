@@ -1,5 +1,5 @@
 #pragma once
-#include "httplib/html/form_data.hpp"
+#include "httplib/form_data.hpp"
 #include "httplib/server/server_fwd.hpp"
 #include <boost/beast/http/fields.hpp>
 #include <boost/beast/http/message.hpp>
@@ -58,7 +58,7 @@ namespace httplib::server
         void set_json_content(boost::json::value const& data, http::status status = http::status::ok);
         void set_json_content(boost::json::value&& data, http::status status = http::status::ok);
         void set_file_content(fs::path const& path, http::fields const& req_header = {});
-        void set_form_data_content(std::vector<html::form_data::field>&& data);
+        void set_form_data_content(std::vector<httplib::form_data::field>&& data);
 
         void set_redirect(std::string_view url, http::status status = http::status::moved_permanently);
 

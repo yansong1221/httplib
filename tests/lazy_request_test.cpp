@@ -8,7 +8,6 @@
 #include <string>
 #include <vector>
 
-namespace html = httplib::html;
 namespace net = httplib::net;
 namespace http = httplib::http;
 
@@ -138,7 +137,7 @@ TEST_CASE("server lazy: read_query_params", "[server-lazy]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            html::query_params params;
+            httplib::query_params params;
             params.add("key", "url-value");
             auto req = httplib::client::request(http::verb::post, "/params");
             req.set_body(std::move(params));
@@ -265,7 +264,7 @@ TEST_CASE("server lazy: read_form_data with file upload", "[server-lazy]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            html::form_data form;
+            httplib::form_data form;
             form.boundary = "----TestFormBoundary";
             form.fields.push_back({ "file", "data.txt", "text/plain", "file-contents" });
             auto req = httplib::client::request(http::verb::post, "/upload");

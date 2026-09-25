@@ -1,8 +1,8 @@
 #pragma once
 #include "httplib/body_type.hpp"
 #include "httplib/config.hpp"
-#include "httplib/html/form_data.hpp"
-#include "httplib/html/query_params.hpp"
+#include "httplib/form_data.hpp"
+#include "httplib/query_params.hpp"
 #include "httplib/server/request_data.hpp"
 #include "httplib/server/server_fwd.hpp"
 #include "httplib/util/misc.hpp"
@@ -50,7 +50,7 @@ namespace httplib::server
         bool has(std::string_view name) const;
 
         std::string_view path() const;
-        html::query_params const& query_params() const;
+        httplib::query_params const& query_params() const;
 
         net::ip::address get_client_ip() const;
         tcp::endpoint const& local_endpoint() const;
@@ -63,8 +63,8 @@ namespace httplib::server
 
         std::string const& as_string() const;
         boost::json::value const& as_json() const;
-        html::form_data const& as_form_data() const;
-        html::query_params const& as_query_params() const;
+        httplib::form_data const& as_form_data() const;
+        httplib::query_params const& as_query_params() const;
 
         body_type type() const;
 
@@ -73,8 +73,8 @@ namespace httplib::server
         // 失败抛 boost::system::system_error。
         net::awaitable<std::string> read_string();
         net::awaitable<boost::json::value> read_json();
-        net::awaitable<html::form_data> read_form_data();
-        net::awaitable<html::query_params> read_query_params();
+        net::awaitable<httplib::form_data> read_form_data();
+        net::awaitable<httplib::query_params> read_query_params();
 
         // 读取剩余 body 并物化到本请求（按 content-type 自动派发 body 类型，用 as_* 取引用）
         net::awaitable<boost::system::error_code> read_body();

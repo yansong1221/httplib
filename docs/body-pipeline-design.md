@@ -95,8 +95,8 @@ public:
 |---|---|---|
 | `string_sink` | `std::string` | chunk 直接 append（原 `string_body::reader` 的逻辑） |
 | `json_sink` | `boost::json::value` | 喂 `boost::json::stream_parser`（本身增量）；沿用 10 MiB 上限与预分配 resource 的思路 |
-| `query_params_sink` | `html::query_params` | 累积原始字节，`finish` 时 urldecode |
-| `form_data_sink` | `html::form_data` | 复用现 multipart 状态机；需 `Content-Type`(boundary) + `form_data::param` |
+| `query_params_sink` | `httplib::query_params` | 累积原始字节，`finish` 时 urldecode |
+| `form_data_sink` | `httplib::form_data` | 复用现 multipart 状态机；需 `Content-Type`(boundary) + `form_data::param` |
 | `file_sink` | `void` | 复用 `file_body::value_type`（open/write），chunk 直接写盘 |
 | `discard_sink` | `void` | 空 body / 无需消费时逐块丢弃 |
 
@@ -123,7 +123,7 @@ public:
 |---|---|---|
 | `string_source` | `std::string` | 一块发完，`more=false` |
 | `json_source` | `boost::json::value` | 包 `boost::json::serializer`（增量吐 chunk） |
-| `form_data_source` | `std::vector<html::form_data::field>` | 复用现 multipart 构建器（boundary 头 / 字段 / 文件 8 KiB 流式） |
+| `form_data_source` | `std::vector<httplib::form_data::field>` | 复用现 multipart 构建器（boundary 头 / 字段 / 文件 8 KiB 流式） |
 | `file_source` | `fs::path` + ranges | 复用现 `file_body::writer` 的 16 KiB chunk 读取与 multipart/byteranges 组装 |
 | `encoded_source` | `source*` + encoding | 包 `stream_encoder`：plain chunk → 压缩 chunk |
 | `empty_source` | — | `next` 直接 none |
@@ -140,16 +140,16 @@ class payload {
     kind kind_ = kind::none;
     std::string text_;                    // string/query_params 原始(text_)、form_data 的备用
     boost::json::value json_;
-    html::query_params query_params_;
-    html::form_data form_data_;
+    httplib::query_params query_params_;
+    httplib::form_data form_data_;
 public:
     bool has() const;
     kind type() const;
     bool is_empty() const;
     std::string const&   as_string() const;       // == text_
     boost::json::value const& as_json() const;
-    html::query_params const& as_query_params() const;
-    html::form_data const&    as_form_data() const;
+    httplib::query_params const& as_query_params() const;
+    httplib::form_data const&    as_form_data() const;
     void assign(kind, 各产物&&);                    // sink.release 后写入
     // take<T>() 迁移语义保留
 };

@@ -1,7 +1,8 @@
-﻿#pragma once
+#pragma once
 #include "body/body_state.hpp"
 #include "body/multipart_parser.hpp"
 #include "httplib/config.hpp"
+#include <algorithm>
 #include <boost/asio/buffer.hpp>
 #include <boost/beast/http/error.hpp>
 #include <boost/core/ignore_unused.hpp>
@@ -9,7 +10,6 @@
 #include <boost/json/monotonic_resource.hpp>
 #include <boost/json/stream_parser.hpp>
 #include <boost/json/value.hpp>
-#include <algorithm>
 #include <cstdint>
 #include <fstream>
 #include <memory>
@@ -69,7 +69,7 @@ namespace httplib::body
         void
         commit(body_state& out) override
         {
-            out.set_string(std::move(buf_));
+            out.set<std::string>(std::move(buf_));
         }
 
       private:
@@ -93,7 +93,9 @@ namespace httplib::body
         }
 
         void
-        commit(body_state&) override {}
+        commit(body_state&) override
+        {
+        }
     };
 
     /// 递增解析 JSON（`boost::json::stream_parser`）。
@@ -136,7 +138,7 @@ namespace httplib::body
         void
         commit(body_state& out) override
         {
-            out.set_json(std::move(value_));
+            out.set<boost::json::value>(std::move(value_));
         }
 
       private:
@@ -178,19 +180,19 @@ namespace httplib::body
         void
         commit(body_state& out) override
         {
-            out.set_query_params(std::move(params_));
+            out.set<httplib::query_params>(std::move(params_));
         }
 
       private:
         std::string buf_;
-        html::query_params params_;
+        httplib::query_params params_;
     };
 
     /// 增量解析 multipart/form-data。
     class form_data_sink : public sink
     {
       public:
-        form_data_sink(std::string content_type, html::form_data::param params = {})
+        form_data_sink(std::string content_type, httplib::form_data::param params = {})
             : parser_(std::move(content_type), std::move(params))
         {
         }
@@ -216,7 +218,7 @@ namespace httplib::body
         void
         commit(body_state& out) override
         {
-            out.set_form_data(parser_.take());
+            out.set<httplib::form_data>(parser_.take());
         }
 
       private:
@@ -262,7 +264,9 @@ namespace httplib::body
         }
 
         void
-        commit(body_state&) override {}
+        commit(body_state&) override
+        {
+        }
 
       private:
         fs::path path_;
@@ -271,7 +275,7 @@ namespace httplib::body
 
     /// 按 Content-Type 选择默认 sink（读方向的类型分发）。
     inline sink_ptr
-    make_sink_for(std::string_view content_type, html::form_data::param params = {})
+    make_sink_for(std::string_view content_type, httplib::form_data::param params = {})
     {
         if (content_type.starts_with("multipart/form-data"))
         {

@@ -3,8 +3,8 @@
 #include "body/codec.hpp"
 #include "body/source.hpp"
 #include "httplib/config.hpp"
-#include "httplib/html/form_data.hpp"
-#include "httplib/html/query_params.hpp"
+#include "httplib/form_data.hpp"
+#include "httplib/query_params.hpp"
 #include "httplib/util/async_mutex.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <boost/beast/http/buffer_body.hpp>
@@ -85,8 +85,8 @@ namespace httplib::detail
             reset();
             msg_.content_length(data.size());
             msg_.set(http::field::content_type, content_type);
-            payload_.set_string(std::move(data));
-            source_ = std::make_unique<body::string_source>(payload_.as_string());
+            payload_.set<std::string>(std::move(data));
+            source_ = std::make_unique<body::string_source>(payload_.as<std::string>());
         }
 
         void
@@ -98,33 +98,33 @@ namespace httplib::detail
             {
                 msg_.set(http::field::cache_control, "no-store");
             }
-            payload_.set_json(std::move(data));
-            source_ = std::make_unique<body::json_source>(payload_.as_json());
+            payload_.set<boost::json::value>(std::move(data));
+            source_ = std::make_unique<body::json_source>(payload_.as<boost::json::value>());
         }
 
         void
-        set_query_params(html::query_params data)
+        set_query_params(httplib::query_params data)
         {
             reset();
             msg_.set(http::field::content_type, "application/x-www-form-urlencoded");
-            payload_.set_query_params(std::move(data));
-            source_ = std::make_unique<body::query_params_source>(payload_.as_query_params());
+            payload_.set<httplib::query_params>(std::move(data));
+            source_ = std::make_unique<body::query_params_source>(payload_.as<httplib::query_params>());
         }
 
         void
-        set_form_data(html::form_data data)
+        set_form_data(httplib::form_data data)
         {
             reset();
             msg_.set(http::field::content_type, "multipart/form-data; boundary=" + data.boundary);
-            payload_.set_form_data(std::move(data));
-            source_ = std::make_unique<body::form_data_source>(payload_.as_form_data());
+            payload_.set<httplib::form_data>(std::move(data));
+            source_ = std::make_unique<body::form_data_source>(payload_.as<httplib::form_data>());
         }
 
         /// 文件型 source（path/ranges 已由调用方封装）：只接管 source，payload 记 file 标记。
         void
         set_file(body::source_ptr source)
         {
-            payload_.set_file();
+            payload_.set<body::file_tag>();
             source_ = std::move(source);
         }
 
@@ -132,7 +132,7 @@ namespace httplib::detail
         set_empty()
         {
             reset();
-            payload_.set_empty();
+            payload_.set<body::empty_tag>();
         }
 
         void

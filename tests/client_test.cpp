@@ -14,7 +14,6 @@
 #include <random>
 #include <thread>
 
-namespace html = httplib::html;
 namespace net = httplib::net;
 
 namespace
@@ -30,7 +29,7 @@ namespace
     auto
     make_params()
     {
-        html::query_params p;
+        httplib::query_params p;
         p.add("msg", "hello");
         return p;
     }
@@ -143,7 +142,10 @@ namespace
                 auto ep = server.local_endpoint();
                 server.run();
 
-                httplib::client::http_client client(pool.get_executor(), "localhost", ep.port(), httplib::url::scheme::tls);
+                httplib::client::http_client client(pool.get_executor(),
+                                                    "localhost",
+                                                    ep.port(),
+                                                    httplib::url::scheme::tls);
                 client.set_timeout(std::chrono::seconds(5));
 
                 co_await test(client);
@@ -998,7 +1000,7 @@ TEST_CASE("client: async_send_request form_data", "[client]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            html::form_data form;
+            httplib::form_data form;
             form.boundary = "----TestFormBoundary";
             form.fields.push_back({ "name", "", "text/plain", "alice" });
             auto req = httplib::client::request(http::verb::post, "/form-upload");
@@ -1023,7 +1025,7 @@ TEST_CASE("client: async_send_request query_params body", "[client]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            html::query_params body;
+            httplib::query_params body;
             body.add("key", "url-value");
             auto req = httplib::client::request(http::verb::post, "/form-post");
             req.set_body(std::move(body));
@@ -1140,7 +1142,7 @@ TEST_CASE("client: lazy read multipart body", "[client]")
                 "/lazy-form",
                 [](httplib::server::request&, httplib::server::response& resp)
                 {
-                    std::vector<html::form_data::field> fields;
+                    std::vector<httplib::form_data::field> fields;
                     auto& a = fields.emplace_back();
                     a.name = "a";
                     a.content = std::string(9000, 'x') + "\r\ncc\r";

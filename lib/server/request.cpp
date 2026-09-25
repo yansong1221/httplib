@@ -1,4 +1,4 @@
-﻿#include "httplib/server/request.hpp"
+#include "httplib/server/request.hpp"
 #include "httplib/util/misc.hpp"
 #include "request_impl.hpp"
 
@@ -126,7 +126,7 @@ namespace httplib::server
         return impl_->data();
     }
 
-    html::query_params const&
+    httplib::query_params const&
     request::query_params() const
     {
         return impl_->query_params();
@@ -135,25 +135,25 @@ namespace httplib::server
     std::string const&
     request::as_string() const
     {
-        return impl_->reader().state().as_string();
+        return impl_->reader().state().as<std::string>();
     }
 
     boost::json::value const&
     request::as_json() const
     {
-        return impl_->reader().state().as_json();
+        return impl_->reader().state().as<boost::json::value>();
     }
 
-    html::form_data const&
+    httplib::form_data const&
     request::as_form_data() const
     {
-        return impl_->reader().state().as_form_data();
+        return impl_->reader().state().as<httplib::form_data>();
     }
 
-    html::query_params const&
+    httplib::query_params const&
     request::as_query_params() const
     {
-        return impl_->reader().state().as_query_params();
+        return impl_->reader().state().as<httplib::query_params>();
     }
 
     body_type
@@ -184,7 +184,7 @@ namespace httplib::server
         co_return std::move(*result);
     }
 
-    net::awaitable<html::form_data>
+    net::awaitable<httplib::form_data>
     request::read_form_data()
     {
         auto result = co_await impl_->reader().read_form_data();
@@ -195,7 +195,7 @@ namespace httplib::server
         co_return std::move(*result);
     }
 
-    net::awaitable<html::query_params>
+    net::awaitable<httplib::query_params>
     request::read_query_params()
     {
         auto result = co_await impl_->reader().read_query_params();

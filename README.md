@@ -244,8 +244,8 @@ The request/response body is parsed into a type-safe variant, but the server API
 ```cpp
 std::string const&           str  = req.as_string();
 boost::json::value const&    json = req.as_json();
-html::form_data const&       fd   = req.as_form_data();
-html::query_params const&    qp   = req.as_query_params();
+httplib::form_data const&       fd   = req.as_form_data();
+httplib::query_params const&    qp   = req.as_query_params();
 ```
 
 Auto-detection during parsing: `content-type` header selects the correct body reader at runtime. Use `req.is_empty()` / `req.is_string()` / `req.is_json()` / `req.is_form_data()` / `req.is_query_params()` to check which type the body was parsed as.

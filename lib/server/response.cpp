@@ -144,7 +144,7 @@ namespace httplib::server
     }
 
     void
-    response::set_form_data_content(std::vector<html::form_data::field>&& data)
+    response::set_form_data_content(std::vector<httplib::form_data::field>&& data)
     {
         impl_->set_form_data_content(std::move(data));
     }
@@ -172,7 +172,7 @@ namespace httplib::server
     {
         if (!impl_->stream_writer_)
         {
-            impl_->stream_writer_ = std::make_unique<stream_writer_impl>(*impl_); 
+            impl_->stream_writer_ = std::make_unique<stream_writer_impl>(*impl_);
         }
         return impl_->stream_writer_.get();
     }

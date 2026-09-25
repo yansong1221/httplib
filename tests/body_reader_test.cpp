@@ -44,10 +44,7 @@ namespace
         net::awaitable<void>
         read_some(Parser& parser, boost::system::error_code& ec)
         {
-            co_await http::async_read_some(stream_,
-                                           buffer_,
-                                           parser,
-                                           net::redirect_error(net::use_awaitable, ec));
+            co_await http::async_read_some(stream_, buffer_, parser, net::redirect_error(net::use_awaitable, ec));
         }
 
       private:
@@ -59,8 +56,8 @@ namespace
     std::string
     make_response(std::string const& body, std::string const& extra_headers = "")
     {
-        return "HTTP/1.1 200 OK\r\nContent-Length: " + std::to_string(body.size()) + "\r\n"
-               + extra_headers + "\r\n" + body;
+        return "HTTP/1.1 200 OK\r\nContent-Length: " + std::to_string(body.size()) + "\r\n" + extra_headers + "\r\n"
+               + body;
     }
 
     using response_reader = httplib::detail::body_reader<false, memory_source>;
@@ -92,16 +89,14 @@ TEST_CASE("body_reader: materialize string body via fake source", "[body-reader]
     auto fut = net::co_spawn(
         ioc,
         [&]() -> net::awaitable<void>
-        {
-            read_ec = co_await reader.read_body(std::make_unique<httplib::body::string_sink>());
-        },
+        { read_ec = co_await reader.read_body(std::make_unique<httplib::body::string_sink>()); },
         net::use_future);
     ioc.run();
     fut.get();
 
     REQUIRE_FALSE(read_ec);
     REQUIRE(reader.state().type() == httplib::body::body_state::kind::string);
-    REQUIRE(reader.state().as_string() == "hello world");
+    REQUIRE(reader.state().as<std::string>() == "hello world");
     REQUIRE(reader.is_body_done());
 }
 

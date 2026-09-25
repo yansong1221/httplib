@@ -1,5 +1,5 @@
-﻿#include "common.hpp"
-#include "httplib/html/query_params.hpp"
+#include "common.hpp"
+#include "httplib/query_params.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include <boost/json.hpp>
@@ -25,10 +25,10 @@ namespace
         return resp.as_json();
     }
 
-    httplib::html::query_params
+    httplib::query_params
     params(std::initializer_list<std::pair<std::string, std::string>> vals)
     {
-        httplib::html::query_params out;
+        httplib::query_params out;
         for (auto const& [key, val] : vals)
         {
             out.add(key, val);
@@ -1409,7 +1409,7 @@ TEST_CASE("Query params randomized round-trip", "[http-methods]")
 
     for (int round = 0; round < 15; ++round)
     {
-        httplib::html::query_params sent;
+        httplib::query_params sent;
         std::vector<std::pair<std::string, std::string>> expected;
         int npairs = npairs_dist(rng);
         for (int i = 0; i < npairs; ++i)

@@ -1,10 +1,10 @@
-#include "httplib/html/query_params.hpp"
+#include "httplib/query_params.hpp"
 #include "httplib/url/url.hpp"
 #include "httplib/util/misc.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <stdexcept>
 
-namespace httplib::html
+namespace httplib
 {
     std::string_view
     query_params::at_raw(std::string const& key) const
@@ -96,4 +96,4 @@ namespace httplib::html
         params_.emplace(key, val);
     }
 
-} // namespace httplib::html
+} // namespace httplib

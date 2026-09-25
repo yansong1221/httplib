@@ -146,8 +146,7 @@ namespace httplib::server
             bool const multipart = ranges.size() > 1;
             std::string boundary = multipart ? html::generate_boundary() : std::string {};
 
-            auto file_source
-                = std::make_unique<body::file_source>(path, ranges, content_type, boundary);
+            auto file_source = std::make_unique<body::file_source>(path, ranges, content_type, boundary);
             if (!file_source->ok())
             {
                 set_error_content(http::status::forbidden);
@@ -183,9 +182,9 @@ namespace httplib::server
         }
 
         void
-        set_form_data_content(std::vector<html::form_data::field>&& data)
+        set_form_data_content(std::vector<httplib::form_data::field>&& data)
         {
-            html::form_data value;
+            httplib::form_data value;
             value.boundary = html::generate_boundary();
             value.fields = std::move(data);
             writer_.set_form_data(std::move(value));

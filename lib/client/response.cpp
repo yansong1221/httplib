@@ -75,25 +75,25 @@ namespace httplib::client
     std::string const&
     response::as_string() const
     {
-        return impl_->reader().state().as_string();
+        return impl_->reader().state().as<std::string>();
     }
 
     boost::json::value const&
     response::as_json() const
     {
-        return impl_->reader().state().as_json();
+        return impl_->reader().state().as<boost::json::value>();
     }
 
-    html::form_data const&
+    httplib::form_data const&
     response::as_form_data() const
     {
-        return impl_->reader().state().as_form_data();
+        return impl_->reader().state().as<httplib::form_data>();
     }
 
-    html::query_params const&
+    httplib::query_params const&
     response::as_query_params() const
     {
-        return impl_->reader().state().as_query_params();
+        return impl_->reader().state().as<httplib::query_params>();
     }
 
     body_type
@@ -126,13 +126,13 @@ namespace httplib::client
         co_return co_await impl_->reader().read_json();
     }
 
-    net::awaitable<boost::system::result<html::form_data>>
+    net::awaitable<boost::system::result<httplib::form_data>>
     response::read_form_data()
     {
         co_return co_await impl_->reader().read_form_data();
     }
 
-    net::awaitable<boost::system::result<html::query_params>>
+    net::awaitable<boost::system::result<httplib::query_params>>
     response::read_query_params()
     {
         co_return co_await impl_->reader().read_query_params();

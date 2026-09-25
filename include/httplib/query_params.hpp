@@ -8,7 +8,7 @@
 #include <string>
 #include <vector>
 
-namespace httplib::html
+namespace httplib
 {
     class HTTPLIB_API query_params
     {
@@ -109,4 +109,4 @@ namespace httplib::html
 
         container_type params_;
     };
-} // namespace httplib::html
+} // namespace httplib
