@@ -27,8 +27,7 @@ namespace httplib::body
         每次 `next` 产出一块字节；`more == true` 表示后面还有块。取代旧 per-type beast writer：
         业务类型只负责产出字节，压缩与传输由外层 source 链 / `http::buffer_body` 负责。
 
-        source 只引用外部数据（不拷贝），调用方（response::impl / request::impl）需保证被引用
-        对象在本 source 使用期间存活。
+        source 只引用外部数据（不拷贝），body_writer 需保证被引用对象在本 source 使用期间存活。
     */
     class source
     {

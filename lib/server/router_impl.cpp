@@ -387,9 +387,7 @@ namespace httplib::server
     }
 
     void
-    router_impl::set_lazy_http_handler_impl(http::verb method,
-                                            std::string_view key,
-                                            coro_http_handler_type&& handler)
+    router_impl::set_lazy_http_handler_impl(http::verb method, std::string_view key, coro_http_handler_type&& handler)
     {
         std::unique_lock lock(mutex_);
         auto segments = detail::split_segments(key);

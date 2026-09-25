@@ -32,10 +32,9 @@ namespace httplib::detail
           - 整消息写：write_message()（source_ 驱动序列化器）；
           - 流式写：begin_stream(mode) + write_some(data, more)。
 
-        业务数据写入本对象的 @ref payload_，source_ 引用它产出字节。Beast 的
-        `http::buffer_body::writer` 只接受 const message，写循环要修改的是调用方持有的
-        message body（scratch），故本对象持有 message 引用 @p msg，而不是像 body_reader
-        那样自持 parser。
+        业务数据写入本对象的 @ref payload_，source_ 引用它产出字节。message 由本对象自持，
+        Beast 的 `http::buffer_body::writer` 只接受 const message，serializer 通过自持的
+        message 引用完成序列化。
 
         数据落地由构造期/attach 注入的 Task 提供（方向仅由 IsRequest 决定）：
 
@@ -44,7 +43,7 @@ namespace httplib::detail
             task->write(serializer, ec);          // 写到 need_buffer/完成（流式块用）
     */
     template <bool IsRequest, typename Task>
-    class body_writer
+    class body_writer : public http::message<IsRequest, http::buffer_body, http::fields>
     {
       public:
         using message_t = http::message<IsRequest, http::buffer_body, http::fields>;
@@ -59,31 +58,26 @@ namespace httplib::detail
             chunked,
         };
 
-        explicit body_writer(message_t& msg, Task* task = nullptr, net::any_io_executor ex = {})
-            : msg_(msg)
-            , task_(task)
-            , executor_(std::move(ex))
+        explicit body_writer(Task* task = nullptr, net::any_io_executor ex = {}) : task_(task), executor_(std::move(ex))
         {
         }
 
         body_writer(body_writer const&) = delete;
         body_writer& operator=(body_writer const&) = delete;
 
-        /// 发送前绑定连接写入端（client 的 request 在 send 时才拿到 http_client::impl）。
         void
         attach(Task* task, net::any_io_executor ex)
         {
             task_ = task;
             executor_ = std::move(ex);
+            write_mutex_.reset();
         }
-
-        // ---- 内容注入 ----
 
         void
         set_string(std::string data, std::string_view content_type)
         {
             reset();
-            msg_.set(http::field::content_type, content_type);
+            this->set(http::field::content_type, content_type);
             payload_.set<std::string>(std::move(data));
             source_ = std::make_unique<body::string_source>(payload_.as<std::string>());
         }
@@ -92,10 +86,10 @@ namespace httplib::detail
         set_json(boost::json::value data, std::string_view content_type, bool no_store = false)
         {
             reset();
-            msg_.set(http::field::content_type, content_type);
+            this->set(http::field::content_type, content_type);
             if (no_store)
             {
-                msg_.set(http::field::cache_control, "no-store");
+                this->set(http::field::cache_control, "no-store");
             }
             payload_.set<boost::json::value>(std::move(data));
             source_ = std::make_unique<body::json_source>(payload_.as<boost::json::value>());
@@ -105,7 +99,7 @@ namespace httplib::detail
         set_query_params(httplib::query_params data)
         {
             reset();
-            msg_.set(http::field::content_type, "application/x-www-form-urlencoded");
+            this->set(http::field::content_type, "application/x-www-form-urlencoded");
             payload_.set<httplib::query_params>(std::move(data));
             source_ = std::make_unique<body::query_params_source>(payload_.as<httplib::query_params>());
         }
@@ -114,7 +108,7 @@ namespace httplib::detail
         set_form_data(httplib::form_data data)
         {
             reset();
-            msg_.set(http::field::content_type, "multipart/form-data; boundary=" + data.boundary);
+            this->set(http::field::content_type, "multipart/form-data; boundary=" + data.boundary);
             payload_.set<httplib::form_data>(std::move(data));
             source_ = std::make_unique<body::form_data_source>(payload_.as<httplib::form_data>());
         }
@@ -123,6 +117,7 @@ namespace httplib::detail
         void
         set_file(body::source_ptr source)
         {
+            reset();
             payload_.set<body::file_tag>();
             source_ = std::move(source);
         }
@@ -137,9 +132,11 @@ namespace httplib::detail
         void
         reset()
         {
-            payload_.reset();
+            reset_serializer();
             source_.reset();
-            msg_.body() = http::buffer_body::value_type {};
+            payload_.reset();
+            encoder_.reset();
+            this->body() = http::buffer_body::value_type {};
         }
 
         // ---- 编码与分帧 ----
@@ -159,7 +156,7 @@ namespace httplib::detail
         void
         prepare_payload()
         {
-            if (msg_.has_content_length())
+            if (this->has_content_length())
             {
                 return;
             }
@@ -176,17 +173,17 @@ namespace httplib::detail
 
             if (length)
             {
-                msg_.chunked(false);
-                msg_.content_length(*length);
+                message_t::chunked(false);
+                this->content_length(*length);
                 return;
             }
-            msg_.prepare_payload();
+            message_t::prepare_payload();
         }
 
         void
         chunked(bool value)
         {
-            msg_.chunked(value);
+            message_t::chunked(value);
         }
 
         // ---- 状态访问 ----
@@ -215,10 +212,29 @@ namespace httplib::detail
             return source_ != nullptr;
         }
 
-        bool
-        header_sent() const
+        serializer_t&
+        serializer()
         {
-            return header_sent_;
+            if (!sr_)
+            {
+                sr_ = std::make_unique<serializer_t>(*this);
+            }
+            return *sr_;
+        }
+
+        void
+        reset_serializer()
+        {
+            sr_.reset();
+        }
+
+        void
+        prepare_for_send()
+        {
+            if (sr_ && sr_->is_done())
+            {
+                reset_serializer();
+            }
         }
 
         bool
@@ -227,18 +243,11 @@ namespace httplib::detail
             return sr_ && sr_->is_done();
         }
 
-        /// 上次 write_message 返回时头部是否已写出（client 死连接重试判定用）。
+        /// 头部是否已写出（client 死连接重试判定用）。
         bool
         header_done() const
         {
-            return last_header_done_;
-        }
-
-        void
-        reset_serializer()
-        {
-            sr_.reset();
-            header_sent_ = false;
+            return sr_ && sr_->is_header_done();
         }
 
         // ---- 整消息写 ----
@@ -284,7 +293,7 @@ namespace httplib::detail
         {
             if (!write_mutex_)
             {
-                write_mutex_.emplace(executor_);
+                write_mutex_ = std::make_unique<util::async_mutex>(executor_);
             }
             co_return co_await write_mutex_->lock();
         }
@@ -293,18 +302,20 @@ namespace httplib::detail
         write_message_locked()
         {
             boost::system::error_code ec;
-            if (header_sent_)
+            if (sr_ && sr_->is_header_done())
             {
-                co_return ec;
+                co_return invalid_argument();
+            }
+            if (!sr_)
+            {
+                sr_ = std::make_unique<serializer_t>(*this);
             }
 
             prepare_payload();
-            sr_ = std::make_unique<serializer_t>(msg_);
-            last_header_done_ = false;
+            auto& sr = serializer();
 
-            static char empty_byte = 0;
             bool refill = true;
-            while (!sr_->is_done())
+            while (!sr.is_done())
             {
                 if (refill)
                 {
@@ -314,25 +325,24 @@ namespace httplib::detail
                         chunk = source_->next(ec);
                         if (ec)
                         {
-                            last_header_done_ = sr_->is_header_done();
                             co_return ec;
                         }
                     }
                     if (chunk)
                     {
-                        msg_.body().data = const_cast<void*>(chunk->first.data());
-                        msg_.body().size = chunk->first.size();
-                        msg_.body().more = chunk->second;
+                        this->body().data = const_cast<void*>(chunk->first.data());
+                        this->body().size = chunk->first.size();
+                        this->body().more = chunk->second;
                     }
                     else
                     {
-                        msg_.body().data = &empty_byte;
-                        msg_.body().size = 0;
-                        msg_.body().more = false;
+                        this->body().data = nullptr;
+                        this->body().size = 0;
+                        this->body().more = false;
                     }
                 }
 
-                co_await task_->write_some(*sr_, ec);
+                co_await task_->write_some(sr, ec);
                 if (ec == http::error::need_buffer)
                 {
                     ec = {};
@@ -340,7 +350,6 @@ namespace httplib::detail
                 }
                 else if (ec)
                 {
-                    last_header_done_ = sr_->is_header_done();
                     co_return ec;
                 }
                 else
@@ -348,7 +357,6 @@ namespace httplib::detail
                     refill = false;
                 }
             }
-            last_header_done_ = sr_->is_header_done();
             ec = {};
             co_return ec;
         }
@@ -357,25 +365,29 @@ namespace httplib::detail
         begin_stream_locked(stream_mode mode)
         {
             boost::system::error_code ec;
-            if (header_sent_)
+            if (sr_ && sr_->is_header_done())
             {
-                co_return ec;
+                co_return invalid_argument();
+            }
+            if (!sr_)
+            {
+                sr_ = std::make_unique<serializer_t>(*this);
             }
 
             if (mode == stream_mode::chunked)
             {
-                msg_.body() = http::buffer_body::value_type {};
-                msg_.chunked(true);
+                this->body() = http::buffer_body::value_type {};
+                message_t::chunked(true);
 
                 // 调用方声明的 Content-Encoding 由流式写入侧逐块压缩。
-                auto encoding = msg_[http::field::content_encoding];
+                auto encoding = (*this)[http::field::content_encoding];
                 if (!encoding.empty() && compress::compressor_factory::instance().is_transform_encoding(encoding))
                 {
                     encoder_ = std::make_unique<body::stream_encoder>();
                     encoder_->reset(encoding, ec);
                     if (ec)
                     {
-                        msg_.keep_alive(false);
+                        this->keep_alive(false);
                         co_return ec;
                     }
                 }
@@ -385,15 +397,11 @@ namespace httplib::detail
                 reset();
             }
 
-            sr_ = std::make_unique<serializer_t>(msg_);
-            co_await task_->write_header(*sr_, ec);
+            auto& sr = serializer();
+            co_await task_->write_header(sr, ec);
             if (ec)
             {
-                msg_.keep_alive(false);
-            }
-            else
-            {
-                header_sent_ = true;
+                this->keep_alive(false);
             }
             co_return ec;
         }
@@ -402,7 +410,7 @@ namespace httplib::detail
         write_some_locked(net::const_buffer const& data, bool more)
         {
             boost::system::error_code ec;
-            if (!sr_)
+            if (!sr_ || !sr_->is_header_done() || sr_->is_done())
             {
                 co_return invalid_argument();
             }
@@ -413,7 +421,7 @@ namespace httplib::detail
                 encoder_->feed(data, more, ec);
                 if (ec)
                 {
-                    msg_.keep_alive(false);
+                    this->keep_alive(false);
                     co_return ec;
                 }
                 auto buffer = encoder_->buffer();
@@ -421,24 +429,23 @@ namespace httplib::detail
                 {
                     co_return ec;
                 }
-                static char const empty_byte = 0;
                 if (buffer.size() == 0)
                 {
-                    msg_.body().data = const_cast<char*>(&empty_byte);
-                    msg_.body().size = 0;
+                    this->body().data = nullptr;
+                    this->body().size = 0;
                 }
                 else
                 {
-                    msg_.body().data = const_cast<void*>(buffer.data());
-                    msg_.body().size = buffer.size();
+                    this->body().data = const_cast<void*>(buffer.data());
+                    this->body().size = buffer.size();
                 }
-                msg_.body().more = more;
+                this->body().more = more;
                 co_return co_await write_serialized(ec);
             }
 
-            msg_.body().data = data.size() > 0 ? const_cast<void*>(data.data()) : nullptr;
-            msg_.body().size = data.size();
-            msg_.body().more = more;
+            this->body().data = data.size() > 0 ? const_cast<void*>(data.data()) : nullptr;
+            this->body().size = data.size();
+            this->body().more = more;
             co_return co_await write_serialized(ec);
         }
 
@@ -452,7 +459,7 @@ namespace httplib::detail
             }
             else if (ec)
             {
-                msg_.keep_alive(false);
+                this->keep_alive(false);
             }
             co_return ec;
         }
@@ -469,17 +476,14 @@ namespace httplib::detail
             return boost::system::errc::make_error_code(boost::system::errc::invalid_argument);
         }
 
-        message_t& msg_;
+        std::unique_ptr<serializer_t> sr_;
         Task* task_ = nullptr;
         net::any_io_executor executor_;
-        std::optional<util::async_mutex> write_mutex_;
+        std::unique_ptr<util::async_mutex> write_mutex_;
 
         state_t payload_;
         body::source_ptr source_;
 
-        std::unique_ptr<serializer_t> sr_;
         std::unique_ptr<body::stream_encoder> encoder_;
-        bool header_sent_ = false;
-        bool last_header_done_ = false;
     };
 } // namespace httplib::detail

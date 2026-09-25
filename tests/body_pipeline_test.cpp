@@ -1,4 +1,5 @@
 #include "body/body_state.hpp"
+#include "body/body_writer.hpp"
 #include "body/codec.hpp"
 #include "body/sink.hpp"
 #include "body/source.hpp"
@@ -78,6 +79,29 @@ TEST_CASE("payload: set and get", "[body_pipeline]")
 
     p.set<boost::json::value>(json::value { 42 });
     REQUIRE(p.as<boost::json::value>().as_int64() == 42);
+}
+
+TEST_CASE("body_writer: exposes its serializer for external changes", "[body_pipeline]")
+{
+    struct task
+    {
+    };
+
+    using writer_t = httplib::detail::body_writer<false, task>;
+
+    writer_t writer;
+    writer.result(httplib::http::status::ok);
+    writer.version(11);
+    writer.content_length(0);
+
+    auto& serializer = writer.serializer();
+    serializer.split(true);
+    serializer.limit(1024);
+
+    REQUIRE(&writer.serializer() == &serializer);
+    REQUIRE(&serializer.get() == static_cast<writer_t::message_t const*>(&writer));
+    REQUIRE(serializer.split());
+    REQUIRE(serializer.limit() == 1024);
 }
 
 TEST_CASE("source: string_source once", "[body_pipeline]")

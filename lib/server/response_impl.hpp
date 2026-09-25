@@ -36,14 +36,14 @@ namespace httplib::server
         }
     } // namespace detail
 
-    class response::impl : public http::response<http::buffer_body>
+    class response::impl : public httplib::detail::body_writer<false, session::http_task>
     {
       public:
         using body_writer_t = httplib::detail::body_writer<false, session::http_task>;
 
         impl(unsigned int version, bool keep_alive, std::shared_ptr<session::http_task> task)
-            : task_(std::move(task))
-            , writer_(*this, task_.get(), task_ ? task_->executor() : net::any_io_executor {})
+            : body_writer_t(task.get(), task ? task->executor() : net::any_io_executor {})
+            , task_(std::move(task))
         {
             this->result(http::status::not_found);
             this->version(version);
@@ -55,7 +55,7 @@ namespace httplib::server
         void
         set_empty_content(http::status status)
         {
-            writer_.set_empty();
+            this->set_empty();
             this->result(status);
             this->content_length(0);
         }
@@ -75,7 +75,7 @@ namespace httplib::server
                 http::obsolete_reason(status),
                 this->at(http::field::server));
 
-            this->set_string_content(std::move(content), "text/html; charset=utf-8", status);
+            set_string_content(std::move(content), "text/html; charset=utf-8", status);
         }
 
         void
@@ -86,7 +86,7 @@ namespace httplib::server
         void
         set_string_content(std::string&& data, std::string_view content_type, http::status status = http::status::ok)
         {
-            writer_.set_string(std::move(data), content_type);
+            this->set_string(std::move(data), content_type);
             this->result(status);
         }
 
@@ -98,14 +98,14 @@ namespace httplib::server
         void
         set_json_content(boost::json::value&& data, http::status status = http::status::ok)
         {
-            writer_.set_json(std::move(data), "application/json; charset=utf-8", true);
+            this->set_json(std::move(data), "application/json; charset=utf-8", true);
             this->result(status);
         }
 
         void
         set_file_content(fs::path const& path, http::fields const& req_header = {})
         {
-            writer_.reset();
+            this->reset();
             std::error_code ec;
             auto file_size = fs::file_size(path, ec);
             if (ec)
@@ -178,7 +178,7 @@ namespace httplib::server
                 this->set(http::field::content_type, fmt::format("multipart/byteranges; boundary={}", boundary));
                 this->result(http::status::partial_content);
             }
-            writer_.set_file(std::move(file_source));
+            this->set_file(std::move(file_source));
         }
 
         void
@@ -187,7 +187,7 @@ namespace httplib::server
             httplib::form_data value;
             value.boundary = html::generate_boundary();
             value.fields = std::move(data);
-            writer_.set_form_data(std::move(value));
+            this->set_form_data(std::move(value));
             this->result(http::status::ok);
         }
 
@@ -201,32 +201,32 @@ namespace httplib::server
         void
         reset_content()
         {
-            writer_.reset();
+            this->reset();
         }
 
         /// 按 Content-Encoding 在现有 source 上叠加编码（压缩）。
         void
         apply_encoding(std::string_view encoding)
         {
-            writer_.apply_encoding(encoding);
+            body_writer_t::apply_encoding(encoding);
         }
 
         body::source*
         source()
         {
-            return writer_.source();
+            return static_cast<body_writer_t*>(this)->source();
         }
 
         body_writer_t&
         writer()
         {
-            return writer_;
+            return *this;
         }
 
         bool
         stream_header_sent() const
         {
-            return writer_.header_sent();
+            return this->header_done();
         }
 
         static response
@@ -239,9 +239,6 @@ namespace httplib::server
         std::shared_ptr<stream_writer> stream_writer_;
         // 连接所有者（http_task）：提供写流与写超时，作用同 request 的 reader_。
         std::shared_ptr<session::http_task> task_;
-
-        // 写方向统一入口：业务数据容器 + source + 序列化/编码/分帧状态。
-        body_writer_t writer_;
     };
 
 } // namespace httplib::server

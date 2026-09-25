@@ -61,13 +61,13 @@ namespace httplib::server
     std::string_view
     response::at(http::field name) const
     {
-        return impl_->base().at(name);
+        return impl_->at(name);
     }
 
     std::string_view
     response::at(std::string_view name) const
     {
-        return impl_->base().at(name);
+        return impl_->at(name);
     }
 
     bool

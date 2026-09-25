@@ -223,34 +223,34 @@ namespace httplib::client
     void
     request::set_body(std::string&& data, std::string_view content_type)
     {
-        impl_->writer().set_string(std::move(data), content_type);
+        impl_->set_string(std::move(data), content_type);
     }
 
     void
     request::set_body(boost::json::value&& data)
     {
-        impl_->writer().set_json(std::move(data), "application/json");
+        impl_->set_json(std::move(data), "application/json");
         impl_->prepare_payload();
     }
 
     void
     request::set_body(httplib::form_data&& data)
     {
-        impl_->writer().set_form_data(std::move(data));
+        impl_->set_form_data(std::move(data));
         impl_->prepare_payload();
     }
 
     void
     request::set_body(httplib::query_params&& data)
     {
-        impl_->writer().set_query_params(std::move(data));
+        impl_->set_query_params(std::move(data));
         impl_->prepare_payload();
     }
 
     void
     request::set_file_body(fs::path const& path)
     {
-        impl_->writer().set_file(std::make_unique<body::file_source>(path, html::http_ranges {}, "", ""));
+        impl_->set_file(std::make_unique<body::file_source>(path, html::http_ranges {}, "", ""));
         impl_->prepare_payload();
     }
 

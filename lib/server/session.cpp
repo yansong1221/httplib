@@ -410,7 +410,7 @@ namespace httplib::server
     session::http_task::async_write(request const& req, response& resp)
     {
         auto& writer = get_impl(resp).writer();
-        if (writer.header_sent())
+        if (writer.header_done())
         {
             co_return true;
         }
@@ -512,7 +512,8 @@ namespace httplib::server
         get_impl(resp).reason("Connection Established");
         get_impl(resp).result(http::status::ok);
         get_impl(resp).content_length(0);
-        httplib::detail::body_writer<false, http_proxy_task> writer(get_impl(resp), this, stream_.get_executor());
+        httplib::detail::body_writer<false, http_proxy_task> writer(this, stream_.get_executor());
+        static_cast<http::message<false, http::buffer_body>&>(writer) = get_impl(resp);
         writer.set_empty();
         ec = co_await writer.write_message();
         if (ec)

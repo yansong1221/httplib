@@ -119,24 +119,24 @@ namespace httplib::client
         {
             co_return;
         }
-        ec = co_await req.writer().write_message();
+        ec = co_await req.write_message();
     }
 
     net::awaitable<http_client::response_result>
     http_client::impl::async_send_request_lazy(request::impl& req)
     {
+        req.prepare_for_send();
         prepare_request(req);
-        auto& writer = req.writer();
-        writer.attach(this, strand_);
+        req.attach(this, strand_);
 
         boost::system::error_code ec;
         co_await write_request(req, ec);
         // 复用连接池里的死连接：header 尚未写出时透明重连并重发一次。
-        if (ec && is_retryable(ec) && !writer.header_done())
+        if (ec && is_retryable(ec) && !req.header_done())
         {
             ec = {};
             co_await async_close();
-            writer.reset_serializer();
+            req.reset_serializer();
             co_await write_request(req, ec);
         }
         if (ec)
@@ -175,6 +175,7 @@ namespace httplib::client
     http_client::impl::async_send_request_lazy_with_redirect(request::impl& req)
     {
         auto max_redirects = max_redirects_.load();
+        auto& req_msg = req;
 
         if (max_redirects <= 0)
         {
@@ -200,7 +201,7 @@ namespace httplib::client
                     co_return result;
                 }
 
-                get_logger()->trace("redirect {} -> {}", req.target(), std::string_view(loc));
+                get_logger()->trace("redirect {} -> {}", req_msg.target(), std::string_view(loc));
 
                 // 读完并丢弃 redirect 响应的 body，保证连接可复用
                 if (auto drain_result = co_await resp.read_string(); drain_result.has_error())
@@ -226,9 +227,9 @@ namespace httplib::client
                     if (new_host != host_ || new_port != port_ || new_ssl != (scheme_ == url::scheme::tls))
                     {
                         // CL-02: 跨 origin 重定向时移除 origin-bound 敏感头，避免认证凭据泄露到新主机
-                        redirect::strip_origin_bound_headers(req.base());
+                        redirect::strip_origin_bound_headers(req_msg.base());
 
-                        req.target(new_target);
+                        req_msg.target(new_target);
 
                         auto new_impl = std::make_shared<impl>(strand_.get_inner_executor(),
                                                                new_host,
@@ -247,21 +248,22 @@ namespace httplib::client
                 {
                     // 相对 Location：按 RFC 3986 针对当前 target 解析，兼容
                     // "final"、"../a/b"、"?q=1" 等形式。
-                    target = url::resolve(req.target(), loc);
+                    target = url::resolve(req_msg.target(), loc);
                 }
 
                 if (s == http::status::see_other
                     || ((s == http::status::moved_permanently || s == http::status::found)
-                        && req.method() != http::verb::head))
+                        && req_msg.method() != http::verb::head))
                 {
-                    req.method(http::verb::get);
-                    req.reset_body();
-                    req.erase(http::field::content_type);
-                    req.erase(http::field::content_length);
-                    req.content_length(0);
+                    req_msg.method(http::verb::get);
+                    req.reset();
+                    req_msg.erase(http::field::content_type);
+                    req_msg.erase(http::field::content_length);
+                    req_msg.content_length(0);
                 }
 
-                req.target(std::move(target));
+                req_msg.target(std::move(target));
+
                 continue;
             }
 
@@ -327,31 +329,32 @@ namespace httplib::client
     void
     http_client::impl::prepare_request(request::impl& req)
     {
-        if (req.find(http::field::host) == req.end())
+        auto& msg = req;
+        if (msg.find(http::field::host) == msg.end())
         {
-            req.set(http::field::host, host_value_);
+            msg.set(http::field::host, host_value_);
         }
         // 声明了不支持的 Content-Encoding：不会被真正压缩，头却留在线上会让对端误判，
         // 这里删掉头并告警。
-        auto content_encoding = req[http::field::content_encoding];
+        auto content_encoding = msg[http::field::content_encoding];
         if (!content_encoding.empty()
             && !compress::compressor_factory::instance().is_supported_encoding(content_encoding))
         {
             get_logger()->warn("unsupported request content-encoding '{}', remove the header",
                                std::string(content_encoding));
-            req.erase(http::field::content_encoding);
+            msg.erase(http::field::content_encoding);
         }
-        req.writer().prepare_payload();
+        req.prepare_payload();
 
         // 请求带 Content-Encoding 时，write 阶段会压缩 body，set_body() 预先写入的
         // Content-Length 是明文长度，与压缩后的实际长度不一致。改用 chunked + stream encoder。
         {
-            auto content_encoding = req[http::field::content_encoding];
+            auto content_encoding = msg[http::field::content_encoding];
             if (!content_encoding.empty()
                 && compress::compressor_factory::instance().is_transform_encoding(content_encoding))
             {
-                req.writer().apply_encoding(content_encoding);
-                req.chunked(true);
+                req.apply_encoding(content_encoding);
+                msg.chunked(true);
             }
         }
     }
