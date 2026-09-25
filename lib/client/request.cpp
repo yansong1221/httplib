@@ -29,18 +29,18 @@ namespace httplib::client
     request::request(http::verb method, std::string_view target, http::fields const& headers)
         : impl_(std::make_shared<impl>(method, target, 11))
     {
-        impl_->set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
-        impl_->set(http::field::accept, "*/*");
+        impl_->base().set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
+        impl_->base().set(http::field::accept, "*/*");
 
         auto const& encoding = compress::compressor_factory::instance().supported_encoding();
         if (!encoding.empty())
         {
-            impl_->set(http::field::accept_encoding, boost::join(encoding, ","));
+            impl_->base().set(http::field::accept_encoding, boost::join(encoding, ","));
         }
 
         for (auto const& field : headers)
         {
-            impl_->set(field.name_string(), field.value());
+            impl_->base().set(field.name_string(), field.value());
         }
         impl_->keep_alive(true);
     }
@@ -62,25 +62,25 @@ namespace httplib::client
     http::verb
     request::method() const
     {
-        return impl_->method();
+        return impl_->base().method();
     }
 
     void
     request::method(http::verb v)
     {
-        impl_->method(v);
+        impl_->base().method(v);
     }
 
     std::string_view
     request::target() const
     {
-        return impl_->target();
+        return impl_->base().target();
     }
 
     void
     request::target(std::string_view t)
     {
-        impl_->target(t);
+        impl_->base().target(t);
     }
 
     std::string_view
@@ -109,31 +109,31 @@ namespace httplib::client
     void
     request::insert(http::field name, std::string_view value)
     {
-        impl_->insert(name, value);
+        impl_->base().insert(name, value);
     }
 
     void
     request::insert(std::string_view name, std::string_view value)
     {
-        impl_->insert(name, value);
+        impl_->base().insert(name, value);
     }
 
     void
     request::set(http::field name, std::string_view value)
     {
-        impl_->set(name, value);
+        impl_->base().set(name, value);
     }
 
     void
     request::set(std::string_view name, std::string_view value)
     {
-        impl_->set(name, value);
+        impl_->base().set(name, value);
     }
 
     void
     request::erase(http::field name)
     {
-        impl_->erase(name);
+        impl_->base().erase(name);
     }
 
     void

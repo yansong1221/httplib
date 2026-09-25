@@ -28,81 +28,81 @@ namespace httplib::server
     void
     response::set(http::field name, std::string_view value)
     {
-        impl_->set(name, value);
+        impl_->base().set(name, value);
     }
 
     void
     response::set(std::string_view name, std::string_view value)
     {
-        impl_->set(name, value);
+        impl_->base().set(name, value);
     }
     void
     response::insert(http::field name, std::string_view value)
     {
-        impl_->insert(name, value);
+        impl_->base().insert(name, value);
     }
     void
     response::insert(std::string_view name, std::string_view value)
     {
-        impl_->insert(name, value);
+        impl_->base().insert(name, value);
     }
     std::string_view
     response::operator[](http::field name) const
     {
-        return (*impl_)[name];
+        return (*impl_).base()[name];
     }
 
     std::string_view
     response::operator[](std::string_view name) const
     {
-        return (*impl_)[name];
+        return (*impl_).base()[name];
     }
 
     std::string_view
     response::at(http::field name) const
     {
-        return impl_->at(name);
+        return impl_->base().at(name);
     }
 
     std::string_view
     response::at(std::string_view name) const
     {
-        return impl_->at(name);
+        return impl_->base().at(name);
     }
 
     bool
     response::has(http::field name) const
     {
-        return impl_->find(name) != impl_->end();
+        return impl_->base().find(name) != impl_->base().end();
     }
 
     bool
     response::has(std::string_view name) const
     {
-        return impl_->find(name) != impl_->end();
+        return impl_->base().find(name) != impl_->base().end();
     }
 
     void
     response::erase(http::field name)
     {
-        impl_->erase(name);
+        impl_->base().erase(name);
     }
 
     void
     response::erase(std::string_view name)
     {
-        impl_->erase(name);
+        impl_->base().erase(name);
     }
 
     httplib::http::status
     response::result() const
     {
-        return impl_->result();
+        return impl_->base().result();
     }
     unsigned
     response::result_int() const
     {
-        return impl_->result_int();
+        return impl_->base().result_int();
     }
 
     void

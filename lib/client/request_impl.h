@@ -13,9 +13,9 @@ namespace httplib::client
 
         impl(http::verb method, std::string_view target, unsigned version) : body_writer_t()
         {
-            this->method(method);
-            this->target(target);
-            this->version(version);
+            this->base().method(method);
+            this->base().target(target);
+            this->base().version(version);
         }
     };
 } // namespace httplib::client

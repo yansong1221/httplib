@@ -90,8 +90,8 @@ TEST_CASE("body_writer: exposes its serializer for external changes", "[body_pip
     using writer_t = httplib::detail::body_writer<false, task>;
 
     writer_t writer;
-    writer.result(httplib::http::status::ok);
-    writer.version(11);
+    writer.base().result(httplib::http::status::ok);
+    writer.base().version(11);
     writer.content_length(0);
 
     auto& serializer = writer.serializer();
@@ -99,7 +99,7 @@ TEST_CASE("body_writer: exposes its serializer for external changes", "[body_pip
     serializer.limit(1024);
 
     REQUIRE(&writer.serializer() == &serializer);
-    REQUIRE(&serializer.get() == static_cast<writer_t::message_t const*>(&writer));
+    REQUIRE(&serializer.get() == &writer.message());
     REQUIRE(serializer.split());
     REQUIRE(serializer.limit() == 1024);
 }

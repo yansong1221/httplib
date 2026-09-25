@@ -143,7 +143,7 @@ namespace httplib::client
         {
             co_return ec;
         }
-        co_return co_await read_response_lazy(req.method());
+        co_return co_await read_response_lazy(req.base().method());
     }
     net::awaitable<httplib::client::http_client::response_result>
     http_client::impl::read_response_lazy(http::verb method)
@@ -201,7 +201,7 @@ namespace httplib::client
                     co_return result;
                 }
 
-                get_logger()->trace("redirect {} -> {}", req_msg.target(), std::string_view(loc));
+                get_logger()->trace("redirect {} -> {}", req_msg.base().target(), std::string_view(loc));
 
                 // 读完并丢弃 redirect 响应的 body，保证连接可复用
                 if (auto drain_result = co_await resp.read_string(); drain_result.has_error())
@@ -229,7 +229,7 @@ namespace httplib::client
                         // CL-02: 跨 origin 重定向时移除 origin-bound 敏感头，避免认证凭据泄露到新主机
                         redirect::strip_origin_bound_headers(req_msg.base());
 
-                        req_msg.target(new_target);
+                        req_msg.base().target(new_target);
 
                         auto new_impl = std::make_shared<impl>(strand_.get_inner_executor(),
                                                                new_host,
@@ -248,21 +248,21 @@ namespace httplib::client
                 {
                     // 相对 Location：按 RFC 3986 针对当前 target 解析，兼容
                     // "final"、"../a/b"、"?q=1" 等形式。
-                    target = url::resolve(req_msg.target(), loc);
+                    target = url::resolve(req_msg.base().target(), loc);
                 }
 
                 if (s == http::status::see_other
                     || ((s == http::status::moved_permanently || s == http::status::found)
-                        && req_msg.method() != http::verb::head))
+                        && req_msg.base().method() != http::verb::head))
                 {
-                    req_msg.method(http::verb::get);
+                    req_msg.base().method(http::verb::get);
                     req.reset();
-                    req_msg.erase(http::field::content_type);
-                    req_msg.erase(http::field::content_length);
+                    req_msg.base().erase(http::field::content_type);
+                    req_msg.base().erase(http::field::content_length);
                     req_msg.content_length(0);
                 }
 
-                req_msg.target(std::move(target));
+                req_msg.base().target(std::move(target));
 
                 continue;
             }
@@ -329,7 +329,7 @@ namespace httplib::client
     void
     http_client::impl::prepare_request(request::impl& req)
     {
-        auto& msg = req;
+        auto& msg = req.base();
         if (msg.find(http::field::host) == msg.end())
         {
             msg.set(http::field::host, host_value_);
@@ -353,8 +353,13 @@ namespace httplib::client
             if (!content_encoding.empty()
                 && compress::compressor_factory::instance().is_transform_encoding(content_encoding))
             {
-                req.apply_encoding(content_encoding);
-                msg.chunked(true);
+                auto source = req.take_source();
+                if (!source)
+                {
+                    source = std::make_unique<body::empty_source>();
+                }
+                req.set_source(std::make_unique<body::encoded_source>(std::move(source), content_encoding));
+                req.chunked(true);
             }
         }
     }

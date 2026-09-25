@@ -51,15 +51,15 @@ namespace httplib::client
 
             this->reset();
             this->base().clear();
-            this->method(method);
-            this->target(target);
-            this->version(11);
-            this->set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
+            this->base().method(method);
+            this->base().target(target);
+            this->base().version(11);
+            this->base().set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
             for (auto const& f : headers)
             {
-                this->set(f.name_string(), f.value());
+                this->base().set(f.name_string(), f.value());
             }
-            this->set(http::field::host, parent_->host_value_);
+            this->base().set(http::field::host, parent_->host_value_);
             this->keep_alive(true);
             auto writer_mode
                 = m == mode::chunked ? body_writer_t::stream_mode::chunked : body_writer_t::stream_mode::relay;
@@ -95,7 +95,7 @@ namespace httplib::client
             {
                 co_return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
             }
-            co_return co_await parent_->read_response_lazy(this->method());
+            co_return co_await parent_->read_response_lazy(this->base().method());
         }
 
         net::awaitable<boost::system::result<client::response>>

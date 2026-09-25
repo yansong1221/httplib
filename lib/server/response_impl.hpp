@@ -45,10 +45,10 @@ namespace httplib::server
             : body_writer_t(task.get(), task ? task->executor() : net::any_io_executor {})
             , task_(std::move(task))
         {
-            this->result(http::status::not_found);
-            this->version(version);
-            this->set(http::field::server, BOOST_BEAST_VERSION_STRING);
-            this->set(http::field::date, detail::get_current_gmt_date());
+            this->base().result(http::status::not_found);
+            this->base().version(version);
+            this->base().set(http::field::server, BOOST_BEAST_VERSION_STRING);
+            this->base().set(http::field::date, detail::get_current_gmt_date());
             this->keep_alive(keep_alive);
         }
 
@@ -56,7 +56,7 @@ namespace httplib::server
         set_empty_content(http::status status)
         {
             this->set_empty();
-            this->result(status);
+            this->base().result(status);
             this->content_length(0);
         }
 
@@ -73,7 +73,7 @@ namespace httplib::server
 </html>)",
                 (int)status,
                 http::obsolete_reason(status),
-                this->at(http::field::server));
+                this->base().at(http::field::server));
 
             set_string_content(std::move(content), "text/html; charset=utf-8", status);
         }
@@ -87,7 +87,7 @@ namespace httplib::server
         set_string_content(std::string&& data, std::string_view content_type, http::status status = http::status::ok)
         {
             this->set_string(std::move(data), content_type);
-            this->result(status);
+            this->base().result(status);
         }
 
         void
@@ -99,7 +99,7 @@ namespace httplib::server
         set_json_content(boost::json::value&& data, http::status status = http::status::ok)
         {
             this->set_json(std::move(data), "application/json; charset=utf-8", true);
-            this->result(status);
+            this->base().result(status);
         }
 
         void
@@ -123,7 +123,7 @@ namespace httplib::server
             html::http_ranges ranges;
             if (!ranges.parse(req_header[http::field::range], file_size))
             {
-                this->set(http::field::content_range, fmt::format("bytes */{}", file_size));
+                this->base().set(http::field::content_range, fmt::format("bytes */{}", file_size));
                 set_empty_content(http::status::range_not_satisfiable);
                 return;
             }
@@ -153,30 +153,30 @@ namespace httplib::server
                 return;
             }
 
-            this->set(http::field::etag, file_etag_str);
-            this->set(http::field::last_modified, file_gmt_date_str);
+            this->base().set(http::field::etag, file_etag_str);
+            this->base().set(http::field::last_modified, file_gmt_date_str);
 
             if (ranges.empty())
             {
-                this->set(http::field::accept_ranges, "bytes");
-                this->set(http::field::content_type, content_type);
-                this->result(http::status::ok);
+                this->base().set(http::field::accept_ranges, "bytes");
+                this->base().set(http::field::content_type, content_type);
+                this->base().result(http::status::ok);
                 this->content_length(file_size);
             }
             else if (ranges.size() == 1)
             {
                 auto const& range = ranges.front();
                 size_t part_size = range.second + 1 - range.first;
-                this->set(http::field::content_range,
-                          fmt::format("bytes {}-{}/{}", range.first, range.second, file_size));
-                this->set(http::field::content_type, content_type);
-                this->result(http::status::partial_content);
+                this->base().set(http::field::content_range,
+                                 fmt::format("bytes {}-{}/{}", range.first, range.second, file_size));
+                this->base().set(http::field::content_type, content_type);
+                this->base().result(http::status::partial_content);
                 this->content_length(part_size);
             }
             else
             {
-                this->set(http::field::content_type, fmt::format("multipart/byteranges; boundary={}", boundary));
-                this->result(http::status::partial_content);
+                this->base().set(http::field::content_type, fmt::format("multipart/byteranges; boundary={}", boundary));
+                this->base().result(http::status::partial_content);
             }
             this->set_file(std::move(file_source));
         }
@@ -188,13 +188,13 @@ namespace httplib::server
             value.boundary = html::generate_boundary();
             value.fields = std::move(data);
             this->set_form_data(std::move(value));
-            this->result(http::status::ok);
+            this->base().result(http::status::ok);
         }
 
         void
         set_redirect(std::string_view url, http::status status = http::status::moved_permanently)
         {
-            this->set(http::field::location, url);
+            this->base().set(http::field::location, url);
             set_empty_content(status);
         }
 
@@ -202,13 +202,6 @@ namespace httplib::server
         reset_content()
         {
             this->reset();
-        }
-
-        /// 按 Content-Encoding 在现有 source 上叠加编码（压缩）。
-        void
-        apply_encoding(std::string_view encoding)
-        {
-            body_writer_t::apply_encoding(encoding);
         }
 
         body::source*

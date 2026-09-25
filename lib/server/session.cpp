@@ -1,4 +1,5 @@
 #include "session.hpp"
+#include "body/source.hpp"
 #include "compress/compressor.hpp"
 #include "html/accept_content.hpp"
 #include "httplib/server/response.hpp"
@@ -428,7 +429,12 @@ namespace httplib::server
                         (*server_impl_).should_compress_content_type(content_type))
                     {
                         resp.set(http::field::content_encoding, encoding);
-                        writer.apply_encoding(encoding);
+                        auto source = writer.take_source();
+                        if (!source)
+                        {
+                            source = std::make_unique<body::empty_source>();
+                        }
+                        writer.set_source(std::make_unique<body::encoded_source>(std::move(source), encoding));
                         writer.chunked(true);
                     }
                 }
@@ -509,11 +515,11 @@ namespace httplib::server
         }
 
         auto resp = response::impl::create(get_impl(req_).get().version(), get_impl(req_).get().keep_alive(), nullptr);
-        get_impl(resp).reason("Connection Established");
-        get_impl(resp).result(http::status::ok);
+        get_impl(resp).base().reason("Connection Established");
+        get_impl(resp).base().result(http::status::ok);
         get_impl(resp).content_length(0);
         httplib::detail::body_writer<false, http_proxy_task> writer(this, stream_.get_executor());
-        static_cast<http::message<false, http::buffer_body>&>(writer) = get_impl(resp);
+        writer.base() = get_impl(resp).base();
         writer.set_empty();
         ec = co_await writer.write_message();
         if (ec)
