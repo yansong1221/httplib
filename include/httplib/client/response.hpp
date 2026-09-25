@@ -1,4 +1,5 @@
 #pragma once
+#include "httplib/body_type.hpp"
 #include "httplib/client/stream_reader.hpp"
 #include "httplib/config.hpp"
 #include "httplib/html/form_data.hpp"
@@ -43,6 +44,9 @@ namespace httplib::client
         boost::json::value const& as_json() const;
         html::form_data const& as_form_data() const;
         html::query_params const& as_query_params() const;
+
+        /// 已物化 body 的类型（未读取时为 body_type::none）。
+        body_type type() const;
 
         // ---- 未读完 body（lazy）：异步读取 ----
         net::awaitable<boost::system::result<std::string>> read_string();

@@ -190,40 +190,10 @@ namespace httplib::client
         return impl_->payload().as_query_params();
     }
 
-    bool
-    request::is_empty() const
+    body_type
+    request::type() const
     {
-        return impl_->payload().is_empty();
-    }
-
-    bool
-    request::is_string() const
-    {
-        return impl_->payload().type() == body::body_state::kind::string;
-    }
-
-    bool
-    request::is_json() const
-    {
-        return impl_->payload().type() == body::body_state::kind::json;
-    }
-
-    bool
-    request::is_form_data() const
-    {
-        return impl_->payload().type() == body::body_state::kind::form_data;
-    }
-
-    bool
-    request::is_query_params() const
-    {
-        return impl_->payload().type() == body::body_state::kind::query_params;
-    }
-
-    bool
-    request::is_file() const
-    {
-        return impl_->payload().type() == body::body_state::kind::file;
+        return impl_->payload().type();
     }
 
     void

@@ -1,9 +1,11 @@
 #pragma once
+#include "httplib/body_type.hpp"
 #include "httplib/config.hpp"
 #include "httplib/html/form_data.hpp"
 #include "httplib/html/query_params.hpp"
 #include <boost/json/value.hpp>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -31,47 +33,71 @@ namespace httplib::body
         公共 API 以 `as_*` / `take_*` 取回。
     */
     using body_variant = std::variant<
-        none_tag, // 0: 尚未读取
-        empty_tag, // 1: 显式空
-        std::string, // 2: string
-        boost::json::value, // 3: json
-        html::query_params, // 4: query_params
-        html::form_data, // 5: form_data
-        file_tag>; // 6: file 标记
+        none_tag, // 尚未读取
+        empty_tag, // 显式空
+        std::string, // string
+        boost::json::value, // json
+        html::query_params, // query_params
+        html::form_data, // form_data
+        file_tag>; // file 标记
 
     /** 方向无关的读取结果（server request / client request / client response 共用）。
     */
     class body_state
     {
       public:
-        /// 与 @ref body_variant 分支下标一一对应。
-        enum class kind
-        {
-            none,
-            empty,
-            string,
-            json,
-            query_params,
-            form_data,
-            file,
-        };
+        using kind = httplib::body_type;
 
         bool
         has() const
         {
-            return state_.index() != static_cast<std::size_t>(kind::none);
+            return type() != kind::none;
         }
 
+        /// 由 variant 当前分支映射得到，不依赖分支声明顺序。
         kind
         type() const
         {
-            return static_cast<kind>(state_.index());
+            return std::visit(
+                [](auto const& value) -> kind
+                {
+                    using T = std::decay_t<decltype(value)>;
+                    if constexpr (std::is_same_v<T, none_tag>)
+                    {
+                        return kind::none;
+                    }
+                    else if constexpr (std::is_same_v<T, empty_tag>)
+                    {
+                        return kind::empty;
+                    }
+                    else if constexpr (std::is_same_v<T, std::string>)
+                    {
+                        return kind::string;
+                    }
+                    else if constexpr (std::is_same_v<T, boost::json::value>)
+                    {
+                        return kind::json;
+                    }
+                    else if constexpr (std::is_same_v<T, html::query_params>)
+                    {
+                        return kind::query_params;
+                    }
+                    else if constexpr (std::is_same_v<T, html::form_data>)
+                    {
+                        return kind::form_data;
+                    }
+                    else
+                    {
+                        return kind::file;
+                    }
+                },
+                state_);
         }
 
         bool
         is_empty() const
         {
-            return state_.index() == static_cast<std::size_t>(kind::empty);
+            return type() == kind::empty;
         }
 
         std::string const&
@@ -167,7 +193,4 @@ namespace httplib::body
       private:
         body_variant state_;
     };
-
-    static_assert(static_cast<std::size_t>(body_state::kind::none) == 0);
-    static_assert(static_cast<std::size_t>(body_state::kind::file) == 6);
 } // namespace httplib::body

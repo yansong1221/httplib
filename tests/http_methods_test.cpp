@@ -1317,7 +1317,7 @@ TEST_CASE("Body: empty_body on empty POST request", "[http-methods]")
                 "/empty-post",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    REQUIRE(req.is_empty());
+                    REQUIRE(req.type() == httplib::body_type::empty);
                     set_text(resp, "empty-ok"sv);
                 });
         },

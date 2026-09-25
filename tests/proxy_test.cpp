@@ -31,7 +31,7 @@ namespace
     std::string
     as_string(httplib::server::request& req)
     {
-        if (req.is_empty())
+        if (req.type() == httplib::body_type::empty)
         {
             return {};
         }

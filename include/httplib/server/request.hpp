@@ -1,4 +1,5 @@
 #pragma once
+#include "httplib/body_type.hpp"
 #include "httplib/config.hpp"
 #include "httplib/html/form_data.hpp"
 #include "httplib/html/query_params.hpp"
@@ -65,11 +66,7 @@ namespace httplib::server
         html::form_data const& as_form_data() const;
         html::query_params const& as_query_params() const;
 
-        bool is_empty() const;
-        bool is_string() const;
-        bool is_json() const;
-        bool is_form_data() const;
-        bool is_query_params() const;
+        body_type type() const;
 
         // ---- 未读完 body（lazy）：异步读取 ----
         // 读取剩余 body 并按指定类型物化后移动返回（不拷贝，request 不再持有该 body）；

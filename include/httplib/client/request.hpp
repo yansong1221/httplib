@@ -1,4 +1,5 @@
 #pragma once
+#include "httplib/body_type.hpp"
 #include "httplib/config.hpp"
 #include "httplib/html/form_data.hpp"
 #include "httplib/html/query_params.hpp"
@@ -55,12 +56,7 @@ namespace httplib::client
         html::form_data const& as_form_data() const;
         html::query_params const& as_query_params() const;
 
-        bool is_empty() const;
-        bool is_string() const;
-        bool is_json() const;
-        bool is_form_data() const;
-        bool is_query_params() const;
-        bool is_file() const;
+        body_type type() const;
 
         void content_length(std::uint64_t n);
         bool keep_alive() const;

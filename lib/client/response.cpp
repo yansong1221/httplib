@@ -96,6 +96,12 @@ namespace httplib::client
         return impl_->reader().state().as_query_params();
     }
 
+    body_type
+    response::type() const
+    {
+        return impl_->reader().state().type();
+    }
+
     std::unique_ptr<sse_reader>
     response::create_sse_reader()
     {

@@ -156,34 +156,10 @@ namespace httplib::server
         return impl_->reader().state().as_query_params();
     }
 
-    bool
-    request::is_empty() const
+    body_type
+    request::type() const
     {
-        return impl_->reader().state().is_empty();
-    }
-
-    bool
-    request::is_string() const
-    {
-        return impl_->reader().state().type() == body::body_state::kind::string;
-    }
-
-    bool
-    request::is_json() const
-    {
-        return impl_->reader().state().type() == body::body_state::kind::json;
-    }
-
-    bool
-    request::is_form_data() const
-    {
-        return impl_->reader().state().type() == body::body_state::kind::form_data;
-    }
-
-    bool
-    request::is_query_params() const
-    {
-        return impl_->reader().state().type() == body::body_state::kind::query_params;
+        return impl_->reader().state().type();
     }
 
     net::awaitable<std::string>
