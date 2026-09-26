@@ -59,13 +59,22 @@ namespace httplib::detail
             /// 自身流式输出（chunked）。
             chunked,
         };
-
-        explicit body_writer(Task* task = nullptr, net::any_io_executor ex = {}) : task_(task), executor_(std::move(ex))
-        {
-        }
-
+        body_writer() = default;
         body_writer(body_writer const&) = delete;
         body_writer& operator=(body_writer const&) = delete;
+
+        void
+        merge(http::fields const& fields)
+        {
+            for (auto const& h : fields)
+            {
+                msg_.erase(h.name_string());
+            }
+            for (auto const& h : fields)
+            {
+                msg_.insert(h.name_string(), h.value());
+            }
+        }
 
         /// 发送前绑定连接写入端（client 的 request 在 send 时才拿到 http_client::impl）。
         void

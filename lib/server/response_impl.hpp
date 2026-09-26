@@ -41,10 +41,10 @@ namespace httplib::server
       public:
         using body_writer_t = httplib::detail::body_writer<false, session::http_task>;
 
-        impl(unsigned int version, bool keep_alive, std::shared_ptr<session::http_task> task)
-            : body_writer_t(task.get(), task ? task->executor() : net::any_io_executor {})
-            , task_(std::move(task))
+        impl(unsigned int version, bool keep_alive, std::shared_ptr<session::http_task> task) : task_(std::move(task))
         {
+            attach(task_.get(), task_ ? task_->executor() : net::any_io_executor {});
+
             this->base().result(http::status::not_found);
             this->base().version(version);
             this->base().set(http::field::server, BOOST_BEAST_VERSION_STRING);

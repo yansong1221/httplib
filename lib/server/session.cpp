@@ -518,7 +518,8 @@ namespace httplib::server
         get_impl(resp).base().reason("Connection Established");
         get_impl(resp).base().result(http::status::ok);
         get_impl(resp).content_length(0);
-        httplib::detail::body_writer<false, http_proxy_task> writer(this, stream_.get_executor());
+        httplib::detail::body_writer<false, http_proxy_task> writer;
+        writer.attach(this, stream_.get_executor());
         writer.base() = get_impl(resp).base();
         writer.set_empty();
         ec = co_await writer.write_message();

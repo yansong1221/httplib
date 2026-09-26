@@ -22,9 +22,9 @@ namespace httplib::client
         using body_writer_t = httplib::detail::body_writer<true, http_client::impl>;
 
         explicit lazy_request_impl(net::any_io_executor ex, std::shared_ptr<http_client::impl> parent)
-            : body_writer_t(parent.get(), std::move(ex))
-            , parent_(std::move(parent))
+            :parent_(std::move(parent))
         {
+            attach(parent_.get(), std::move(ex));
         }
         net::awaitable<void>
         write_header(http::verb method, std::string_view target, http::fields const& headers, mode m) override

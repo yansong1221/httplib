@@ -150,14 +150,7 @@ namespace httplib::client
     void
     request::merge(http::fields const& fields)
     {
-        for (auto const& h : fields)
-        {
-            erase(h.name_string());
-        }
-        for (auto const& h : fields)
-        {
-            insert(h.name_string(), h.value());
-        }
+        impl_->merge(fields);
     }
     http::fields const&
     request::base() const
