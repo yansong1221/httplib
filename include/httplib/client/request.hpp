@@ -17,11 +17,11 @@ namespace httplib::client
     class HTTPLIB_API request
     {
       public:
-        request(http::verb method, std::string_view target, http::fields const& headers = http::fields());
+        request(http::verb method, std::string_view target, http::fields const& headers = {});
         request(http::verb method,
                 std::string_view path,
                 httplib::query_params const& params,
-                http::fields const& headers = http::fields());
+                http::fields const& headers = {});
 
         request(request&&) noexcept;
         request& operator=(request&&) noexcept;
@@ -47,6 +47,8 @@ namespace httplib::client
         void erase(std::string_view name);
         bool has(http::field name) const;
         bool has(std::string_view name) const;
+
+        void merge(http::fields const& fields);
 
         http::fields& base();
         http::fields const& base() const;

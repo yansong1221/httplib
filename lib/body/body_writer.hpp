@@ -128,14 +128,12 @@ namespace httplib::detail
         }
 
         void
-        set_json(boost::json::value data, std::string_view content_type, bool no_store = false)
+        set_json(boost::json::value data)
         {
             reset();
-            msg_.set(http::field::content_type, content_type);
-            if (no_store)
-            {
-                msg_.set(http::field::cache_control, "no-store");
-            }
+            msg_.set(http::field::content_type, "application/json; charset=utf-8");
+            msg_.set(http::field::cache_control, "no-store");
+
             payload_.set<boost::json::value>(std::move(data));
             source_ = std::make_unique<body::json_source>(payload_.as<boost::json::value>());
         }

@@ -582,49 +582,56 @@ namespace httplib::client
     net::awaitable<http_client::response_result>
     http_client::async_get(std::string_view path, httplib::query_params const& params, http::fields const& headers)
     {
-        request req(http::verb::get, path, params, headers);
+        request req(http::verb::get, path, params);
+        req.merge(headers);
         co_return co_await async_send_request(req);
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_head(std::string_view path, httplib::query_params const& params, http::fields const& headers)
     {
-        request req(http::verb::head, path, params, headers);
+        request req(http::verb::head, path, params);
+        req.merge(headers);
         co_return co_await async_send_request(req);
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_post(std::string_view path, httplib::query_params const& params, http::fields const& headers)
     {
-        request req(http::verb::post, path, params, headers);
+        request req(http::verb::post, path, params);
+        req.merge(headers);
         co_return co_await async_send_request(req);
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_put(std::string_view path, httplib::query_params const& params, http::fields const& headers)
     {
-        request req(http::verb::put, path, params, headers);
+        request req(http::verb::put, path, params);
+        req.merge(headers);
         co_return co_await async_send_request(req);
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_patch(std::string_view path, httplib::query_params const& params, http::fields const& headers)
     {
-        request req(http::verb::patch, path, params, headers);
+        request req(http::verb::patch, path, params);
+        req.merge(headers);
         co_return co_await async_send_request(req);
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_del(std::string_view path, httplib::query_params const& params, http::fields const& headers)
     {
-        request req(http::verb::delete_, path, params, headers);
+        request req(http::verb::delete_, path, params);
+        req.merge(headers);
         co_return co_await async_send_request(req);
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_options(std::string_view path, httplib::query_params const& params, http::fields const& headers)
     {
-        request req(http::verb::options, path, params, headers);
+        request req(http::verb::options, path, params);
+        req.merge(headers);
         co_return co_await async_send_request(req);
     }
 
@@ -639,7 +646,8 @@ namespace httplib::client
                             httplib::query_params const& params,
                             http::fields const& headers)
     {
-        auto req = request(http::verb::post, path, params, headers);
+        auto req = request(http::verb::post, path, params);
+        req.merge(headers);
         req.set_body(body, content_type);
         co_return co_await async_send_request(req);
     }
@@ -650,7 +658,8 @@ namespace httplib::client
                             httplib::query_params const& params,
                             http::fields const& headers)
     {
-        auto req = request(http::verb::post, path, params, headers);
+        auto req = request(http::verb::post, path, params);
+        req.merge(headers);
         req.set_body(std::move(body));
         co_return co_await async_send_request(req);
     }
@@ -662,7 +671,8 @@ namespace httplib::client
                            httplib::query_params const& params,
                            http::fields const& headers)
     {
-        auto req = request(http::verb::put, path, params, headers);
+        auto req = request(http::verb::put, path, params);
+        req.merge(headers);
         req.set_body(body, content_type);
         co_return co_await async_send_request(req);
     }
@@ -673,7 +683,8 @@ namespace httplib::client
                            httplib::query_params const& params,
                            http::fields const& headers)
     {
-        auto req = request(http::verb::put, path, params, headers);
+        auto req = request(http::verb::put, path, params);
+        req.merge(headers);
         req.set_body(std::move(body));
         co_return co_await async_send_request(req);
     }
@@ -685,7 +696,8 @@ namespace httplib::client
                              httplib::query_params const& params,
                              http::fields const& headers)
     {
-        auto req = request(http::verb::patch, path, params, headers);
+        auto req = request(http::verb::patch, path, params);
+        req.merge(headers);
         req.set_body(body, content_type);
         co_return co_await async_send_request(req);
     }
@@ -696,7 +708,8 @@ namespace httplib::client
                              httplib::query_params const& params,
                              http::fields const& headers)
     {
-        auto req = request(http::verb::patch, path, params, headers);
+        auto req = request(http::verb::patch, path, params);
+        req.merge(headers);
         req.set_body(std::move(body));
         co_return co_await async_send_request(req);
     }
@@ -711,7 +724,9 @@ namespace httplib::client
                                 fs::path const& save_path,
                                 http::fields const& headers)
     {
-        auto req = request(method, path, headers);
+        auto req = request(method, path);
+        req.merge(headers);
+
         auto result = co_await impl_->async_send_request_lazy_with_redirect(get_impl(req));
         if (result.has_error())
         {

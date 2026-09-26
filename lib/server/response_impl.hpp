@@ -98,7 +98,7 @@ namespace httplib::server
         void
         set_json_content(boost::json::value&& data, http::status status = http::status::ok)
         {
-            this->set_json(std::move(data), "application/json; charset=utf-8", true);
+            this->set_json(std::move(data));
             this->base().result(status);
         }
 

@@ -27,22 +27,9 @@ namespace httplib::client
     } // namespace detail
 
     request::request(http::verb method, std::string_view target, http::fields const& headers)
-        : impl_(std::make_shared<impl>(method, target, 11))
+        : impl_(std::make_shared<impl>(method, target))
     {
-        impl_->base().set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
-        impl_->base().set(http::field::accept, "*/*");
-
-        auto const& encoding = compress::compressor_factory::instance().supported_encoding();
-        if (!encoding.empty())
-        {
-            impl_->base().set(http::field::accept_encoding, boost::join(encoding, ","));
-        }
-
-        for (auto const& field : headers)
-        {
-            impl_->base().set(field.name_string(), field.value());
-        }
-        impl_->keep_alive(true);
+        merge(headers);
     }
 
     request::request(request&&) noexcept = default;
@@ -54,9 +41,10 @@ namespace httplib::client
     request::request(http::verb method,
                      std::string_view path,
                      httplib::query_params const& params,
-                     http::fields const& headers /*= http::fields()*/)
-        : request(method, detail::make_target(path, params), headers)
+                     http::fields const& headers)
+        : request(method, detail::make_target(path, params))
     {
+        merge(headers);
     }
 
     http::verb
@@ -159,7 +147,18 @@ namespace httplib::client
     {
         return impl_->base();
     }
-
+    void
+    request::merge(http::fields const& fields)
+    {
+        for (auto const& h : fields)
+        {
+            erase(h.name_string());
+        }
+        for (auto const& h : fields)
+        {
+            insert(h.name_string(), h.value());
+        }
+    }
     http::fields const&
     request::base() const
     {
@@ -229,7 +228,7 @@ namespace httplib::client
     void
     request::set_body(boost::json::value&& data)
     {
-        impl_->set_json(std::move(data), "application/json");
+        impl_->set_json(std::move(data));
         impl_->prepare_payload();
     }
 

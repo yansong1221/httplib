@@ -874,7 +874,9 @@ namespace httplib::client
             handle->set_verify_ssl(active_config_.verify_ssl);
             handle->set_download_rate_limit(per_connection_rate_);
 
-            auto req = httplib::client::request(method, t, merged);
+            auto req = httplib::client::request(method, t);
+            req.merge(merged);
+
             auto resp_result = co_await handle->async_send_request(req, http_client::body_mode::lazy);
             if (!resp_result.has_value())
             {
