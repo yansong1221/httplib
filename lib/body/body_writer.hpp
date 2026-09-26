@@ -1,6 +1,8 @@
 #pragma once
 #include "body/body_state.hpp"
+#include "body/codec.hpp"
 #include "body/source.hpp"
+#include "compress/compressor.hpp"
 #include "httplib/config.hpp"
 #include "httplib/form_data.hpp"
 #include "httplib/query_params.hpp"
@@ -29,19 +31,23 @@ namespace httplib::detail
             / set_empty / reset；
           - 分帧：prepare_payload / chunked；
           - 整消息写：write_message()（source_ 驱动序列化器）；
-          - 流式写：begin_stream(mode) + write_some(data, more)。
+          - 流式写：begin_stream() + write_some(data, more) / write_raw(data, more)。
 
         业务数据写入本对象的 @ref payload_，source_ 引用它产出字节。HTTP message 由本对象
         以成员 @ref msg_ 自持；对外只暴露 @ref base()（start-line + headers，即 Beast 的
         header_type），body 与 serializer 状态保持私有。
 
-        Content-Encoding 的协商与压缩由发送准备层决定，本对象只负责原始字节的序列化与落地。
+        所有 body 字节最终收口于两个写原语：
+          - @ref write_raw_locked：无条件原样发送明文块；
+          - @ref write_compressed_locked：按 message 配置的 Content-Encoding 自动压缩后再由
+            raw 落地，无转换编码时退化为 raw。
+        配置了转换编码时字节长度在压缩后才确定，@ref prepare_payload 自动改用 chunked 分帧。
+        分帧与 raw/压缩路线的选择属调用方业务，本对象不感知 relay / chunked 等语义。
 
-        数据落地由构造期/attach 注入的 Task 提供（方向仅由 IsRequest 决定）：
+        数据落地由 attach 注入的 Task 提供（方向仅由 IsRequest 决定）：
 
             task->write_header(serializer, ec);   // 只写头
-            task->write_some(serializer, ec);     // 单步写（整消息驱动用）
-            task->write(serializer, ec);          // 写到 need_buffer/完成（流式块用）
+            task->write(serializer, ec);          // 驱动到 need_buffer/完成
     */
     template <bool IsRequest, typename Task>
     class body_writer
@@ -52,13 +58,6 @@ namespace httplib::detail
         using header_type = typename message_t::header_type;
         using state_t = httplib::body::body_state;
 
-        enum class stream_mode
-        {
-            /// 透传原始字节，不做二次压缩（反向代理）。
-            relay,
-            /// 自身流式输出（chunked）。
-            chunked,
-        };
         body_writer() = default;
         body_writer(body_writer const&) = delete;
         body_writer& operator=(body_writer const&) = delete;
@@ -77,12 +76,12 @@ namespace httplib::detail
         }
 
         /// 发送前绑定连接写入端（client 的 request 在 send 时才拿到 http_client::impl）。
+        /// 同时用连接 executor 立即构造写锁：锁必须在任何并发写之前就绪，避免惰性初始化的竞态。
         void
         attach(Task* task, net::any_io_executor ex)
         {
             task_ = task;
-            executor_ = std::move(ex);
-            write_mutex_.reset();
+            write_mutex_ = std::make_unique<util::async_mutex>(std::move(ex));
         }
 
         // ---- header / message 元数据访问（body 保持私有） ----
@@ -188,6 +187,7 @@ namespace httplib::detail
             source_.reset();
             payload_.reset();
             msg_.body() = http::buffer_body::value_type {};
+            encoder_.reset();
         }
 
         // ---- 分帧 ----
@@ -196,6 +196,16 @@ namespace httplib::detail
         void
         prepare_payload()
         {
+            // 转换编码（gzip/br/...）会改写字节长度，明文 Content-Length 不再成立，
+            // 统一退化为 chunked 分帧。
+            if (!msg_[http::field::content_encoding].empty() && source_)
+            {
+                msg_.erase(http::field::content_length);
+                msg_.body() = http::buffer_body::value_type {};
+                msg_.chunked(true);
+                return;
+            }
+
             if (msg_.has_content_length())
             {
                 return;
@@ -288,6 +298,7 @@ namespace httplib::detail
             if (sr_ && sr_->is_done())
             {
                 reset_serializer();
+                encoder_.reset();
             }
         }
 
@@ -319,17 +330,20 @@ namespace httplib::detail
 
         // ---- 流式写 ----
 
+        /// 写出 header 并进入流式写模式。分帧（chunked / content-length）由调用方在
+        /// @ref base() 上自行配置；本对象不感知 relay / chunked 等业务语义。
         net::awaitable<boost::system::error_code>
-        begin_stream(stream_mode mode)
+        begin_stream()
         {
             auto lock = co_await lock_write();
             if (!lock)
             {
                 co_return aborted();
             }
-            co_return co_await begin_stream_locked(mode);
+            co_return co_await begin_stream_locked();
         }
 
+        /// 流式写一块 body：按 Content-Encoding 自动压缩（无转换编码时退化为 raw）。
         net::awaitable<boost::system::error_code>
         write_some(net::const_buffer const& data, bool more)
         {
@@ -341,13 +355,29 @@ namespace httplib::detail
             co_return co_await write_some_locked(data, more);
         }
 
+        /// 流式写一块 body：无条件原样透传（relay 等调用方指定的直通场景）。
+        net::awaitable<boost::system::error_code>
+        write_raw(net::const_buffer const& data, bool more)
+        {
+            auto lock = co_await lock_write();
+            if (!lock)
+            {
+                co_return aborted();
+            }
+            if (!sr_ || !sr_->is_header_done() || sr_->is_done())
+            {
+                co_return invalid_argument();
+            }
+            co_return co_await write_raw_locked(data, more);
+        }
+
       private:
         net::awaitable<util::async_mutex::guard>
         lock_write()
         {
             if (!write_mutex_)
             {
-                write_mutex_ = std::make_unique<util::async_mutex>(executor_);
+                co_return util::async_mutex::guard {};
             }
             co_return co_await write_mutex_->lock();
         }
@@ -360,85 +390,59 @@ namespace httplib::detail
             {
                 co_return invalid_argument();
             }
+
+            prepare_payload();
             if (!sr_)
             {
                 sr_ = std::make_unique<serializer_t>(msg_);
             }
 
-            prepare_payload();
-            auto& sr = serializer();
-
-            bool refill = true;
-            while (!sr.is_done())
+            // 逐块拉取 source，经统一原语落地；source 读尽后以空 body + more=false 收尾
+            // （压缩时正是这一步冲刷编码器并写出 chunked 终止块）。
+            for (;;)
             {
-                if (refill)
+                body::source::chunk_t chunk;
+                if (source_)
                 {
-                    body::source::chunk_t chunk;
-                    if (source_)
+                    chunk = source_->next(ec);
+                    if (ec)
                     {
-                        chunk = source_->next(ec);
-                        if (ec)
-                        {
-                            co_return ec;
-                        }
-                    }
-                    if (chunk)
-                    {
-                        msg_.body().data = const_cast<void*>(chunk->first.data());
-                        msg_.body().size = chunk->first.size();
-                        msg_.body().more = chunk->second;
-                    }
-                    else
-                    {
-                        msg_.body().data = nullptr;
-                        msg_.body().size = 0;
-                        msg_.body().more = false;
+                        co_return ec;
                     }
                 }
 
-                co_await task_->write_some(sr, ec);
-                if (ec == http::error::need_buffer)
+                if (chunk)
                 {
-                    ec = {};
-                    refill = true;
+                    ec = co_await write_compressed_locked(chunk->first, chunk->second);
+                    if (ec)
+                    {
+                        co_return ec;
+                    }
+                    if (!chunk->second)
+                    {
+                        co_return boost::system::error_code {};
+                    }
+                    continue;
                 }
-                else if (ec)
-                {
-                    co_return ec;
-                }
-                else
-                {
-                    refill = false;
-                }
+
+                co_return co_await write_compressed_locked(net::const_buffer {}, false);
             }
-            ec = {};
-            co_return ec;
         }
 
         net::awaitable<boost::system::error_code>
-        begin_stream_locked(stream_mode mode)
+        begin_stream_locked()
         {
             boost::system::error_code ec;
             if (sr_ && sr_->is_header_done())
             {
                 co_return invalid_argument();
             }
-            if (!sr_)
-            {
-                sr_ = std::make_unique<serializer_t>(msg_);
-            }
 
-            if (mode == stream_mode::chunked)
-            {
-                msg_.body() = http::buffer_body::value_type {};
-                msg_.chunked(true);
-            }
-            else
-            {
-                reset();
-            }
+            // 只负责重置 body 与编码器状态；chunked / content-length 由调用方事先在 base() 上配置。
+            reset();
+            sr_ = std::make_unique<serializer_t>(msg_);
 
-            auto& sr = serializer();
+            auto& sr = *sr_;
             co_await task_->write_header(sr, ec);
             if (ec)
             {
@@ -450,21 +454,32 @@ namespace httplib::detail
         net::awaitable<boost::system::error_code>
         write_some_locked(net::const_buffer const& data, bool more)
         {
-            boost::system::error_code ec;
             if (!sr_ || !sr_->is_header_done() || sr_->is_done())
             {
                 co_return invalid_argument();
             }
+            co_return co_await write_compressed_locked(data, more);
+        }
 
+        /// 当前 message 是否配置了转换编码（gzip/br/...）；identity / 未设置时为否。
+        bool
+        transforms_encoding() const
+        {
+            auto encoding = msg_[http::field::content_encoding];
+            return !encoding.empty() && compress::compressor_factory::instance().is_transform_encoding(encoding);
+        }
+
+        // ---- body 写原语（所有 body 字节最终由这两个函数落到序列化器）----
+
+        /// 原始写：data 作为 body 字节直接交给序列化器，无条件不压缩（relay 透传 / identity）。
+        net::awaitable<boost::system::error_code>
+        write_raw_locked(net::const_buffer data, bool more)
+        {
             msg_.body().data = data.size() > 0 ? const_cast<void*>(data.data()) : nullptr;
             msg_.body().size = data.size();
             msg_.body().more = more;
-            co_return co_await write_serialized(ec);
-        }
 
-        net::awaitable<boost::system::error_code>
-        write_serialized(boost::system::error_code& ec)
-        {
+            boost::system::error_code ec;
             co_await task_->write(*sr_, ec);
             if (ec == http::error::need_buffer)
             {
@@ -475,6 +490,56 @@ namespace httplib::detail
                 msg_.keep_alive(false);
             }
             co_return ec;
+        }
+
+        /// 压缩写：按 message 配置的 Content-Encoding 自动压缩；非转换编码时退化为
+        /// @ref write_raw_locked。data 明文喂入编码器，产物经 raw 落地；`more == false`
+        /// 表示明文结束，冲刷编码器。编码器按需懒初始化。
+        net::awaitable<boost::system::error_code>
+        write_compressed_locked(net::const_buffer data, bool more)
+        {
+            if (!transforms_encoding())
+            {
+                co_return co_await write_raw_locked(data, more);
+            }
+
+            boost::system::error_code ec;
+            if (!encoder_)
+            {
+                encoder_ = std::make_unique<body::stream_encoder>();
+                encoder_->reset(msg_[http::field::content_encoding], ec);
+                if (ec)
+                {
+                    msg_.keep_alive(false);
+                    co_return ec;
+                }
+            }
+
+            // 上一轮产物已被写尽（flush_serializer_locked 驱动到消费完），可安全清理后喂入新明文。
+            encoder_->consume_all();
+            encoder_->feed(data, more, ec);
+            if (ec)
+            {
+                msg_.keep_alive(false);
+                co_return ec;
+            }
+            if (!more)
+            {
+                encoder_->flush(ec);
+                if (ec)
+                {
+                    msg_.keep_alive(false);
+                    co_return ec;
+                }
+            }
+
+            auto out = encoder_->buffer();
+            if (out.size() == 0 && more)
+            {
+                // 编码器仍在缓冲（尚未产出）：本轮无数据可发，等下一次 feed。
+                co_return boost::system::error_code {};
+            }
+            co_return co_await write_raw_locked(out, more);
         }
 
         static boost::system::error_code
@@ -491,12 +556,13 @@ namespace httplib::detail
 
         message_t msg_;
         Task* task_ = nullptr;
-        net::any_io_executor executor_;
         std::unique_ptr<util::async_mutex> write_mutex_;
 
         state_t payload_;
         body::source_ptr source_;
 
         std::unique_ptr<serializer_t> sr_;
+        /// Content-Encoding 编码器，按需懒初始化（仅在需要压缩时存在）。
+        std::unique_ptr<body::stream_encoder> encoder_;
     };
 } // namespace httplib::detail

@@ -61,9 +61,13 @@ namespace httplib::client
             }
             this->base().set(http::field::host, parent_->host_value_);
             this->keep_alive(true);
-            auto writer_mode
-                = m == mode::chunked ? body_writer_t::stream_mode::chunked : body_writer_t::stream_mode::relay;
-            ec = co_await this->begin_stream(writer_mode);
+            mode_ = m;
+            // chunked 自带分帧；relay 保留调用方配置的分帧。
+            if (m == mode::chunked)
+            {
+                this->chunked(true);
+            }
+            ec = co_await this->begin_stream();
         }
 
         net::awaitable<void>
@@ -83,6 +87,12 @@ namespace httplib::client
             if (!parent_)
             {
                 ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+                co_return;
+            }
+            // relay 直通原始字节；chunked 由 body_writer 按 Content-Encoding 自动压缩。
+            if (mode_ == mode::relay)
+            {
+                ec = co_await this->write_raw(data, more);
                 co_return;
             }
             ec = co_await this->write_some(data, more);
@@ -119,5 +129,6 @@ namespace httplib::client
 
       private:
         std::shared_ptr<http_client::impl> parent_;
+        mode mode_ = mode::chunked;
     };
 } // namespace httplib::client

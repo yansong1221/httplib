@@ -416,8 +416,7 @@ namespace httplib::server
             co_return true;
         }
 
-        writer.prepare_payload();
-
+        // 内容协商：命中可压缩类型时设置 Content-Encoding，body_writer 写 body 时自动压缩。
         if (auto accept_encoding = req[http::field::accept_encoding]; !accept_encoding.empty())
         {
             html::accept_encoding_content encoding_content;
@@ -429,17 +428,14 @@ namespace httplib::server
                         (*server_impl_).should_compress_content_type(content_type))
                     {
                         resp.set(http::field::content_encoding, encoding);
-                        auto source = writer.take_source();
-                        if (!source)
-                        {
-                            source = std::make_unique<body::empty_source>();
-                        }
-                        writer.set_source(std::make_unique<body::encoded_source>(std::move(source), encoding));
-                        writer.chunked(true);
                     }
                 }
             }
         }
+
+        // 压缩会改写长度：prepare_payload 会据此自动退化为 chunked。
+        writer.prepare_payload();
+
         if (req.method() == http::verb::head)
         {
             writer.reset();

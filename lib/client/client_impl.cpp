@@ -344,24 +344,9 @@ namespace httplib::client
                                std::string(content_encoding));
             msg.erase(http::field::content_encoding);
         }
+        // transform 编码（gzip/br/...）会在 write 阶段压缩，明文 Content-Length 不再成立，
+        // prepare_payload 会自动改用 chunked。
         req.prepare_payload();
-
-        // 请求带 Content-Encoding 时，write 阶段会压缩 body，set_body() 预先写入的
-        // Content-Length 是明文长度，与压缩后的实际长度不一致。改用 chunked + stream encoder。
-        {
-            auto content_encoding = msg[http::field::content_encoding];
-            if (!content_encoding.empty()
-                && compress::compressor_factory::instance().is_transform_encoding(content_encoding))
-            {
-                auto source = req.take_source();
-                if (!source)
-                {
-                    source = std::make_unique<body::empty_source>();
-                }
-                req.set_source(std::make_unique<body::encoded_source>(std::move(source), content_encoding));
-                req.chunked(true);
-            }
-        }
     }
     net::awaitable<void>
     http_client::impl::co_connect(boost::system::error_code& ec)
