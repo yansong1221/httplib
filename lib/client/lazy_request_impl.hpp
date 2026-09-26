@@ -95,7 +95,7 @@ namespace httplib::client
                 ec = co_await this->write_raw(data, more);
                 co_return;
             }
-            ec = co_await this->write_some(data, more);
+            ec = co_await this->write_compressed(data, more);
         }
 
         net::awaitable<boost::system::result<client::response>>

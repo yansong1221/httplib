@@ -65,7 +65,7 @@ namespace httplib::server
             }
             else
             {
-                ec = co_await resp_.writer().write_some(data, more);
+                ec = co_await resp_.writer().write_compressed(data, more);
             }
         }
 

@@ -31,7 +31,7 @@ namespace httplib::detail
             / set_empty / reset；
           - 分帧：prepare_payload / chunked；
           - 整消息写：write_message()（source_ 驱动序列化器）；
-          - 流式写：begin_stream() + write_some(data, more) / write_raw(data, more)。
+          - 流式写：begin_stream() + write_compressed(data, more) / write_raw(data, more)。
 
         业务数据写入本对象的 @ref payload_，source_ 引用它产出字节。HTTP message 由本对象
         以成员 @ref msg_ 自持；对外只暴露 @ref base()（start-line + headers，即 Beast 的
@@ -343,16 +343,21 @@ namespace httplib::detail
             co_return co_await begin_stream_locked();
         }
 
-        /// 流式写一块 body：按 Content-Encoding 自动压缩（无转换编码时退化为 raw）。
+        /// 流式写一块 body，驱动到该块全部写完才返回：按 Content-Encoding 自动压缩
+        /// （无转换编码时退化为 raw）。
         net::awaitable<boost::system::error_code>
-        write_some(net::const_buffer const& data, bool more)
+        write_compressed(net::const_buffer const& data, bool more)
         {
             auto lock = co_await lock_write();
             if (!lock)
             {
                 co_return aborted();
             }
-            co_return co_await write_some_locked(data, more);
+            if (!sr_ || !sr_->is_header_done() || sr_->is_done())
+            {
+                co_return invalid_argument();
+            }
+            co_return co_await write_compressed_locked(data, more);
         }
 
         /// 流式写一块 body：无条件原样透传（relay 等调用方指定的直通场景）。
@@ -392,10 +397,8 @@ namespace httplib::detail
             }
 
             prepare_payload();
-            if (!sr_)
-            {
-                sr_ = std::make_unique<serializer_t>(msg_);
-            }
+            // 序列化器惰性就绪：统一经 serializer() 这一处构造。
+            serializer();
 
             // 逐块拉取 source，经统一原语落地；source 读尽后以空 body + more=false 收尾
             // （压缩时正是这一步冲刷编码器并写出 chunked 终止块）。
@@ -440,25 +443,13 @@ namespace httplib::detail
 
             // 只负责重置 body 与编码器状态；chunked / content-length 由调用方事先在 base() 上配置。
             reset();
-            sr_ = std::make_unique<serializer_t>(msg_);
-
-            auto& sr = *sr_;
+            auto& sr = serializer();
             co_await task_->write_header(sr, ec);
             if (ec)
             {
                 msg_.keep_alive(false);
             }
             co_return ec;
-        }
-
-        net::awaitable<boost::system::error_code>
-        write_some_locked(net::const_buffer const& data, bool more)
-        {
-            if (!sr_ || !sr_->is_header_done() || sr_->is_done())
-            {
-                co_return invalid_argument();
-            }
-            co_return co_await write_compressed_locked(data, more);
         }
 
         /// 当前 message 是否配置了转换编码（gzip/br/...）；identity / 未设置时为否。
@@ -515,7 +506,7 @@ namespace httplib::detail
                 }
             }
 
-            // 上一轮产物已被写尽（flush_serializer_locked 驱动到消费完），可安全清理后喂入新明文。
+            // 上一轮产物已被写尽（write_raw_locked 驱动到消费完），可安全清理后喂入新明文。
             encoder_->consume_all();
             encoder_->feed(data, more, ec);
             if (ec)
