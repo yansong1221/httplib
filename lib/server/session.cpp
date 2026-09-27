@@ -436,14 +436,12 @@ namespace httplib::server
         // 压缩会改写长度：prepare_payload 会据此自动退化为 chunked。
         writer.prepare_payload();
 
-        if (req.method() == http::verb::head)
-        {
-            // HEAD 只丢 body，保留 GET 会发的头（含 Content-Length），
-            // 否则会退化成 Content-Length: 0，等于断言资源为空。
-            writer.discard_body();
-        }
-
-        auto ec = co_await writer.write_message();
+        // HEAD 只写头，一个 body 字节都不写。body 仍留在 source_ 里不消费——这样
+        // prepare_payload 照样按真实 source 算出分帧，HEAD 的头与同一 URL 的 GET 逐字相同
+        // （RFC 9112 §6.3）。不要改成"先 discard_body() 再整消息写"：丢了 source 之后分帧
+        // 无从重算，配了 Content-Encoding 时会落成 Content-Length: 0（谎报资源为空）；而走完
+        // 收尾写又会给 chunked 响应补上 "0\r\n\r\n" 终止块，那几字节就是 body。
+        auto ec = co_await writer.write_message(req.method() == http::verb::head);
         if (ec)
         {
             server_impl_->get_logger()->trace("write http body failed: {}", ec.message());

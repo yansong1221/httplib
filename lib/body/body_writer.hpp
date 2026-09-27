@@ -184,7 +184,10 @@ namespace httplib::detail
         }
 
         /// 丢弃 body payload 与编码器状态，但保留 header（含 Content-Length 及其分帧）。
-        /// HEAD 响应用它：回显 GET 会有的头，但不发 body。
+        ///
+        /// 只被 @ref reset() 调用（换新 body）。注意它**不**适用于 HEAD：丢掉 source 之后
+        /// @ref prepare_payload 无法按真实 source 重算分帧。HEAD 请用
+        /// @ref write_message 的 `headers_only`。
         void
         discard_body()
         {
@@ -342,15 +345,22 @@ namespace httplib::detail
 
         // ---- 整消息写 ----
 
+        /// 整消息写。`headers_only` 为真时只写 header：一个 body 字节都不写，连 chunked 的
+        /// "0\r\n\r\n" 终止块也不写。
+        ///
+        /// HEAD 响应用它。头仍由 @ref prepare_payload 从同一个 source 算出，所以与同一 URL 的
+        /// GET 逐字相同（含 Content-Length / Transfer-Encoding），只是没有 body——这正是
+        /// RFC 9112 §6.3 对 HEAD 的要求。比"丢掉 source 再走收尾写"干净：那样要么把
+        /// Content-Length 覆盖成 0（谎报资源为空），要么凭空压出一个空 body。
         net::awaitable<boost::system::error_code>
-        write_message()
+        write_message(bool headers_only = false)
         {
             auto lock = co_await lock_write();
             if (!lock)
             {
                 co_return aborted();
             }
-            co_return co_await write_message_locked();
+            co_return co_await write_message_locked(headers_only);
         }
 
         // ---- 流式写 ----
@@ -413,7 +423,7 @@ namespace httplib::detail
         }
 
         net::awaitable<boost::system::error_code>
-        write_message_locked()
+        write_message_locked(bool headers_only)
         {
             boost::system::error_code ec;
             if (sr_ && sr_->is_header_done())
@@ -434,8 +444,19 @@ namespace httplib::detail
                 co_return ec;
             }
 
+            // HEAD：头已写完就收工。body 留在 source_ 里不消费，序列化器停在 header_done——
+            // 服务端不依赖 is_done()（只有客户端复用请求对象时才依赖，见 prepare_for_send()），
+            // 所以这样即可，不必也不能走下面的收尾写：chunked 会写出 "0\r\n\r\n" 终止块，
+            // 那几字节就是 body。
+            if (headers_only)
+            {
+                co_return ec;
+            }
+
             // 逐块拉取 source，经统一原语落地；source 读尽后以空 body + more=false 收尾
-            // （压缩时正是这一步冲刷编码器并写出 chunked 终止块）。
+            // （压缩时正是这一步冲刷编码器并写出 chunked 终止块）。这一步同时把序列化器驱动到
+            // is_done()——请求对象要靠这个判定重置序列化器后复用（见 prepare_for_send()），
+            // 所以不能因为"没有 body"就整个跳过。
             for (;;)
             {
                 body::source::chunk_t chunk;

@@ -1230,6 +1230,96 @@ TEST_CASE("response: compressed HTTP/1.0 response is not chunked", "[response][c
     REQUIRE(plain10_body == std::string(2000, 'a'));
 }
 
+// 回归：HEAD 的头必须与同一 URL 的 GET 逐字相同，且头之后不得有任何 body 字节。
+//
+// 旧实现把 HEAD 当作"先 discard_body() 再走整消息写"，于是分帧被算了两遍：
+//   1) 配了 Content-Encoding 时 prepare_payload() 先抹掉 Content-Length 转 chunked，
+//      discard_body() 丢掉 source 后它再跑一遍，"无 source"分支把分帧覆盖成 CL:0——
+//      谎报资源为空，而 GET 实际返回 1234 字节；
+//   2) 就算分帧保住了，走完收尾写还会给 chunked 响应补上 "0\r\n\r\n" 终止块——
+//      那 5 字节就是 body，HEAD 不能有。
+//
+// 现在改为只写头：body 留在 source_ 里不消费，分帧仍按真实 source 算出，于是与 GET 一致。
+#ifdef HTTPLIB_ENABLED_COMPRESS
+TEST_CASE("response: HEAD headers match GET exactly, with no body", "[response]")
+{
+    test_common::test_scaffold sc;
+    auto handler = [](httplib::server::request&, httplib::server::response& resp) {
+        resp.set_string_content(std::string(1234, 'a'), "text/plain"sv);
+    };
+    sc.server.router().set_http_handler<http::verb::get>("/gzip-head", handler);
+    sc.server.router().set_http_handler<http::verb::head>("/gzip-head", handler);
+    sc.start();
+
+    auto head = test_common::raw_request(sc.endpoint,
+                                         "HEAD /gzip-head HTTP/1.1\r\nHost: x\r\n"
+                                         "Accept-Encoding: gzip\r\nConnection: close\r\n\r\n");
+    auto get = test_common::raw_request(sc.endpoint,
+                                        "GET /gzip-head HTTP/1.1\r\nHost: x\r\n"
+                                        "Accept-Encoding: gzip\r\nConnection: close\r\n\r\n");
+
+    // 命中压缩：text/* 默认可压缩。
+    REQUIRE(test_common::raw_header(head, "Content-Encoding") == "gzip");
+    // 关键断言：不得退化成 Content-Length: 0（旧行为）。
+    REQUIRE(test_common::raw_header(head, "Content-Length").empty());
+    // HEAD 的分帧必须与 GET 一致：GET 同样是 chunked 且不带 Content-Length。
+    REQUIRE(test_common::raw_header(head, "Transfer-Encoding") == "chunked");
+    REQUIRE(test_common::raw_header(get, "Transfer-Encoding") == "chunked");
+    REQUIRE(test_common::raw_header(get, "Content-Length").empty());
+
+    // HEAD 不得发 body：头之后必须再无字节——连 chunked 的 "0\r\n\r\n" 终止块也不能有。
+    REQUIRE(head.size() == head.find("\r\n\r\n") + 4);
+
+    // HTTP/1.0 没有 chunked 可退，GET 靠关连接定界、不带 Content-Length，
+    // HEAD 就该同样不带。
+    auto h10 = test_common::raw_request(sc.endpoint,
+                                         "HEAD /gzip-head HTTP/1.0\r\nHost: x\r\n"
+                                         "Accept-Encoding: gzip\r\n\r\n");
+    REQUIRE(test_common::raw_header(h10, "Content-Length").empty());
+    REQUIRE(h10.size() == h10.find("\r\n\r\n") + 4);
+}
+#endif
+
+// 回归：HEAD + multipart/byteranges。file_source 在多段 Range 时报不出长度（帧开销未计入），
+// 于是旧实现落进 prepare_payload() 的"无 body"兜底写成 Content-Length: 0 —— 而 GET 实际
+// 返回的是一份 multipart 文档，报 0 等于断言资源为空。HEAD 只写头后不再丢 source，
+// 分帧与 GET 一致（chunked），头之后也没有终止块。
+TEST_CASE("response: HEAD headers match GET when the body length is unknown", "[response]")
+{
+    auto tmp_path = std::filesystem::temp_directory_path() / "httplib_test_head_mr.txt";
+    {
+        std::ofstream f(tmp_path, std::ios::binary);
+        f << "0123456789";
+    }
+
+    test_common::test_scaffold sc;
+    auto handler = [&](httplib::server::request& req, httplib::server::response& resp) {
+        resp.set_file_content(tmp_path, req.base());
+    };
+    sc.server.router().set_http_handler<http::verb::get>("/head-mr", handler);
+    sc.server.router().set_http_handler<http::verb::head>("/head-mr", handler);
+    sc.start();
+
+    auto head = test_common::raw_request(sc.endpoint,
+                                         "HEAD /head-mr HTTP/1.1\r\nHost: x\r\n"
+                                         "Range: bytes=0-2,5-7\r\nConnection: close\r\n\r\n");
+    auto get = test_common::raw_request(sc.endpoint,
+                                        "GET /head-mr HTTP/1.1\r\nHost: x\r\n"
+                                        "Range: bytes=0-2,5-7\r\nConnection: close\r\n\r\n");
+    std::filesystem::remove(tmp_path);
+
+    // 关键断言：不得谎报 Content-Length: 0。
+    REQUIRE(test_common::raw_header(head, "Content-Length").empty());
+    // 长度未知时与 GET 同分帧。
+    REQUIRE(test_common::raw_header(head, "Transfer-Encoding") == "chunked");
+    REQUIRE(test_common::raw_header(get, "Transfer-Encoding") == "chunked");
+    // 头之后零字节：这次连终止块都没有，长度未知不再是代价。
+    REQUIRE(head.size() == head.find("\r\n\r\n") + 4);
+    // 同一个 GET 必须真的带出 multipart 文档，证明那个 0 确实是谎报。
+    REQUIRE(get.size() > get.find("\r\n\r\n") + 4);
+    REQUIRE(test_common::raw_header(get, "Content-Type").starts_with("multipart/byteranges"));
+}
+
 // 回归：HEAD 应回显 GET 会发的 Content-Length，只是不发 body。
 // 旧实现 HEAD 走 writer.reset()，而 reset() 会丢掉"由本对象替上一个 body 算出的"
 // Content-Length，于是 HEAD 退化成 Content-Length: 0 —— 相当于断言资源为空，
