@@ -404,16 +404,10 @@ namespace httplib::detail
             stream_started_ = true;
             if (!stream_decoder_)
             {
-                std::optional<std::uint64_t> content_length;
-                if (auto len = raw_parser_.content_length())
-                {
-                    content_length = *len;
-                }
                 stream_decoder_ = std::make_unique<body::stream_decoder>();
-                stream_decoder_->reset(raw_parser_.get()[http::field::content_encoding],
-                                       content_length,
-                                       body_limit_,
-                                       ec);
+                // 线上压缩字节的额度由 raw_parser_ 自己管（它带同一个 body_limit），这里只管
+                // 解压产出，所以不必也不该再把 Content-Length 传进去复查一遍。
+                stream_decoder_->reset(raw_parser_.get()[http::field::content_encoding], body_limit_, ec);
                 if (ec)
                 {
                     co_return 0;

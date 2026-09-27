@@ -94,7 +94,7 @@ namespace
     {
         body::stream_decoder decoder;
         boost::system::error_code ec;
-        decoder.reset(encoding, std::nullopt, 0, ec);
+        decoder.reset(encoding, 0, ec);
         REQUIRE_FALSE(ec);
         decoder.feed(boost::asio::buffer(wire), ec);
         if (!ec)
@@ -143,7 +143,7 @@ TEST_CASE("Compressor: brotli roundtrip via stream_decoder", "[compressor]")
 
     body::stream_decoder decoder;
     boost::system::error_code ec;
-    decoder.reset("br", std::nullopt, 0, ec);
+    decoder.reset("br", 0, ec);
     REQUIRE_FALSE(ec);
     decoder.feed(boost::asio::buffer(wire), ec);
     if (!ec)

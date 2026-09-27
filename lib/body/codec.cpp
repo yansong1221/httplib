@@ -30,7 +30,6 @@ namespace httplib::body
 
     void
     stream_decoder::reset(std::string_view encoding,
-                          std::optional<std::uint64_t> const& content_length,
                           std::uint64_t limit,
                           boost::system::error_code& ec)
     {
@@ -47,15 +46,6 @@ namespace httplib::body
         if (ec || !compressor_)
         {
             return;
-        }
-        // 已知压缩长度时做个快速检查：压缩体本身已超限就不必再解压。
-        // 注意不从 limit_ 里扣除压缩长度 —— limit_ 约束的是"产出"（解压后）字节，而压缩
-        // 字节已由上层 parser 按其 body_limit 单独限制。旧实现的扣除等于把同一份额度算两次，
-        // 使"压缩后体积大、解压后正常"的 body 被误拒。
-        if (limit_ > 0 && content_length.has_value() && *content_length >= limit_)
-        {
-            ec = http::error::body_limit;
-            compressor_.reset();
         }
     }
 
@@ -238,7 +228,7 @@ namespace httplib::body
     {
         stream_decoder decoder;
         boost::system::error_code ec;
-        decoder.reset(encoding, std::nullopt, limit, ec);
+        decoder.reset(encoding, limit, ec);
         if (ec)
         {
             return ec;

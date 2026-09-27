@@ -422,7 +422,7 @@ TEST_CASE("codec: stream_decoder handles small chunks", "[body_pipeline]")
 
     body::stream_decoder decoder;
     boost::system::error_code ec;
-    decoder.reset("gzip", std::nullopt, 0, ec);
+    decoder.reset("gzip", 0, ec);
     REQUIRE_FALSE(ec);
     REQUIRE(decoder.transforms());
 
@@ -467,7 +467,7 @@ TEST_CASE("codec: identity passthrough", "[body_pipeline]")
 
     body::stream_decoder decoder;
     boost::system::error_code ec;
-    decoder.reset("", std::nullopt, 0, ec);
+    decoder.reset("", 0, ec);
     REQUIRE_FALSE(ec);
     REQUIRE_FALSE(decoder.transforms());
     decoder.feed(net::buffer(std::string_view { "raw bytes" }), ec);
@@ -500,7 +500,7 @@ TEST_CASE("codec: produced-bytes limit is not reduced by compressed length", "[b
 
     // limit = 4096 > 瑙ｅ帇鍚?3000锛涙棫瀹炵幇浼氬彉鎴?4096 - wire->size() < 3000 鑰岃鎶ャ€?
     body::stream_decoder decoder;
-    decoder.reset("gzip", std::optional<std::uint64_t>(wire->size()), 4096, ec);
+    decoder.reset("gzip", 4096, ec);
     REQUIRE_FALSE(ec);
     decoder.feed(net::buffer(*wire), ec);
     REQUIRE_FALSE(ec);
@@ -516,12 +516,66 @@ TEST_CASE("codec: produced-bytes limit is not reduced by compressed length", "[b
 
     // 浜у嚭纭疄瓒呰繃闄愰鏃朵粛瑕佹姤閿欙紝纭闄愰娌¤鏀惧鎴愬け鏁堛€?
     body::stream_decoder bomb;
-    bomb.reset("gzip", std::nullopt, 1024, ec);
+    bomb.reset("gzip", 1024, ec);
     REQUIRE_FALSE(ec);
     bomb.feed(net::buffer(*wire), ec);
     if (!ec)
     {
         bomb.flush(ec);
+    }
+    REQUIRE(ec == http::error::body_limit);
+}
+
+// 回归：拿 Content-Length（线上压缩长度）复查一遍额度，两个毛病同时暴露。
+//
+//  1. 量纲错：压缩长度和 limit 比的是"线上字节"，而 limit 约束的是"解压产出"。取不可压数据
+//     让 gzip 反而比原文更长，于是"压缩长度 ≥ limit、解压产出 ≤ limit"完全合法，却会被拒。
+//  2. 差一格：快速路径用 >=，而 account() 用 >、Beast 的 body_limit 也是 >（恰好 limit 放行）。
+//     所以哪怕量纲对，恰好等于 limit 的 body 也会被这道多余的检查拒掉。
+//
+// 上面的用例测不到这两点：它 limit=4096 而压缩体约 1030~3010，快速路径根本不触发。
+// 旧实现下本用例在 reset() 那一刻就报 body_limit（压根没进 feed）。
+TEST_CASE("codec: compressed Content-Length must not pre-reject a within-limit body", "[body_pipeline]")
+{
+    // 伪随机（近似不可压）数据，gzip 之后只会略微变大。
+    std::string original(1024, '\0');
+    std::uint32_t seed = 0xC0FFEEu;
+    for (auto& c : original)
+    {
+        seed = seed * 1103515245u + 12345u;
+        c = static_cast<char>(seed >> 24);
+    }
+
+    auto wire = body::encode(original, "gzip");
+    REQUIRE(wire.has_value());
+    // 前提：压缩后比 limit 还大（>= 触发旧快速路径），解压产出恰好等于 limit。
+    REQUIRE(wire->size() >= 1024);
+
+    boost::system::error_code ec;
+    body::stream_decoder decoder;
+    decoder.reset("gzip", 1024, ec);
+    REQUIRE_FALSE(ec);
+    decoder.feed(net::buffer(*wire), ec);
+    REQUIRE_FALSE(ec);
+    decoder.flush(ec);
+    REQUIRE_FALSE(ec);
+
+    std::string out(decoder.buffered(), '\0');
+    auto n = decoder.drain(net::buffer(out), ec);
+    REQUIRE_FALSE(ec);
+    out.resize(n);
+    // 产出恰好 1024 == limit：边界是 >，应当放行（与 Beast 一致）。
+    REQUIRE(n == 1024);
+    REQUIRE(out == original);
+
+    // 边界另一侧仍要拒：limit 比产出小 1 就得报。
+    body::stream_decoder tight;
+    tight.reset("gzip", 1023, ec);
+    REQUIRE_FALSE(ec);
+    tight.feed(net::buffer(*wire), ec);
+    if (!ec)
+    {
+        tight.flush(ec);
     }
     REQUIRE(ec == http::error::body_limit);
 }
@@ -539,7 +593,7 @@ TEST_CASE("stream_decoder: flushing a never-fed decoder is an empty success", "[
     SECTION("gzip, nothing ever fed")
     {
         body::stream_decoder d;
-        d.reset("gzip", 0, 1024, ec);
+        d.reset("gzip", 1024, ec);
         REQUIRE_FALSE(ec);
         REQUIRE(d.transforms());
         d.flush(ec);
@@ -550,7 +604,7 @@ TEST_CASE("stream_decoder: flushing a never-fed decoder is an empty success", "[
     SECTION("gzip, fed zero bytes")
     {
         body::stream_decoder d;
-        d.reset("gzip", 0, 1024, ec);
+        d.reset("gzip", 1024, ec);
         REQUIRE_FALSE(ec);
         d.feed(net::buffer("", 0), ec);
         REQUIRE_FALSE(ec);
@@ -571,7 +625,7 @@ TEST_CASE("stream_decoder: flushing a never-fed decoder is an empty success", "[
         auto wire = body::encode("hello", "gzip");
         REQUIRE(wire);
         body::stream_decoder d;
-        d.reset("gzip", wire->size(), 1024, ec);
+        d.reset("gzip", 1024, ec);
         REQUIRE_FALSE(ec);
         d.feed(net::buffer(*wire), ec);
         REQUIRE_FALSE(ec);

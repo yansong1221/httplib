@@ -5,7 +5,6 @@
 #include <boost/system/error_code.hpp>
 #include <boost/system/result.hpp>
 #include <cstdint>
-#include <optional>
 #include <string>
 #include <string_view>
 
@@ -16,8 +15,11 @@ namespace httplib::body
         逐块喂入线上压缩字节（`feed`），逐块取出解压结果（`drain`）。`identity` / 未知编码
         退化为纯透传（`transforms() == false`），此时 `feed` 的字节原样进内部缓冲。
 
-        解压炸弹防护：`limit > 0` 时对**产出**字节计数，超过报 `http::error::body_limit`。
-        压缩后的输入字节不在此额度内（它们由上层 parser 按其 body_limit 单独限制）。
+        解压炸弹防护：`limit > 0` 时对**产出**字节计数，超过报 `http::error::body_limit`，
+        边界与 Beast 的 body_limit 一致（恰好 limit 放行）。压缩后的输入字节不在此额度内
+        ——它们由上层 parser 按其 body_limit 单独限制（session.cpp / client_impl.cpp），此处
+        不再拿 Content-Length 复查一遍：那既量纲不对（压缩长度 vs 解压产出），也和 Beast 的
+        `>` 差一格。
 
         解压结果放内部缓冲，调用方缓冲放不下的部分保留到下次 `drain`，不丢数据。
     */
@@ -26,10 +28,7 @@ namespace httplib::body
       public:
         stream_decoder() = default;
 
-        void reset(std::string_view encoding,
-                   std::optional<std::uint64_t> const& content_length,
-                   std::uint64_t limit,
-                   boost::system::error_code& ec);
+        void reset(std::string_view encoding, std::uint64_t limit, boost::system::error_code& ec);
 
         bool
         transforms() const
