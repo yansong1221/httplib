@@ -47,13 +47,35 @@ namespace
         net::awaitable<void>
         read_some(Parser& parser, boost::system::error_code& ec)
         {
+            ++read_calls_;
+            // 可选读取次数上限：把"读不完就再来一轮"的死循环变成有界的确定性失败，
+            // 否则防护一旦回归，测试是挂死而不是报错。
+            if (max_reads_ != 0 && read_calls_ > max_reads_)
+            {
+                ec = net::error::operation_aborted;
+                co_return;
+            }
             co_await http::async_read_some(stream_, buffer_, parser, net::redirect_error(net::use_awaitable, ec));
+        }
+
+        std::size_t
+        read_calls() const
+        {
+            return read_calls_;
+        }
+
+        void
+        set_max_reads(std::size_t n)
+        {
+            max_reads_ = n;
         }
 
       private:
         beast::test::stream stream_;
         beast::flat_buffer buffer_;
         std::string data_;
+        std::size_t read_calls_ = 0;
+        std::size_t max_reads_ = 0; // 0 = 不限
     };
 
     std::string
@@ -185,6 +207,71 @@ TEST_CASE("body_reader: stream raw body via fake source", "[body-reader]")
     fut.get();
 
     REQUIRE_FALSE(read_ec);
+    REQUIRE(got == body);
+    REQUIRE(reader.is_body_done());
+}
+
+// 回归：零长缓冲必须立刻返回 0，且不能去动 source。
+//
+// read_some_raw_locked 过去没有这道防护：body.size=0 时 parser 只会一直 need_buffer，
+// consumed 恒为 0，于是 for 循环每轮都从 source 再拉一次。整个 body 会被堆进 parser 的
+// 内部缓冲，直到 body 收完才返回 0 —— 一次本该立即返回的调用变成了"把整个 body 读进内存"。
+// 公开的 read_some_raw 直接把调用方的 buffer 传进来，所以外部传空缓冲即可触发。
+// 解压路径 read_some_decompressed_locked 早有同样的防护，这里一并锁住公开契约。
+TEST_CASE("body_reader: zero-length buffer returns 0 without touching the source", "[body-reader]")
+{
+    net::io_context ioc;
+    auto ex = ioc.get_executor();
+
+    std::string body(10000, 'x');
+    auto source = std::make_unique<memory_source>(ex, make_response(body));
+    auto hp = std::make_unique<http::response_parser<http::empty_body>>();
+    boost::system::error_code hec;
+    source->read_header(*hp, hec);
+    REQUIRE_FALSE(hec);
+
+    auto reader = make_reader(source, std::move(hp), 1 << 20, ex);
+    // 兜底：防护若回归，空转会一直读到撞上这个上限报错，测试失败而不是挂死。
+    // 200 远大于下文正常读所需（10000 字节 / 512 缓冲，约 20 轮）。
+    source->set_max_reads(200);
+
+    boost::system::error_code raw_ec;
+    boost::system::error_code dec_ec;
+    std::string got;
+    std::size_t calls_after_blank = 0;
+    auto fut = net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            auto raw_n = co_await reader.read_some_raw(net::mutable_buffer {}, raw_ec);
+            REQUIRE(raw_n == 0);
+            auto dec_n = co_await reader.read_some_decompressed(net::mutable_buffer {}, dec_ec);
+            REQUIRE(dec_n == 0);
+            // 在后续正常读之前取样：交白卷时不该碰过 source。
+            calls_after_blank = source->read_calls();
+
+            // 交白卷不等于 body 读完：后续正常读仍应拿到全部数据。
+            std::array<char, 512> buf {};
+            for (;;)
+            {
+                auto n = co_await reader.read_some_raw(net::buffer(buf), raw_ec);
+                if (raw_ec || n == 0)
+                {
+                    break;
+                }
+                got.append(buf.data(), n);
+            }
+        },
+        net::use_future);
+    ioc.run();
+    fut.get();
+
+    REQUIRE_FALSE(raw_ec);
+    REQUIRE_FALSE(dec_ec);
+    // 关键断言：交白卷时一次都没去读 source —— 既没有空转，也没有把 body 读进来。
+    REQUIRE(calls_after_blank == 0);
+    // 兜底确实生效（正常读之后计数增长了）。
+    REQUIRE(source->read_calls() > 0);
     REQUIRE(got == body);
     REQUIRE(reader.is_body_done());
 }

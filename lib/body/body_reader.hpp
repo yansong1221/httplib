@@ -359,6 +359,15 @@ namespace httplib::detail
         net::awaitable<std::size_t>
         read_some_raw_locked(net::mutable_buffer const& buf, boost::system::error_code& ec)
         {
+            // 零长缓冲没有任何字节可交给 parser，parser 只会一直 need_buffer，而下面 consumed
+            // 恒为 0 —— 于是每轮都从 source 再拉一次，把整个 body 堆进 parser 内部缓冲，直到
+            // body 收完才返回 0。调用方传空缓冲（本函数经公开的 read_some_raw 可达）时应当
+            // 立刻交白卷，和 read_some_decompressed_locked 的处理一致。
+            if (buf.size() == 0)
+            {
+                ec = {};
+                co_return 0;
+            }
             for (;;)
             {
                 if (raw_parser_.is_done())
