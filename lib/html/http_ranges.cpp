@@ -60,16 +60,24 @@ namespace httplib::html
             }
 
             auto sub_range = util::split(range, "-");
-            auto fist_range = boost::trim_copy(sub_range[0]);
+            // 必须先查再下标：空段（"bytes=,"、"bytes=1,,"）会让 split 返回空 vector，
+            // 直接取 [0] 会越界读——debug 下 STL 断言中止进程，release 下是 UB。
+            // 段数 >2（"bytes=5-10-20"）是畸形区间，一并拒掉，别静默取前两段。
+            if (sub_range.empty() || sub_range.size() > 2)
+            {
+                ranges_.clear();
+                return false;
+            }
+            auto first_range = boost::trim_copy(sub_range[0]);
 
             int64_t start = 0;
-            if (fist_range.empty())
+            if (first_range.empty())
             {
                 start = -1;
             }
             else
             {
-                auto [ptr, ec] = std::from_chars(fist_range.data(), fist_range.data() + fist_range.size(), start);
+                auto [ptr, ec] = std::from_chars(first_range.data(), first_range.data() + first_range.size(), start);
                 if (ec != std::errc {})
                 {
                     ranges_.clear();

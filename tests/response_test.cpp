@@ -396,6 +396,54 @@ TEST_CASE("Response: Range request Content-Range header", "[response]")
     std::filesystem::remove(tmp_path);
 }
 
+// 回归：畸形 Range 不得越界读。util::split 对空串返回空 vector，而解析器曾直接取
+// sub_range[0] —— "bytes=," 之类会产生空段，debug 下 STL 断言中止进程（0xC0000005），
+// release 下是 UB。Range 直接来自客户端且 set_static_mount_point / set_file_content 都会走到
+// 这里，所以这是无需认证即可触发的远程崩溃。
+// util::split 只丢首尾分隔符，中间空段会保留：","、",,"、"1,," 均产生空元素。
+TEST_CASE("Response: malformed Range returns 416 without crashing", "[response]")
+{
+    auto tmp_path = std::filesystem::temp_directory_path() / "httplib_test_range_malformed.txt";
+    {
+        std::ofstream f(tmp_path, std::ios::binary);
+        f << "01234";
+    }
+
+    // 全部会产生空段（空 sub_range）或畸形段数（>2）。
+    // 注意 "bytes=,1" 不在此列：util::split 会丢弃首尾分隔符，前导逗号不产生空元素，
+    // 它被宽松地解析成合法区间 1..end，不属于崩溃触发点。
+    std::vector<std::string> const bad { "bytes=,",  "bytes=,,",    "bytes=1,,",
+                                         "bytes=5-10-20", "bytes=0-1,,", "bytes=,,,",
+                                         "bytes=1-2-3-4" };
+
+    {
+        run(
+            [&](auto& server)
+            {
+                server.router().template set_http_handler<http::verb::get>(
+                    "/file-range-bad",
+                    [&](httplib::server::request& req, httplib::server::response& resp)
+                    { resp.set_file_content(tmp_path, req.base()); });
+            },
+            [&](auto& client) -> net::awaitable<void>
+            {
+                for (auto const& range : bad)
+                {
+                    auto range_headers = httplib::http::fields();
+                    range_headers.set(http::field::range, range);
+
+                    httplib::client::request req(http::verb::get, "/file-range-bad", range_headers);
+                    auto resp = UNWRAP(co_await client.async_send_request(req));
+                    INFO("Range: " << range);
+                    REQUIRE(resp.result() == http::status::range_not_satisfiable);
+                }
+                co_return;
+            });
+    }
+
+    std::filesystem::remove(tmp_path);
+}
+
 TEST_CASE("Response: Range request out of bounds returns 416", "[response]")
 {
     auto tmp_path = std::filesystem::temp_directory_path() / "httplib_test_range_oob.txt";
