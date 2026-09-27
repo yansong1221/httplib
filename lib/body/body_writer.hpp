@@ -178,6 +178,9 @@ namespace httplib::detail
         {
             reset();
             payload_.set<body::empty_tag>();
+            // 空 body 也挂一个 source（长度 0、不产字节），使分帧统一走 source 长度这条路径，
+            // 而不是在 prepare_payload() 里再对"无 source"分一种情况。
+            source_ = std::make_unique<body::empty_source>();
         }
 
         /// 丢弃 body payload 与编码器状态，但保留 header（含 Content-Length 及其分帧）。
@@ -192,71 +195,64 @@ namespace httplib::detail
             encoder_.reset();
         }
 
-        /// 准备写入一个新 body：在 discard_body() 之上，再丢掉"上一个 body 由本对象算出的"
-        /// Content-Length。
+        /// 准备写入一个新 body：丢掉 body payload 与上一个 body 留下的 Content-Length。
+        ///
+        /// prepare_payload() 见到已存在的 Content-Length 会直接沿用，"旧长度 + 新 body"会把
+        /// 对端挂在那儿等永远不会到达的字节，所以换 body 必须连同它一起丢掉；分帧会在下次
+        /// prepare_payload() 按当前 body 重算。要指定 Content-Length（HEAD 回显、multipart 等）
+        /// 请在 set_* 之后再设。
         void
         reset()
         {
             discard_body();
-
-            // 只丢掉"本对象替上一个 body 算出、且此后没被改过"的 Content-Length：
-            // prepare_payload() 见到已存在的 Content-Length 会直接沿用，于是"旧长度 + 新 body"
-            // 会把对端挂在那儿等永远不会到达的字节。调用方自己设的 Content-Length（先
-            // resp.set(content_length) 再 set_empty_content()、set_file_content 的 range 分支等）
-            // 必须原样保留 —— 所以要比对值，而不是只看"这个头在不在"。
-            if (content_length_derived_ &&
-                msg_[http::field::content_length] == std::to_string(*content_length_derived_))
-            {
-                msg_.erase(http::field::content_length);
-            }
-            content_length_derived_.reset();
+            msg_.erase(http::field::content_length);
         }
 
         // ---- 分帧 ----
 
-        /// 未显式设置 Content-Length 时：优先用 source 已知长度，其次空 source 记 CL:0，否则走 chunked。
+        /// 分帧：优先采用 source 已知长度；source 报不出长度（multipart / 未知）时保留调用方
+        /// 显式设的 Content-Length，否则交给 Beast 分帧；完全没有 source（HEAD 丢 body 后或
+        /// 未设过 body）时保留已有 Content-Length，没有才记 CL:0。
         void
         prepare_payload()
         {
             // 转换编码（gzip/br/...）会改写字节长度，明文 Content-Length 不再成立。
             // 分帧交给 Beast 的 prepare_payload()：它只在 HTTP/1.1 上选 chunked，
             // 而 HTTP/1.0 没有 chunked 传输编码，只能不写 Content-Length、靠关连接定界 body。
-            if (!msg_[http::field::content_encoding].empty() && source_)
+            // 空 body（长度已知为 0）无需编码，交给下面的长度分支记 CL:0。
+            if (!msg_[http::field::content_encoding].empty() && source_ && source_->content_length() != 0)
             {
                 msg_.erase(http::field::content_length);
-                content_length_derived_.reset();
                 msg_.body() = http::buffer_body::value_type {};
                 msg_.prepare_payload();
                 return;
             }
 
-            if (msg_.has_content_length())
-            {
-                // 调用方显式设的（range 分片、HEAD 等），沿用且不由本对象负责替换。
-                content_length_derived_.reset();
-                return;
-            }
-
-            std::optional<std::uint64_t> length;
             if (source_)
             {
-                length = source_->content_length();
-            }
-            else
-            {
-                length = 0;
-            }
-
-            if (length)
-            {
-                msg_.chunked(false);
-                msg_.content_length(*length);
-                content_length_derived_ = *length;
+                if (auto length = source_->content_length())
+                {
+                    // source 自己知道长度：以它为准，顺带覆盖上一个 body 可能残留的 Content-Length。
+                    msg_.chunked(false);
+                    msg_.content_length(*length);
+                    return;
+                }
+                // source 报不出长度：调用方显式设了 Content-Length 就沿用，否则交给 Beast 分帧。
+                if (msg_.has_content_length())
+                {
+                    msg_.chunked(false);
+                    return;
+                }
+                msg_.prepare_payload();
                 return;
             }
-            msg_.prepare_payload();
-            // 长度不可预知时 Beast 自己改走 chunked 分帧，本对象没有写下的 CL 可记。
-            content_length_derived_.reset();
+
+            // 无 body：保留调用方显式设的 Content-Length（HEAD 回显 GET 的长度），否则记 CL:0。
+            if (!msg_.has_content_length())
+            {
+                msg_.chunked(false);
+                msg_.content_length(0);
+            }
         }
 
         void
@@ -479,8 +475,9 @@ namespace httplib::detail
                 co_return invalid_argument();
             }
 
-            // 只负责重置 body 与编码器状态；chunked / content-length 由调用方事先在 base() 上配置。
-            reset();
+            // 只重置 body 与编码器状态；chunked / content-length 由调用方事先在 base() 上配置
+            // （relay 透传上游头、chunked 由调用方置位），故这里不能动 header。
+            discard_body();
             auto& sr = serializer();
             co_await task_->write_header(sr, ec);
             if (ec)
@@ -588,9 +585,6 @@ namespace httplib::detail
         message_t msg_;
         Task* task_ = nullptr;
         std::unique_ptr<util::async_mutex> write_mutex_;
-        /// prepare_payload() 替本对象算出的那个 Content-Length 的值（未算过则为空），
-        /// 用于在 reset() 时区分"自己写的"与"调用方设的"。
-        std::optional<std::uint64_t> content_length_derived_;
 
         state_t payload_;
         body::source_ptr source_;

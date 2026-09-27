@@ -225,11 +225,11 @@ TEST_CASE("body_writer: header write failure leaves source unconsumed for retry"
     REQUIRE(writer.base()[http::field::content_length] == "13");
 }
 
-// 回归：换 body 必须丢掉"上一个 body 由 prepare_payload() 算出的 Content-Length"。
-// 旧实现的 reset() 只清 source/payload，于是 prepare_payload() 沿用旧值，"旧长度 + 新 body"
-// 会把对端挂在那儿等永远不会到达的字节。反过来，调用方自己设的 Content-Length 必须活下来
-// （先 resp.set(content_length) 再 set_empty_content 是既有合法用法），所以只能按来源区分。
-TEST_CASE("body_writer: reset drops only the self-derived Content-Length", "[body_pipeline]")
+// 回归：换 body 必须丢掉上一个 body 留下的 Content-Length。
+// prepare_payload() 见到已存在的 Content-Length 会直接沿用，于是"旧长度 + 新 body"会把对端
+// 挂在那儿等永远不会到达的字节。契约：reset() 无条件丢弃 Content-Length，之后
+// prepare_payload() 按当前 body 重算；要指定 Content-Length 请在 set_* 之后再设。
+TEST_CASE("body_writer: reset drops the previous Content-Length", "[body_pipeline]")
 {
     net::io_context ioc;
     auto ex = ioc.get_executor();
@@ -270,10 +270,17 @@ TEST_CASE("body_writer: reset drops only the self-derived Content-Length", "[bod
     REQUIRE(task.body() == "hi");
     REQUIRE(writer.base()[http::field::content_length] == "2");
 
-    // 第三轮：调用方显式设的 Content-Length 必须活过 reset()（HEAD / range 分片等用法）。
-    writer.base().set(http::field::content_length, "4");
+    // 第三轮：换 body 时上一轮的 Content-Length 一律丢弃；空 body 走 empty_source，长度即 0。
     task.reset_record();
     writer.set_empty();
+    send();
+    REQUIRE(writer.base()[http::field::content_length] == "0");
+
+    // 第四轮：要指定 Content-Length 而又不发 body（HEAD 回显 GET 长度），用 discard_body()
+    // 让 source 为空、header 原样保留，而不是 set_empty()（后者会带出长度 0）。
+    task.reset_record();
+    writer.discard_body();
+    writer.base().set(http::field::content_length, "4");
     send();
     REQUIRE(writer.base()[http::field::content_length] == "4");
 }
