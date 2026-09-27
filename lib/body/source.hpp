@@ -1,5 +1,4 @@
 #pragma once
-#include "body/codec.hpp"
 #include "html/http_ranges.hpp"
 #include "httplib/config.hpp"
 #include "httplib/form_data.hpp"
@@ -239,25 +238,6 @@ namespace httplib::body
         };
         step step_ = step::header;
         char buf_[16 * 1024];
-    };
-
-    /** 在内部 source 上叠加 Content-Encoding 编码。
-
-        identity / 未知编码时直接透传内层。压缩后的产物由本对象持有，`next` 返回指向它的
-        缓冲；序列化器消费后再次调用即推进。
-    */
-    class encoded_source : public source
-    {
-      public:
-        encoded_source(source_ptr inner, std::string_view encoding);
-
-        chunk_t next(boost::system::error_code& ec) override;
-
-      private:
-        source_ptr inner_;
-        stream_encoder encoder_;
-        bool inner_done_ = false;
-        bool flushed_ = false;
     };
 
 } // namespace httplib::body

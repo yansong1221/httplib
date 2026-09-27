@@ -39,7 +39,8 @@ namespace httplib::client
         std::optional<std::uint64_t> content_length() const;
 
         // ---- 已读完 body（eager）：同步转换 ----
-        // 按内容类型取响应体（引用，不拷贝）；body 非该类型或尚未读取时抛 std::bad_variant_access
+        // 按内容类型取响应体（引用，不拷贝）；body 为显式空（HEAD / 204 等）时返回空值，
+        // body 非该类型或尚未读取时抛 std::bad_variant_access
         std::string const& as_string() const;
         boost::json::value const& as_json() const;
         httplib::form_data const& as_form_data() const;

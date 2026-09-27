@@ -100,10 +100,23 @@ namespace httplib::body
         }
 
         /// 按类型取回当前分支的 const 引用（类型需为 variant 的某个存储类型）。
+        ///
+        /// 显式空 body（empty：HEAD、204/304、无 body 的 GET）视为该类型的空值，返回一个
+        /// 静态空对象而不是抛异常 —— 对调用方而言"没有 body"与"body 是空字符串"是同一件事。
+        /// 尚未读取（none：调用方忘了 read_body）或类型不符（如 body 是 json 却取 string）
+        /// 仍抛 std::bad_variant_access，那是调用方的用法错误。
         template <class T>
         T const&
         as() const
         {
+            if constexpr (!std::is_same_v<T, empty_tag> && !std::is_same_v<T, none_tag>)
+            {
+                if (holds<empty_tag>())
+                {
+                    static T const empty {};
+                    return empty;
+                }
+            }
             return std::get<T>(state_);
         }
 

@@ -1229,3 +1229,86 @@ TEST_CASE("response: compressed HTTP/1.0 response is not chunked", "[response][c
     auto plain10_body = plain10.substr(plain10.find("\r\n\r\n") + 4);
     REQUIRE(plain10_body == std::string(2000, 'a'));
 }
+
+// 回归：HEAD 应回显 GET 会发的 Content-Length，只是不发 body。
+// 旧实现 HEAD 走 writer.reset()，而 reset() 会丢掉"由本对象替上一个 body 算出的"
+// Content-Length，于是 HEAD 退化成 Content-Length: 0 —— 相当于断言资源为空，
+// 与 GET 实际返回的长度矛盾。改用 discard_body()：只丢 body，保留头。
+TEST_CASE("response: HEAD echoes the Content-Length GET would send", "[response]")
+{
+    test_common::test_scaffold sc;
+    auto handler = [](httplib::server::request&, httplib::server::response& resp) {
+        resp.set_string_content(std::string(1234, 'a'), "application/octet-stream"sv);
+    };
+    sc.server.router().set_http_handler<http::verb::get>("/echo-len", handler);
+    sc.server.router().set_http_handler<http::verb::head>("/echo-len", handler);
+    sc.start();
+
+    auto get = test_common::raw_request(
+        sc.endpoint, "GET /echo-len HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    auto head = test_common::raw_request(
+        sc.endpoint, "HEAD /echo-len HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+
+    REQUIRE(test_common::raw_header(get, "Content-Length") == "1234");
+    // 关键断言：HEAD 与 GET 的 Content-Length 必须一致（旧实现是 "0"）。
+    REQUIRE(test_common::raw_header(head, "Content-Length") == "1234");
+
+    // HEAD 不得发 body：头之后必须再无字节。
+    REQUIRE(head.size() == head.find("\r\n\r\n") + 4);
+    // GET 的 body 必须完整：恰好 1234 字节。
+    REQUIRE(get.size() == get.find("\r\n\r\n") + 4 + 1234);
+}
+
+// 回归：显式空 body（HEAD / 204）的类型化访问器应返回空值，而不是抛 std::bad_variant_access。
+// 空 body 的 state 是 empty_tag（不是 std::string），旧实现直接 std::get<std::string> 必抛，
+// 于是"检查 HEAD 没有 body"这种最自然的写法反而炸掉。
+TEST_CASE("response: bodyless response accessors return empty instead of throwing", "[response][bodyless]")
+{
+    run(
+        [](auto& server) {
+            auto handler = [](httplib::server::request&, httplib::server::response& resp) {
+                resp.set_string_content(std::string(8, 'a'), "application/octet-stream"sv);
+            };
+            server.router().template set_http_handler<http::verb::get>("/bodyless", handler);
+            server.router().template set_http_handler<http::verb::head>("/bodyless", handler);
+            server.router().template set_http_handler<http::verb::get>(
+                "/no-content",
+                [](httplib::server::request&, httplib::server::response& resp) {
+                    resp.set_empty_content(http::status::no_content);
+                });
+        },
+        [](auto& client) -> net::awaitable<void> {
+            // HEAD：无 body。
+            auto head = UNWRAP(co_await client.async_head("/bodyless"));
+            REQUIRE(head.type() == httplib::body_type::empty);
+            REQUIRE(head.as_string().empty());
+            REQUIRE(head.as_json().is_null());
+
+            // 204 同理。
+            auto nc = UNWRAP(co_await client.async_get("/no-content"));
+            REQUIRE(nc.type() == httplib::body_type::empty);
+            REQUIRE(nc.as_string().empty());
+            REQUIRE(nc.as_query_params().empty());
+        });
+}
+
+// 同一缺陷在 server 侧：无 body 的 GET 请求 state 也是 empty_tag，
+// req.as_string() 旧实现抛异常（在 handler 里抛 → 500）。
+TEST_CASE("request: as_string on a bodyless request returns empty instead of throwing", "[request][bodyless]")
+{
+    run(
+        [](auto& server) {
+            server.router().template set_http_handler<http::verb::get>(
+                "/no-body",
+                [](httplib::server::request& req, httplib::server::response& resp) {
+                    // 不抛才算走到这里；抛出的话整个请求会 500，下面的断言自然失败。
+                    resp.set_string_content(std::string_view(req.as_string().empty() ? "empty" : "nonempty"),
+                                            "application/octet-stream"sv);
+                });
+        },
+        [](auto& client) -> net::awaitable<void> {
+            auto resp = UNWRAP(co_await client.async_get("/no-body"));
+            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.as_string() == "empty");
+        });
+}

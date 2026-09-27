@@ -451,41 +451,6 @@ TEST_CASE("codec: stream_decoder handles small chunks", "[body_pipeline]")
     REQUIRE(out == original);
 }
 
-TEST_CASE("codec: encoded_source chains compression", "[body_pipeline]")
-{
-    std::string original = "encoded source chain payload 0123456789 abcdefghij";
-    body::encoded_source src(std::make_unique<body::string_source>(original), "gzip");
-    auto wire = pull(src);
-
-    body::stream_decoder decoder;
-    boost::system::error_code ec;
-    decoder.reset("gzip", std::nullopt, 0, ec);
-    REQUIRE_FALSE(ec);
-    decoder.feed(net::buffer(wire), ec);
-    REQUIRE_FALSE(ec);
-    decoder.flush(ec);
-    REQUIRE_FALSE(ec);
-
-    body::string_sink sink;
-    char buf[7];
-    for (;;)
-    {
-        auto got = decoder.drain(net::buffer(buf), ec);
-        REQUIRE_FALSE(ec);
-        if (got == 0)
-        {
-            break;
-        }
-        sink.put(net::buffer(buf, got), ec);
-        REQUIRE_FALSE(ec);
-    }
-    sink.finish(ec);
-    REQUIRE_FALSE(ec);
-    body::body_state p;
-    sink.commit(p);
-    REQUIRE(p.as<std::string>() == original);
-}
-
 TEST_CASE("codec: identity passthrough", "[body_pipeline]")
 {
     auto encoded = body::encode("raw bytes", "identity");

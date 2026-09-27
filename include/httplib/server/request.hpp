@@ -61,6 +61,8 @@ namespace httplib::server
         request_data& data();
         request_data const& data() const;
 
+        // 按内容类型取请求体（引用，不拷贝）；body 为显式空（无 body 的 GET 等）时返回空值，
+        // body 非该类型或尚未读取时抛 std::bad_variant_access
         std::string const& as_string() const;
         boost::json::value const& as_json() const;
         httplib::form_data const& as_form_data() const;

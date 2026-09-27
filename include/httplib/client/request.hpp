@@ -53,6 +53,8 @@ namespace httplib::client
         http::fields& base();
         http::fields const& base() const;
 
+        // 按内容类型取请求体（引用，不拷贝）；body 为显式空时返回空值，
+        // body 非该类型或尚未设置时抛 std::bad_variant_access
         std::string const& as_string() const;
         boost::json::value const& as_json() const;
         httplib::form_data const& as_form_data() const;

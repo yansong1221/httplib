@@ -180,14 +180,24 @@ namespace httplib::detail
             payload_.set<body::empty_tag>();
         }
 
+        /// 丢弃 body payload 与编码器状态，但保留 header（含 Content-Length 及其分帧）。
+        /// HEAD 响应用它：回显 GET 会有的头，但不发 body。
         void
-        reset()
+        discard_body()
         {
             reset_serializer();
             source_.reset();
             payload_.reset();
             msg_.body() = http::buffer_body::value_type {};
             encoder_.reset();
+        }
+
+        /// 准备写入一个新 body：在 discard_body() 之上，再丢掉"上一个 body 由本对象算出的"
+        /// Content-Length。
+        void
+        reset()
+        {
+            discard_body();
 
             // 只丢掉"本对象替上一个 body 算出、且此后没被改过"的 Content-Length：
             // prepare_payload() 见到已存在的 Content-Length 会直接沿用，于是"旧长度 + 新 body"

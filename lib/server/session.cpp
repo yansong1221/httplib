@@ -438,7 +438,9 @@ namespace httplib::server
 
         if (req.method() == http::verb::head)
         {
-            writer.reset();
+            // HEAD 只丢 body，保留 GET 会发的头（含 Content-Length），
+            // 否则会退化成 Content-Length: 0，等于断言资源为空。
+            writer.discard_body();
         }
 
         auto ec = co_await writer.write_message();
