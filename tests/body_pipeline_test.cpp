@@ -72,8 +72,8 @@ namespace
         return out;
     }
 
-    /// 伪写入端：不产生任何网络字节，只记录 body_writer 交给序列化器的 body 片段，
-    /// 并可按需让「写头」失败 —— 用于验证写头失败时 source 尚未被消费（重试前提）。
+    /// 浼啓鍏ョ锛氫笉浜х敓浠讳綍缃戠粶瀛楄妭锛屽彧璁板綍 body_writer 浜ょ粰搴忓垪鍖栧櫒鐨?body 鐗囨锛?
+    /// 骞跺彲鎸夐渶璁┿€屽啓澶淬€嶅け璐?鈥斺€?鐢ㄤ簬楠岃瘉鍐欏ご澶辫触鏃?source 灏氭湭琚秷璐癸紙閲嶈瘯鍓嶆彁锛夈€?
     class recording_task
     {
       public:
@@ -191,7 +191,7 @@ TEST_CASE("body_writer: header write failure leaves source unconsumed for retry"
 
     boost::system::error_code ec;
 
-    // 第一次发送：写头即失败（模拟复用池中的死连接）。
+    // 绗竴娆″彂閫侊細鍐欏ご鍗冲け璐ワ紙妯℃嫙澶嶇敤姹犱腑鐨勬杩炴帴锛夈€?
     auto fut = net::co_spawn(
         ioc,
         [&]() -> net::awaitable<void> { ec = co_await writer.write_message(); },
@@ -199,12 +199,12 @@ TEST_CASE("body_writer: header write failure leaves source unconsumed for retry"
     ioc.run();
     fut.get();
 
-    // 关键不变量：写头失败时 source 一个字节都没被消费。
+    // 鍏抽敭涓嶅彉閲忥細鍐欏ご澶辫触鏃?source 涓€涓瓧鑺傞兘娌¤娑堣垂銆?
     REQUIRE(task.body().empty());
     REQUIRE_FALSE(task.header_written_);
     REQUIRE(ec == boost::asio::error::connection_reset);
 
-    // 模拟 client 死连接重试：只重建 serializer（source 不动）后重发。
+    // 妯℃嫙 client 姝昏繛鎺ラ噸璇曪細鍙噸寤?serializer锛坰ource 涓嶅姩锛夊悗閲嶅彂銆?
     task.fail_header_ = false;
     writer.reset_serializer();
 
@@ -212,24 +212,24 @@ TEST_CASE("body_writer: header write failure leaves source unconsumed for retry"
         ioc,
         [&]() -> net::awaitable<void> { ec = co_await writer.write_message(); },
         net::use_future);
-    // 上一轮 run() 因无工作而返回，io_context 处于 stopped 态，必须 restart 才能再跑。
+    // 涓婁竴杞?run() 鍥犳棤宸ヤ綔鑰岃繑鍥烇紝io_context 澶勪簬 stopped 鎬侊紝蹇呴』 restart 鎵嶈兘鍐嶈窇銆?
     ioc.restart();
     ioc.run();
     fut2.get();
 
     REQUIRE_FALSE(ec);
     REQUIRE(task.header_written_);
-    // 重发后 body 必须完整。
+    // 閲嶅彂鍚?body 蹇呴』瀹屾暣銆?
     REQUIRE(task.body() == "retry payload");
     REQUIRE(task.more().size() == 1);
     REQUIRE_FALSE(task.more().front());
     REQUIRE(writer.base()[http::field::content_length] == "13");
 }
 
-// 回归：换 body 必须丢掉上一个 body 留下的 Content-Length。
-// prepare_payload() 见到已存在的 Content-Length 会直接沿用，于是"旧长度 + 新 body"会把对端
-// 挂在那儿等永远不会到达的字节。契约：reset() 无条件丢弃 Content-Length，之后
-// prepare_payload() 按当前 body 重算；要指定 Content-Length 请在 set_* 之后再设。
+// 鍥炲綊锛氭崲 body 蹇呴』涓㈡帀涓婁竴涓?body 鐣欎笅鐨?Content-Length銆?
+// prepare_payload() 瑙佸埌宸插瓨鍦ㄧ殑 Content-Length 浼氱洿鎺ユ部鐢紝浜庢槸"鏃ч暱搴?+ 鏂?body"浼氭妸瀵圭
+// 鎸傚湪閭ｅ効绛夋案杩滀笉浼氬埌杈剧殑瀛楄妭銆傚绾︼細reset() 鏃犳潯浠朵涪寮?Content-Length锛屼箣鍚?
+// prepare_payload() 鎸夊綋鍓?body 閲嶇畻锛涜鎸囧畾 Content-Length 璇峰湪 set_* 涔嬪悗鍐嶈銆?
 TEST_CASE("body_writer: reset drops the previous Content-Length", "[body_pipeline]")
 {
     net::io_context ioc;
@@ -258,27 +258,27 @@ TEST_CASE("body_writer: reset drops the previous Content-Length", "[body_pipelin
         REQUIRE_FALSE(ec);
     };
 
-    // 第一轮：长字符串（string_source 已知长度），Content-Length 由 prepare_payload() 算出。
+    // 绗竴杞細闀垮瓧绗︿覆锛坰tring_source 宸茬煡闀垮害锛夛紝Content-Length 鐢?prepare_payload() 绠楀嚭銆?
     writer.set_string(std::string(40, 'a'), "text/plain");
     send();
     REQUIRE(task.body().size() == 40);
     REQUIRE(writer.base()[http::field::content_length] == "40");
 
-    // 第二轮：换短 body。关键断言：Content-Length 必须重算，不能沿用 40。
+    // 绗簩杞細鎹㈢煭 body銆傚叧閿柇瑷€锛欳ontent-Length 蹇呴』閲嶇畻锛屼笉鑳芥部鐢?40銆?
     task.reset_record();
     writer.set_string("hi", "text/plain");
     send();
     REQUIRE(task.body() == "hi");
     REQUIRE(writer.base()[http::field::content_length] == "2");
 
-    // 第三轮：换 body 时上一轮的 Content-Length 一律丢弃；空 body 走 empty_source，长度即 0。
+    // 绗笁杞細鎹?body 鏃朵笂涓€杞殑 Content-Length 涓€寰嬩涪寮冿紱绌?body 璧?empty_source锛岄暱搴﹀嵆 0銆?
     task.reset_record();
     writer.set_empty();
     send();
     REQUIRE(writer.base()[http::field::content_length] == "0");
 
-    // 第四轮：要指定 Content-Length 而又不发 body（HEAD 回显 GET 长度），用 discard_body()
-    // 让 source 为空、header 原样保留，而不是 set_empty()（后者会带出长度 0）。
+    // 绗洓杞細瑕佹寚瀹?Content-Length 鑰屽張涓嶅彂 body锛圚EAD 鍥炴樉 GET 闀垮害锛夛紝鐢?discard_body()
+    // 璁?source 涓虹┖銆乭eader 鍘熸牱淇濈暀锛岃€屼笉鏄?set_empty()锛堝悗鑰呬細甯﹀嚭闀垮害 0锛夈€?
     task.reset_record();
     writer.discard_body();
     writer.base().set(http::field::content_length, "4");
@@ -478,12 +478,12 @@ TEST_CASE("codec: identity passthrough", "[body_pipeline]")
     REQUIRE(std::string(buf, got) == "raw bytes");
 }
 
-// 回归：limit 约束的是解压"产出"字节，压缩后的长度不再从限额里扣除。
-// 旧实现把压缩长度从 limit 里扣掉后（limit_ -= content_length）再对产出计数，等于把同一份
-// 额度算两次：压缩后体积大、解压后仍在限额内的 body 会被误判为 body_limit。
+// 鍥炲綊锛歭imit 绾︽潫鐨勬槸瑙ｅ帇"浜у嚭"瀛楄妭锛屽帇缂╁悗鐨勯暱搴︿笉鍐嶄粠闄愰閲屾墸闄ゃ€?
+// 鏃у疄鐜版妸鍘嬬缉闀垮害浠?limit 閲屾墸鎺夊悗锛坙imit_ -= content_length锛夊啀瀵逛骇鍑鸿鏁帮紝绛変簬鎶婂悓涓€浠?
+// 棰濆害绠椾袱娆★細鍘嬬缉鍚庝綋绉ぇ銆佽В鍘嬪悗浠嶅湪闄愰鍐呯殑 body 浼氳璇垽涓?body_limit銆?
 TEST_CASE("codec: produced-bytes limit is not reduced by compressed length", "[body_pipeline]")
 {
-    // 用近似不可压的数据，保证压缩后体积仍接近原始大小；否则压缩长度很小，区分不出问题。
+    // 鐢ㄨ繎浼间笉鍙帇鐨勬暟鎹紝淇濊瘉鍘嬬缉鍚庝綋绉粛鎺ヨ繎鍘熷澶у皬锛涘惁鍒欏帇缂╅暱搴﹀緢灏忥紝鍖哄垎涓嶅嚭闂銆?
     std::string original(3000, '\0');
     std::uint32_t seed = 0x12345678u;
     for (auto& c : original)
@@ -494,11 +494,11 @@ TEST_CASE("codec: produced-bytes limit is not reduced by compressed length", "[b
 
     auto wire = body::encode(original, "gzip");
     REQUIRE(wire.has_value());
-    REQUIRE(wire->size() > 1024); // 压缩后仍较大，才足以触发旧实现的误判
+    REQUIRE(wire->size() > 1024); // 鍘嬬缉鍚庝粛杈冨ぇ锛屾墠瓒充互瑙﹀彂鏃у疄鐜扮殑璇垽
 
     boost::system::error_code ec;
 
-    // limit = 4096 > 解压后 3000；旧实现会变成 4096 - wire->size() < 3000 而误报。
+    // limit = 4096 > 瑙ｅ帇鍚?3000锛涙棫瀹炵幇浼氬彉鎴?4096 - wire->size() < 3000 鑰岃鎶ャ€?
     body::stream_decoder decoder;
     decoder.reset("gzip", std::optional<std::uint64_t>(wire->size()), 4096, ec);
     REQUIRE_FALSE(ec);
@@ -514,7 +514,7 @@ TEST_CASE("codec: produced-bytes limit is not reduced by compressed length", "[b
     out.resize(n);
     REQUIRE(out == original);
 
-    // 产出确实超过限额时仍要报错，确认限额没被放宽成失效。
+    // 浜у嚭纭疄瓒呰繃闄愰鏃朵粛瑕佹姤閿欙紝纭闄愰娌¤鏀惧鎴愬け鏁堛€?
     body::stream_decoder bomb;
     bomb.reset("gzip", std::nullopt, 1024, ec);
     REQUIRE_FALSE(ec);
@@ -526,3 +526,70 @@ TEST_CASE("codec: produced-bytes limit is not reduced by compressed length", "[b
     REQUIRE(ec == http::error::body_limit);
 }
 #endif
+
+// 回归：空 body 声明了 Content-Encoding 时不能变成硬错误。
+// flush() 曾无条件对解压器调 finish()，而空 body 一个字节都没喂过——gzip 解压器没见到
+// 头，finish() 报 "compression stream truncated or insufficient input"（httplib.compress/6），
+// 于是 read_string()/read() 返回错误而不是空串。本库 server 协商压缩时不检查 body 是否为空
+// （session.cpp），HEAD 响应也会带上 GET 的 Content-Encoding，所以这是可达路径。
+TEST_CASE("stream_decoder: flushing a never-fed decoder is an empty success", "[body]")
+{
+    boost::system::error_code ec;
+
+    SECTION("gzip, nothing ever fed")
+    {
+        body::stream_decoder d;
+        d.reset("gzip", 0, 1024, ec);
+        REQUIRE_FALSE(ec);
+        REQUIRE(d.transforms());
+        d.flush(ec);
+        REQUIRE_FALSE(ec);
+        REQUIRE(d.buffered() == 0);
+    }
+
+    SECTION("gzip, fed zero bytes")
+    {
+        body::stream_decoder d;
+        d.reset("gzip", 0, 1024, ec);
+        REQUIRE_FALSE(ec);
+        d.feed(net::buffer("", 0), ec);
+        REQUIRE_FALSE(ec);
+        d.flush(ec);
+        REQUIRE_FALSE(ec);
+    }
+
+    SECTION("one-shot decode of an empty gzip body yields an empty string")
+    {
+        auto r = body::decode("", "gzip", 1024);
+        REQUIRE(r);
+        REQUIRE(r->empty());
+    }
+
+    SECTION("a real gzip stream still decodes and still validates its trailer")
+    {
+        // 非空输入必须仍然走 finish()，否则截断的 gzip 流会被当成成功。
+        auto wire = body::encode("hello", "gzip");
+        REQUIRE(wire);
+        body::stream_decoder d;
+        d.reset("gzip", wire->size(), 1024, ec);
+        REQUIRE_FALSE(ec);
+        d.feed(net::buffer(*wire), ec);
+        REQUIRE_FALSE(ec);
+        d.flush(ec);
+        REQUIRE_FALSE(ec);
+        std::string out;
+        out.resize(d.buffered());
+        d.drain(net::buffer(out), ec);
+        REQUIRE_FALSE(ec);
+        REQUIRE(out == "hello");
+    }
+}
+
+TEST_CASE("stream_encoder: encoding an empty string still emits a valid gzip stream", "[body]")
+{
+    // 与 decoder 的空输入跳过相反：编码空串必须产出合法空载荷流，否则对端拿到 0 字节。
+    auto wire = body::encode("", "gzip");
+    REQUIRE(wire);
+    REQUIRE(wire->size() > 0);
+    REQUIRE(body::decode(*wire, "gzip", 1024));
+}

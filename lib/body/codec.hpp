@@ -64,6 +64,8 @@ namespace httplib::body
         std::uint64_t limit_ = 0;
         std::uint64_t produced_ = 0;
         bool finished_ = false;
+        /// 是否真的喂进过字节：空 body 也可能声明 Content-Encoding，那时一个字节都没有。
+        bool fed_ = false;
     };
 
     /** 流式 Content-Encoding 编码器（写方向的对称实现）。

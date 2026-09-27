@@ -1234,6 +1234,55 @@ TEST_CASE("Response: malformed gzip request body errors cleanly, no exception", 
 }
 #endif
 
+// 回归：声明了 Content-Encoding 的空 body，线上不许多出任何字节。
+// 协商压缩时只看 Accept-Encoding 与 content-type，不看 body 是否为空（session.cpp），
+// 所以空 body 也会带上 Content-Encoding: gzip。prepare_payload() 对长度 0 的 source 记的是
+// CL:0 + chunked(false)，可写路径却照样冲刷了编码器，把一个 20 字节的空载荷 gzip 流
+// （1f 8b ... 03 00 + CRC 0 + ISIZE 0）写在 CL:0 之下——对端按 CL:0 读 0 字节，剩下的流字节
+// 被当成下一个响应的开头，这条 keep-alive 连接直接废掉（客户端报 beast.http:14 bad version）。
+// 这里按字节断言：头之后必须正好是 0 字节。
+TEST_CASE("response: empty encoded body writes no bytes past Content-Length: 0", "[response][compression]")
+{
+    test_common::test_scaffold sc;
+    sc.server.router().set_http_handler<http::verb::get>(
+        "/empty-encoded",
+        [](httplib::server::request&, httplib::server::response& resp)
+        { resp.set_string_content(std::string {}, "text/plain"); });
+    sc.start();
+
+    auto raw = test_common::raw_request(sc.endpoint,
+                                        "GET /empty-encoded HTTP/1.1\r\nHost: x\r\n"
+                                        "Connection: close\r\nAccept-Encoding: gzip\r\n\r\n");
+    auto header_end = raw.find("\r\n\r\n") + 4;
+    REQUIRE(header_end == raw.size());
+    REQUIRE(test_common::raw_header(raw, "Content-Encoding") == "gzip");
+    REQUIRE(test_common::raw_header(raw, "Content-Length") == "0");
+    // 非空同源 body 仍要正常压缩（走 chunked），别被这个修复顺带改掉。
+    sc.server.router().set_http_handler<http::verb::get>(
+        "/nonempty-encoded",
+        [](httplib::server::request&, httplib::server::response& resp)
+        { resp.set_string_content(std::string(2000, 'a'), "text/plain"sv); });
+    auto full = test_common::raw_request(sc.endpoint,
+                                         "GET /nonempty-encoded HTTP/1.1\r\nHost: x\r\n"
+                                         "Connection: close\r\nAccept-Encoding: gzip\r\n\r\n");
+    REQUIRE(test_common::raw_header(full, "Content-Encoding") == "gzip");
+    REQUIRE(test_common::raw_header(full, "Transfer-Encoding") == "chunked");
+    REQUIRE(full.size() > full.find("\r\n\r\n") + 4);
+
+    // "空"的另一种形态：只设 Content-Type、不设任何 body —— source_ 是 discard_body() 之后的
+    // 空指针（有意状态，HEAD 靠它保住显式 Content-Length），压根没有 content_length() 可问。
+    // 漏判这一支同样会写出 20 字节，所以单独覆盖。
+    sc.server.router().set_http_handler<http::verb::get>(
+        "/no-body-encoded",
+        [](httplib::server::request&, httplib::server::response& resp)
+        { resp.set(http::field::content_type, "text/plain"); });
+    auto nobody = test_common::raw_request(sc.endpoint,
+                                          "GET /no-body-encoded HTTP/1.1\r\nHost: x\r\n"
+                                          "Connection: close\r\nAccept-Encoding: gzip\r\n\r\n");
+    REQUIRE(test_common::raw_header(nobody, "Content-Length") == "0");
+    REQUIRE(nobody.find("\r\n\r\n") + 4 == nobody.size());
+}
+
 // 回归：压缩 body 的分帧必须交给 Beast 的 prepare_payload()，它只在 HTTP/1.1 上用 chunked。
 // 旧实现无条件 msg_.chunked(true)，于是 HTTP/1.0 响应也带上 Transfer-Encoding: chunked ——
 // 而 HTTP/1.0 根本没有 chunked 传输编码，严格的 1.0 客户端/代理会直接解析失败。

@@ -1087,6 +1087,50 @@ TEST_CASE("client: lazy read text", "[client]")
         });
 }
 
+// 回归：空 body + Content-Encoding 必须读成空串，而不是报错。
+// server 协商压缩时只检查 Accept-Encoding 与 content-type，不检查 body 是否为空
+// （session.cpp），所以空 body 也会带上 Content-Encoding: gzip 与 Content-Length: 0。
+// 客户端曾对这种"从未收到过压缩字节"的解码器调 finish()，得到
+// "compression stream truncated or insufficient input"，read_string() 返回错误。
+// 读取失败还会波及连接复用，所以这里额外验证同一 client 的下一个请求仍然成功。
+TEST_CASE("client: empty body with Content-Encoding reads as empty string", "[client]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<http::verb::get>(
+                "/empty-encoded",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content(std::string {}, "text/plain"); });
+            server.router().template set_http_handler<http::verb::get>(
+                "/after-empty-encoded",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto headers = httplib::http::fields();
+            headers.set(http::field::accept_encoding, "gzip");
+
+            httplib::client::request req(http::verb::get, "/empty-encoded", headers);
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
+            REQUIRE(resp.result() == http::status::ok);
+            // 确认这条路径真的产出了"空 body 却带 Content-Encoding"，否则本测试是空转。
+            REQUIRE(resp[http::field::content_encoding] == "gzip");
+            REQUIRE(resp[http::field::content_length] == "0");
+
+            auto text = co_await resp.read_string();
+            REQUIRE(text);
+            REQUIRE(text->empty());
+
+            // 读失败曾污染连接池，使同一 client 的后续请求全部失败。
+            auto next = UNWRAP(co_await client.async_get("/after-empty-encoded"));
+            REQUIRE(next.result() == http::status::ok);
+            auto next_text = UNWRAP(co_await next.read_string());
+            REQUIRE(next_text == "ok");
+        });
+}
+
 TEST_CASE("client: lazy read json", "[client]")
 {
     run(

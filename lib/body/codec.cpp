@@ -40,6 +40,7 @@ namespace httplib::body
         produced_ = 0;
         limit_ = limit;
         finished_ = false;
+        fed_ = false;
         compressor_.reset();
 
         compressor_ = make_compressor(encoding, compress::compressor::mode::decode, ec);
@@ -64,6 +65,11 @@ namespace httplib::body
         ec = {};
         if (compressor_)
         {
+            // 空块不算"喂过"：上层收 CL:0 的 body 时仍会走一次 feed 空 buffer。
+            if (raw.size() > 0)
+            {
+                fed_ = true;
+            }
             compressor_->write(raw, true, ec);
             if (ec)
             {
@@ -107,6 +113,15 @@ namespace httplib::body
             return;
         }
         finished_ = true;
+        // 一个字节都没喂过就别 finish：解压器连 gzip 头都没见过，finish() 必然报
+        // "compression stream truncated or insufficient input"（compress/6）。空 body 声明
+        // Content-Encoding 是可达路径——本库 server 协商压缩时不检查 body 是否为空
+        // （session.cpp），HEAD 响应还会带上 GET 的 Content-Encoding——此时正确结果就是
+        // 空产出，不是错误。喂过字节的照常 finish，截断流仍会被验出来。
+        if (!fed_)
+        {
+            return;
+        }
         compressor_->finish(ec);
         if (ec)
         {

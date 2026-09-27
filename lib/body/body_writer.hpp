@@ -453,6 +453,28 @@ namespace httplib::detail
                 co_return ec;
             }
 
+            // body 为空时，prepare_payload() 记的是 CL:0 + chunked(false)，线上不该有任何 body
+            // 字节。但仍要把序列化器驱动到 done（客户端复用请求对象靠这个判定，见
+            // prepare_for_send()），所以照常写一个空 body——只是必须走 write_raw_locked，绝不能走
+            // write_compressed_locked：后者会冲刷编码器，产出一个 20 字节的空载荷 gzip 流
+            // （RFC 1952）并写下去，与 CL:0 矛盾。对端按 CL:0 读 0 字节，剩下的流字节被当成下一个
+            // 响应的开头（实测 beast.http:14 "bad version"），这条 keep-alive 连接就废了。
+            //
+            // "空"有两种形态，两个分支都得判：
+            //   - source_ 为空指针：discard_body() 之后的状态，是有意保留的（HEAD 靠它保住显式
+            //     Content-Length，见 prepare_payload 与 discard_body 的注释），此时压根没有
+            //     content_length() 可问。实测「只设 Content-Type、不设 body」就会走到这里。
+            //   - 挂了 source 但长度为 0：empty_source（set_empty() 用它代表无内容）与
+            //     string_source("") 之类。empty_source::content_length() 就返回 0。
+            // Content-Encoding 不影响这个判断：空 body 照样可能带它（session.cpp 协商时不看 body
+            // 是否为空），而正因为没有字节可编码，才更不能凭空造出一个压缩流。
+            // 注意不能靠 sr.is_done() 判断——实测头写完后它仍是 false，Beast 要再 consume 一次
+            // 才认到 body 结束。
+            if (!source_ || source_->content_length() == 0)
+            {
+                co_return co_await write_raw_locked(net::const_buffer {}, false);
+            }
+
             // 逐块拉取 source，经统一原语落地；source 读尽后以空 body + more=false 收尾
             // （压缩时正是这一步冲刷编码器并写出 chunked 终止块）。这一步同时把序列化器驱动到
             // is_done()——请求对象要靠这个判定重置序列化器后复用（见 prepare_for_send()），
