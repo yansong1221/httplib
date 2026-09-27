@@ -227,6 +227,99 @@ TEST_CASE("JWT: decoded_jwt accessors", "[jwt]")
     REQUIRE(decoded.get_payload().is_object());
 }
 
+// 回归：decoded_jwt 的公开构造函数过去会抛未文档化的异常（json::parse / value::at /
+// value_to 都是抛异常的 overload），头文件对此只字未提。现在除 bad_alloc 外一律不抛，
+// 失败原因记在 get_error()。
+//
+// decode() 过去用 catch (std::exception) 兜住，于是连 std::bad_alloc 也会被报成
+// invalid_token —— 分配失败被当成"token 非法"。现在 decode() 读 error_，不再吞异常。
+TEST_CASE("JWT: decoded_jwt constructor does not throw on malformed token", "[jwt]")
+{
+    // base64url 字面量：not json at all / {"alg":"HS256"} / {} / {"alg":123} / [1,2,3] / {{{
+    // （jwt.cpp 里的 base64url_encode 是内部符号，测试用不了，只能写字面量。）
+    const char* b64_bad_json = "bm90IGpzb24gYXQgYWxs";
+    const char* b64_alg_str = "eyJhbGciOiJIUzI1NiJ9";
+    const char* b64_empty_obj = "e30";
+    const char* b64_alg_num = "eyJhbGciOjEyM30";
+    const char* b64_json_array = "WzEsMiwzXQ";
+    const char* b64_bad_payload = "e3t7";
+
+    auto token = [](std::string_view h, std::string_view p)
+    { return std::string(h) + "." + std::string(p) + ".sig"; };
+
+    SECTION("header is not valid JSON")
+    {
+        auto t = token(b64_bad_json, b64_empty_obj);
+        REQUIRE_NOTHROW([&] { httplib::jwt::decoded_jwt d(t); });
+        httplib::jwt::decoded_jwt d(t);
+        REQUIRE(d.get_error() == make_error_code(httplib::jwt::error::invalid_token));
+    }
+
+    SECTION("payload is not valid JSON")
+    {
+        httplib::jwt::decoded_jwt d(token(b64_alg_str, b64_bad_payload));
+        REQUIRE(d.get_error() == make_error_code(httplib::jwt::error::invalid_token));
+    }
+
+    SECTION("alg claim missing")
+    {
+        httplib::jwt::decoded_jwt d(token(b64_empty_obj, b64_empty_obj));
+        REQUIRE(d.get_error() == make_error_code(httplib::jwt::error::invalid_token));
+    }
+
+    SECTION("alg claim is not a string")
+    {
+        httplib::jwt::decoded_jwt d(token(b64_alg_num, b64_empty_obj));
+        REQUIRE(d.get_error() == make_error_code(httplib::jwt::error::invalid_token));
+    }
+
+    SECTION("header is a JSON array, not an object")
+    {
+        httplib::jwt::decoded_jwt d(token(b64_json_array, b64_empty_obj));
+        REQUIRE(d.get_error() == make_error_code(httplib::jwt::error::invalid_token));
+    }
+
+    SECTION("no dots at all")
+    {
+        httplib::jwt::decoded_jwt d("garbage");
+        REQUIRE(d.get_error() == make_error_code(httplib::jwt::error::invalid_token));
+    }
+
+    SECTION("valid token reports no error")
+    {
+        auto t = httplib::jwt::create().set_issuer("iss").sign(httplib::jwt::hs256("secret"));
+        httplib::jwt::decoded_jwt d(t);
+        REQUIRE_FALSE(d.get_error());
+        REQUIRE(d.get_algorithm() == "HS256");
+    }
+}
+
+// decode() 的对外契约没变：以上每种坏 token 仍然报 invalid_token。
+TEST_CASE("JWT: decode still reports invalid_token for malformed tokens", "[jwt]")
+{
+    auto bad = {
+        std::string("no-dots"),
+        std::string("only.one"),
+        std::string("bm90IGpzb24gYXQgYWxs.e30.sig"),        // header 非 JSON
+        std::string("eyJhbGciOiJIUzI1NiJ9.e3t7.sig"),       // payload 非 JSON
+        std::string("e30.e30.sig"),                          // 缺 alg
+        std::string("eyJhbGciOjEyM30.e30.sig"),              // alg 非字符串
+        std::string("WzEsMiwzXQ.e30.sig"),                   // header 是数组
+    };
+
+    for (auto const& t : bad)
+    {
+        auto res = httplib::jwt::decode(t);
+        REQUIRE_FALSE(res.has_value());
+        REQUIRE(res.error() == make_error_code(httplib::jwt::error::invalid_token));
+    }
+
+    auto good = httplib::jwt::create().sign(httplib::jwt::hs256("secret"));
+    auto res = httplib::jwt::decode(good);
+    REQUIRE(res.has_value());
+    REQUIRE(res.value().get_algorithm() == "HS256");
+}
+
 TEST_CASE("JWT: verifier allow_algorithm explicitly", "[jwt]")
 {
     auto token = httplib::jwt::create().sign(httplib::jwt::hs256("secret"));

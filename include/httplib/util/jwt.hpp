@@ -115,7 +115,17 @@ namespace httplib::jwt
     class HTTPLIB_API decoded_jwt
     {
       public:
+        /// 解析 token。除分配失败（std::bad_alloc）外不抛：token 格式不对、base64 解出不是
+        /// 合法 JSON、缺 alg 字段或 alg 不是字符串，错误都记在 get_error() 里。
+        /// 想要"失败即返回值"的形态请用 decode()（返回 result 并在此转成 error::invalid_token）。
         decoded_jwt(std::string_view token);
+
+        /// 解析失败的原因；成功时为空。仅上面那个构造函数会写入。
+        boost::system::error_code
+        get_error() const
+        {
+            return error_;
+        }
 
         boost::json::value
         get_payload() const
@@ -177,6 +187,7 @@ namespace httplib::jwt
         boost::json::value header_;
         boost::json::value payload_;
         std::string algorithm_;
+        boost::system::error_code error_;
     };
 
     class HTTPLIB_API builder

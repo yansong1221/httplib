@@ -168,18 +168,48 @@ namespace httplib::jwt
         auto dot1 = token.find('.');
         if (dot1 == std::string_view::npos)
         {
+            error_ = make_error_code(error::invalid_token);
             return;
         }
         auto dot2 = token.find('.', dot1 + 1);
         if (dot2 == std::string_view::npos)
         {
+            error_ = make_error_code(error::invalid_token);
             return;
         }
 
         signature_ = token.substr(dot2 + 1);
-        header_ = boost::json::parse(base64url_decode(token.substr(0, dot1)));
-        payload_ = boost::json::parse(base64url_decode(token.substr(dot1 + 1, dot2 - dot1 - 1)));
-        algorithm_ = boost::json::value_to<std::string>(header_.at(claim::algorithm));
+
+        // 这三步过去用的是抛异常的 overload（json::parse / value::at / value_to），异常会从
+        // 公开构造函数里逃出去，而头文件对此没有任何说明。改为非抛形式：解析错误记进
+        // error_，由 get_error() / decode() 上报。base64url_decode 用的是 Beast 的
+        // base64::decode，它跳过非法字符而不会抛，所以不是失败来源。
+        boost::system::error_code jec;
+        header_ = boost::json::parse(base64url_decode(token.substr(0, dot1)), jec);
+        if (jec)
+        {
+            error_ = make_error_code(error::invalid_token);
+            return;
+        }
+        payload_ = boost::json::parse(base64url_decode(token.substr(dot1 + 1, dot2 - dot1 - 1)), jec);
+        if (jec)
+        {
+            error_ = make_error_code(error::invalid_token);
+            return;
+        }
+
+        if (!header_.is_object())
+        {
+            error_ = make_error_code(error::invalid_token);
+            return;
+        }
+        auto const& alg = header_.as_object().find(claim::algorithm);
+        if (alg == header_.as_object().end() || !alg->value().is_string())
+        {
+            error_ = make_error_code(error::invalid_token);
+            return;
+        }
+        algorithm_ = alg->value().as_string();
     }
 
     bool
@@ -414,20 +444,12 @@ namespace httplib::jwt
     boost::system::result<decoded_jwt>
     decode(std::string_view token)
     {
-        auto dot1 = token.find('.');
-        auto dot2 = dot1 != std::string_view::npos ? token.find('.', dot1 + 1) : std::string_view::npos;
-        if (dot1 == std::string_view::npos || dot2 == std::string_view::npos)
+        auto decoded = decoded_jwt(token);
+        if (auto ec = decoded.get_error())
         {
-            return make_error_code(error::invalid_token);
+            return ec;
         }
-        try
-        {
-            return decoded_jwt(token);
-        }
-        catch (std::exception const&)
-        {
-            return make_error_code(error::invalid_token);
-        }
+        return decoded;
     }
 
     verifier&
