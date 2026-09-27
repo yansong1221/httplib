@@ -107,22 +107,20 @@ namespace httplib::detail
             return state_;
         }
 
+        /// body 是否已读完。state_ / raw_parser_ / stream_decoder_ 只在持有 read_mutex_
+        /// 时被改写，而本接口是同步 const 的（可被 SSE/NDJSON 轮询，也可从 io_context
+        /// 之外的线程调用），因此必须 try_lock 后再读：拿不到锁说明有读协程正在改写它们，
+        /// 此时一律返回 false。所有调用方都是按"没读完就继续读"用的，报 false 最多多走一次
+        /// 会正常加锁的 read_some_*，而误报 true 会让调用方提前收手、直接丢掉 body 数据。
         bool
         is_body_done() const
         {
-            if (state_.has())
-            {
-                return true;
-            }
-            if (!raw_parser_.is_done())
+            auto lock = read_mutex_.try_lock();
+            if (!lock)
             {
                 return false;
             }
-            if (stream_decoder_)
-            {
-                return stream_decoder_->buffered() == 0;
-            }
-            return true;
+            return body_done_locked();
         }
 
         /// 流式读取原始（未解压）body。
@@ -173,7 +171,7 @@ namespace httplib::detail
             {
                 co_return ec;
             }
-            co_return state_.take<std::string>();
+            co_return take_materialized<std::string>();
         }
 
         net::awaitable<boost::system::result<boost::json::value>>
@@ -184,7 +182,7 @@ namespace httplib::detail
             {
                 co_return ec;
             }
-            co_return state_.take<boost::json::value>();
+            co_return take_materialized<boost::json::value>();
         }
 
         net::awaitable<boost::system::result<httplib::query_params>>
@@ -195,7 +193,7 @@ namespace httplib::detail
             {
                 co_return ec;
             }
-            co_return state_.take<httplib::query_params>();
+            co_return take_materialized<httplib::query_params>();
         }
 
         net::awaitable<boost::system::result<httplib::form_data>>
@@ -208,7 +206,7 @@ namespace httplib::detail
             {
                 co_return ec;
             }
-            co_return state_.take<httplib::form_data>();
+            co_return take_materialized<httplib::form_data>();
         }
 
         net::awaitable<boost::system::error_code>
@@ -225,6 +223,39 @@ namespace httplib::detail
             co_await source_->read_some(parser, ec);
         }
 
+        bool
+        body_done_locked() const
+        {
+            if (state_.has())
+            {
+                return true;
+            }
+            if (!raw_parser_.is_done())
+            {
+                return false;
+            }
+            if (stream_decoder_)
+            {
+                return stream_decoder_->buffered() == 0;
+            }
+            return true;
+        }
+
+        /// 取回已物化的指定类型。read_body() 成功并不保证 state_ 里就是 T：body 可能已被
+        /// 流式消费，或已按 Content-Type 自动分发成别的类型（如无 body 记为 empty 后再
+        /// read_json()）。这里显式校验分支类型，绝不让 std::get 抛 std::bad_variant_access
+        /// 逃出协程 —— 这些接口的契约是返回 result，而不是抛异常。
+        template <class T>
+        boost::system::result<T>
+        take_materialized()
+        {
+            if (!state_.holds<T>())
+            {
+                return type_mismatch();
+            }
+            return state_.take<T>();
+        }
+
         net::awaitable<boost::system::error_code>
         read_body_impl(body::sink_ptr sink)
         {
@@ -234,13 +265,11 @@ namespace httplib::detail
                 co_return boost::system::error_code {};
             }
 
-            // 已转流式读取则拒绝：解析器已被消费，不能再用流式读一半的结果物化。
+            // 已转流式读取则一律拒绝物化：原始字节已被调用方逐块取走，state_ 里不可能
+            // 再有对应结果。此处必须报错而不是"成功"——否则 read_json() 等类型化读取会
+            // 拿到一个空 state_，随后 std::get 抛 std::bad_variant_access。
             if (stream_started_)
             {
-                if (is_body_done())
-                {
-                    co_return boost::system::error_code {};
-                }
                 co_return bad_file_descriptor();
             }
 
@@ -449,8 +478,15 @@ namespace httplib::detail
             return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
         }
 
+        static boost::system::error_code
+        type_mismatch()
+        {
+            return boost::system::errc::make_error_code(boost::system::errc::operation_not_supported);
+        }
+
         Source* source_ = nullptr;
-        util::async_mutex read_mutex_;
+        // is_body_done() 是 const 同步接口，内部要 try_lock，故此处为 mutable。
+        mutable util::async_mutex read_mutex_;
         raw_parser_t raw_parser_;
         bool stream_started_ = false;
 

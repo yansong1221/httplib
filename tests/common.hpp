@@ -5,15 +5,20 @@
 #include "httplib/server/server.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/thread_pool.hpp>
 #include <boost/asio/use_future.hpp>
+#include <boost/asio/write.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <cctype>
+#include <chrono>
 #include <memory>
 #include <spdlog/sinks/null_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #ifdef _DEBUG
@@ -101,6 +106,109 @@ namespace test_common
     {
         auto null_sink = std::make_shared<spdlog::sinks::null_sink_mt>();
         server.set_logger(std::make_shared<spdlog::logger>("test", null_sink));
+    }
+
+    /// 裸 socket 发一条原始 HTTP 请求，读到对端关闭为止，原样返回响应字节。
+    ///
+    /// httplib::client 永远发 HTTP/1.1（version(11) 写死），所以 HTTP/1.0 这类
+    /// "只有裸报文才能构造"的请求没法用 client 覆盖，只能走这条路。
+    ///
+    /// 靠 EOF 定界：HTTP/1.0 默认关连接；HTTP/1.1 的调用方必须在请求里带
+    /// "Connection: close"，否则对端 keep-alive 不关连接，这里会一直挂着。
+    inline std::string
+    raw_request(httplib::tcp::endpoint ep, std::string_view request)
+    {
+        net::io_context ioc;
+        std::string response;
+        boost::system::error_code result_ec;
+
+        net::co_spawn(
+            ioc,
+            [&]() -> net::awaitable<void> {
+                net::ip::tcp::socket sock{ioc};
+                boost::system::error_code ec;
+
+                sock.connect(ep, ec);
+                if (ec)
+                {
+                    result_ec = ec;
+                    co_return;
+                }
+
+                net::write(sock, net::buffer(request), ec);
+                if (ec)
+                {
+                    result_ec = ec;
+                    co_return;
+                }
+
+                char buf[4096];
+                for (;;)
+                {
+                    auto n = sock.read_some(net::buffer(buf), ec);
+                    if (ec)
+                    {
+                        // 对端关闭（EOF）是预期结局，不算错误。
+                        break;
+                    }
+                    response.append(buf, n);
+                }
+            },
+            [result_ec](std::exception_ptr e) {
+                if (e)
+                {
+                    std::rethrow_exception(e);
+                }
+            });
+
+        ioc.run();
+        REQUIRE_FALSE(result_ec);
+        return response;
+    }
+
+    /// 从原始响应字节里取某个 header 的值（找不到返回空串）。
+    inline std::string
+    raw_header(std::string_view response, std::string_view name)
+    {
+        auto pos = response.find("\r\n\r\n");
+        auto head = (pos == std::string_view::npos) ? response : response.substr(0, pos);
+        std::string needle;
+        needle.reserve(name.size() + 1);
+        needle.append(name).append(":");
+
+        auto line = head.find(needle);
+        if (line == std::string_view::npos)
+        {
+            return {};
+        }
+        line += needle.size();
+        auto eol = head.find("\r\n", line);
+        if (eol == std::string_view::npos)
+        {
+            eol = head.size();
+        }
+        auto value = head.substr(line, eol - line);
+        while (!value.empty() && (value.front() == ' ' || value.front() == '\t'))
+        {
+            value.remove_prefix(1);
+        }
+        return std::string(value);
+    }
+
+    /// 响应首行里的 HTTP 版本号，例如 "HTTP/1.0 200 OK" -> 10、"HTTP/1.1 200 OK" -> 11。
+    inline int
+    raw_version(std::string_view response)
+    {
+        if (response.size() < 8 || response.compare(0, 5, "HTTP/") != 0)
+        {
+            return 0;
+        }
+        if (!std::isdigit(static_cast<unsigned char>(response[5])) || response[6] != '.' ||
+            !std::isdigit(static_cast<unsigned char>(response[7])))
+        {
+            return 0;
+        }
+        return (response[5] - '0') * 10 + (response[7] - '0');
     }
 
     template <typename Setup, typename Test>

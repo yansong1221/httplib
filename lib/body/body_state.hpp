@@ -107,6 +107,15 @@ namespace httplib::body
             return std::get<T>(state_);
         }
 
+        /// 当前分支是否为指定存储类型。供 take() 前置校验，避免 std::get 抛
+        /// std::bad_variant_access（例如 body 已被流式消费或已物化为其它类型）。
+        template <class T>
+        bool
+        holds() const
+        {
+            return std::holds_alternative<T>(state_);
+        }
+
         /// 按类型写入并覆盖当前分支；tag 类型不带参数（如 `set<empty_tag>()`）。
         template <class T>
         void

@@ -188,6 +188,18 @@ namespace httplib::detail
             payload_.reset();
             msg_.body() = http::buffer_body::value_type {};
             encoder_.reset();
+
+            // 只丢掉"本对象替上一个 body 算出、且此后没被改过"的 Content-Length：
+            // prepare_payload() 见到已存在的 Content-Length 会直接沿用，于是"旧长度 + 新 body"
+            // 会把对端挂在那儿等永远不会到达的字节。调用方自己设的 Content-Length（先
+            // resp.set(content_length) 再 set_empty_content()、set_file_content 的 range 分支等）
+            // 必须原样保留 —— 所以要比对值，而不是只看"这个头在不在"。
+            if (content_length_derived_ &&
+                msg_[http::field::content_length] == std::to_string(*content_length_derived_))
+            {
+                msg_.erase(http::field::content_length);
+            }
+            content_length_derived_.reset();
         }
 
         // ---- 分帧 ----
@@ -196,18 +208,22 @@ namespace httplib::detail
         void
         prepare_payload()
         {
-            // 转换编码（gzip/br/...）会改写字节长度，明文 Content-Length 不再成立，
-            // 统一退化为 chunked 分帧。
+            // 转换编码（gzip/br/...）会改写字节长度，明文 Content-Length 不再成立。
+            // 分帧交给 Beast 的 prepare_payload()：它只在 HTTP/1.1 上选 chunked，
+            // 而 HTTP/1.0 没有 chunked 传输编码，只能不写 Content-Length、靠关连接定界 body。
             if (!msg_[http::field::content_encoding].empty() && source_)
             {
                 msg_.erase(http::field::content_length);
+                content_length_derived_.reset();
                 msg_.body() = http::buffer_body::value_type {};
-                msg_.chunked(true);
+                msg_.prepare_payload();
                 return;
             }
 
             if (msg_.has_content_length())
             {
+                // 调用方显式设的（range 分片、HEAD 等），沿用且不由本对象负责替换。
+                content_length_derived_.reset();
                 return;
             }
 
@@ -225,9 +241,12 @@ namespace httplib::detail
             {
                 msg_.chunked(false);
                 msg_.content_length(*length);
+                content_length_derived_ = *length;
                 return;
             }
             msg_.prepare_payload();
+            // 长度不可预知时 Beast 自己改走 chunked 分帧，本对象没有写下的 CL 可记。
+            content_length_derived_.reset();
         }
 
         void
@@ -398,7 +417,16 @@ namespace httplib::detail
 
             prepare_payload();
             // 序列化器惰性就绪：统一经 serializer() 这一处构造。
-            serializer();
+            auto& sr = serializer();
+
+            // 先只写头：失败时 source_ 尚未被消费，调用方（如 client 死连接重试）
+            // 可 reset_serializer() 后安全重发，不会丢 body。
+            co_await task_->write_header(sr, ec);
+            if (ec)
+            {
+                msg_.keep_alive(false);
+                co_return ec;
+            }
 
             // 逐块拉取 source，经统一原语落地；source 读尽后以空 body + more=false 收尾
             // （压缩时正是这一步冲刷编码器并写出 chunked 终止块）。
@@ -471,7 +499,9 @@ namespace httplib::detail
             msg_.body().more = more;
 
             boost::system::error_code ec;
-            co_await task_->write(*sr_, ec);
+            // 统一经 serializer() 取序列化器：所有调用方（write_raw / write_compressed /
+            // write_message_locked）都已写过 header，sr_ 必非空，这里只是不依赖调用顺序。
+            co_await task_->write(serializer(), ec);
             if (ec == http::error::need_buffer)
             {
                 ec = {};
@@ -548,6 +578,9 @@ namespace httplib::detail
         message_t msg_;
         Task* task_ = nullptr;
         std::unique_ptr<util::async_mutex> write_mutex_;
+        /// prepare_payload() 替本对象算出的那个 Content-Length 的值（未算过则为空），
+        /// 用于在 reset() 时区分"自己写的"与"调用方设的"。
+        std::optional<std::uint64_t> content_length_derived_;
 
         state_t payload_;
         body::source_ptr source_;

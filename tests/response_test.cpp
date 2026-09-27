@@ -1185,3 +1185,47 @@ TEST_CASE("Response: malformed gzip request body errors cleanly, no exception", 
     }
 }
 #endif
+
+// 回归：压缩 body 的分帧必须交给 Beast 的 prepare_payload()，它只在 HTTP/1.1 上用 chunked。
+// 旧实现无条件 msg_.chunked(true)，于是 HTTP/1.0 响应也带上 Transfer-Encoding: chunked ——
+// 而 HTTP/1.0 根本没有 chunked 传输编码，严格的 1.0 客户端/代理会直接解析失败。
+// 这条路径 httplib::client 覆盖不到：client 把版本写死成 1.1，发不出 1.0 请求。
+TEST_CASE("response: compressed HTTP/1.0 response is not chunked", "[response][compression]")
+{
+    test_common::test_scaffold sc;
+    auto handler = [](httplib::server::request&, httplib::server::response& resp) {
+        resp.set_string_content(std::string(2000, 'a'), "text/plain"sv);
+    };
+    sc.server.router().set_http_handler<http::verb::get>("/text", handler);
+    sc.start();
+
+    // HTTP/1.0 + gzip：不得出现 chunked；压缩后长度未知，只能靠关连接定界。
+    auto resp10 = test_common::raw_request(
+        sc.endpoint, "GET /text HTTP/1.0\r\nAccept-Encoding: gzip\r\n\r\n");
+    REQUIRE(test_common::raw_version(resp10) == 10);
+    REQUIRE(test_common::raw_header(resp10, "Content-Encoding") == "gzip");
+    REQUIRE(test_common::raw_header(resp10, "Transfer-Encoding").empty());
+    REQUIRE(test_common::raw_header(resp10, "Content-Length").empty());
+    // 1.0 靠关连接定界，所以 body 一定完整送达。
+    REQUIRE(resp10.size() > resp10.find("\r\n\r\n") + 4);
+
+    // HTTP/1.1 + gzip：chunked 是正确且预期的，不能被这个修复顺带改掉。
+    // 带 Connection: close，让服务端写完就关，raw_request 才能读到 body 末尾。
+    auto resp11 = test_common::raw_request(sc.endpoint,
+                                           "GET /text HTTP/1.1\r\nHost: x\r\nConnection: close\r\n"
+                                           "Accept-Encoding: gzip\r\n\r\n");
+    REQUIRE(test_common::raw_version(resp11) == 11);
+    REQUIRE(test_common::raw_header(resp11, "Content-Encoding") == "gzip");
+    REQUIRE(test_common::raw_header(resp11, "Transfer-Encoding") == "chunked");
+    REQUIRE(test_common::raw_header(resp11, "Content-Length").empty());
+
+    // 不压缩的 HTTP/1.0 仍然走明文 Content-Length 分帧。
+    auto plain10 = test_common::raw_request(sc.endpoint, "GET /text HTTP/1.0\r\n\r\n");
+    REQUIRE(test_common::raw_version(plain10) == 10);
+    REQUIRE(test_common::raw_header(plain10, "Content-Encoding").empty());
+    REQUIRE(test_common::raw_header(plain10, "Content-Length") == "2000");
+    REQUIRE(test_common::raw_header(plain10, "Transfer-Encoding").empty());
+    // 明文体应原样送达，未被分帧改写。
+    auto plain10_body = plain10.substr(plain10.find("\r\n\r\n") + 4);
+    REQUIRE(plain10_body == std::string(2000, 'a'));
+}
