@@ -16,8 +16,8 @@ namespace httplib::body
         逐块喂入线上压缩字节（`feed`），逐块取出解压结果（`drain`）。`identity` / 未知编码
         退化为纯透传（`transforms() == false`），此时 `feed` 的字节原样进内部缓冲。
 
-        解压炸弹防护：`limit > 0` 时对**产出**字节计数，超过报 `http::error::body_limit`；
-        与旧 `compressed_body` 一致，压缩流会先从限额里扣除 `Content-Length`（压缩长度）。
+        解压炸弹防护：`limit > 0` 时对**产出**字节计数，超过报 `http::error::body_limit`。
+        压缩后的输入字节不在此额度内（它们由上层 parser 按其 body_limit 单独限制）。
 
         解压结果放内部缓冲，调用方缓冲放不下的部分保留到下次 `drain`，不丢数据。
     */

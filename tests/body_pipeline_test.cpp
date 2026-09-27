@@ -15,6 +15,7 @@
 #include <boost/json/value.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
+#include <cstdint>
 #include <fstream>
 #include <optional>
 #include <string>
@@ -475,5 +476,53 @@ TEST_CASE("codec: identity passthrough", "[body_pipeline]")
     auto got = decoder.drain(net::buffer(buf), ec);
     REQUIRE(got == std::string_view("raw bytes").size());
     REQUIRE(std::string(buf, got) == "raw bytes");
+}
+
+// 回归：limit 约束的是解压"产出"字节，压缩后的长度不再从限额里扣除。
+// 旧实现把压缩长度从 limit 里扣掉后（limit_ -= content_length）再对产出计数，等于把同一份
+// 额度算两次：压缩后体积大、解压后仍在限额内的 body 会被误判为 body_limit。
+TEST_CASE("codec: produced-bytes limit is not reduced by compressed length", "[body_pipeline]")
+{
+    // 用近似不可压的数据，保证压缩后体积仍接近原始大小；否则压缩长度很小，区分不出问题。
+    std::string original(3000, '\0');
+    std::uint32_t seed = 0x12345678u;
+    for (auto& c : original)
+    {
+        seed = seed * 1103515245u + 12345u;
+        c = static_cast<char>(seed >> 24);
+    }
+
+    auto wire = body::encode(original, "gzip");
+    REQUIRE(wire.has_value());
+    REQUIRE(wire->size() > 1024); // 压缩后仍较大，才足以触发旧实现的误判
+
+    boost::system::error_code ec;
+
+    // limit = 4096 > 解压后 3000；旧实现会变成 4096 - wire->size() < 3000 而误报。
+    body::stream_decoder decoder;
+    decoder.reset("gzip", std::optional<std::uint64_t>(wire->size()), 4096, ec);
+    REQUIRE_FALSE(ec);
+    decoder.feed(net::buffer(*wire), ec);
+    REQUIRE_FALSE(ec);
+    decoder.flush(ec);
+    REQUIRE_FALSE(ec);
+
+    std::string out(decoder.buffered(), '\0');
+    auto n = decoder.drain(net::buffer(out), ec);
+    REQUIRE_FALSE(ec);
+    REQUIRE(n == original.size());
+    out.resize(n);
+    REQUIRE(out == original);
+
+    // 产出确实超过限额时仍要报错，确认限额没被放宽成失效。
+    body::stream_decoder bomb;
+    bomb.reset("gzip", std::nullopt, 1024, ec);
+    REQUIRE_FALSE(ec);
+    bomb.feed(net::buffer(*wire), ec);
+    if (!ec)
+    {
+        bomb.flush(ec);
+    }
+    REQUIRE(ec == http::error::body_limit);
 }
 #endif
