@@ -1,8 +1,8 @@
 #pragma once
-#include "body/body_state.hpp"
 #include "body/codec.hpp"
 #include "body/source.hpp"
 #include "compress/compressor.hpp"
+#include "html/html.h"
 #include "httplib/config.hpp"
 #include "httplib/form_data.hpp"
 #include "httplib/query_params.hpp"
@@ -16,6 +16,7 @@
 #include <boost/json/value.hpp>
 #include <boost/system/error_code.hpp>
 #include <cstdint>
+#include <format>
 #include <memory>
 #include <optional>
 #include <string>
@@ -33,9 +34,9 @@ namespace httplib::detail
           - 整消息写：write_message()（source_ 驱动序列化器）；
           - 流式写：begin_stream() + write_compressed(data, more) / write_raw(data, more)。
 
-        业务数据写入本对象的 @ref payload_，source_ 引用它产出字节。HTTP message 由本对象
-        以成员 @ref msg_ 自持；对外只暴露 @ref base()（start-line + headers，即 Beast 的
-        header_type），body 与 serializer 状态保持私有。
+        业务数据由各 source 自持（见 body/source.hpp），本对象只持有 @ref source_ 产出字节。
+        HTTP message 由本对象以成员 @ref msg_ 自持；对外只暴露 @ref base()（start-line +
+        headers，即 Beast 的 header_type），body 与 serializer 状态保持私有。
 
         所有 body 字节最终收口于两个写原语：
           - @ref write_raw_locked：无条件原样发送明文块；
@@ -56,7 +57,6 @@ namespace httplib::detail
         using message_t = http::message<IsRequest, http::buffer_body, http::fields>;
         using serializer_t = http::serializer<IsRequest, http::buffer_body, http::fields>;
         using header_type = typename message_t::header_type;
-        using state_t = httplib::body::body_state;
 
         body_writer() = default;
         body_writer(body_writer const&) = delete;
@@ -131,8 +131,7 @@ namespace httplib::detail
         {
             reset();
             msg_.set(http::field::content_type, content_type);
-            payload_.set<std::string>(std::move(data));
-            source_ = std::make_unique<body::string_source>(payload_.as<std::string>());
+            source_ = std::make_shared<body::string_source>(std::move(data));
         }
 
         void
@@ -142,8 +141,7 @@ namespace httplib::detail
             msg_.set(http::field::content_type, "application/json; charset=utf-8");
             msg_.set(http::field::cache_control, "no-store");
 
-            payload_.set<boost::json::value>(std::move(data));
-            source_ = std::make_unique<body::json_source>(payload_.as<boost::json::value>());
+            source_ = std::make_shared<body::json_source>(std::move(data));
         }
 
         void
@@ -151,8 +149,7 @@ namespace httplib::detail
         {
             reset();
             msg_.set(http::field::content_type, "application/x-www-form-urlencoded");
-            payload_.set<httplib::query_params>(std::move(data));
-            source_ = std::make_unique<body::query_params_source>(payload_.as<httplib::query_params>());
+            source_ = std::make_shared<body::query_params_source>(std::move(data));
         }
 
         void
@@ -160,27 +157,38 @@ namespace httplib::detail
         {
             reset();
             msg_.set(http::field::content_type, "multipart/form-data; boundary=" + data.boundary);
-            payload_.set<httplib::form_data>(std::move(data));
-            source_ = std::make_unique<body::form_data_source>(payload_.as<httplib::form_data>());
+            source_ = std::make_shared<body::form_data_source>(std::move(data));
         }
 
-        /// 文件型 source（path/ranges 已由调用方封装）：只接管 source，payload 记 file 标记。
         void
-        set_file(body::source_ptr source)
+        set_file(std::ifstream file, std::string content_type, httplib::html::http_ranges ranges)
         {
             reset();
-            payload_.set<body::file_tag>();
-            source_ = std::move(source);
+            if (ranges.empty() || ranges.size() == 1)
+            {
+                msg_.set(http::field::content_type, content_type);
+                source_ = std::make_shared<body::file_source>(std::move(file),
+                                                              std::move(ranges),
+                                                              std::move(content_type),
+                                                              "");
+            }
+            else
+            {
+                std::string boundary = httplib::html::generate_boundary();
+                msg_.set(http::field::content_type, std::format("multipart/byteranges; boundary={}", boundary));
+                source_ = std::make_shared<body::file_source>(std::move(file),
+                                                              std::move(ranges),
+                                                              std::move(content_type),
+                                                              std::move(boundary));
+            }
         }
-
         void
         set_empty()
         {
             reset();
-            payload_.set<body::empty_tag>();
             // 空 body 也挂一个 source（长度 0、不产字节），使分帧统一走 source 长度这条路径，
-            // 而不是在 prepare_payload() 里再对"无 source"分一种情况。
-            source_ = std::make_unique<body::empty_source>();
+            // 而不是在 prepare_payload() 里再对"无 source"分一种情况。空 source 无状态，共享单例。
+            source_ = body::shared_empty_source();
         }
 
         /// 丢弃 body payload 与编码器状态，但保留 header（含 Content-Length 及其分帧）。
@@ -193,7 +201,6 @@ namespace httplib::detail
         {
             reset_serializer();
             source_.reset();
-            payload_.reset();
             msg_.body() = http::buffer_body::value_type {};
             encoder_.reset();
         }
@@ -265,18 +272,6 @@ namespace httplib::detail
         }
 
         // ---- 状态访问 ----
-
-        state_t&
-        payload()
-        {
-            return payload_;
-        }
-
-        state_t const&
-        payload() const
-        {
-            return payload_;
-        }
 
         body::source*
         source()
@@ -629,7 +624,6 @@ namespace httplib::detail
         Task* task_ = nullptr;
         std::unique_ptr<util::async_mutex> write_mutex_;
 
-        state_t payload_;
         body::source_ptr source_;
 
         std::unique_ptr<serializer_t> sr_;

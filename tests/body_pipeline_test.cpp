@@ -386,14 +386,16 @@ TEST_CASE("file_source streams file content", "[body_pipeline]")
         f.write(content.data(), static_cast<std::streamsize>(content.size()));
     }
 
-    body::file_source src(path, {}, "", "");
-    REQUIRE(src.ok());
+    std::ifstream file(path, std::ios::binary | std::ios::in);
+    REQUIRE(file.is_open());
+    body::file_source src(std::move(file), {}, "", "");
     REQUIRE(pull(src) == content);
 
     httplib::html::http_ranges ranges;
     ranges.add({ 0, 4 });
-    body::file_source ranged(path, ranges, "application/octet-stream", "");
-    REQUIRE(ranged.ok());
+    std::ifstream ranged_file(path, std::ios::binary | std::ios::in);
+    REQUIRE(ranged_file.is_open());
+    body::file_source ranged(std::move(ranged_file), ranges, "application/octet-stream", "");
     REQUIRE(pull(ranged) == content.substr(0, 5));
 
     std::error_code ec;

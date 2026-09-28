@@ -1,6 +1,7 @@
 #include "httplib/client/request.hpp"
 #include "compress/compressor.hpp"
 #include "request_impl.h"
+#include "util/mime_types.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/beast/version.hpp>
 #include <boost/json/value.hpp>
@@ -158,36 +159,6 @@ namespace httplib::client
         return impl_->base();
     }
 
-    std::string const&
-    request::as_string() const
-    {
-        return impl_->payload().as<std::string>();
-    }
-
-    boost::json::value const&
-    request::as_json() const
-    {
-        return impl_->payload().as<boost::json::value>();
-    }
-
-    httplib::form_data const&
-    request::as_form_data() const
-    {
-        return impl_->payload().as<httplib::form_data>();
-    }
-
-    httplib::query_params const&
-    request::as_query_params() const
-    {
-        return impl_->payload().as<httplib::query_params>();
-    }
-
-    body_type
-    request::type() const
-    {
-        return impl_->payload().type();
-    }
-
     void
     request::content_length(std::uint64_t n)
     {
@@ -240,10 +211,16 @@ namespace httplib::client
     }
 
     void
-    request::set_file_body(fs::path const& path)
+    request::set_file_body(fs::path const& path, boost::system::error_code& ec)
     {
-        impl_->set_file(std::make_unique<body::file_source>(path, html::http_ranges {}, "", ""));
-        impl_->prepare_payload();
+        std::ifstream file(path, std::ios::binary | std::ios::in);
+        if (!file.is_open())
+        {
+            ec = boost::system::errc::make_error_code(boost::system::errc::no_such_file_or_directory);
+            return;
+        }
+        std::string content_type(mime::get_mime_type(path.extension().string()));
+        impl_->set_file(std::move(file), content_type, html::http_ranges {});
     }
 
 } // namespace httplib::client

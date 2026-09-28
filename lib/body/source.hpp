@@ -26,7 +26,8 @@ namespace httplib::body
         每次 `next` 产出一块字节；`more == true` 表示后面还有块。取代旧 per-type beast writer：
         业务类型只负责产出字节，压缩与传输由外层 source 链 / `http::buffer_body` 负责。
 
-        source 只引用外部数据（不拷贝），body_writer 需保证被引用对象在本 source 使用期间存活。
+        source 自持产出所需的业务数据（string/json/query_params/form_data 各存一份），body_writer
+        只持有 source，不再另存 payload。
     */
     class source
     {
@@ -44,13 +45,13 @@ namespace httplib::body
         }
     };
 
-    using source_ptr = std::unique_ptr<source>;
+    using source_ptr = std::shared_ptr<source>;
 
     /// 单块字符串，一次产出。
     class string_source : public source
     {
       public:
-        explicit string_source(std::string const& data) : data_(&data) {}
+        explicit string_source(std::string data) : data_(std::move(data)) {}
 
         chunk_t
         next(boost::system::error_code& ec) override
@@ -61,17 +62,17 @@ namespace httplib::body
                 return std::nullopt;
             }
             done_ = true;
-            return std::make_pair(net::buffer(*data_), false);
+            return std::make_pair(net::buffer(data_), false);
         }
 
         std::optional<std::uint64_t>
         content_length() const override
         {
-            return data_->size();
+            return data_.size();
         }
 
       private:
-        std::string const* data_;
+        std::string data_;
         bool done_ = false;
     };
 
@@ -79,7 +80,7 @@ namespace httplib::body
     class json_source : public source
     {
       public:
-        explicit json_source(boost::json::value const& value) : value_(&value) { serializer_.reset(value_); }
+        explicit json_source(boost::json::value value) : value_(std::move(value)) { serializer_.reset(&value_); }
 
         chunk_t
         next(boost::system::error_code& ec) override
@@ -100,7 +101,7 @@ namespace httplib::body
         }
 
       private:
-        boost::json::value const* value_;
+        boost::json::value value_;
         json::serializer serializer_;
         char buffer_[32768];
         bool done_ = false;
@@ -110,7 +111,7 @@ namespace httplib::body
     class query_params_source : public source
     {
       public:
-        explicit query_params_source(httplib::query_params const& value) : buffer_(value.encoded()) {}
+        explicit query_params_source(httplib::query_params value) : buffer_(value.encoded()) {}
 
         chunk_t
         next(boost::system::error_code& ec) override
@@ -153,16 +154,25 @@ namespace httplib::body
         }
     };
 
-    /// 递增构建 multipart/form-data（字段 + 文件流），引用外部 form_data。
+    /// 共享的单例空 source：无状态（不产字节、长度恒 0），set_empty() 复用同一实例，
+    /// 避免每次造一个新的。
+    inline source_ptr
+    shared_empty_source()
+    {
+        static source_ptr instance = std::make_shared<empty_source>();
+        return instance;
+    }
+
+    /// 递增构建 multipart/form-data（字段 + 文件流），自持 form_data。
     class form_data_source : public source
     {
       public:
-        explicit form_data_source(httplib::form_data const& body);
+        explicit form_data_source(httplib::form_data body);
 
         chunk_t next(boost::system::error_code& ec) override;
 
       private:
-        httplib::form_data const* body_;
+        httplib::form_data body_;
         std::size_t field_index_ = 0;
         beast::flat_buffer buffer_;
 
@@ -185,18 +195,12 @@ namespace httplib::body
     class file_source : public source
     {
       public:
-        file_source(fs::path path, html::http_ranges ranges, std::string content_type, std::string boundary);
-
-        bool
-        ok() const
-        {
-            return !open_ec_;
-        }
+        file_source(std::ifstream file, html::http_ranges ranges, std::string content_type, std::string boundary);
 
         std::optional<std::uint64_t>
         content_length() const override
         {
-            if (open_ec_)
+            if (!file_.is_open())
             {
                 return std::nullopt;
             }
@@ -218,13 +222,11 @@ namespace httplib::body
       private:
         std::size_t read(char* dest, std::size_t n);
 
-        fs::path path_;
         std::ifstream file_;
         std::size_t file_size_ = 0;
         html::http_ranges ranges_;
         std::string content_type_;
         std::string boundary_;
-        boost::system::error_code open_ec_;
 
         std::optional<int> range_index_;
         std::optional<std::uint64_t> pos_;
@@ -237,7 +239,7 @@ namespace httplib::body
             eof
         };
         step step_ = step::header;
-        char buf_[16 * 1024];
+        char buf_[65535] = {};
     };
 
 } // namespace httplib::body

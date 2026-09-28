@@ -105,7 +105,6 @@ namespace httplib::server
         void
         set_file_content(fs::path const& path, http::fields const& req_header = {})
         {
-            this->reset();
             std::error_code ec;
             auto file_size = fs::file_size(path, ec);
             if (ec)
@@ -142,43 +141,30 @@ namespace httplib::server
                 return;
             }
 
-            std::string content_type(mime::get_mime_type(path.extension().string()));
-            bool const multipart = ranges.size() > 1;
-            std::string boundary = multipart ? html::generate_boundary() : std::string {};
-
-            auto file_source = std::make_unique<body::file_source>(path, ranges, content_type, boundary);
-            if (!file_source->ok())
+            std::ifstream file(path, std::ios::binary | std::ios::in);
+            if (!file.is_open())
             {
                 set_error_content(http::status::forbidden);
                 return;
             }
 
+            std::string content_type(mime::get_mime_type(path.extension().string()));
+
             this->base().set(http::field::etag, file_etag_str);
             this->base().set(http::field::last_modified, file_gmt_date_str);
-
+            this->base().result(ranges.empty() ? http::status::ok : http::status::partial_content);
             if (ranges.empty())
             {
                 this->base().set(http::field::accept_ranges, "bytes");
-                this->base().set(http::field::content_type, content_type);
-                this->base().result(http::status::ok);
-                this->content_length(file_size);
             }
             else if (ranges.size() == 1)
             {
                 auto const& range = ranges.front();
-                size_t part_size = range.second + 1 - range.first;
                 this->base().set(http::field::content_range,
-                                 fmt::format("bytes {}-{}/{}", range.first, range.second, file_size));
-                this->base().set(http::field::content_type, content_type);
-                this->base().result(http::status::partial_content);
-                this->content_length(part_size);
+                                 std::format("bytes {}-{}/{}", range.first, range.second, file_size));
             }
-            else
-            {
-                this->base().set(http::field::content_type, fmt::format("multipart/byteranges; boundary={}", boundary));
-                this->base().result(http::status::partial_content);
-            }
-            this->set_file(std::move(file_source));
+
+            this->set_file(std::move(file), std::move(content_type), std::move(ranges));
         }
 
         void

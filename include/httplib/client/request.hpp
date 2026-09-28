@@ -1,5 +1,4 @@
 #pragma once
-#include "httplib/body_type.hpp"
 #include "httplib/config.hpp"
 #include "httplib/form_data.hpp"
 #include "httplib/query_params.hpp"
@@ -53,15 +52,6 @@ namespace httplib::client
         http::fields& base();
         http::fields const& base() const;
 
-        // 按内容类型取请求体（引用，不拷贝）；body 为显式空时返回空值，
-        // body 非该类型或尚未设置时抛 std::bad_variant_access
-        std::string const& as_string() const;
-        boost::json::value const& as_json() const;
-        httplib::form_data const& as_form_data() const;
-        httplib::query_params const& as_query_params() const;
-
-        body_type type() const;
-
         void content_length(std::uint64_t n);
         bool keep_alive() const;
         void keep_alive(bool value);
@@ -73,7 +63,7 @@ namespace httplib::client
         void set_body(boost::json::value&& data);
         void set_body(httplib::form_data&& data);
         void set_body(httplib::query_params&& data);
-        void set_file_body(fs::path const& path);
+        void set_file_body(fs::path const& path, boost::system::error_code& ec);
 
         class impl;
 

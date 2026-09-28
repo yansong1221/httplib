@@ -7,24 +7,24 @@ namespace httplib::body
 {
     // ---- form_data_source ----
 
-    form_data_source::form_data_source(httplib::form_data const& body) : body_(&body) {}
+    form_data_source::form_data_source(httplib::form_data body) : body_(std::move(body)) {}
 
     source::chunk_t
     form_data_source::next(boost::system::error_code& ec)
     {
         ec = {};
-        if (field_index_ >= body_->fields.size())
+        if (field_index_ >= body_.fields.size())
         {
             return std::nullopt;
         }
         buffer_.consume(buffer_.size());
 
-        auto& field_data = body_->fields[field_index_];
+        auto& field_data = body_.fields[field_index_];
         switch (step_)
         {
             case step::header:
             {
-                std::string header = fmt::format("--{}\r\n", body_->boundary);
+                std::string header = fmt::format("--{}\r\n", body_.boundary);
                 header += fmt::format(R"(Content-Disposition: form-data; name="{}")", field_data.name);
                 if (!field_data.filename.empty())
                 {
@@ -85,11 +85,11 @@ namespace httplib::body
             }
             case step::content_end:
             {
-                bool is_eof = field_index_ == body_->fields.size() - 1;
+                bool is_eof = field_index_ == body_.fields.size() - 1;
                 std::string end("\r\n");
                 if (is_eof)
                 {
-                    end += fmt::format("--{}--\r\n", body_->boundary);
+                    end += fmt::format("--{}--\r\n", body_.boundary);
                     step_ = step::eof;
                 }
                 else
@@ -109,18 +109,12 @@ namespace httplib::body
 
     // ---- file_source ----
 
-    file_source::file_source(fs::path path, html::http_ranges ranges, std::string content_type, std::string boundary)
-        : path_(std::move(path))
+    file_source::file_source(std::ifstream file, html::http_ranges ranges, std::string content_type, std::string boundary)
+        : file_(std::move(file))
         , ranges_(std::move(ranges))
         , content_type_(std::move(content_type))
         , boundary_(std::move(boundary))
     {
-        file_.open(path_, std::ios::in | std::ios::binary);
-        if (!file_.is_open())
-        {
-            open_ec_ = boost::system::errc::make_error_code(boost::system::errc::no_such_file_or_directory);
-            return;
-        }
         file_.seekg(0, std::ios::end);
         file_size_ = static_cast<std::size_t>(file_.tellg());
         file_.seekg(0, std::ios::beg);
@@ -137,11 +131,6 @@ namespace httplib::body
     file_source::next(boost::system::error_code& ec)
     {
         ec = {};
-        if (open_ec_)
-        {
-            ec = open_ec_;
-            return std::nullopt;
-        }
 
         if (ranges_.size() == 1 || ranges_.empty())
         {

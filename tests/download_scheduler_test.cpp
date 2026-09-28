@@ -113,6 +113,31 @@ namespace
         sf.get();
     }
 
+    // Remove a temp file, retrying for a short window. Cancelling/shutting down a
+    // download closes the client socket asynchronously, and the server only
+    // releases its open file handle once the in-flight response write unwinds.
+    // Removing immediately can therefore race on Windows ("file in use").
+    void
+    remove_eventually(fs::path const& path, int timeout_ms = 5000)
+    {
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+        for (;;)
+        {
+            std::error_code ec;
+            fs::remove(path, ec);
+            if (!ec)
+            {
+                return;
+            }
+            if (std::chrono::steady_clock::now() >= deadline)
+            {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        fs::remove(path); // final attempt: throws if the handle is genuinely leaked
+    }
+
     // Poll until `pred` becomes true.
     bool
     wait_until(std::function<bool()> pred, int timeout_ms = 10000)
@@ -169,7 +194,7 @@ TEST_CASE("Download scheduler: basic single task", "[download_scheduler]")
 
     shutdown_scheduler(ts.ioc_, sched);
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     fs::remove(dl_path);
 }
 
@@ -241,7 +266,7 @@ TEST_CASE("Download scheduler: max_concurrent limits tasks", "[download_schedule
 
     shutdown_scheduler(ts.ioc_, sched);
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     for (auto& p : outs)
     {
         fs::remove(p);
@@ -310,7 +335,7 @@ TEST_CASE("Download scheduler: cancel all tasks", "[download_scheduler]")
 
     shutdown_scheduler(ts.ioc_, sched);
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     for (auto& p : outs)
     {
         std::error_code ec;
@@ -386,7 +411,7 @@ TEST_CASE("Download scheduler: pause and resume", "[download_scheduler]")
 
     shutdown_scheduler(ts.ioc_, sched);
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     fs::remove(dl_path);
 }
 
@@ -442,7 +467,7 @@ TEST_CASE("Download scheduler: state callback fires", "[download_scheduler]")
 
     shutdown_scheduler(ts.ioc_, sched);
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     fs::remove(dl_path);
 }
 
@@ -497,8 +522,8 @@ TEST_CASE("Download scheduler: dynamic add while running", "[download_scheduler]
 
     shutdown_scheduler(ts.ioc_, sched);
 
-    fs::remove(srv_a);
-    fs::remove(srv_b);
+    remove_eventually(srv_a);
+    remove_eventually(srv_b);
     fs::remove(out_a);
     fs::remove(out_b);
 }
@@ -565,7 +590,7 @@ TEST_CASE("Download scheduler: pending task cancel before dispatch", "[download_
 
     shutdown_scheduler(ts.ioc_, sched);
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     fs::remove(out1);
     fs::remove(out2);
 }
@@ -601,7 +626,7 @@ TEST_CASE("Download scheduler: shutdown drains running tasks", "[download_schedu
     REQUIRE(sched->active_count() == 0);
     REQUIRE(sched->pending_count() == 0);
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     fs::remove(dl_path);
 }
 
@@ -651,7 +676,7 @@ TEST_CASE("Download scheduler: cancel a single running task", "[download_schedul
 
     shutdown_scheduler(ts.ioc_, sched);
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     std::error_code ec;
     fs::remove(dl_path, ec);
     for (int i = 0; i < 8; ++i)
@@ -728,7 +753,7 @@ TEST_CASE("Download scheduler: progress callback carries id and url", "[download
 
     shutdown_scheduler(ts.ioc_, sched);
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     fs::remove(dl_path);
 }
 
@@ -809,7 +834,7 @@ TEST_CASE("Download scheduler: pending pause blocks dispatch until resume", "[do
 
     shutdown_scheduler(ts.ioc_, sched);
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     fs::remove(out1);
     fs::remove(out2);
 }
@@ -866,7 +891,7 @@ TEST_CASE("Download scheduler: cancel a paused-pending task", "[download_schedul
 
     shutdown_scheduler(ts.ioc_, sched);
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     fs::remove(out1);
     fs::remove(out2);
 }
@@ -925,7 +950,7 @@ TEST_CASE("Download scheduler: async_wait_any consumes one completion each", "[d
 
     shutdown_scheduler(ts.ioc_, sched);
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     for (int i = 0; i < 3; ++i)
     {
         fs::remove(fs::temp_directory_path() / std::format("sched_wany_out_{}.bin", i));
@@ -1000,7 +1025,7 @@ TEST_CASE("Download scheduler: async_wait_one returns immediately for done/missi
 
     shutdown_scheduler(ts.ioc_, sched);
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     fs::remove(dl_path);
 }
 
@@ -1060,7 +1085,7 @@ TEST_CASE("Download scheduler: shutdown while a task is paused", "[download_sche
     REQUIRE(sched->pending_count() == 0);
     REQUIRE(is_terminal(sched->get_status(id).state));
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     fs::remove(dl_path);
 }
 
@@ -1113,7 +1138,7 @@ TEST_CASE("Download scheduler: shutdown while a task is pending", "[download_sch
     REQUIRE(is_terminal(sched->get_status(id1).state));
     REQUIRE(sched->get_status(id2).state == httplib::client::downloader::state::cancelled);
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     fs::remove(out1);
     std::error_code ec;
     fs::remove(out2, ec);
@@ -1153,7 +1178,7 @@ TEST_CASE("Download scheduler: add is rejected after shutdown", "[download_sched
     REQUIRE(st.id == 0);
     REQUIRE(sched->total_count() == 0);
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     fs::remove(dl_path);
 }
 
@@ -1187,7 +1212,7 @@ TEST_CASE("Download scheduler: destructor without async_shutdown is safe", "[dow
     ioc.stop();
     worker.join();
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     fs::remove(dl_path);
 }
 
@@ -1254,7 +1279,7 @@ TEST_CASE("Download scheduler: dynamic config change wakes dispatch", "[download
 
     shutdown_scheduler(ts.ioc_, sched);
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     fs::remove(out1);
     fs::remove(out2);
 }
@@ -1321,8 +1346,8 @@ TEST_CASE("Download scheduler: state callback may re-enter add", "[download_sche
 
     shutdown_scheduler(ts.ioc_, sched);
 
-    fs::remove(srv_a);
-    fs::remove(srv_b);
+    remove_eventually(srv_a);
+    remove_eventually(srv_b);
     fs::remove(out_a);
     fs::remove(out_b);
 }
@@ -1362,7 +1387,7 @@ TEST_CASE("Download scheduler: callback exception does not kill the run", "[down
 
     shutdown_scheduler(ts.ioc_, sched);
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     fs::remove(dl_path);
 }
 
@@ -1419,7 +1444,7 @@ TEST_CASE("Download scheduler: callback may trigger shutdown", "[download_schedu
     REQUIRE(run_future.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
     REQUIRE(read_file(dl_path) == "ctor\n");
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     fs::remove(dl_path);
 }
 
@@ -1519,7 +1544,7 @@ TEST_CASE("Download scheduler: concurrent API calls from many threads", "[downlo
     REQUIRE(sched->active_count() == 0);
     REQUIRE(sched->pending_count() == 0);
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     std::error_code ec;
     fs::remove(seed_out, ec);
     for (int t = 0; t < kThreads; ++t)
@@ -1582,7 +1607,7 @@ TEST_CASE("Download scheduler: sync queries are safe from inside a state callbac
 
     shutdown_scheduler(ts.ioc_, sched);
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     fs::remove(dl_path);
 }
 
@@ -1626,7 +1651,7 @@ TEST_CASE("Download scheduler: shared cache reaches per-task downloaders", "[dow
 
     shutdown_scheduler(ts.ioc_, sched);
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     fs::remove(dl_path);
     fs::remove_all(cache_dir);
 }
@@ -1662,6 +1687,6 @@ TEST_CASE("Download scheduler: clear_finished prunes terminal tasks", "[download
 
     shutdown_scheduler(ts.ioc_, sched);
 
-    fs::remove(server_path);
+    remove_eventually(server_path);
     fs::remove(dl_path);
 }

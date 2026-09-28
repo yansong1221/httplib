@@ -1056,7 +1056,8 @@ TEST_CASE("client: send file body upload", "[client]")
         [&](auto& client) -> net::awaitable<void>
         {
             auto req = httplib::client::request(http::verb::put, "/upload");
-            req.set_file_body(up);
+            boost::system::error_code ec;
+            req.set_file_body(up, ec);
             auto resp = UNWRAP(co_await client.async_send_request(req));
             REQUIRE(resp.result() == http::status::ok);
         });
