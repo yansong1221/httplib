@@ -21,11 +21,6 @@ namespace httplib::body
     {
     };
 
-    /// 文件型 body 的标记（set_file_body：只标记，不存路径）。
-    struct file_tag
-    {
-    };
-
     /** 物化后的业务 body 结果容器。
 
         与传输层（`http::buffer_body`）解耦：同一时刻只承载一种已解析的业务类型，
@@ -37,8 +32,7 @@ namespace httplib::body
                                       std::string,           // string
                                       boost::json::value,    // json
                                       httplib::query_params, // query_params
-                                      httplib::form_data,    // form_data
-                                      file_tag>;             // file 标记
+                                      httplib::form_data>;   // form_data
 
     /** 方向无关的读取结果（server request / client request / client response 共用）。
      */
@@ -87,7 +81,8 @@ namespace httplib::body
                     }
                     else
                     {
-                        return kind::file;
+                        static_assert(!std::is_same_v<T, T>, "unhandled body variant type");
+                        return kind::none;
                     }
                 },
                 state_);
@@ -135,12 +130,6 @@ namespace httplib::body
         set(T value = {})
         {
             state_ = std::move(value);
-        }
-
-        void
-        reset()
-        {
-            state_ = none_tag {};
         }
 
         /// 按类型取走当前分支并移交所有权（variant 仍保留该分支，值为 moved-from）。

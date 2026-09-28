@@ -1,5 +1,4 @@
 #pragma once
-#include "body/body_state.hpp"
 #include "body/body_writer.hpp"
 #include "body/source.hpp"
 #include "html/html.h"
@@ -182,18 +181,6 @@ namespace httplib::server
         {
             this->base().set(http::field::location, url);
             set_empty_content(status);
-        }
-
-        void
-        reset_content()
-        {
-            this->reset();
-        }
-
-        body::source*
-        source()
-        {
-            return static_cast<body_writer_t*>(this)->source();
         }
 
         body_writer_t&

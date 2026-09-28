@@ -216,13 +216,6 @@ namespace httplib::detail
         }
 
       private:
-        template <typename Parser>
-        net::awaitable<void>
-        pull(Parser& parser, boost::system::error_code& ec)
-        {
-            co_await source_->read_some(parser, ec);
-        }
-
         bool
         body_done_locked() const
         {
@@ -381,7 +374,7 @@ namespace httplib::detail
                 body.data = buf.data();
                 body.size = buf.size();
 
-                co_await pull(raw_parser_, ec);
+                co_await source_->read_some(raw_parser_, ec);
                 if (ec == http::error::need_buffer)
                 {
                     ec = {};

@@ -273,32 +273,6 @@ namespace httplib::detail
 
         // ---- 状态访问 ----
 
-        body::source*
-        source()
-        {
-            return source_.get();
-        }
-
-        bool
-        has_source() const
-        {
-            return source_ != nullptr;
-        }
-
-        /// 取走当前 source 的所有权（发送准备层据此叠加编码等包装）。
-        body::source_ptr
-        take_source()
-        {
-            return std::move(source_);
-        }
-
-        /// 替换当前 source。
-        void
-        set_source(body::source_ptr source)
-        {
-            source_ = std::move(source);
-        }
-
         serializer_t&
         serializer()
         {
@@ -323,12 +297,6 @@ namespace httplib::detail
                 reset_serializer();
                 encoder_.reset();
             }
-        }
-
-        bool
-        is_done() const
-        {
-            return sr_ && sr_->is_done();
         }
 
         /// 头部是否已写出（client 死连接重试判定用）。

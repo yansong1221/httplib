@@ -14,6 +14,5 @@ namespace httplib
         json,         ///< JSON
         query_params, ///< application/x-www-form-urlencoded
         form_data,    ///< multipart/form-data
-        file,         ///< 文件型（只写来源）
     };
 } // namespace httplib
