@@ -1,4 +1,6 @@
 #include "downloader_impl.h"
+#include "beast_alias.hpp"
+#include "enum_conv.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/lazy_request.hpp"
@@ -15,8 +17,6 @@
 #include <format>
 #include <fstream>
 #include <stdexcept>
-#include "beast_alias.hpp"
-#include "enum_conv.hpp"
 
 namespace httplib::client
 {
@@ -880,8 +880,7 @@ namespace httplib::client
             handle->set_verify_ssl(active_config_.verify_ssl);
             handle->set_download_rate_limit(per_connection_rate_);
 
-            auto req = httplib::client::request(m, t);
-            req.merge(merged);
+            auto req = httplib::client::request(m, t, merged);
 
             auto resp_result = co_await handle->async_send_request(req, http_client::body_mode::lazy);
             if (!resp_result.has_value())
@@ -894,9 +893,8 @@ namespace httplib::client
 
             auto status = resp.result();
 
-            if ((status == status::moved_permanently || status == status::found
-                 || status == status::see_other || status == status::temporary_redirect
-                 || status == status::permanent_redirect)
+            if ((status == status::moved_permanently || status == status::found || status == status::see_other
+                 || status == status::temporary_redirect || status == status::permanent_redirect)
                 && redir < active_config_.max_redirects)
             {
                 auto rt = parse_redirect(resp.headers());

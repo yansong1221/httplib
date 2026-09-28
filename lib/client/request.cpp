@@ -33,7 +33,7 @@ namespace httplib::client
     request::request(httplib::method method, std::string_view target, httplib::headers const& headers)
         : impl_(std::make_shared<impl>(enum_conv::to_verb(method), target))
     {
-        merge(headers);
+        replace(headers);
     }
 
     request::request(request&&) noexcept = default;
@@ -48,7 +48,7 @@ namespace httplib::client
                      httplib::headers const& headers)
         : request(method, detail::make_target(path, params))
     {
-        merge(headers);
+        replace(headers);
     }
 
     httplib::method
@@ -159,13 +159,13 @@ namespace httplib::client
     }
 
     void
-    request::merge(httplib::headers const& fields)
+    request::replace(httplib::headers const& fields)
     {
         if (fields.empty())
         {
             return;
         }
-        impl_->merge(get_impl(fields));
+        impl_->replace_fields(get_impl(fields));
     }
 
     httplib::headers

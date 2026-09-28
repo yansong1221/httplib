@@ -51,7 +51,7 @@ namespace httplib::client
         std::size_t count(httplib::field name) const;
         std::size_t count(std::string_view name) const;
 
-        void merge(httplib::headers const& fields);
+        void replace(httplib::headers const& fields);
 
         /// 全部请求头。返回的是「借用」视图：写入直接落到本请求上。
         httplib::headers base();

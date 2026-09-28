@@ -1,4 +1,5 @@
 #include "client_impl.h"
+#include "beast_alias.hpp"
 #include "compress/compressor.hpp"
 #include "headers_impl.hpp"
 #include "httplib/url/url.hpp"
@@ -26,7 +27,6 @@
 #include <limits>
 #include <optional>
 #include <spdlog/spdlog.h>
-#include "beast_alias.hpp"
 
 namespace httplib::client
 {
@@ -573,56 +573,58 @@ namespace httplib::client
     net::awaitable<http_client::response_result>
     http_client::async_get(std::string_view path, httplib::query_params const& params, httplib::headers const& headers)
     {
-        request req(method::get, path, params);
-        req.merge(headers);
+        request req(method::get, path, params, headers);
         co_return co_await async_send_request(req);
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_head(std::string_view path, httplib::query_params const& params, httplib::headers const& headers)
     {
-        request req(method::head, path, params);
-        req.merge(headers);
+        request req(method::head, path, params, headers);
         co_return co_await async_send_request(req);
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_post(std::string_view path, httplib::query_params const& params, httplib::headers const& headers)
     {
-        request req(method::post, path, params);
-        req.merge(headers);
+        request req(method::post, path, params, headers);
+
         co_return co_await async_send_request(req);
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_put(std::string_view path, httplib::query_params const& params, httplib::headers const& headers)
     {
-        request req(method::put, path, params);
-        req.merge(headers);
+        request req(method::put, path, params, headers);
+
         co_return co_await async_send_request(req);
     }
 
     net::awaitable<http_client::response_result>
-    http_client::async_patch(std::string_view path, httplib::query_params const& params, httplib::headers const& headers)
+    http_client::async_patch(std::string_view path,
+                             httplib::query_params const& params,
+                             httplib::headers const& headers)
     {
-        request req(method::patch, path, params);
-        req.merge(headers);
+        request req(method::patch, path, params, headers);
+
         co_return co_await async_send_request(req);
     }
 
     net::awaitable<http_client::response_result>
     http_client::async_del(std::string_view path, httplib::query_params const& params, httplib::headers const& headers)
     {
-        request req(method::delete_, path, params);
-        req.merge(headers);
+        request req(method::delete_, path, params, headers);
+
         co_return co_await async_send_request(req);
     }
 
     net::awaitable<http_client::response_result>
-    http_client::async_options(std::string_view path, httplib::query_params const& params, httplib::headers const& headers)
+    http_client::async_options(std::string_view path,
+                               httplib::query_params const& params,
+                               httplib::headers const& headers)
     {
-        request req(method::options, path, params);
-        req.merge(headers);
+        request req(method::options, path, params, headers);
+
         co_return co_await async_send_request(req);
     }
 
@@ -637,8 +639,8 @@ namespace httplib::client
                             httplib::query_params const& params,
                             httplib::headers const& headers)
     {
-        auto req = request(method::post, path, params);
-        req.merge(headers);
+        auto req = request(method::post, path, params, headers);
+
         req.set_body(body, content_type);
         co_return co_await async_send_request(req);
     }
@@ -649,8 +651,8 @@ namespace httplib::client
                             httplib::query_params const& params,
                             httplib::headers const& headers)
     {
-        auto req = request(method::post, path, params);
-        req.merge(headers);
+        auto req = request(method::post, path, params, headers);
+
         req.set_body(std::move(body));
         co_return co_await async_send_request(req);
     }
@@ -662,8 +664,8 @@ namespace httplib::client
                            httplib::query_params const& params,
                            httplib::headers const& headers)
     {
-        auto req = request(method::put, path, params);
-        req.merge(headers);
+        auto req = request(method::put, path, params, headers);
+
         req.set_body(body, content_type);
         co_return co_await async_send_request(req);
     }
@@ -674,8 +676,7 @@ namespace httplib::client
                            httplib::query_params const& params,
                            httplib::headers const& headers)
     {
-        auto req = request(method::put, path, params);
-        req.merge(headers);
+        auto req = request(method::put, path, params, headers);
         req.set_body(std::move(body));
         co_return co_await async_send_request(req);
     }
@@ -687,8 +688,8 @@ namespace httplib::client
                              httplib::query_params const& params,
                              httplib::headers const& headers)
     {
-        auto req = request(method::patch, path, params);
-        req.merge(headers);
+        auto req = request(method::patch, path, params, headers);
+
         req.set_body(body, content_type);
         co_return co_await async_send_request(req);
     }
@@ -699,8 +700,8 @@ namespace httplib::client
                              httplib::query_params const& params,
                              httplib::headers const& headers)
     {
-        auto req = request(method::patch, path, params);
-        req.merge(headers);
+        auto req = request(method::patch, path, params, headers);
+
         req.set_body(std::move(body));
         co_return co_await async_send_request(req);
     }
@@ -715,9 +716,7 @@ namespace httplib::client
                                 fs::path const& save_path,
                                 httplib::headers const& headers)
     {
-        auto req = request(method, path);
-        req.merge(headers);
-
+        auto req = request(method, path, headers);
         auto result = co_await impl_->async_send_request_lazy_with_redirect(get_impl(req));
         if (result.has_error())
         {

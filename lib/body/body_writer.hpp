@@ -1,4 +1,5 @@
 #pragma once
+#include "beast_alias.hpp"
 #include "body/codec.hpp"
 #include "body/source.hpp"
 #include "compress/compressor.hpp"
@@ -22,7 +23,6 @@
 #include <string>
 #include <string_view>
 #include <utility>
-#include "beast_alias.hpp"
 
 namespace httplib::detail
 {
@@ -64,7 +64,7 @@ namespace httplib::detail
         body_writer& operator=(body_writer const&) = delete;
 
         void
-        merge(http::fields const& fields)
+        replace_fields(http::fields const& fields)
         {
             for (auto const& h : fields)
             {
