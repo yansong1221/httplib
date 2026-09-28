@@ -31,12 +31,12 @@ namespace httplib::server
                      mode m,
                      boost::system::error_code& ec) override
         {
-            for (auto const& f : headers)
+            for (auto const& f : headers.fields())
             {
                 resp_.base().erase(f.name_string());
             }
             resp_.base().result(enum_conv::to_status(status));
-            for (auto const& f : headers)
+            for (auto const& f : headers.fields())
             {
                 resp_.base().insert(f.name_string(), f.value());
             }

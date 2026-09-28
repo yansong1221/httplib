@@ -21,7 +21,7 @@ namespace httplib::server
     httplib::headers
     response::base()
     {
-        return httplib::detail::headers_access::borrow(impl_->base());
+        return httplib::headers::impl::borrow(impl_->base());
     }
 
     httplib::headers
@@ -29,7 +29,7 @@ namespace httplib::server
     {
         // unique_ptr 的 const 不传递到被指对象，故这里无需 const_cast：
         // 借用视图本身就指向消息自己的字段集合，写入语义与非常量重载一致。
-        return httplib::detail::headers_access::borrow(impl_->base());
+        return httplib::headers::impl::borrow(impl_->base());
     }
 
     void
@@ -161,7 +161,7 @@ namespace httplib::server
     void
     response::set_file_content(fs::path const& path, httplib::headers const& req_header)
     {
-        impl_->set_file_content(path, httplib::detail::headers_access::raw(req_header));
+        impl_->set_file_content(path, get_impl(req_header));
     }
 
     void

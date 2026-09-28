@@ -41,14 +41,14 @@ namespace httplib::server
     httplib::headers
     request::base()
     {
-        return httplib::detail::headers_access::borrow(impl_->get());
+        return httplib::headers::impl::borrow(impl_->get());
     }
 
     httplib::headers
     request::base() const
     {
         // unique_ptr 的 const 不传递到被指对象，impl_ 可变，视图直接借用消息的字段集合。
-        return httplib::detail::headers_access::borrow(impl_->get());
+        return httplib::headers::impl::borrow(impl_->get());
     }
 
     std::string_view

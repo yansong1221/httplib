@@ -165,20 +165,20 @@ namespace httplib::client
         {
             return;
         }
-        impl_->merge(httplib::detail::headers_access::raw(fields));
+        impl_->merge(get_impl(fields));
     }
 
     httplib::headers
     request::base()
     {
-        return httplib::detail::headers_access::borrow(impl_->base());
+        return httplib::headers::impl::borrow(impl_->base());
     }
 
     httplib::headers
     request::base() const
     {
         // shared_ptr 的 const 不传递到被指对象，impl_ 可变，视图直接借用消息的字段集合。
-        return httplib::detail::headers_access::borrow(impl_->base());
+        return httplib::headers::impl::borrow(impl_->base());
     }
 
     void

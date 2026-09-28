@@ -230,7 +230,7 @@ namespace httplib::client
                     {
                         // CL-02: 跨 origin 重定向时移除 origin-bound 敏感头，避免认证凭据泄露到新主机
                         // req_msg.base() 是 beast message，借一个 httplib::headers 视图过去
-                        auto req_headers = httplib::detail::headers_access::borrow(req_msg.base());
+                        auto req_headers = httplib::headers::impl::borrow(req_msg.base());
                         redirect::strip_origin_bound_headers(req_headers);
 
                         req_msg.base().target(new_target);

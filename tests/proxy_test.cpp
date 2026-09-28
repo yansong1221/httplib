@@ -1570,7 +1570,7 @@ TEST_CASE("proxy: Set-Cookie Domain dropped for IP public host", "[proxy]")
             auto resp = UNWRAP(co_await proxy_client.async_get("/api/set-cookie"));
             REQUIRE(resp.result() == httplib::status::ok);
             std::vector<std::string> cookies;
-            for (auto const& f : resp.base())
+            for (auto const& f : resp.base().fields())
             {
                 if (f.name() == httplib::field::set_cookie)
                 {

@@ -77,7 +77,7 @@ namespace httplib::client
                          req.set(http::field::host, url::make_host_value(host_, port_, scheme_));
                          req.set(http::field::user_agent,
                                  std::string(BOOST_BEAST_VERSION_STRING) + "websocket-client-coro");
-                        for (auto const& field : headers)
+                        for (auto const& field : headers.fields())
                         {
                             req.set(field.name_string(), field.value());
                         }

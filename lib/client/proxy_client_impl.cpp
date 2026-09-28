@@ -71,7 +71,7 @@ namespace httplib::client
                 // req 是 beast request,要用 beast 枚举
                 http::request<http::empty_body> req { http::verb::connect, target, 11 };
                 req.set(http::field::host, target);
-                for (auto const& h : headers)
+                for (auto const& h : headers.fields())
                 {
                     req.set(h.name_string(), h.value());
                 }

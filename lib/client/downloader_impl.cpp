@@ -842,7 +842,7 @@ namespace httplib::client
     downloader::impl::send_request(url::url_info const& ui, httplib::method m, httplib::headers const& req_headers)
     {
         httplib::headers merged = custom_headers_;
-        for (auto const& f : req_headers)
+        for (auto const& f : req_headers.fields())
         {
             merged.set(f.name_string(), f.value());
         }
@@ -1766,7 +1766,7 @@ namespace httplib::client
                     has_final = has_final_ui_;
                 }
                 bool cacheable = response_is_cacheable(probe.headers);
-                if (response_headers.begin() != response_headers.end())
+                if (!response_headers.empty())
                 {
                     cacheable = cacheable && response_is_cacheable(response_headers);
                 }

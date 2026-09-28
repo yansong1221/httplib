@@ -93,7 +93,7 @@ namespace httplib::server::detail
             }
 
             std::vector<std::string> rewritten;
-            for (auto const& f : headers)
+            for (auto const& f : headers.fields())
             {
                 if (f.name() != field::set_cookie)
                 {

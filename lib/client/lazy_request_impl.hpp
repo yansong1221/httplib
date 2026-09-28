@@ -57,7 +57,7 @@ namespace httplib::client
             this->base().target(target);
             this->base().version(11);
             this->base().set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);
-            for (auto const& f : headers)
+            for (auto const& f : headers.fields())
             {
                 this->base().set(f.name_string(), f.value());
             }
