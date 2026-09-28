@@ -1,3 +1,4 @@
+#include "beast_alias.hpp"
 #include "body/body_state.hpp"
 #include "body/body_writer.hpp"
 #include "body/codec.hpp"
@@ -23,8 +24,8 @@
 #include <vector>
 
 namespace body = httplib::body;
-namespace net = httplib::net;
 namespace http = httplib::http;
+namespace net = httplib::net;
 namespace json = boost::json;
 
 namespace
@@ -159,7 +160,7 @@ TEST_CASE("body_writer: exposes its serializer for external changes", "[body_pip
     using writer_t = httplib::detail::body_writer<false, task>;
 
     writer_t writer;
-    writer.base().result(httplib::http::status::ok);
+    writer.base().result(http::status::ok);
     writer.base().version(11);
     writer.content_length(0);
 

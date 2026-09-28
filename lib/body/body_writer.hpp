@@ -22,6 +22,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include "beast_alias.hpp"
 
 namespace httplib::detail
 {

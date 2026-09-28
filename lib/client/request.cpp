@@ -1,5 +1,6 @@
 #include "httplib/client/request.hpp"
 #include "compress/compressor.hpp"
+#include "headers_impl.hpp"
 #include "request_impl.h"
 #include "util/mime_types.hpp"
 #include <boost/algorithm/string/join.hpp>
@@ -7,6 +8,8 @@
 #include <boost/json/value.hpp>
 #include <fmt/format.h>
 #include <fstream>
+#include "beast_alias.hpp"
+#include "enum_conv.hpp"
 
 namespace httplib::client
 {
@@ -27,8 +30,8 @@ namespace httplib::client
 
     } // namespace detail
 
-    request::request(http::verb method, std::string_view target, http::fields const& headers)
-        : impl_(std::make_shared<impl>(method, target))
+    request::request(httplib::method method, std::string_view target, httplib::headers const& headers)
+        : impl_(std::make_shared<impl>(enum_conv::to_verb(method), target))
     {
         merge(headers);
     }
@@ -39,25 +42,25 @@ namespace httplib::client
 
     request::request(std::shared_ptr<impl> impl) : impl_(std::move(impl)) {}
 
-    request::request(http::verb method,
+    request::request(httplib::method method,
                      std::string_view path,
                      httplib::query_params const& params,
-                     http::fields const& headers)
+                     httplib::headers const& headers)
         : request(method, detail::make_target(path, params))
     {
         merge(headers);
     }
 
-    http::verb
+    httplib::method
     request::method() const
     {
-        return impl_->base().method();
+        return enum_conv::to_method(impl_->base().method());
     }
 
     void
-    request::method(http::verb v)
+    request::method(httplib::method v)
     {
-        impl_->base().method(v);
+        impl_->base().method(enum_conv::to_verb(v));
     }
 
     std::string_view
@@ -73,9 +76,9 @@ namespace httplib::client
     }
 
     std::string_view
-    request::operator[](http::field name) const
+    request::operator[](httplib::field name) const
     {
-        return impl_->base()[name];
+        return impl_->base()[enum_conv::to_field(name)];
     }
 
     std::string_view
@@ -85,9 +88,9 @@ namespace httplib::client
     }
 
     std::string_view
-    request::at(http::field name) const
+    request::at(httplib::field name) const
     {
-        return impl_->base().at(name);
+        return impl_->base().at(enum_conv::to_field(name));
     }
 
     std::string_view
@@ -96,9 +99,9 @@ namespace httplib::client
         return impl_->base().at(name);
     }
     void
-    request::insert(http::field name, std::string_view value)
+    request::insert(httplib::field name, std::string_view value)
     {
-        impl_->base().insert(name, value);
+        impl_->base().insert(enum_conv::to_field(name), value);
     }
 
     void
@@ -108,9 +111,9 @@ namespace httplib::client
     }
 
     void
-    request::set(http::field name, std::string_view value)
+    request::set(httplib::field name, std::string_view value)
     {
-        impl_->base().set(name, value);
+        impl_->base().set(enum_conv::to_field(name), value);
     }
 
     void
@@ -120,9 +123,9 @@ namespace httplib::client
     }
 
     void
-    request::erase(http::field name)
+    request::erase(httplib::field name)
     {
-        impl_->base().erase(name);
+        impl_->base().erase(enum_conv::to_field(name));
     }
 
     void
@@ -132,9 +135,9 @@ namespace httplib::client
     }
 
     bool
-    request::has(http::field name) const
+    request::has(httplib::field name) const
     {
-        return impl_->base().find(name) != impl_->base().end();
+        return impl_->base().find(enum_conv::to_field(name)) != impl_->base().end();
     }
 
     bool
@@ -143,20 +146,39 @@ namespace httplib::client
         return impl_->base().find(name) != impl_->base().end();
     }
 
-    http::fields&
+    std::size_t
+    request::count(httplib::field name) const
+    {
+        return impl_->base().count(enum_conv::to_field(name));
+    }
+
+    std::size_t
+    request::count(std::string_view name) const
+    {
+        return impl_->base().count(name);
+    }
+
+    void
+    request::merge(httplib::headers const& fields)
+    {
+        if (fields.empty())
+        {
+            return;
+        }
+        impl_->merge(httplib::detail::headers_access::raw(fields));
+    }
+
+    httplib::headers
     request::base()
     {
-        return impl_->base();
+        return httplib::detail::headers_access::borrow(impl_->base());
     }
-    void
-    request::merge(http::fields const& fields)
-    {
-        impl_->merge(fields);
-    }
-    http::fields const&
+
+    httplib::headers
     request::base() const
     {
-        return impl_->base();
+        // shared_ptr 的 const 不传递到被指对象，impl_ 可变，视图直接借用消息的字段集合。
+        return httplib::detail::headers_access::borrow(impl_->base());
     }
 
     void

@@ -15,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include "beast_alias.hpp"
 
 namespace httplib::server::detail
 {
@@ -92,7 +93,7 @@ namespace httplib::server::detail
             provider_lease& operator=(provider_lease const&) = delete;
         };
 
-        http::fields upstream_headers_ {};
+        httplib::headers upstream_headers_ {};
         client::http_client_pool::client_handle client_;
         std::optional<provider_lease> lease_;
         std::shared_ptr<client::lazy_request> writer_;

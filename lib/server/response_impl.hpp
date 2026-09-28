@@ -14,6 +14,7 @@
 #include <string_view>
 #include <utility>
 #include <vector>
+#include "beast_alias.hpp"
 
 namespace httplib::server
 {

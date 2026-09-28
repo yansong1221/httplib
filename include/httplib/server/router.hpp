@@ -1,10 +1,10 @@
 #pragma once
+#include "httplib/headers.hpp"
 #include "httplib/server/mount_point_entry.hpp"
 #include "httplib/server/server_fwd.hpp"
 #include "httplib/server/websocket_conn.hpp"
 #include "httplib/util/type_traits.h"
 #include <algorithm>
-#include <boost/beast/http/fields.hpp>
 #include <filesystem>
 #include <functional>
 #include <list>
@@ -24,16 +24,19 @@ namespace httplib::server
         void use(Aspects&&... asps);
 
         template <typename Func, typename... Aspects>
-        void set_http_handler(http::verb method, std::string_view key, Func&& handler, Aspects&&... asps);
+        void set_http_handler(httplib::method method,
+                              std::string_view key,
+                              Func&& handler,
+                              Aspects&&... asps);
 
-        template <http::verb... method, typename Func, typename... Aspects>
+        template <httplib::method... method, typename Func, typename... Aspects>
         void
         set_http_handler(std::string_view key, Func handler, Aspects&&... asps)
         {
             static_assert(sizeof...(method) >= 1, "must set method");
             (set_http_handler(method, key, handler, std::forward<Aspects>(asps)...), ...);
         }
-        template <http::verb... method, typename Func, typename... Aspects>
+        template <httplib::method... method, typename Func, typename... Aspects>
             requires std::is_member_function_pointer_v<Func>
         void set_http_handler(std::string_view key, Func handler, util::class_type_t<Func>& owner, Aspects&&... asps);
 
@@ -52,16 +55,16 @@ namespace httplib::server
         void set_static_mount_point(mount_point_entry&& entry, Aspects&&... asps);
 
         template <typename Func, typename... Aspects>
-        void set_lazy_http_handler(http::verb method, std::string_view key, Func&& handler, Aspects... asps);
+        void set_lazy_http_handler(httplib::method method, std::string_view key, Func&& handler, Aspects... asps);
 
-        template <http::verb... method, typename Func, typename... Aspects>
+        template <httplib::method... method, typename Func, typename... Aspects>
         void
         set_lazy_http_handler(std::string_view key, Func handler, Aspects&&... asps)
         {
             static_assert(sizeof...(method) >= 1, "must set method");
             (set_lazy_http_handler(method, key, handler, std::forward<Aspects>(asps)...), ...);
         }
-        template <http::verb... method, typename Func, typename... Aspects>
+        template <httplib::method... method, typename Func, typename... Aspects>
             requires std::is_member_function_pointer_v<Func>
         void set_lazy_http_handler(std::string_view key,
                                    Func handler,
@@ -82,7 +85,9 @@ namespace httplib::server
         template <typename Func, typename... Aspects>
         coro_http_handler_type make_coro_http_handler(Func&& handler, Aspects&&... asps);
 
-        virtual void set_http_handler_impl(http::verb method, std::string_view key, coro_http_handler_type&& handler)
+        virtual void set_http_handler_impl(httplib::method method,
+                                           std::string_view key,
+                                           coro_http_handler_type&& handler)
             = 0;
         virtual void set_not_found_handler_impl(coro_http_handler_type&& handler) = 0;
         virtual void set_ws_handler_impl(std::string_view key,
@@ -92,7 +97,7 @@ namespace httplib::server
             = 0;
         virtual void set_post_routing_handler_impl(coro_http_handler_type&& handler) = 0;
 
-        virtual void set_lazy_http_handler_impl(http::verb method,
+        virtual void set_lazy_http_handler_impl(httplib::method method,
                                                 std::string_view key,
                                                 coro_http_handler_type&& handler)
             = 0;

@@ -1,5 +1,6 @@
 #include "httplib/server/response.hpp"
 #include "html/html.h"
+#include "headers_impl.hpp"
 #include "ndjson_writer_impl.hpp"
 #include "response_impl.hpp"
 #include "sse_writer_impl.hpp"
@@ -7,6 +8,8 @@
 #include "util/mime_types.hpp"
 #include <boost/beast/version.hpp>
 #include <fmt/format.h>
+#include "beast_alias.hpp"
+#include "enum_conv.hpp"
 
 namespace httplib::server
 {
@@ -14,21 +17,25 @@ namespace httplib::server
     response::response(std::unique_ptr<impl>&& _impl) : impl_(std::move(_impl)) {}
 
     response::~response() {}
-    httplib::http::fields&
+
+    httplib::headers
     response::base()
     {
-        return impl_->base();
+        return httplib::detail::headers_access::borrow(impl_->base());
     }
 
-    httplib::http::fields const&
+    httplib::headers
     response::base() const
     {
-        return impl_->base();
+        // unique_ptr 的 const 不传递到被指对象，故这里无需 const_cast：
+        // 借用视图本身就指向消息自己的字段集合，写入语义与非常量重载一致。
+        return httplib::detail::headers_access::borrow(impl_->base());
     }
+
     void
-    response::set(http::field name, std::string_view value)
+    response::set(httplib::field name, std::string_view value)
     {
-        impl_->base().set(name, value);
+        impl_->base().set(enum_conv::to_field(name), value);
     }
 
     void
@@ -36,32 +43,35 @@ namespace httplib::server
     {
         impl_->base().set(name, value);
     }
+
     void
-    response::insert(http::field name, std::string_view value)
+    response::insert(httplib::field name, std::string_view value)
     {
-        impl_->base().insert(name, value);
+        impl_->base().insert(enum_conv::to_field(name), value);
     }
+
     void
     response::insert(std::string_view name, std::string_view value)
     {
         impl_->base().insert(name, value);
     }
+
     std::string_view
-    response::operator[](http::field name) const
+    response::operator[](httplib::field name) const
     {
-        return (*impl_).base()[name];
+        return impl_->base()[enum_conv::to_field(name)];
     }
 
     std::string_view
     response::operator[](std::string_view name) const
     {
-        return (*impl_).base()[name];
+        return impl_->base()[name];
     }
 
     std::string_view
-    response::at(http::field name) const
+    response::at(httplib::field name) const
     {
-        return impl_->base().at(name);
+        return impl_->base().at(enum_conv::to_field(name));
     }
 
     std::string_view
@@ -71,9 +81,9 @@ namespace httplib::server
     }
 
     bool
-    response::has(http::field name) const
+    response::has(httplib::field name) const
     {
-        return impl_->base().find(name) != impl_->base().end();
+        return impl_->base().find(enum_conv::to_field(name)) != impl_->base().end();
     }
 
     bool
@@ -83,9 +93,9 @@ namespace httplib::server
     }
 
     void
-    response::erase(http::field name)
+    response::erase(httplib::field name)
     {
-        impl_->base().erase(name);
+        impl_->base().erase(enum_conv::to_field(name));
     }
 
     void
@@ -94,11 +104,24 @@ namespace httplib::server
         impl_->base().erase(name);
     }
 
-    httplib::http::status
+    std::size_t
+    response::count(httplib::field name) const
+    {
+        return impl_->base().count(enum_conv::to_field(name));
+    }
+
+    std::size_t
+    response::count(std::string_view name) const
+    {
+        return impl_->base().count(name);
+    }
+
+    httplib::status
     response::result() const
     {
-        return impl_->base().result();
+        return enum_conv::to_status(impl_->base().result());
     }
+
     unsigned
     response::result_int() const
     {
@@ -106,41 +129,39 @@ namespace httplib::server
     }
 
     void
-    response::set_empty_content(http::status status)
+    response::set_empty_content(httplib::status status)
     {
-        impl_->set_empty_content(status);
+        impl_->set_empty_content(enum_conv::to_status(status));
     }
 
     void
-    response::set_error_content(http::status status)
+    response::set_error_content(httplib::status status)
     {
-        impl_->set_error_content(status);
+        impl_->set_error_content(enum_conv::to_status(status));
     }
 
     void
-    response::set_string_content(std::string&& data,
-                                 std::string_view content_type,
-                                 http::status status /*= http::status::ok*/)
+    response::set_string_content(std::string&& data, std::string_view content_type, httplib::status status)
     {
-        impl_->set_string_content(std::move(data), content_type, status);
+        impl_->set_string_content(std::move(data), content_type, enum_conv::to_status(status));
     }
 
     void
-    response::set_json_content(boost::json::value const& data, http::status status)
+    response::set_json_content(boost::json::value const& data, httplib::status status)
     {
         set_json_content(boost::json::value(data), status);
     }
 
     void
-    response::set_json_content(boost::json::value&& data, http::status status /*= http::status::ok*/)
+    response::set_json_content(boost::json::value&& data, httplib::status status)
     {
-        impl_->set_json_content(std::move(data), status);
+        impl_->set_json_content(std::move(data), enum_conv::to_status(status));
     }
 
     void
-    response::set_file_content(fs::path const& path, http::fields const& req_header /*= {}*/)
+    response::set_file_content(fs::path const& path, httplib::headers const& req_header)
     {
-        impl_->set_file_content(path, req_header);
+        impl_->set_file_content(path, httplib::detail::headers_access::raw(req_header));
     }
 
     void
@@ -150,9 +171,9 @@ namespace httplib::server
     }
 
     void
-    response::set_redirect(std::string_view url, http::status status /*= http::status::moved_permanently*/)
+    response::set_redirect(std::string_view url, httplib::status status)
     {
-        impl_->set_redirect(url, status);
+        impl_->set_redirect(url, enum_conv::to_status(status));
     }
 
     std::unique_ptr<server::sse_writer>

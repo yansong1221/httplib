@@ -3,6 +3,7 @@
 #include "httplib/util/misc.hpp"
 #include "proxy_util.hpp"
 #include "server_impl.h"
+#include "beast_alias.hpp"
 
 namespace httplib::server::detail
 {
@@ -116,14 +117,17 @@ namespace httplib::server::detail
 
         get_logger()->debug("[ws-forward] {} -> {}", req.target(), upstream_.url);
 
-        upstream_headers_ = http::fields(req.base());
-        upstream_headers_.erase(http::field::host);
-        upstream_headers_.erase(http::field::sec_websocket_key);
-        upstream_headers_.erase(http::field::sec_websocket_accept);
-        upstream_headers_.erase(http::field::sec_websocket_version);
-        upstream_headers_.erase(http::field::upgrade);
-        upstream_headers_.erase(http::field::connection);
-        upstream_headers_.set(http::field::host,
+        // req.base() 只是请求头的借用视图，直接赋值会让 upstream_headers_ 也变成
+        // 借用视图，后面 erase/set 就会就地改写下游请求自己的头。要的是独立副本。
+        upstream_headers_.clear();
+        upstream_headers_.merge(req.base());
+        upstream_headers_.erase(field::host);
+        upstream_headers_.erase(field::sec_websocket_key);
+        upstream_headers_.erase(field::sec_websocket_accept);
+        upstream_headers_.erase(field::sec_websocket_version);
+        upstream_headers_.erase(field::upgrade);
+        upstream_headers_.erase(field::connection);
+        upstream_headers_.set(field::host,
                               url::make_host_value(upstream_.host,
                                                     upstream_.port,
                                                     upstream_.ssl ? url::scheme::tls : url::scheme::plain));

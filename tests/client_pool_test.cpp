@@ -574,7 +574,7 @@ TEST_CASE("client_pool: reuses a server-closed connection transparently", "[clie
         [](httplib::server::http_server& server)
         {
             server.set_read_timeout(std::chrono::milliseconds(200));
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ok",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("ok"sv, "text/plain"); });
@@ -617,7 +617,7 @@ TEST_CASE("client_pool: validate_on_borrow discards dead idle connection", "[cli
         [](httplib::server::http_server& server)
         {
             server.set_read_timeout(std::chrono::milliseconds(200));
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ok",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("ok"sv, "text/plain"); });
@@ -662,7 +662,7 @@ TEST_CASE("http_client: is_alive detects peer close", "[client_pool]")
         [](httplib::server::http_server& server)
         {
             server.set_read_timeout(std::chrono::milliseconds(200));
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ok",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("ok"sv, "text/plain"); });
@@ -697,14 +697,14 @@ TEST_CASE("client_pool: reader survives handle destruction", "[client_pool]")
     run_with_server(
         [](httplib::server::http_server& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/stream",
                 [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     auto cw = resp.create_stream_writer();
-                    http::fields headers;
-                    headers.set(http::field::content_type, "text/plain");
-                    co_await cw->write_header(http::status::ok, headers, httplib::server::stream_writer::mode::chunked);
+                    httplib::headers headers;
+                    headers.set(httplib::field::content_type, "text/plain");
+                    co_await cw->write_header(httplib::status::ok, headers, httplib::server::stream_writer::mode::chunked);
                     co_await cw->write_body(net::buffer("ABC"), false);
                 });
         },
@@ -722,7 +722,7 @@ TEST_CASE("client_pool: reader survives handle destruction", "[client_pool]")
                 REQUIRE(h);
                 auto writer = h->create_lazy_request();
 
-                co_await writer->write_header(http::verb::get,
+                co_await writer->write_header(httplib::method::get,
                                               "/stream",
                                               {},
                                               httplib::client::lazy_request::mode::relay);
@@ -762,7 +762,7 @@ TEST_CASE("client_pool: idle eviction wakes a waiting acquire", "[client_pool]")
     run_with_server(
         [](httplib::server::http_server& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ok",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("ok"sv, "text/plain"); });

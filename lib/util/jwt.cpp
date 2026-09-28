@@ -6,6 +6,7 @@
 
 #ifdef HTTPLIB_ENABLED_SSL
 #include <openssl/hmac.h>
+#include "beast_alias.hpp"
 #endif
 
 namespace httplib::jwt

@@ -8,7 +8,6 @@
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/ip/tcp.hpp>
-#include <boost/beast/http/fields.hpp>
 #include <filesystem>
 #include <functional>
 #include <future>

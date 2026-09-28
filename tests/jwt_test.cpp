@@ -344,7 +344,7 @@ TEST_CASE("JWT: middleware auth via Bearer token", "[jwt]")
     run(
         [&](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/protected",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
@@ -355,11 +355,11 @@ TEST_CASE("JWT: middleware auth via Bearer token", "[jwt]")
         },
         [&](auto& client) -> net::awaitable<void>
         {
-            auto hdrs = httplib::http::fields();
-            hdrs.set(http::field::authorization, "Bearer " + token);
-            httplib::client::request req(http::verb::get, "/protected", hdrs);
+            auto hdrs = httplib::headers();
+            hdrs.set(httplib::field::authorization, "Bearer " + token);
+            httplib::client::request req(httplib::method::get, "/protected", hdrs);
             auto resp = UNWRAP(co_await client.async_send_request(req));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(test_common::as_string(resp) == "alice");
             co_return;
         });
@@ -372,7 +372,7 @@ TEST_CASE("JWT: middleware rejects invalid token", "[jwt]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/protected",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("ok"sv, "text/plain"sv); },
@@ -380,11 +380,11 @@ TEST_CASE("JWT: middleware rejects invalid token", "[jwt]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto hdrs = httplib::http::fields();
-            hdrs.set(http::field::authorization, "Bearer invalid.token.here");
-            httplib::client::request req(http::verb::get, "/protected", hdrs);
+            auto hdrs = httplib::headers();
+            hdrs.set(httplib::field::authorization, "Bearer invalid.token.here");
+            httplib::client::request req(httplib::method::get, "/protected", hdrs);
             auto resp = UNWRAP(co_await client.async_send_request(req));
-            REQUIRE(resp.result() == http::status::unauthorized);
+            REQUIRE(resp.result() == httplib::status::unauthorized);
             co_return;
         });
 }
@@ -396,7 +396,7 @@ TEST_CASE("JWT: middleware rejects missing Bearer", "[jwt]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/protected",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("ok"sv, "text/plain"sv); },
@@ -405,7 +405,7 @@ TEST_CASE("JWT: middleware rejects missing Bearer", "[jwt]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/protected"));
-            REQUIRE(resp.result() == http::status::unauthorized);
+            REQUIRE(resp.result() == httplib::status::unauthorized);
             co_return;
         });
 }

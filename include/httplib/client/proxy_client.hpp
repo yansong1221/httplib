@@ -1,10 +1,11 @@
 #pragma once
+#include "httplib/headers.hpp"
 #include "httplib/url/scheme.hpp"
 #include "httplib/config.hpp"
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/buffer.hpp>
 #include <boost/asio/io_context.hpp>
-#include <boost/beast/http/fields.hpp>
 #include <boost/system/error_code.hpp>
 #include <boost/system/result.hpp>
 #include <future>
@@ -25,7 +26,7 @@ namespace httplib::client
         ~proxy_client();
 
         net::awaitable<void> async_connect(std::string_view target,
-                                           http::fields const& headers,
+                                           httplib::headers const& headers,
                                            boost::system::error_code& ec);
 
         net::awaitable<std::size_t> async_read_some(net::mutable_buffer const& buffer, boost::system::error_code& ec);

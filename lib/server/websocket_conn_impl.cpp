@@ -7,6 +7,7 @@
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/use_future.hpp>
 #include <spdlog/spdlog.h>
+#include "beast_alias.hpp"
 
 namespace httplib::server
 {

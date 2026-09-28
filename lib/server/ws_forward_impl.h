@@ -10,6 +10,7 @@
 #include <spdlog/spdlog.h>
 #include <string>
 #include <string_view>
+#include "beast_alias.hpp"
 
 namespace httplib::client
 {
@@ -87,6 +88,6 @@ namespace httplib::server::detail
         // ---- per-connection state (set by prepare_upstream) ----
         std::shared_ptr<ws_interceptor> interceptor_;
         parsed_upstream upstream_;
-        http::fields upstream_headers_ {};
+        httplib::headers upstream_headers_ {};
     };
 } // namespace httplib::server::detail

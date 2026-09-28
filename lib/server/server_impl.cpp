@@ -25,6 +25,7 @@
 #ifdef HTTPLIB_ENABLED_SSL
 #include <openssl/err.h>
 #include <openssl/ssl.h>
+#include "beast_alias.hpp"
 #endif
 
 namespace httplib::server
@@ -404,13 +405,13 @@ namespace httplib::server
 
         std::string prefix = detail::strip_proxy_prefix(location);
 
-        router_.set_lazy_http_handler<http::verb::get,
-                                      http::verb::head,
-                                      http::verb::post,
-                                      http::verb::put,
-                                      http::verb::patch,
-                                      http::verb::delete_,
-                                      http::verb::options>(
+        router_.set_lazy_http_handler<method::get,
+                                      method::head,
+                                      method::post,
+                                      method::put,
+                                      method::patch,
+                                      method::delete_,
+                                      method::options>(
             location,
             [this,
              self = shared_from_this(),

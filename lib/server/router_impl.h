@@ -10,6 +10,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "beast_alias.hpp"
 
 namespace httplib::server
 {
@@ -46,8 +47,8 @@ namespace httplib::server
             std::string param_name;
             std::regex regex;
 
-            std::unordered_map<http::verb, coro_http_handler_type> handlers;
-            std::unordered_map<http::verb, coro_http_handler_type> lazy_handlers;
+            std::unordered_map<method, coro_http_handler_type> handlers;
+            std::unordered_map<method, coro_http_handler_type> lazy_handlers;
             std::optional<ws_handler_entry> ws_handler;
 
             util::string_map<std::unique_ptr<Node>> static_children;
@@ -64,14 +65,14 @@ namespace httplib::server
         void reset();
 
       protected:
-        void set_http_handler_impl(http::verb method, std::string_view key, coro_http_handler_type&& handler) override;
+        void set_http_handler_impl(method m, std::string_view key, coro_http_handler_type&& handler) override;
         void set_not_found_handler_impl(coro_http_handler_type&& handler) override;
         void set_ws_handler_impl(std::string_view path,
                                  websocket_conn::coro_open_handler_type&& open_handler,
                                  websocket_conn::coro_message_handler_type&& message_handler,
                                  websocket_conn::coro_close_handler_type&& close_handler) override;
         void set_post_routing_handler_impl(coro_http_handler_type&& handler) override;
-        void set_lazy_http_handler_impl(http::verb method,
+        void set_lazy_http_handler_impl(method m,
                                         std::string_view key,
                                         coro_http_handler_type&& handler) override;
         void use_impl(coro_mw_handler_type&& before, coro_mw_handler_type&& after) override;

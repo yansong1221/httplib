@@ -1,4 +1,5 @@
 #pragma once
+#include "httplib/headers.hpp"
 #include "httplib/url/scheme.hpp"
 #include "httplib/config.hpp"
 #include "httplib/util/misc.hpp"
@@ -6,7 +7,6 @@
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/io_context.hpp>
-#include <boost/beast/http/fields.hpp>
 #include <boost/system/error_code.hpp>
 #include <chrono>
 #include <functional>
@@ -107,7 +107,7 @@ namespace httplib::client
          * 可从任意线程 co_await。
          */
         net::awaitable<void> async_connect(std::string_view target,
-                                           http::fields const& headers,
+                                           httplib::headers const& headers,
                                            std::chrono::steady_clock::duration timeout,
                                            boost::system::error_code& ec);
 
@@ -278,7 +278,7 @@ namespace httplib::client
             OpenFunc&& open_handler,
             MessageFunc&& message_handler,
             CloseFunc&& close_handler,
-            http::fields const& headers = {})
+            httplib::headers const& headers = {})
         {
             run_impl(target,
                      httplib::util::make_coro_handler(std::forward<OpenFunc>(open_handler)),
@@ -307,7 +307,7 @@ namespace httplib::client
         template <typename MessageFunc, typename CloseFunc>
         net::awaitable<void>
         async_run(std::string_view target,
-                  http::fields const& headers,
+                  httplib::headers const& headers,
                   MessageFunc&& message_handler,
                   CloseFunc&& close_handler,
                   boost::system::error_code& ec)
@@ -325,7 +325,7 @@ namespace httplib::client
         using coro_message_handler_type = std::function<net::awaitable<void>(websocket_message)>;
 
         net::awaitable<void> async_run_impl(std::string_view target,
-                                            http::fields const& headers,
+                                            httplib::headers const& headers,
                                             coro_message_handler_type&& message_handler,
                                             coro_close_handler_type&& close_handler,
                                             boost::system::error_code& ec);
@@ -333,7 +333,7 @@ namespace httplib::client
                       coro_open_handler_type&& open_handler,
                       coro_message_handler_type&& message_handler,
                       coro_close_handler_type&& close_handler,
-                      http::fields const& headers = {});
+                      httplib::headers const& headers = {});
 
       private:
         ws_client(ws_client const&) = delete;

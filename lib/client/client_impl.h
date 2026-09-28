@@ -20,6 +20,7 @@
 #include <future>
 #include <limits>
 #include <spdlog/spdlog.h>
+#include "beast_alias.hpp"
 
 namespace httplib::client
 {

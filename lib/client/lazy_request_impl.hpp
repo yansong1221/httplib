@@ -11,6 +11,8 @@
 #include <boost/beast/http/serializer.hpp>
 #include <boost/beast/version.hpp>
 #include <limits>
+#include "beast_alias.hpp"
+#include "enum_conv.hpp"
 
 namespace httplib::client
 {
@@ -27,7 +29,7 @@ namespace httplib::client
             attach(parent_.get(), std::move(ex));
         }
         net::awaitable<void>
-        write_header(http::verb method, std::string_view target, http::fields const& headers, mode m) override
+        write_header(httplib::method method, std::string_view target, httplib::headers const& headers, mode m) override
         {
             boost::system::error_code ec;
             co_await write_header(method, target, headers, m, ec);
@@ -37,9 +39,9 @@ namespace httplib::client
             }
         }
         net::awaitable<void>
-        write_header(http::verb method,
+        write_header(httplib::method method,
                      std::string_view target,
-                     http::fields const& headers,
+                     httplib::headers const& headers,
                      mode m,
                      boost::system::error_code& ec) override
         {
@@ -51,7 +53,7 @@ namespace httplib::client
 
             this->reset();
             this->base().clear();
-            this->base().method(method);
+            this->base().method(enum_conv::to_verb(method));
             this->base().target(target);
             this->base().version(11);
             this->base().set(http::field::user_agent, BOOST_BEAST_VERSION_STRING);

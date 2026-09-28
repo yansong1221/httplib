@@ -2,6 +2,7 @@
 #include <boost/beast/http/error.hpp>
 #include <cstring>
 #include <algorithm>
+#include "beast_alias.hpp"
 
 namespace httplib::body
 {

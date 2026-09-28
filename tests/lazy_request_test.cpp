@@ -9,7 +9,6 @@
 #include <vector>
 
 namespace net = httplib::net;
-namespace http = httplib::http;
 
 namespace
 {
@@ -34,7 +33,7 @@ TEST_CASE("server lazy: read_string", "[server-lazy]")
     run(
         [](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/string",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -46,7 +45,7 @@ TEST_CASE("server lazy: read_string", "[server-lazy]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_post("/string", std::string_view("hello lazy"), "text/plain"sv));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(resp.as_string() == "hello lazy");
         });
 }
@@ -56,7 +55,7 @@ TEST_CASE("server lazy: read_json", "[server-lazy]")
     run(
         [](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/json",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -88,9 +87,9 @@ TEST_CASE("server lazy: read_json", "[server-lazy]")
                                                           boost::json::value({
                                                               { "msg", "hi" }
             })));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             spdlog::info("client json ct={} body={}",
-                         std::string(resp.base()[http::field::content_type]),
+                         std::string(resp.base()[httplib::field::content_type]),
                          boost::json::serialize(resp.as_json()));
             REQUIRE(resp.as_json().at("msg").as_string() == "hi");
         });
@@ -101,7 +100,7 @@ TEST_CASE("server lazy: read_body default content-type dispatch", "[server-lazy]
     run(
         [](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/any",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -118,7 +117,7 @@ TEST_CASE("server lazy: read_body default content-type dispatch", "[server-lazy]
                                                           boost::json::value({
                                                               { "a", 1 }
             })));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
         });
 }
 
@@ -127,7 +126,7 @@ TEST_CASE("server lazy: read_query_params", "[server-lazy]")
     run(
         [](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/params",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -139,10 +138,10 @@ TEST_CASE("server lazy: read_query_params", "[server-lazy]")
         {
             httplib::query_params params;
             params.add("key", "url-value");
-            auto req = httplib::client::request(http::verb::post, "/params");
+            auto req = httplib::client::request(httplib::method::post, "/params");
             req.set_body(std::move(params));
             auto resp = UNWRAP(co_await client.async_send_request(req));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(resp.as_string() == "url-value");
         });
 }
@@ -152,7 +151,7 @@ TEST_CASE("server lazy: read_some_raw streaming", "[server-lazy]")
     run(
         [](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/raw",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -184,7 +183,7 @@ TEST_CASE("server lazy: read_some_raw streaming", "[server-lazy]")
         {
             auto big = big_payload();
             auto resp = UNWRAP(co_await client.async_post("/raw", std::string_view(big), "text/plain"sv));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(resp.as_string() == big);
         });
 }
@@ -194,7 +193,7 @@ TEST_CASE("server lazy: body not consumed forces connection close", "[server-laz
     run(
         [](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/ignore",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -208,10 +207,10 @@ TEST_CASE("server lazy: body not consumed forces connection close", "[server-laz
             auto resp = UNWRAP(co_await client.async_post("/ignore",
                                                           std::string_view("a request body that is never consumed"),
                                                           "text/plain"sv));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             // 服务端已发 Connection: close，客户端下一请求应自动重连并成功
             auto resp2 = UNWRAP(co_await client.async_post("/ignore", std::string_view("second"), "text/plain"sv));
-            REQUIRE(resp2.result() == http::status::ok);
+            REQUIRE(resp2.result() == httplib::status::ok);
         });
 }
 
@@ -220,14 +219,14 @@ TEST_CASE("server lazy: regular handler takes precedence", "[server-lazy]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::post>(
+            server.router().template set_http_handler<httplib::method::post>(
                 "/both",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
                     REQUIRE(req.is_body_done());
                     resp.set_string_content(std::string("regular"), "text/plain");
                 });
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/both",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -238,7 +237,7 @@ TEST_CASE("server lazy: regular handler takes precedence", "[server-lazy]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_post("/both", std::string_view("body"), "text/plain"sv));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(resp.as_string() == "regular");
         });
 }
@@ -248,7 +247,7 @@ TEST_CASE("server lazy: read_form_data with file upload", "[server-lazy]")
     run(
         [](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/upload",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -267,10 +266,10 @@ TEST_CASE("server lazy: read_form_data with file upload", "[server-lazy]")
             httplib::form_data form;
             form.boundary = "----TestFormBoundary";
             form.fields.push_back({ "file", "data.txt", "text/plain", "file-contents" });
-            auto req = httplib::client::request(http::verb::post, "/upload");
+            auto req = httplib::client::request(httplib::method::post, "/upload");
             req.set_body(std::move(form));
             auto resp = UNWRAP(co_await client.async_send_request(req));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(resp.as_string() == "file-contents");
         });
 }

@@ -3,6 +3,7 @@
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include "request_impl.hpp"
+#include "beast_alias.hpp"
 
 namespace httplib::server
 {
@@ -146,7 +147,7 @@ namespace httplib::server
         auto relative_path = req.path_param<std::string>("*");
         if (!detail::is_valid_path(relative_path))
         {
-            res.set_error_content(http::status::bad_request);
+            res.set_error_content(status::bad_request);
             return;
         }
 
@@ -155,12 +156,12 @@ namespace httplib::server
                     / fs::path(std::u8string_view((char8_t const*)relative_path.data(), relative_path.size()));
         if (!detail::is_within(path, impl_->base_dir, ec))
         {
-            res.set_error_content(http::status::forbidden);
+            res.set_error_content(status::forbidden);
             return;
         }
         if (!fs::exists(path, ec))
         {
-            res.set_error_content(http::status::not_found);
+            res.set_error_content(status::not_found);
             return;
         }
 
@@ -184,11 +185,11 @@ namespace httplib::server
         {
             if (fs::is_regular_file(path, ec))
             {
-                res.set_file_content(path, get_impl(req).get());
+                res.set_file_content(path, req.base());
             }
             else
             {
-                res.set_error_content(http::status::not_found);
+                res.set_error_content(status::not_found);
             }
             return;
         }
@@ -216,16 +217,16 @@ namespace httplib::server
                 }
                 if (ec)
                 {
-                    res.set_error_content(http::status::internal_server_error);
+                    res.set_error_content(status::internal_server_error);
                 }
             }
             else
             {
-                res.set_error_content(http::status::forbidden);
+                res.set_error_content(status::forbidden);
             }
             return;
         }
-        res.set_error_content(http::status::forbidden);
+        res.set_error_content(status::forbidden);
     }
 
     void

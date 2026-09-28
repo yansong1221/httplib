@@ -13,6 +13,7 @@
 #include <boost/beast/http/serializer.hpp>
 #include <boost/beast/http/write.hpp>
 #include <spdlog/spdlog.h>
+#include "beast_alias.hpp"
 
 namespace httplib::client
 {
@@ -29,7 +30,7 @@ namespace httplib::client
 
     net::awaitable<void>
     proxy_client::impl::async_connect(std::string_view target,
-                                      http::fields const& headers,
+                                      httplib::headers const& headers,
                                       boost::system::error_code& ec)
     {
         co_return co_await net::co_spawn(
@@ -67,6 +68,7 @@ namespace httplib::client
                     co_return;
                 }
 
+                // req 是 beast request,要用 beast 枚举
                 http::request<http::empty_body> req { http::verb::connect, target, 11 };
                 req.set(http::field::host, target);
                 for (auto const& h : headers)
@@ -213,7 +215,7 @@ namespace httplib::client
     }
 
     net::awaitable<void>
-    proxy_client::async_connect(std::string_view target, http::fields const& headers, boost::system::error_code& ec)
+    proxy_client::async_connect(std::string_view target, httplib::headers const& headers, boost::system::error_code& ec)
     {
         co_return co_await impl_->async_connect(target, headers, ec);
     }

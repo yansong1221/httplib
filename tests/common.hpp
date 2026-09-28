@@ -40,7 +40,6 @@ namespace
 #endif
 
 using namespace std::string_view_literals;
-namespace http = httplib::http;
 namespace net = httplib::net;
 
 #ifdef HTTPLIB_ENABLED_SSL

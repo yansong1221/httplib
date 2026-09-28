@@ -17,6 +17,7 @@
 #include <boost/beast/http/write.hpp>
 #include <cstdint>
 #include <memory>
+#include "beast_alias.hpp"
 
 namespace httplib::server
 {

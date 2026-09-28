@@ -95,14 +95,14 @@ TEST_CASE("Downloader: basic download to file", "[downloader]")
     auto dl_path = fs::temp_directory_path() / "httplib_dl_out.bin";
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/file",
+    ts.router().set_http_handler<httplib::method::get>("/file",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
                                                   { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>("/file",
+    ts.router().set_http_handler<httplib::method::head>("/file",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    {
-                                                       resp.set(http::field::content_length, "17");
-                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                       resp.set(httplib::field::content_length, "17");
+                                                       resp.set(httplib::field::accept_ranges, "bytes");
                                                    });
     ts.start();
 
@@ -130,10 +130,10 @@ TEST_CASE("Downloader: multi-segment parallel download", "[downloader]")
     auto dl_path = fs::temp_directory_path() / "httplib_dl_ms_out.bin";
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/big",
+    ts.router().set_http_handler<httplib::method::get>("/big",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
                                                   { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>("/big",
+    ts.router().set_http_handler<httplib::method::head>("/big",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    { resp.set_file_content(server_path); });
     ts.start();
@@ -175,14 +175,14 @@ TEST_CASE("Downloader: progress callback", "[downloader]")
     auto dl_path = fs::temp_directory_path() / "httplib_dl_prog_out.bin";
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/prog",
+    ts.router().set_http_handler<httplib::method::get>("/prog",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
                                                   { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>("/prog",
+    ts.router().set_http_handler<httplib::method::head>("/prog",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    {
-                                                       resp.set(http::field::content_length, std::to_string(kSize));
-                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                       resp.set(httplib::field::content_length, std::to_string(kSize));
+                                                       resp.set(httplib::field::accept_ranges, "bytes");
                                                    });
     ts.start();
 
@@ -218,23 +218,23 @@ TEST_CASE("Downloader: redirect follow", "[downloader]")
     auto dl_path = fs::temp_directory_path() / "httplib_dl_redir_out.bin";
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/start",
+    ts.router().set_http_handler<httplib::method::get>("/start",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
-                                                  { resp.set_redirect("/final", http::status::found); });
-    ts.router().set_http_handler<http::verb::get>("/final",
+                                                  { resp.set_redirect("/final", httplib::status::found); });
+    ts.router().set_http_handler<httplib::method::get>("/final",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
                                                   { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>("/start",
+    ts.router().set_http_handler<httplib::method::head>("/start",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    {
-                                                       resp.set(http::field::location, "/final");
-                                                       resp.set_empty_content(http::status::found);
+                                                       resp.set(httplib::field::location, "/final");
+                                                       resp.set_empty_content(httplib::status::found);
                                                    });
-    ts.router().set_http_handler<http::verb::head>("/final",
+    ts.router().set_http_handler<httplib::method::head>("/final",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    {
-                                                       resp.set(http::field::content_length, "11");
-                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                       resp.set(httplib::field::content_length, "11");
+                                                       resp.set(httplib::field::accept_ranges, "bytes");
                                                    });
     ts.start();
 
@@ -268,37 +268,37 @@ TEST_CASE("Downloader: strips sensitive headers on cross-origin redirect", "[dow
 
     target.set_logger(std::make_shared<spdlog::logger>("t", null_sink));
     origin.set_logger(std::make_shared<spdlog::logger>("o", null_sink));
-    target.router().set_http_handler<http::verb::get>(
+    target.router().set_http_handler<httplib::method::get>(
         "/target",
         [&](httplib::server::request& req, httplib::server::response& resp)
         {
             ++target_hits;
-            leaked_auth = req.has(http::field::authorization);
-            leaked_cookie = req.has(http::field::cookie);
+            leaked_auth = req.has(httplib::field::authorization);
+            leaked_cookie = req.has(httplib::field::cookie);
             resp.set_file_content(srv_path);
         });
-    target.router().set_http_handler<http::verb::head>(
+    target.router().set_http_handler<httplib::method::head>(
         "/target",
         [&](httplib::server::request& req, httplib::server::response& resp)
         {
-            leaked_auth = req.has(http::field::authorization);
-            leaked_cookie = req.has(http::field::cookie);
-            resp.set(http::field::content_length, "17");
-            resp.set(http::field::accept_ranges, "bytes");
+            leaked_auth = req.has(httplib::field::authorization);
+            leaked_cookie = req.has(httplib::field::cookie);
+            resp.set(httplib::field::content_length, "17");
+            resp.set(httplib::field::accept_ranges, "bytes");
         });
 
     target.listen("127.0.0.1", 0);
     auto target_port = target.local_endpoint().port();
-    origin.router().set_http_handler<http::verb::get>(
+    origin.router().set_http_handler<httplib::method::get>(
         "/start",
         [&](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_redirect(std::format("http://127.0.0.1:{}/target", target_port), http::status::found); });
-    origin.router().set_http_handler<http::verb::head>(
+        { resp.set_redirect(std::format("http://127.0.0.1:{}/target", target_port), httplib::status::found); });
+    origin.router().set_http_handler<httplib::method::head>(
         "/start",
         [&](httplib::server::request&, httplib::server::response& resp)
         {
-            resp.set(http::field::location, std::format("http://127.0.0.1:{}/target", target_port));
-            resp.set_empty_content(http::status::found);
+            resp.set(httplib::field::location, std::format("http://127.0.0.1:{}/target", target_port));
+            resp.set_empty_content(httplib::status::found);
         });
     origin.listen("127.0.0.1", 0);
 
@@ -310,9 +310,9 @@ TEST_CASE("Downloader: strips sensitive headers on cross-origin redirect", "[dow
     worker = std::thread([&] { ioc.run(); });
 
     httplib::client::downloader dl(ioc, pool);
-    http::fields headers;
-    headers.set(http::field::authorization, "Bearer secret");
-    headers.set(http::field::cookie, "session=abc");
+    httplib::headers headers;
+    headers.set(httplib::field::authorization, "Bearer secret");
+    headers.set(httplib::field::cookie, "session=abc");
     dl.set_config({ .max_redirects = 5 });
     auto ec
         = dl.download(std::format("http://127.0.0.1:{}/start", origin.local_endpoint().port()), dl_path, headers).get();
@@ -355,14 +355,14 @@ TEST_CASE("Downloader: resume partial download", "[downloader]")
     }
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/resume",
+    ts.router().set_http_handler<httplib::method::get>("/resume",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
                                                   { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>("/resume",
+    ts.router().set_http_handler<httplib::method::head>("/resume",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    {
-                                                       resp.set(http::field::content_length, std::to_string(kSize));
-                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                       resp.set(httplib::field::content_length, std::to_string(kSize));
+                                                       resp.set(httplib::field::accept_ranges, "bytes");
                                                    });
     ts.start();
 
@@ -393,14 +393,14 @@ TEST_CASE("Downloader: suggested filename from Content-Disposition", "[downloade
     auto dl_path = fs::temp_directory_path() / "httplib_dl_cd_out.bin";
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/cd",
+    ts.router().set_http_handler<httplib::method::get>("/cd",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
                                                   {
-                                                      resp.set(http::field::content_disposition,
+                                                      resp.set(httplib::field::content_disposition,
                                                                R"(attachment; filename="hello.zip")");
                                                       resp.set_file_content(server_path);
                                                   });
-    ts.router().set_http_handler<http::verb::head>("/cd",
+    ts.router().set_http_handler<httplib::method::head>("/cd",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    { resp.set_file_content(server_path); });
     ts.start();
@@ -428,17 +428,17 @@ TEST_CASE("Downloader: disk cache hit on second download", "[downloader]")
     auto cache_dir = fs::temp_directory_path() / "httplib_test_cache";
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/cached",
+    ts.router().set_http_handler<httplib::method::get>("/cached",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
                                                   {
-                                                      resp.set(http::field::etag, "\"abc123\"");
+                                                      resp.set(httplib::field::etag, "\"abc123\"");
                                                       resp.set_file_content(server_path);
                                                   });
-    ts.router().set_http_handler<http::verb::head>("/cached",
+    ts.router().set_http_handler<httplib::method::head>("/cached",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    {
-                                                       resp.set(http::field::content_length, "15");
-                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                       resp.set(httplib::field::content_length, "15");
+                                                       resp.set(httplib::field::accept_ranges, "bytes");
                                                    });
     ts.start();
 
@@ -485,32 +485,32 @@ TEST_CASE("Downloader: cache isolates different origins", "[downloader]")
     auto cache_dir = fs::temp_directory_path() / "httplib_test_cache_iso";
 
     dl_test_scaffold ts_a;
-    ts_a.router().set_http_handler<http::verb::get>("/data",
+    ts_a.router().set_http_handler<httplib::method::get>("/data",
                                                     [&](httplib::server::request&, httplib::server::response& resp)
                                                     {
-                                                        resp.set(http::field::etag, "\"aaa\"");
+                                                        resp.set(httplib::field::etag, "\"aaa\"");
                                                         resp.set_file_content(server_path_a);
                                                     });
-    ts_a.router().set_http_handler<http::verb::head>("/data",
+    ts_a.router().set_http_handler<httplib::method::head>("/data",
                                                      [&](httplib::server::request&, httplib::server::response& resp)
                                                      {
-                                                         resp.set(http::field::content_length, "22");
-                                                         resp.set(http::field::accept_ranges, "bytes");
+                                                         resp.set(httplib::field::content_length, "22");
+                                                         resp.set(httplib::field::accept_ranges, "bytes");
                                                      });
     ts_a.start();
 
     dl_test_scaffold ts_b;
-    ts_b.router().set_http_handler<http::verb::get>("/data",
+    ts_b.router().set_http_handler<httplib::method::get>("/data",
                                                     [&](httplib::server::request&, httplib::server::response& resp)
                                                     {
-                                                        resp.set(http::field::etag, "\"bbb\"");
+                                                        resp.set(httplib::field::etag, "\"bbb\"");
                                                         resp.set_file_content(server_path_b);
                                                     });
-    ts_b.router().set_http_handler<http::verb::head>("/data",
+    ts_b.router().set_http_handler<httplib::method::head>("/data",
                                                      [&](httplib::server::request&, httplib::server::response& resp)
                                                      {
-                                                         resp.set(http::field::content_length, "22");
-                                                         resp.set(http::field::accept_ranges, "bytes");
+                                                         resp.set(httplib::field::content_length, "22");
+                                                         resp.set(httplib::field::accept_ranges, "bytes");
                                                      });
     ts_b.start();
 
@@ -558,10 +558,10 @@ TEST_CASE("Downloader: cancel stops download", "[downloader]")
     auto dl_path = fs::temp_directory_path() / "httplib_dl_cancel_out.bin";
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/bigcancel",
+    ts.router().set_http_handler<httplib::method::get>("/bigcancel",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
                                                   { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>("/bigcancel",
+    ts.router().set_http_handler<httplib::method::head>("/bigcancel",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    { resp.set_file_content(server_path); });
     ts.start();
@@ -620,14 +620,14 @@ TEST_CASE("Downloader: download after cancel starts cleanly", "[downloader]")
     auto dl_path = fs::temp_directory_path() / "httplib_dl_recancel_out.bin";
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/recancel",
+    ts.router().set_http_handler<httplib::method::get>("/recancel",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
                                                   { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>("/recancel",
+    ts.router().set_http_handler<httplib::method::head>("/recancel",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    {
-                                                       resp.set(http::field::content_length, "13");
-                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                       resp.set(httplib::field::content_length, "13");
+                                                       resp.set(httplib::field::accept_ranges, "bytes");
                                                    });
     ts.start();
 
@@ -662,24 +662,24 @@ TEST_CASE("Downloader: multiple retries succeed eventually", "[downloader]")
 
     std::atomic<int> attempt { 0 };
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/retry-me",
+    ts.router().set_http_handler<httplib::method::get>("/retry-me",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
                                                   {
                                                       int a = attempt.fetch_add(1);
                                                       if (a < 2)
                                                       {
-                                                          resp.set_empty_content(http::status::internal_server_error);
+                                                          resp.set_empty_content(httplib::status::internal_server_error);
                                                       }
                                                       else
                                                       {
                                                           resp.set_file_content(server_path);
                                                       }
                                                   });
-    ts.router().set_http_handler<http::verb::head>("/retry-me",
+    ts.router().set_http_handler<httplib::method::head>("/retry-me",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    {
-                                                       resp.set(http::field::content_length, "9");
-                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                       resp.set(httplib::field::content_length, "9");
+                                                       resp.set(httplib::field::accept_ranges, "bytes");
                                                    });
     ts.start();
 
@@ -705,7 +705,7 @@ TEST_CASE("Downloader: single-segment fallback when no content-length", "[downlo
     auto dl_path = fs::temp_directory_path() / "httplib_dl_nocl_out.bin";
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/no-cl",
+    ts.router().set_http_handler<httplib::method::get>("/no-cl",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
                                                   { resp.set_file_content(server_path); });
     ts.start();
@@ -758,34 +758,34 @@ TEST_CASE("Downloader: custom headers sent in request", "[downloader]")
     auto dl_path = fs::temp_directory_path() / "httplib_dl_hdr_out.bin";
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/auth",
+    ts.router().set_http_handler<httplib::method::get>("/auth",
                                                   [&](httplib::server::request& req, httplib::server::response& resp)
                                                   {
-                                                      auto auth = req[http::field::authorization];
+                                                      auto auth = req[httplib::field::authorization];
                                                       if (auth != "Bearer secret-token")
                                                       {
-                                                          resp.set_empty_content(http::status::forbidden);
+                                                          resp.set_empty_content(httplib::status::forbidden);
                                                           return;
                                                       }
                                                       resp.set_file_content(server_path);
                                                   });
-    ts.router().set_http_handler<http::verb::head>("/auth",
+    ts.router().set_http_handler<httplib::method::head>("/auth",
                                                    [&](httplib::server::request& req, httplib::server::response& resp)
                                                    {
-                                                       auto auth = req[http::field::authorization];
+                                                       auto auth = req[httplib::field::authorization];
                                                        if (auth != "Bearer secret-token")
                                                        {
-                                                           resp.set_empty_content(http::status::forbidden);
+                                                           resp.set_empty_content(httplib::status::forbidden);
                                                            return;
                                                        }
-                                                       resp.set(http::field::content_length, "13");
-                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                       resp.set(httplib::field::content_length, "13");
+                                                       resp.set(httplib::field::accept_ranges, "bytes");
                                                    });
     ts.start();
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
-    http::fields headers;
-    headers.set(http::field::authorization, "Bearer secret-token");
+    httplib::headers headers;
+    headers.set(httplib::field::authorization, "Bearer secret-token");
     auto ec = dl.download(ts.url_for_path("/auth"), dl_path, headers).get();
     REQUIRE_FALSE(ec);
     REQUIRE(read_file(dl_path) == "with-headers\n");
@@ -1017,28 +1017,28 @@ TEST_CASE("Downloader: cache is isolated by request credentials", "[downloader]"
     fs::remove_all(cache_dir);
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/secret",
+    ts.router().set_http_handler<httplib::method::get>("/secret",
                                                   [&](httplib::server::request& req, httplib::server::response& resp)
                                                   {
-                                                      auto auth = std::string(req[http::field::authorization]);
-                                                      resp.set(http::field::etag, "\"" + auth + "\"");
+                                                      auto auth = std::string(req[httplib::field::authorization]);
+                                                      resp.set(httplib::field::etag, "\"" + auth + "\"");
                                                       resp.set_file_content(server_path);
                                                   });
-    ts.router().set_http_handler<http::verb::head>("/secret",
+    ts.router().set_http_handler<httplib::method::head>("/secret",
                                                    [&](httplib::server::request& req, httplib::server::response& resp)
                                                    {
-                                                       auto auth = std::string(req[http::field::authorization]);
-                                                       resp.set(http::field::etag, "\"" + auth + "\"");
+                                                       auto auth = std::string(req[httplib::field::authorization]);
+                                                       resp.set(httplib::field::etag, "\"" + auth + "\"");
                                                        resp.set_file_content(server_path);
                                                    });
     ts.start();
 
     auto cache = std::make_shared<httplib::client::disk_cache>(cache_dir);
 
-    http::fields headers_a;
-    headers_a.set(http::field::authorization, "Bearer user-a");
-    http::fields headers_b;
-    headers_b.set(http::field::authorization, "Bearer user-b");
+    httplib::headers headers_a;
+    headers_a.set(httplib::field::authorization, "Bearer user-a");
+    httplib::headers headers_b;
+    headers_b.set(httplib::field::authorization, "Bearer user-b");
 
     {
         httplib::client::downloader dl(ts.ioc_, ts.pool);
@@ -1080,14 +1080,14 @@ TEST_CASE("Downloader: no-store responses are not cached", "[downloader]")
     fs::remove_all(cache_dir);
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/nostore",
+    ts.router().set_http_handler<httplib::method::get>("/nostore",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
                                                   {
-                                                      resp.set(http::field::cache_control, "no-store");
-                                                      resp.set(http::field::etag, "\"ns\"");
+                                                      resp.set(httplib::field::cache_control, "no-store");
+                                                      resp.set(httplib::field::etag, "\"ns\"");
                                                       resp.set_file_content(server_path);
                                                   });
-    ts.router().set_http_handler<http::verb::head>("/nostore",
+    ts.router().set_http_handler<httplib::method::head>("/nostore",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    { resp.set_file_content(server_path); });
     ts.start();
@@ -1126,20 +1126,20 @@ TEST_CASE("Downloader: fresh cache entry is served without network", "[downloade
     std::atomic<int> head_hits { 0 };
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/fresh",
+    ts.router().set_http_handler<httplib::method::get>("/fresh",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
                                                   {
                                                       get_hits.fetch_add(1);
-                                                      resp.set(http::field::etag, "\"f1\"");
-                                                      resp.set(http::field::cache_control, "max-age=3600");
+                                                      resp.set(httplib::field::etag, "\"f1\"");
+                                                      resp.set(httplib::field::cache_control, "max-age=3600");
                                                       resp.set_file_content(server_path);
                                                   });
-    ts.router().set_http_handler<http::verb::head>("/fresh",
+    ts.router().set_http_handler<httplib::method::head>("/fresh",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    {
                                                        head_hits.fetch_add(1);
-                                                       resp.set(http::field::etag, "\"f1\"");
-                                                       resp.set(http::field::cache_control, "max-age=3600");
+                                                       resp.set(httplib::field::etag, "\"f1\"");
+                                                       resp.set(httplib::field::cache_control, "max-age=3600");
                                                        resp.set_file_content(server_path);
                                                    });
     ts.start();
@@ -1192,25 +1192,25 @@ TEST_CASE("Downloader: stale entry is revalidated with 304 and keeps its body", 
     std::string const payload = "revalidated payload\n";
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/reval",
+    ts.router().set_http_handler<httplib::method::get>("/reval",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
                                                   {
                                                       get_hits.fetch_add(1);
-                                                      resp.set(http::field::etag, "\"r1\"");
-                                                      resp.set(http::field::cache_control, "no-cache");
+                                                      resp.set(httplib::field::etag, "\"r1\"");
+                                                      resp.set(httplib::field::cache_control, "no-cache");
                                                       resp.set_string_content(payload, "text/plain");
                                                   });
-    ts.router().set_http_handler<http::verb::head>("/reval",
+    ts.router().set_http_handler<httplib::method::head>("/reval",
                                                    [&](httplib::server::request& req, httplib::server::response& resp)
                                                    {
                                                        head_hits.fetch_add(1);
-                                                       if (req[http::field::if_none_match] == "\"r1\"")
+                                                       if (req[httplib::field::if_none_match] == "\"r1\"")
                                                        {
-                                                           resp.set_empty_content(http::status::not_modified);
+                                                           resp.set_empty_content(httplib::status::not_modified);
                                                            return;
                                                        }
-                                                       resp.set(http::field::etag, "\"r1\"");
-                                                       resp.set(http::field::cache_control, "no-cache");
+                                                       resp.set(httplib::field::etag, "\"r1\"");
+                                                       resp.set(httplib::field::cache_control, "no-cache");
                                                        resp.set_string_content(payload, "text/plain");
                                                    });
     ts.start();
@@ -1267,13 +1267,13 @@ TEST_CASE("Downloader: multi-segment pause and resume", "[downloader]")
     auto dl_path = fs::temp_directory_path() / "httplib_dl_mspause_out.bin";
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/pause",
+    ts.router().set_http_handler<httplib::method::get>("/pause",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
                                                   {
                                                       std::this_thread::sleep_for(std::chrono::milliseconds(300));
                                                       resp.set_file_content(server_path);
                                                   });
-    ts.router().set_http_handler<http::verb::head>("/pause",
+    ts.router().set_http_handler<httplib::method::head>("/pause",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    { resp.set_file_content(server_path); });
     ts.start();
@@ -1344,13 +1344,13 @@ TEST_CASE("Downloader: cancel while paused aborts immediately", "[downloader]")
     auto dl_path = fs::temp_directory_path() / "httplib_dl_pcancel_out.bin";
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/pcancel",
+    ts.router().set_http_handler<httplib::method::get>("/pcancel",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
                                                   {
                                                       std::this_thread::sleep_for(std::chrono::milliseconds(300));
                                                       resp.set_file_content(server_path);
                                                   });
-    ts.router().set_http_handler<http::verb::head>("/pcancel",
+    ts.router().set_http_handler<httplib::method::head>("/pcancel",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    { resp.set_file_content(server_path); });
     ts.start();
@@ -1418,10 +1418,10 @@ TEST_CASE("Downloader: multi-segment failure cleans up part files", "[downloader
     auto dl_path = fs::temp_directory_path() / "httplib_dl_segfail_out.bin";
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/segfail",
+    ts.router().set_http_handler<httplib::method::get>("/segfail",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
-                                                  { resp.set_empty_content(http::status::internal_server_error); });
-    ts.router().set_http_handler<http::verb::head>("/segfail",
+                                                  { resp.set_empty_content(httplib::status::internal_server_error); });
+    ts.router().set_http_handler<httplib::method::head>("/segfail",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    { resp.set_file_content(server_path); });
     ts.start();
@@ -1450,9 +1450,9 @@ TEST_CASE("Downloader: persistent server 500 ends failed", "[downloader]")
     auto dl_path = fs::temp_directory_path() / "httplib_dl_500_out.bin";
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/500",
+    ts.router().set_http_handler<httplib::method::get>("/500",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
-                                                  { resp.set_empty_content(http::status::internal_server_error); });
+                                                  { resp.set_empty_content(httplib::status::internal_server_error); });
     ts.start();
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
@@ -1515,16 +1515,16 @@ TEST_CASE("Downloader: multi-segment resume reuses existing part files", "[downl
     dl_test_scaffold ts;
     std::mutex ranges_mtx;
     std::vector<std::string> ranges;
-    ts.router().set_http_handler<http::verb::get>("/resume-multi",
+    ts.router().set_http_handler<httplib::method::get>("/resume-multi",
                                                   [&](httplib::server::request& req, httplib::server::response& resp)
                                                   {
                                                       {
                                                           std::lock_guard<std::mutex> lk(ranges_mtx);
-                                                          ranges.emplace_back(std::string(req[http::field::range]));
+                                                          ranges.emplace_back(std::string(req[httplib::field::range]));
                                                       }
                                                       resp.set_file_content(server_path);
                                                   });
-    ts.router().set_http_handler<http::verb::head>("/resume-multi",
+    ts.router().set_http_handler<httplib::method::head>("/resume-multi",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    { resp.set_file_content(server_path); });
     ts.start();
@@ -1609,10 +1609,10 @@ TEST_CASE("Downloader: stale state from another URL is not resumed", "[downloade
     fs::remove(fs::path(dl_path.string() + ".dlstate"), rm_ec);
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/fresh",
+    ts.router().set_http_handler<httplib::method::get>("/fresh",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
                                                   { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>("/fresh",
+    ts.router().set_http_handler<httplib::method::head>("/fresh",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    { resp.set_file_content(server_path); });
     ts.start();
@@ -1665,17 +1665,17 @@ TEST_CASE("Downloader: falls back to single segment when server ignores Range", 
 
     std::atomic<int> range_hits { 0 };
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/norange",
+    ts.router().set_http_handler<httplib::method::get>("/norange",
                                                   [&](httplib::server::request& req, httplib::server::response& resp)
                                                   {
-                                                      if (req.has(http::field::range))
+                                                      if (req.has(httplib::field::range))
                                                       {
                                                           range_hits.fetch_add(1);
                                                       }
                                                       // Always answer with the full body and 200, ignoring Range.
                                                       resp.set_string_content(data, "application/octet-stream");
                                                   });
-    ts.router().set_http_handler<http::verb::head>("/norange",
+    ts.router().set_http_handler<httplib::method::head>("/norange",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    { resp.set_file_content(server_path); });
     ts.start();
@@ -1710,10 +1710,10 @@ TEST_CASE("Downloader: max speed throttles the transfer", "[downloader]")
     auto dl_path = fs::temp_directory_path() / "httplib_dl_speed_out.bin";
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/speed",
+    ts.router().set_http_handler<httplib::method::get>("/speed",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
                                                   { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>("/speed",
+    ts.router().set_http_handler<httplib::method::head>("/speed",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    { resp.set_file_content(server_path); });
     ts.start();
@@ -1747,19 +1747,19 @@ TEST_CASE("Downloader: relative redirect Location is resolved", "[downloader]")
     auto dl_path = fs::temp_directory_path() / "httplib_dl_relredir_out.bin";
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/start",
+    ts.router().set_http_handler<httplib::method::get>("/start",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
-                                                  { resp.set_redirect("final", http::status::found); });
-    ts.router().set_http_handler<http::verb::get>("/final",
+                                                  { resp.set_redirect("final", httplib::status::found); });
+    ts.router().set_http_handler<httplib::method::get>("/final",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
                                                   { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>("/start",
+    ts.router().set_http_handler<httplib::method::head>("/start",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    {
-                                                       resp.set(http::field::location, "final");
-                                                       resp.set_empty_content(http::status::found);
+                                                       resp.set(httplib::field::location, "final");
+                                                       resp.set_empty_content(httplib::status::found);
                                                    });
-    ts.router().set_http_handler<http::verb::head>("/final",
+    ts.router().set_http_handler<httplib::method::head>("/final",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    { resp.set_file_content(server_path); });
     ts.start();
@@ -1799,31 +1799,31 @@ TEST_CASE("Downloader: redirect response body does not corrupt connection reuse"
     std::atomic<std::uint16_t> final_port { 0 };
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>(
+    ts.router().set_http_handler<httplib::method::get>(
         "/start",
         [&](httplib::server::request& req, httplib::server::response& resp)
         {
             start_port.store(req.remote_endpoint().port());
-            resp.set(http::field::location, "/final");
-            resp.set_string_content(redirect_body, "text/plain", http::status::found);
+            resp.set(httplib::field::location, "/final");
+            resp.set_string_content(redirect_body, "text/plain", httplib::status::found);
         });
-    ts.router().set_http_handler<http::verb::get>("/final",
+    ts.router().set_http_handler<httplib::method::get>("/final",
                                                   [&](httplib::server::request& req, httplib::server::response& resp)
                                                   {
                                                       final_port.store(req.remote_endpoint().port());
                                                       resp.set_file_content(server_path);
                                                   });
-    ts.router().set_http_handler<http::verb::head>("/start",
+    ts.router().set_http_handler<httplib::method::head>("/start",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    {
-                                                       resp.set(http::field::location, "/final");
-                                                       resp.set_empty_content(http::status::found);
+                                                       resp.set(httplib::field::location, "/final");
+                                                       resp.set_empty_content(httplib::status::found);
                                                    });
-    ts.router().set_http_handler<http::verb::head>("/final",
+    ts.router().set_http_handler<httplib::method::head>("/final",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    {
-                                                       resp.set(http::field::content_length, "18");
-                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                       resp.set(httplib::field::content_length, "18");
+                                                       resp.set(httplib::field::accept_ranges, "bytes");
                                                    });
     ts.start();
 
@@ -1863,10 +1863,10 @@ TEST_CASE("Downloader: oversized part file fails the merge instead of succeeding
     fs::remove(fs::path(dl_path.string() + ".dlstate"), rm_ec);
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/mergebad",
+    ts.router().set_http_handler<httplib::method::get>("/mergebad",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
                                                   { resp.set_file_content(server_path); });
-    ts.router().set_http_handler<http::verb::head>("/mergebad",
+    ts.router().set_http_handler<httplib::method::head>("/mergebad",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    { resp.set_file_content(server_path); });
     ts.start();
@@ -1949,21 +1949,21 @@ TEST_CASE("Downloader: cache hit emits a final progress tick", "[downloader]")
     fs::remove_all(cache_dir);
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<http::verb::get>("/cacheprog",
+    ts.router().set_http_handler<httplib::method::get>("/cacheprog",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
                                                   {
-                                                      resp.set(http::field::etag, "\"cp\"");
-                                                      resp.set(http::field::cache_control, "max-age=3600");
+                                                      resp.set(httplib::field::etag, "\"cp\"");
+                                                      resp.set(httplib::field::cache_control, "max-age=3600");
                                                       resp.set_file_content(server_path);
                                                   });
-    ts.router().set_http_handler<http::verb::head>("/cacheprog",
+    ts.router().set_http_handler<httplib::method::head>("/cacheprog",
                                                    [&](httplib::server::request&, httplib::server::response& resp)
                                                    {
-                                                       resp.set(http::field::etag, "\"cp\"");
-                                                       resp.set(http::field::cache_control, "max-age=3600");
-                                                       resp.set(http::field::content_length,
+                                                       resp.set(httplib::field::etag, "\"cp\"");
+                                                       resp.set(httplib::field::cache_control, "max-age=3600");
+                                                       resp.set(httplib::field::content_length,
                                                                 std::to_string(payload.size()));
-                                                       resp.set(http::field::accept_ranges, "bytes");
+                                                       resp.set(httplib::field::accept_ranges, "bytes");
                                                    });
     ts.start();
 

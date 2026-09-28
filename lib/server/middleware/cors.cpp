@@ -2,6 +2,7 @@
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include <algorithm>
+#include "beast_alias.hpp"
 
 namespace httplib::server::middleware
 {
@@ -136,9 +137,9 @@ namespace httplib::server::middleware
     cors_middleware::before(request& req, response& resp)
     {
         impl_->apply(resp);
-        if (req.method() == http::verb::options)
+        if (req.method() == method::options)
         {
-            resp.set_empty_content(http::status::no_content);
+            resp.set_empty_content(status::no_content);
             return false;
         }
 

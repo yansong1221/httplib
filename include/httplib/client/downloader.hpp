@@ -1,7 +1,7 @@
 #pragma once
 #include "httplib/client/client_fwd.hpp"
+#include "httplib/headers.hpp"
 #include <boost/asio/awaitable.hpp>
-#include <boost/beast/http/fields.hpp>
 #include <boost/system/error_code.hpp>
 #include <chrono>
 #include <cstdint>
@@ -83,11 +83,11 @@ namespace httplib::client
 
         net::awaitable<boost::system::error_code> async_download(std::string_view url,
                                                                  fs::path const& save_path,
-                                                                 http::fields const& headers = {});
+                                                                 httplib::headers const& headers = {});
 
         std::future<boost::system::error_code> download(std::string_view url,
                                                         fs::path const& save_path,
-                                                        http::fields const& headers = {});
+                                                        httplib::headers const& headers = {});
 
         void cancel();
         void pause();

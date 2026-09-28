@@ -6,6 +6,7 @@
 #include <boost/asio/strand.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <future>
+#include "beast_alias.hpp"
 
 namespace httplib::client
 {
@@ -19,7 +20,7 @@ namespace httplib::client
 
       public:
         net::awaitable<void> async_connect(std::string_view target,
-                                           http::fields const& headers,
+                                           httplib::headers const& headers,
                                            boost::system::error_code& ec);
 
         net::awaitable<std::size_t> async_read_some(net::mutable_buffer const& buffer, boost::system::error_code& ec);

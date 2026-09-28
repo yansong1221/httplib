@@ -8,6 +8,7 @@
 #include <boost/system/result.hpp>
 #include <chrono>
 #include <future>
+#include "beast_alias.hpp"
 
 namespace httplib::client
 {
@@ -23,7 +24,7 @@ namespace httplib::client
         std::future<boost::system::error_code> send(websocket_message msg);
 
         net::awaitable<void> async_connect(std::string_view target,
-                                           http::fields const& headers,
+                                           httplib::headers const& headers,
                                            std::chrono::steady_clock::duration timeout,
                                            boost::system::error_code& ec);
 
@@ -57,10 +58,10 @@ namespace httplib::client
                  coro_open_handler_type&& open_handler,
                  coro_message_handler_type&& message_handler,
                  coro_close_handler_type&& close_handler,
-                 http::fields const& headers = {});
+                 httplib::headers const& headers = {});
 
         net::awaitable<void> async_run(std::string_view target,
-                                       http::fields const& headers,
+                                       httplib::headers const& headers,
                                        coro_message_handler_type&& message_handler,
                                        coro_close_handler_type&& close_handler,
                                        boost::system::error_code& ec);

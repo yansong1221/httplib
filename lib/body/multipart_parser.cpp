@@ -7,6 +7,7 @@
 #include <cctype>
 #include <cstddef>
 #include <utility>
+#include "beast_alias.hpp"
 
 namespace httplib::body
 {

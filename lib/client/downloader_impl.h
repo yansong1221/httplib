@@ -13,6 +13,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include "beast_alias.hpp"
 
 namespace httplib::client
 {
@@ -39,15 +40,15 @@ namespace httplib::client
         struct probe_result
         {
             std::uint64_t content_length = 0;
-            http::fields headers;
+            httplib::headers headers;
         };
 
         struct request_result
         {
             http_client_pool::client_handle handle;
             client::response response;
-            http::fields headers;
-            http::status status = http::status::unknown;
+            httplib::headers headers;
+            httplib::status status = status::unknown;
             /// Set when no usable response was obtained (connection/acquire/
             /// send failure, cancellation, redirect exhaustion). Callers
             /// propagate this instead of collapsing every failure into a
@@ -93,7 +94,7 @@ namespace httplib::client
 
         net::awaitable<boost::system::error_code> async_download(std::string_view url,
                                                                  fs::path const& save_path,
-                                                                 http::fields const& headers = {});
+                                                                 httplib::headers const& headers = {});
         void cancel();
         void pause();
         void resume();
@@ -106,24 +107,24 @@ namespace httplib::client
 
       private:
         std::string make_cache_key(url::url_info const& ui) const;
-        static std::string cache_auth_scope(http::fields const& headers);
-        static bool response_is_cacheable(http::fields const& headers);
-        static http_meta make_http_meta(http::fields const& response,
-                                        http::fields const& probe,
+        static std::string cache_auth_scope(httplib::headers const& headers);
+        static bool response_is_cacheable(httplib::headers const& headers);
+        static http_meta make_http_meta(httplib::headers const& response,
+                                        httplib::headers const& probe,
                                         url::url_info const& final_ui,
                                         bool has_final_ui);
         static std::string serialize_http_meta(http_meta const& meta);
         static std::optional<http_meta> parse_http_meta(std::string_view blob);
-        static std::uint64_t parse_content_range_total(http::fields const& headers);
-        static std::optional<std::uint64_t> parse_content_range_start(http::fields const& headers);
-        static std::string parse_content_disposition_filename(http::fields const& headers);
-        static std::optional<url::url_info> parse_redirect(http::fields const& headers);
+        static std::uint64_t parse_content_range_total(httplib::headers const& headers);
+        static std::optional<std::uint64_t> parse_content_range_start(httplib::headers const& headers);
+        static std::string parse_content_disposition_filename(httplib::headers const& headers);
+        static std::optional<url::url_info> parse_redirect(httplib::headers const& headers);
 
         void set_state(downloader::state st, boost::system::error_code ec);
         void update_progress(std::uint64_t delta_bytes);
-        void store_suggested_filename(http::fields const& headers);
+        void store_suggested_filename(httplib::headers const& headers);
         void record_final_ui(url::url_info const& ui);
-        void record_resource_headers(http::fields const& headers);
+        void record_resource_headers(httplib::headers const& headers);
 
         void save_state(fs::path const& save_path);
         download_state load_state(fs::path const& save_path) const;
@@ -134,8 +135,8 @@ namespace httplib::client
         net::awaitable<probe_result> probe_content_length(url::url_info const& ui);
 
         net::awaitable<request_result> send_request(url::url_info const& ui,
-                                                    http::verb method,
-                                                    http::fields const& req_headers = {});
+                                                    httplib::method m,
+                                                    httplib::headers const& req_headers = {});
 
         net::awaitable<boost::system::error_code> co_wait_if_paused();
 
@@ -149,7 +150,7 @@ namespace httplib::client
         net::awaitable<boost::system::error_code> co_download_multi_segment(url::url_info const& ui,
                                                                             fs::path const& save_path,
                                                                             std::uint64_t content_length,
-                                                                            http::fields const& probe_headers);
+                                                                            httplib::headers const& probe_headers);
 
         boost::system::error_code merge_parts_sync(fs::path const& save_path,
                                                    int total_segments,
@@ -192,7 +193,7 @@ namespace httplib::client
 
         std::shared_ptr<cache> cache_;
         std::shared_ptr<http_client_pool> pool_;
-        http::fields custom_headers_;
+        httplib::headers custom_headers_;
         /// Hash of credential-bearing request headers folded into the cache key
         /// so two callers with different credentials never share an entry.
         std::string auth_scope_;
@@ -201,7 +202,7 @@ namespace httplib::client
         /// transfer's real response headers (and final origin after redirects)
         /// can be written to the cache.
         mutable std::mutex resource_mutex_;
-        http::fields resource_headers_;
+        httplib::headers resource_headers_;
         url::url_info final_ui_;
         bool has_final_ui_ = false;
 

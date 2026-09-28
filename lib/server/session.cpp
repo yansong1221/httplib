@@ -20,6 +20,7 @@
 #include <boost/beast/http/read.hpp>
 #include <boost/beast/http/serializer.hpp>
 #include <boost/beast/websocket/rfc6455.hpp>
+#include "beast_alias.hpp"
 
 namespace httplib::server
 {
@@ -281,10 +282,10 @@ namespace httplib::server
                 {
                     switch (req.method())
                     {
-                        case http::verb::get:
-                        case http::verb::head:
-                        case http::verb::options:
-                        case http::verb::trace:
+                        case method::get:
+                        case method::head:
+                        case method::options:
+                        case method::trace:
                             break;
                         default:
                             get_impl(resp).keep_alive(false);
@@ -292,12 +293,12 @@ namespace httplib::server
                     }
                     if (!match.allows.empty())
                     {
-                        resp.set(http::field::allow, boost::join(match.allows, ","));
-                        resp.set_error_content(httplib::http::status::method_not_allowed);
+                        resp.set(field::allow, boost::join(match.allows, ","));
+                        resp.set_error_content(httplib::status::method_not_allowed);
                     }
                     else
                     {
-                        resp.set_error_content(httplib::http::status::not_found);
+                        resp.set_error_content(httplib::status::not_found);
                     }
                     server_impl_->get_logger()->debug("{} {} {} {} not matched",
                                                       req.method_string(),
@@ -307,12 +308,12 @@ namespace httplib::server
                 }
                 else
                 {
-                    if (req.method() != http::verb::connect)
+                    if (req.method() != method::connect)
                     {
-                        if (beast::iequals(req[http::field::expect], "100-continue"))
+                        if (beast::iequals(req[field::expect], "100-continue"))
                         {
                             auto cont_resp = response::impl::create(get_impl(req).get().version(), true, self);
-                            cont_resp.set_empty_content(http::status::continue_);
+                            cont_resp.set_empty_content(status::continue_);
                             if (!co_await async_write(req, cont_resp))
                             {
                                 co_return nullptr;
@@ -353,7 +354,7 @@ namespace httplib::server
                                                   log_endp_format,
                                                   e.what());
                 get_impl(resp).keep_alive(false);
-                resp.set_error_content(http::status::internal_server_error);
+                resp.set_error_content(status::internal_server_error);
             }
             catch (...)
             {
@@ -362,10 +363,10 @@ namespace httplib::server
                                                   req.target(),
                                                   log_endp_format);
                 get_impl(resp).keep_alive(false);
-                resp.set_error_content(http::status::internal_server_error);
+                resp.set_error_content(status::internal_server_error);
             }
 
-            if (req.method() == http::verb::connect)
+            if (req.method() == method::connect)
             {
                 // 放行(<300)进入隧道；否则回写拒绝响应后结束本会话（不再继续读下一个请求）。
                 if (resp.result_int() < 300)
@@ -417,17 +418,17 @@ namespace httplib::server
         }
 
         // 内容协商：命中可压缩类型时设置 Content-Encoding，body_writer 写 body 时自动压缩。
-        if (auto accept_encoding = req[http::field::accept_encoding]; !accept_encoding.empty())
+        if (auto accept_encoding = req[field::accept_encoding]; !accept_encoding.empty())
         {
             html::accept_encoding_content encoding_content;
             if (encoding_content.parse(accept_encoding))
             {
                 if (auto encoding = encoding_content.server_apply_encoding(); !encoding.empty())
                 {
-                    if (auto content_type = resp[http::field::content_type];
+                    if (auto content_type = resp[field::content_type];
                         (*server_impl_).should_compress_content_type(content_type))
                     {
-                        resp.set(http::field::content_encoding, encoding);
+                        resp.set(field::content_encoding, encoding);
                     }
                 }
             }
@@ -441,7 +442,7 @@ namespace httplib::server
         // （RFC 9112 §6.3）。不要改成"先 discard_body() 再整消息写"：丢了 source 之后分帧
         // 无从重算，配了 Content-Encoding 时会落成 Content-Length: 0（谎报资源为空）；而走完
         // 收尾写又会给 chunked 响应补上 "0\r\n\r\n" 终止块，那几字节就是 body。
-        auto ec = co_await writer.write_message(req.method() == http::verb::head);
+        auto ec = co_await writer.write_message(req.method() == method::head);
         if (ec)
         {
             server_impl_->get_logger()->trace("write http body failed: {}", ec.message());

@@ -13,7 +13,6 @@
 #include <cstring>
 
 namespace net = httplib::net;
-namespace http = httplib::http;
 using test_common::run;
 using test_common::setup_logger;
 
@@ -26,7 +25,7 @@ TEST_CASE("NDJSON: server sends single line", "[ndjson]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ndjson",
                 [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -41,9 +40,9 @@ TEST_CASE("NDJSON: server sends single line", "[ndjson]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            httplib::client::request req(http::verb::get, "/ndjson");
+            httplib::client::request req(httplib::method::get, "/ndjson");
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             auto ndjson = resp.create_ndjson_reader();
 
             std::vector<boost::json::value> items;
@@ -62,7 +61,7 @@ TEST_CASE("NDJSON: server sends multiple lines", "[ndjson]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ndjson",
                 [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -87,9 +86,9 @@ TEST_CASE("NDJSON: server sends multiple lines", "[ndjson]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            httplib::client::request req(http::verb::get, "/ndjson");
+            httplib::client::request req(httplib::method::get, "/ndjson");
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             auto ndjson = resp.create_ndjson_reader();
 
             std::vector<boost::json::value> items;
@@ -109,7 +108,7 @@ TEST_CASE("NDJSON: Content-Type is application/x-ndjson", "[ndjson]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ndjson",
                 [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -124,12 +123,12 @@ TEST_CASE("NDJSON: Content-Type is application/x-ndjson", "[ndjson]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            httplib::client::request req(http::verb::get, "/ndjson");
+            httplib::client::request req(httplib::method::get, "/ndjson");
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             auto ndjson = resp.create_ndjson_reader();
 
-            REQUIRE(resp[http::field::content_type] == "application/x-ndjson");
+            REQUIRE(resp[httplib::field::content_type] == "application/x-ndjson");
 
             co_return;
         });
@@ -140,7 +139,7 @@ TEST_CASE("NDJSON: reader stops early", "[ndjson]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ndjson",
                 [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -165,9 +164,9 @@ TEST_CASE("NDJSON: reader stops early", "[ndjson]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            httplib::client::request req(http::verb::get, "/ndjson");
+            httplib::client::request req(httplib::method::get, "/ndjson");
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             auto ndjson = resp.create_ndjson_reader();
 
             std::vector<boost::json::value> items;
@@ -201,23 +200,23 @@ TEST_CASE("NDJSON: single line split across chunks", "[ndjson]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ndjson",
                 [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     auto cw = resp.create_stream_writer();
-                    http::fields headers;
-                    headers.set(http::field::content_type, "application/x-ndjson");
-                    co_await cw->write_header(http::status::ok, headers, httplib::server::stream_writer::mode::chunked);
+                    httplib::headers headers;
+                    headers.set(httplib::field::content_type, "application/x-ndjson");
+                    co_await cw->write_header(httplib::status::ok, headers, httplib::server::stream_writer::mode::chunked);
                     co_await cw->write_body(net::buffer(std::string("{\"a\":1}")), true);
                     co_await cw->write_body(net::buffer(std::string("\n")), false);
                 });
         },
         [](auto& client) -> net::awaitable<void>
         {
-            httplib::client::request req(http::verb::get, "/ndjson");
+            httplib::client::request req(httplib::method::get, "/ndjson");
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             auto ndjson = resp.create_ndjson_reader();
 
             std::vector<boost::json::value> items;
@@ -234,22 +233,22 @@ TEST_CASE("NDJSON: multiple lines in one chunk", "[ndjson]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ndjson",
                 [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     auto cw = resp.create_stream_writer();
-                    http::fields headers;
-                    headers.set(http::field::content_type, "application/x-ndjson");
-                    co_await cw->write_header(http::status::ok, headers, httplib::server::stream_writer::mode::chunked);
+                    httplib::headers headers;
+                    headers.set(httplib::field::content_type, "application/x-ndjson");
+                    co_await cw->write_header(httplib::status::ok, headers, httplib::server::stream_writer::mode::chunked);
                     co_await cw->write_body(net::buffer(std::string("{\"a\":1}\n{\"b\":2}\n")), false);
                 });
         },
         [](auto& client) -> net::awaitable<void>
         {
-            httplib::client::request req(http::verb::get, "/ndjson");
+            httplib::client::request req(httplib::method::get, "/ndjson");
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             auto ndjson = resp.create_ndjson_reader();
 
             std::vector<boost::json::value> items;
@@ -267,23 +266,23 @@ TEST_CASE("NDJSON: partial line split across chunks", "[ndjson]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ndjson",
                 [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     auto cw = resp.create_stream_writer();
-                    http::fields headers;
-                    headers.set(http::field::content_type, "application/x-ndjson");
-                    co_await cw->write_header(http::status::ok, headers, httplib::server::stream_writer::mode::chunked);
+                    httplib::headers headers;
+                    headers.set(httplib::field::content_type, "application/x-ndjson");
+                    co_await cw->write_header(httplib::status::ok, headers, httplib::server::stream_writer::mode::chunked);
                     co_await cw->write_body(net::buffer(std::string("{\"x\":100}\n{\"y\":")), true);
                     co_await cw->write_body(net::buffer(std::string("200}\n")), false);
                 });
         },
         [](auto& client) -> net::awaitable<void>
         {
-            httplib::client::request req(http::verb::get, "/ndjson");
+            httplib::client::request req(httplib::method::get, "/ndjson");
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             auto ndjson = resp.create_ndjson_reader();
 
             std::vector<boost::json::value> items;
@@ -301,7 +300,7 @@ TEST_CASE("NDJSON: lines are delivered incrementally", "[ndjson]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ndjson",
                 [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -328,9 +327,9 @@ TEST_CASE("NDJSON: lines are delivered incrementally", "[ndjson]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            httplib::client::request req(http::verb::get, "/ndjson");
+            httplib::client::request req(httplib::method::get, "/ndjson");
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             auto ndjson = resp.create_ndjson_reader();
 
             auto begin = std::chrono::steady_clock::now();
@@ -358,7 +357,7 @@ TEST_CASE("NDJSON: last record without trailing newline is still delivered", "[n
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ndjson-no-trailing-nl",
                 [](httplib::server::request&, httplib::server::response& resp)
                 {
@@ -368,9 +367,9 @@ TEST_CASE("NDJSON: last record without trailing newline is still delivered", "[n
         },
         [](auto& client) -> net::awaitable<void>
         {
-            httplib::client::request req(http::verb::get, "/ndjson-no-trailing-nl");
+            httplib::client::request req(httplib::method::get, "/ndjson-no-trailing-nl");
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             auto ndjson = resp.create_ndjson_reader();
 
             std::vector<boost::json::value> items;
@@ -393,16 +392,16 @@ TEST_CASE("NDJSON: single record without trailing newline", "[ndjson]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ndjson-single-no-nl",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("{\"i\":7}"sv, "application/x-ndjson"); });
         },
         [](auto& client) -> net::awaitable<void>
         {
-            httplib::client::request req(http::verb::get, "/ndjson-single-no-nl");
+            httplib::client::request req(httplib::method::get, "/ndjson-single-no-nl");
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             auto ndjson = resp.create_ndjson_reader();
 
             std::vector<boost::json::value> items;
@@ -422,16 +421,16 @@ TEST_CASE("NDJSON: trailing CR without newline is not a record", "[ndjson]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ndjson-trailing-cr",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("{\"i\":1}\n\r"sv, "application/x-ndjson"); });
         },
         [](auto& client) -> net::awaitable<void>
         {
-            httplib::client::request req(http::verb::get, "/ndjson-trailing-cr");
+            httplib::client::request req(httplib::method::get, "/ndjson-trailing-cr");
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             auto ndjson = resp.create_ndjson_reader();
 
             std::vector<boost::json::value> items;
@@ -455,16 +454,16 @@ TEST_CASE("NDJSON: truncated final record reports a parse error", "[ndjson]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ndjson-truncated",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("{\"i\":1}\n{\"i\":"sv, "application/x-ndjson"); });
         },
         [](auto& client) -> net::awaitable<void>
         {
-            httplib::client::request req(http::verb::get, "/ndjson-truncated");
+            httplib::client::request req(httplib::method::get, "/ndjson-truncated");
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             auto ndjson = resp.create_ndjson_reader();
 
             auto first = co_await ndjson->read();
@@ -485,16 +484,16 @@ TEST_CASE("NDJSON: malformed mid-stream line reports a parse error", "[ndjson]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ndjson-bad-mid",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("{\"i\":1}\nnot json\n{\"i\":3}\n"sv, "application/x-ndjson"); });
         },
         [](auto& client) -> net::awaitable<void>
         {
-            httplib::client::request req(http::verb::get, "/ndjson-bad-mid");
+            httplib::client::request req(httplib::method::get, "/ndjson-bad-mid");
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             auto ndjson = resp.create_ndjson_reader();
 
             auto first = co_await ndjson->read();
@@ -515,19 +514,19 @@ TEST_CASE("NDJSON: reader decodes gzip-compressed stream", "[ndjson]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ndjson-gzip",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("{\"msg\":\"hello\",\"n\":42}\n"sv, "application/json"sv); });
         },
         [](auto& client) -> net::awaitable<void>
         {
-            httplib::http::fields headers;
-            headers.set(http::field::accept_encoding, "gzip");
-            httplib::client::request req(http::verb::get, "/ndjson-gzip", headers);
+            httplib::headers headers;
+            headers.set(httplib::field::accept_encoding, "gzip");
+            httplib::client::request req(httplib::method::get, "/ndjson-gzip", headers);
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
-            REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp[http::field::content_encoding] == "gzip");
+            REQUIRE(resp.result() == httplib::status::ok);
+            REQUIRE(resp[httplib::field::content_encoding] == "gzip");
 
             auto ndjson = resp.create_ndjson_reader();
             std::vector<boost::json::value> items;
@@ -548,7 +547,7 @@ TEST_CASE("NDJSON: reader decodes large gzip stream without truncation", "[ndjso
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ndjson-gzip-large",
                 [](httplib::server::request&, httplib::server::response& resp)
                 {
@@ -563,12 +562,12 @@ TEST_CASE("NDJSON: reader decodes large gzip stream without truncation", "[ndjso
         },
         [](auto& client) -> net::awaitable<void>
         {
-            httplib::http::fields headers;
-            headers.set(http::field::accept_encoding, "gzip");
-            httplib::client::request req(http::verb::get, "/ndjson-gzip-large", headers);
+            httplib::headers headers;
+            headers.set(httplib::field::accept_encoding, "gzip");
+            httplib::client::request req(httplib::method::get, "/ndjson-gzip-large", headers);
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
-            REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp[http::field::content_encoding] == "gzip");
+            REQUIRE(resp.result() == httplib::status::ok);
+            REQUIRE(resp[httplib::field::content_encoding] == "gzip");
 
             auto ndjson = resp.create_ndjson_reader();
             std::vector<boost::json::value> items;

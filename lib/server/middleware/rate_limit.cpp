@@ -3,6 +3,7 @@
 #include "httplib/server/response.hpp"
 #include <mutex>
 #include <unordered_map>
+#include "beast_alias.hpp"
 
 namespace httplib::server::middleware
 {
@@ -57,7 +58,7 @@ namespace httplib::server::middleware
                 {
                     { "error", "too many requests" }
             },
-                http::status::too_many_requests);
+                status::too_many_requests);
             return false;
         }
 

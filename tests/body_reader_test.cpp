@@ -20,8 +20,8 @@
 #include <utility>
 
 namespace beast = boost::beast;
+namespace http = beast::http;
 namespace net = httplib::net;
-namespace http = httplib::http;
 
 namespace
 {

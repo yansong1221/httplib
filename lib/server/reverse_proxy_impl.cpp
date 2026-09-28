@@ -7,20 +7,21 @@
 #include <boost/algorithm/string/trim.hpp>
 #include <spdlog/spdlog.h>
 #include <string_view>
+#include "beast_alias.hpp"
 
 namespace httplib::server::detail
 {
     namespace
     {
         /// Maps an upstream transport error to a client-facing status code.
-        http::status
+        httplib::status
         upstream_error_to_status(boost::system::error_code ec)
         {
             if (ec == boost::asio::error::timed_out || ec == boost::beast::error::timeout)
             {
-                return http::status::gateway_timeout;
+                return status::gateway_timeout;
             }
-            return http::status::bad_gateway;
+            return status::bad_gateway;
         }
 
         /// RFC 7230 §6.1 hop-by-hop headers. These must never be forwarded between
@@ -34,12 +35,12 @@ namespace httplib::server::detail
         /// chunked bytes straight through. Stripping it would leave the relayed
         /// body without valid framing.
         void
-        strip_hop_by_hop(http::fields& headers)
+        strip_hop_by_hop(httplib::headers& headers)
         {
             // Collect the tokens named in the Connection header first, since it
             // may additionally nominate hop-by-hop headers that must be removed.
             std::vector<std::string> connection_tokens;
-            if (auto conn = headers[http::field::connection]; !conn.empty())
+            if (auto conn = headers[field::connection]; !conn.empty())
             {
                 for (auto item : util::split(conn, ","))
                 {
@@ -51,12 +52,12 @@ namespace httplib::server::detail
                 }
             }
 
-            headers.erase(http::field::connection);
-            headers.erase(http::field::keep_alive);
-            headers.erase(http::field::proxy_connection);
-            headers.erase(http::field::te);
-            headers.erase(http::field::trailer);
-            headers.erase(http::field::upgrade);
+            headers.erase(field::connection);
+            headers.erase(field::keep_alive);
+            headers.erase(field::proxy_connection);
+            headers.erase(field::te);
+            headers.erase(field::trailer);
+            headers.erase(field::upgrade);
 
             for (auto const& token : connection_tokens)
             {
@@ -71,7 +72,7 @@ namespace httplib::server::detail
         /// host:port) fall back to dropping the attribute so the cookie becomes
         /// host-only and still scopes to the proxy's public host.
         void
-        rewrite_set_cookie_domain(http::fields& headers, std::string_view public_host)
+        rewrite_set_cookie_domain(httplib::headers& headers, std::string_view public_host)
         {
             std::string public_domain;
             if (public_host.find(']') == std::string_view::npos)
@@ -94,7 +95,7 @@ namespace httplib::server::detail
             std::vector<std::string> rewritten;
             for (auto const& f : headers)
             {
-                if (f.name() != http::field::set_cookie)
+                if (f.name() != field::set_cookie)
                 {
                     continue;
                 }
@@ -120,10 +121,10 @@ namespace httplib::server::detail
 
             if (!rewritten.empty())
             {
-                headers.erase(http::field::set_cookie);
+                headers.erase(field::set_cookie);
                 for (auto const& value : rewritten)
                 {
-                    headers.insert(http::field::set_cookie, value);
+                    headers.insert(field::set_cookie, value);
                 }
             }
         }
@@ -174,14 +175,14 @@ namespace httplib::server::detail
         if (result.rc == upstream_resolve_rc::no_target)
         {
             logger_->trace("[proxy] provider is null");
-            resp.set_error_content(http::status::bad_gateway);
+            resp.set_error_content(status::bad_gateway);
             co_return false;
         }
         logger_->debug("[proxy] {} {} -> {}", req.method_string(), req.target(), result.value.raw_url);
         if (result.rc == upstream_resolve_rc::bad_url)
         {
             logger_->trace("[proxy] invalid upstream url: {}", result.value.raw_url);
-            resp.set_error_content(http::status::bad_gateway);
+            resp.set_error_content(status::bad_gateway);
             co_return false;
         }
 
@@ -197,7 +198,10 @@ namespace httplib::server::detail
 
         // Copy the client's request headers, then remove hop-by-hop headers so they
         // are not (mis)interpreted as applying to the client->proxy hop.
-        http::fields upstream_headers(req.base());
+        // 必须 merge 到自有集合：req.base() 是借用视图，用它拷贝构造会得到同样
+        // 借用的 headers，后面 strip_hop_by_hop 会就地改写客户端请求自己的头。
+        httplib::headers upstream_headers;
+        upstream_headers.merge(req.base());
         strip_hop_by_hop(upstream_headers);
 
         // Forward the client's Cookie scope unchanged. Domain/Path are Set-Cookie
@@ -216,7 +220,7 @@ namespace httplib::server::detail
         upstream_headers.set("X-Forwarded-Host", req["Host"]);
 
 // Rewrite Referer to upstream
-        if (auto ref = req[http::field::referer]; !ref.empty())
+        if (auto ref = req[field::referer]; !ref.empty())
         {
             auto r = url::parse_url(ref);
             if (r)
@@ -250,7 +254,7 @@ namespace httplib::server::detail
                 {
                     new_ref += std::format("#{}", u.fragment);
                 }
-                upstream_headers.set(http::field::referer, new_ref);
+                upstream_headers.set(field::referer, new_ref);
             }
         }
 
@@ -269,7 +273,7 @@ namespace httplib::server::detail
         if (!client_)
         {
             logger_->trace("[proxy] acquire client failed for {}:{}", upstream_.host, upstream_.port);
-            resp.set_error_content(http::status::service_unavailable);
+            resp.set_error_content(status::service_unavailable);
             co_return false;
         }
 
@@ -298,7 +302,7 @@ namespace httplib::server::detail
             if (ec)
             {
                 logger_->trace("[proxy] read request body failed: {}", ec.message());
-                resp.set_error_content(http::status::bad_request);
+                resp.set_error_content(status::bad_request);
                 co_return false;
             }
 
@@ -348,23 +352,27 @@ namespace httplib::server::detail
             co_await interceptor_->on_upstream_response(req, result, headers);
         }
 
-        auto response_hdrs = http::fields(headers);
+        // headers 是 upstream_response_ 的借用视图，必须 merge 到自有集合：
+        // 拷贝构造只会再得到一个借用视图，后面改写的就是上游响应自己的头，
+        // 且 upstream_response_ 一旦销毁 response_hdrs 就悬垂。
+        httplib::headers response_hdrs;
+        response_hdrs.merge(headers);
         // Strip hop-by-hop headers before relaying to the client. Transfer-Encoding
         // is preserved because the relay streams the raw (possibly chunked) body.
         strip_hop_by_hop(response_hdrs);
         // The upstream hosts cookies on its own internal domain; rebind them to
         // the public host the client actually reached.
-        rewrite_set_cookie_domain(response_hdrs, req[http::field::host]);
+        rewrite_set_cookie_domain(response_hdrs, req[field::host]);
 
-        if (result >= http::status::moved_permanently && result <= http::status::permanent_redirect
-            && result != http::status::not_modified)
+        if (result >= status::moved_permanently && result <= status::permanent_redirect
+            && result != status::not_modified)
         {
             auto upstream_base
                 = url::make_url_value(upstream_.host, upstream_.port, upstream_.ssl ? url::scheme::tls : url::scheme::plain);
-            std::string location(response_hdrs[http::field::location]);
+            std::string location(response_hdrs[field::location]);
             if (location.starts_with(upstream_base))
             {
-                response_hdrs.set(http::field::location, prefix_ + location.substr(upstream_base.size()));
+                response_hdrs.set(field::location, prefix_ + location.substr(upstream_base.size()));
             }
         }
         auto writer = resp.create_stream_writer();

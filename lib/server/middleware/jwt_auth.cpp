@@ -3,6 +3,7 @@
 #include "httplib/server/response.hpp"
 #include <spdlog/spdlog.h>
 #include <string>
+#include "beast_alias.hpp"
 
 namespace httplib::server::middleware
 {
@@ -75,17 +76,17 @@ namespace httplib::server::middleware
         {
             if (token = req[p.header_name]; token.empty())
             {
-                resp.set_error_content(http::status::unauthorized);
+                resp.set_error_content(status::unauthorized);
                 return false;
             }
         }
         else
         {
-            auto auth = req[http::field::authorization];
+            auto auth = req[field::authorization];
             auto prefix = p.scheme + " ";
             if (!auth.starts_with(prefix))
             {
-                resp.set_error_content(http::status::unauthorized);
+                resp.set_error_content(status::unauthorized);
                 return false;
             }
             token = auth.substr(prefix.size());
@@ -93,7 +94,7 @@ namespace httplib::server::middleware
         auto result = jwt::decode(token);
         if (result.has_error())
         {
-            resp.set_error_content(http::status::unauthorized);
+            resp.set_error_content(status::unauthorized);
             return false;
         }
         auto& decoded = result.value();
@@ -112,7 +113,7 @@ namespace httplib::server::middleware
         verifier.verify(decoded, ec);
         if (ec)
         {
-            resp.set_error_content(http::status::unauthorized);
+            resp.set_error_content(status::unauthorized);
             return false;
         }
 

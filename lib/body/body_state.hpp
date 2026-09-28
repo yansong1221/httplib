@@ -8,6 +8,7 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
+#include "beast_alias.hpp"
 
 namespace httplib::body
 {

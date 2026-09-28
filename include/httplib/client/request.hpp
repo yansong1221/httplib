@@ -1,9 +1,10 @@
 #pragma once
 #include "httplib/config.hpp"
 #include "httplib/form_data.hpp"
+#include "httplib/headers.hpp"
 #include "httplib/query_params.hpp"
-#include <boost/beast/http/fields.hpp>
 #include <boost/json/value.hpp>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -16,41 +17,45 @@ namespace httplib::client
     class HTTPLIB_API request
     {
       public:
-        request(http::verb method, std::string_view target, http::fields const& headers = {});
-        request(http::verb method,
+        request(httplib::method method, std::string_view target, httplib::headers const& headers = {});
+        request(httplib::method method,
                 std::string_view path,
                 httplib::query_params const& params,
-                http::fields const& headers = {});
+                httplib::headers const& headers = {});
 
         request(request&&) noexcept;
         request& operator=(request&&) noexcept;
         ~request();
 
-        http::verb method() const;
-        void method(http::verb v);
+        httplib::method method() const;
+        void method(httplib::method v);
         std::string_view target() const;
         void target(std::string_view t);
 
-        std::string_view operator[](http::field name) const;
+        std::string_view operator[](httplib::field name) const;
         std::string_view operator[](std::string_view name) const;
-        std::string_view at(http::field name) const;
+        std::string_view at(httplib::field name) const;
         std::string_view at(std::string_view name) const;
 
-        void set(http::field name, std::string_view value);
+        void set(httplib::field name, std::string_view value);
         void set(std::string_view name, std::string_view value);
 
-        void insert(http::field name, std::string_view value);
+        void insert(httplib::field name, std::string_view value);
         void insert(std::string_view name, std::string_view value);
 
-        void erase(http::field name);
+        void erase(httplib::field name);
         void erase(std::string_view name);
-        bool has(http::field name) const;
+        bool has(httplib::field name) const;
         bool has(std::string_view name) const;
+        /// 该请求头出现的次数（1 = 无重复头）。
+        std::size_t count(httplib::field name) const;
+        std::size_t count(std::string_view name) const;
 
-        void merge(http::fields const& fields);
+        void merge(httplib::headers const& fields);
 
-        http::fields& base();
-        http::fields const& base() const;
+        /// 全部请求头。返回的是「借用」视图：写入直接落到本请求上。
+        httplib::headers base();
+        httplib::headers base() const;
 
         void content_length(std::uint64_t n);
         bool keep_alive() const;

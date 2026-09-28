@@ -192,25 +192,25 @@ namespace httplib::client
         /// \param headers 附加请求头。
         net::awaitable<response_result> async_get(std::string_view path,
                                                   httplib::query_params const& params = {},
-                                                  http::fields const& headers = http::fields());
+                                                  httplib::headers const& headers = httplib::headers());
         net::awaitable<response_result> async_head(std::string_view path,
                                                    httplib::query_params const& params = {},
-                                                   http::fields const& headers = http::fields());
+                                                   httplib::headers const& headers = httplib::headers());
         net::awaitable<response_result> async_post(std::string_view path,
                                                    httplib::query_params const& params = {},
-                                                   http::fields const& headers = http::fields());
+                                                   httplib::headers const& headers = httplib::headers());
         net::awaitable<response_result> async_put(std::string_view path,
                                                   httplib::query_params const& params = {},
-                                                  http::fields const& headers = http::fields());
+                                                  httplib::headers const& headers = httplib::headers());
         net::awaitable<response_result> async_patch(std::string_view path,
                                                     httplib::query_params const& params = {},
-                                                    http::fields const& headers = http::fields());
+                                                    httplib::headers const& headers = httplib::headers());
         net::awaitable<response_result> async_del(std::string_view path,
                                                   httplib::query_params const& params = {},
-                                                  http::fields const& headers = http::fields());
+                                                  httplib::headers const& headers = httplib::headers());
         net::awaitable<response_result> async_options(std::string_view path,
                                                       httplib::query_params const& params = {},
-                                                      http::fields const& headers = http::fields());
+                                                      httplib::headers const& headers = httplib::headers());
 
         // ---- HTTP method shorthands (with body) ----
 
@@ -219,29 +219,29 @@ namespace httplib::client
                                                    std::string_view body,
                                                    std::string_view content_type,
                                                    httplib::query_params const& params = {},
-                                                   http::fields const& headers = http::fields());
+                                                   httplib::headers const& headers = httplib::headers());
         net::awaitable<response_result> async_post(std::string_view path,
                                                    boost::json::value&& body,
                                                    httplib::query_params const& params = {},
-                                                   http::fields const& headers = http::fields());
+                                                   httplib::headers const& headers = httplib::headers());
         net::awaitable<response_result> async_put(std::string_view path,
                                                   std::string_view body,
                                                   std::string_view content_type,
                                                   httplib::query_params const& params = {},
-                                                  http::fields const& headers = http::fields());
+                                                  httplib::headers const& headers = httplib::headers());
         net::awaitable<response_result> async_put(std::string_view path,
                                                   boost::json::value&& body,
                                                   httplib::query_params const& params = {},
-                                                  http::fields const& headers = http::fields());
+                                                  httplib::headers const& headers = httplib::headers());
         net::awaitable<response_result> async_patch(std::string_view path,
                                                     std::string_view body,
                                                     std::string_view content_type,
                                                     httplib::query_params const& params = {},
-                                                    http::fields const& headers = http::fields());
+                                                    httplib::headers const& headers = httplib::headers());
         net::awaitable<response_result> async_patch(std::string_view path,
                                                     boost::json::value&& body,
                                                     httplib::query_params const& params = {},
-                                                    http::fields const& headers = http::fields());
+                                                    httplib::headers const& headers = httplib::headers());
 
         // ---- download ----
 
@@ -250,10 +250,10 @@ namespace httplib::client
         /// \param path 请求路径。
         /// \param save_path 保存路径。
         /// \param headers 附加请求头。
-        net::awaitable<response_result> async_download(http::verb method,
+        net::awaitable<response_result> async_download(httplib::method method,
                                                        std::string_view path,
                                                        fs::path const& save_path,
-                                                       http::fields const& headers = http::fields());
+                                                       httplib::headers const& headers = httplib::headers());
 
       private:
         http_client(http_client const&) = delete;

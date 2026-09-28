@@ -1,6 +1,6 @@
 #pragma once
 #include "httplib/config.hpp"
-#include <boost/beast/http/fields.hpp>
+#include "httplib/headers.hpp"
 
 namespace httplib::client::redirect
 {
@@ -8,12 +8,12 @@ namespace httplib::client::redirect
     /// Remove origin-bound credentials before following a cross-origin redirect,
     /// so they cannot leak to a different host.
     inline void
-    strip_origin_bound_headers(http::fields& headers)
+    strip_origin_bound_headers(httplib::headers& headers)
     {
-        headers.erase(http::field::authorization);
-        headers.erase(http::field::proxy_authorization);
-        headers.erase(http::field::cookie);
-        headers.erase(http::field::cookie2);
+        headers.erase(field::authorization);
+        headers.erase(field::proxy_authorization);
+        headers.erase(field::cookie);
+        headers.erase(field::cookie2);
     }
 
 } // namespace httplib::client::redirect

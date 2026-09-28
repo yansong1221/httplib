@@ -9,7 +9,6 @@
 
 namespace mw = httplib::server::middleware;
 namespace net = httplib::net;
-namespace http = httplib::http;
 
 namespace
 {
@@ -28,7 +27,7 @@ TEST_CASE("Session: middleware creates new session ID", "[session]")
     run(
         [&](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/visit",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
@@ -41,9 +40,9 @@ TEST_CASE("Session: middleware creates new session ID", "[session]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/visit"));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
 
-            auto set_cookie = std::string(resp[http::field::set_cookie]);
+            auto set_cookie = std::string(resp[httplib::field::set_cookie]);
             REQUIRE_FALSE(set_cookie.empty());
             REQUIRE(set_cookie.starts_with("session_id="));
             co_return;
@@ -57,7 +56,7 @@ TEST_CASE("Session: middleware persists data across requests", "[session]")
     run(
         [&](auto& server)
         {
-            server.router().template set_http_handler<http::verb::post>(
+            server.router().template set_http_handler<httplib::method::post>(
                 "/login",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
@@ -67,7 +66,7 @@ TEST_CASE("Session: middleware persists data across requests", "[session]")
                 },
                 sm);
 
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/whoami",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
@@ -80,14 +79,14 @@ TEST_CASE("Session: middleware persists data across requests", "[session]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp1 = UNWRAP(co_await client.async_post("/login", std::string_view(""), "text/plain"sv));
-            REQUIRE(resp1.result() == http::status::ok);
-            auto cookie = std::string(resp1[http::field::set_cookie]);
+            REQUIRE(resp1.result() == httplib::status::ok);
+            auto cookie = std::string(resp1[httplib::field::set_cookie]);
 
-            auto hdrs = httplib::http::fields();
-            hdrs.set(http::field::cookie, cookie);
+            auto hdrs = httplib::headers();
+            hdrs.set(httplib::field::cookie, cookie);
 
             auto resp2 = UNWRAP(co_await client.async_get("/whoami", {}, hdrs));
-            REQUIRE(resp2.result() == http::status::ok);
+            REQUIRE(resp2.result() == httplib::status::ok);
             REQUIRE(as_string(resp2) == "alice");
             co_return;
         });
@@ -100,7 +99,7 @@ TEST_CASE("Session: get_session returns valid pointer", "[session]")
     run(
         [&](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/data",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
@@ -117,7 +116,7 @@ TEST_CASE("Session: get_session returns valid pointer", "[session]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/data"));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             co_return;
         });
 }
@@ -129,7 +128,7 @@ TEST_CASE("Session: session has and remove", "[session]")
     run(
         [&](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ops",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
@@ -147,7 +146,7 @@ TEST_CASE("Session: session has and remove", "[session]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/ops"));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             co_return;
         });
 }
@@ -160,7 +159,7 @@ TEST_CASE("Session: custom store can be injected", "[session]")
     run(
         [&](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/custom",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
@@ -173,7 +172,7 @@ TEST_CASE("Session: custom store can be injected", "[session]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/custom"));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             co_return;
         });
 }
@@ -186,7 +185,7 @@ TEST_CASE("Session: configurable cookie name", "[session]")
     run(
         [&](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/named",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
@@ -199,7 +198,7 @@ TEST_CASE("Session: configurable cookie name", "[session]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/named"));
-            auto set_cookie = std::string(resp[http::field::set_cookie]);
+            auto set_cookie = std::string(resp[httplib::field::set_cookie]);
             REQUIRE(set_cookie.starts_with("my_session="));
             REQUIRE(set_cookie.find("Path=/app") != std::string::npos);
             co_return;
@@ -214,7 +213,7 @@ TEST_CASE("Session: cookie attributes http_only, secure, max_age", "[session]")
     run(
         [&](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/attrs",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
@@ -226,7 +225,7 @@ TEST_CASE("Session: cookie attributes http_only, secure, max_age", "[session]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/attrs"));
-            auto set_cookie = std::string(resp[http::field::set_cookie]);
+            auto set_cookie = std::string(resp[httplib::field::set_cookie]);
             REQUIRE(set_cookie.find("HttpOnly") != std::string::npos);
             REQUIRE(set_cookie.find("Secure") != std::string::npos);
             REQUIRE(set_cookie.find("Max-Age=3600") != std::string::npos);
@@ -242,7 +241,7 @@ TEST_CASE("Session: same_site strict", "[session]")
     run(
         [&](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/samesite",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
@@ -254,7 +253,7 @@ TEST_CASE("Session: same_site strict", "[session]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/samesite"));
-            auto set_cookie = std::string(resp[http::field::set_cookie]);
+            auto set_cookie = std::string(resp[httplib::field::set_cookie]);
             REQUIRE(set_cookie.find("SameSite=Strict") != std::string::npos);
             co_return;
         });
@@ -268,7 +267,7 @@ TEST_CASE("Session: max_age cookie attribute", "[session]")
     run(
         [&](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/aged",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
@@ -280,7 +279,7 @@ TEST_CASE("Session: max_age cookie attribute", "[session]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/aged"));
-            auto set_cookie = std::string(resp[http::field::set_cookie]);
+            auto set_cookie = std::string(resp[httplib::field::set_cookie]);
             REQUIRE(set_cookie.find("Max-Age=1800") != std::string::npos);
             co_return;
         });

@@ -2,6 +2,7 @@
 #include <boost/beast/core/detail/clamp.hpp>
 #include <boost/beast/http/error.hpp>
 #include <fmt/format.h>
+#include "beast_alias.hpp"
 
 namespace httplib::body
 {

@@ -15,7 +15,6 @@
 
 using namespace std::string_view_literals;
 namespace fs = std::filesystem;
-namespace http = httplib::http;
 namespace net = httplib::net;
 
 static void
@@ -92,7 +91,7 @@ main(int argc, char* argv[])
 
     auto& router = svr.router();
 
-    router.set_http_handler<http::verb::get>(
+    router.set_http_handler<httplib::method::get>(
         "/",
         [&](httplib::server::request&, httplib::server::response& resp)
         {
@@ -109,19 +108,19 @@ main(int argc, char* argv[])
             resp.set_string_content(std::move(html), "text/html; charset=utf-8");
         });
 
-    router.set_http_handler<http::verb::get>("/download",
+    router.set_http_handler<httplib::method::get>("/download",
                                              [&](httplib::server::request&, httplib::server::response& resp)
                                              {
                                                  resp.set_file_content(bin_path);
-                                                 resp.set(http::field::content_disposition,
+                                                 resp.set(httplib::field::content_disposition,
                                                           "attachment; filename=download.bin");
                                              });
 
-    router.set_http_handler<http::verb::get>("/download.txt",
+    router.set_http_handler<httplib::method::get>("/download.txt",
                                              [&](httplib::server::request&, httplib::server::response& resp)
                                              {
                                                  resp.set_file_content(txt_path);
-                                                 resp.set(http::field::content_disposition,
+                                                 resp.set(httplib::field::content_disposition,
                                                           "attachment; filename=download.txt");
                                              });
 

@@ -13,6 +13,7 @@
 #include <memory>
 #include <optional>
 #include <variant>
+#include "beast_alias.hpp"
 
 namespace httplib::client
 {

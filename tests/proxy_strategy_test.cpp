@@ -280,13 +280,13 @@ TEST_CASE("proxy[group]: distributes round-robin across upstreams", "[proxy][gro
         [&]() -> net::awaitable<void>
         {
             server::http_server upstream1(pool.get_executor());
-            upstream1.router().template set_http_handler<http::verb::get>(
+            upstream1.router().template set_http_handler<httplib::method::get>(
                 "/who",
                 [](server::request&, server::response& resp)
                 { resp.set_string_content(std::string("u1"), "text/plain"); });
 
             server::http_server upstream2(pool.get_executor());
-            upstream2.router().template set_http_handler<http::verb::get>(
+            upstream2.router().template set_http_handler<httplib::method::get>(
                 "/who",
                 [](server::request&, server::response& resp)
                 { resp.set_string_content(std::string("u2"), "text/plain"); });
@@ -315,7 +315,7 @@ TEST_CASE("proxy[group]: distributes round-robin across upstreams", "[proxy][gro
             for (int i = 0; i < 6; ++i)
             {
                 auto resp = UNWRAP(co_await c.async_get("/api/who"));
-                REQUIRE(resp.result() == http::status::ok);
+                REQUIRE(resp.result() == httplib::status::ok);
                 hits.push_back(as_string(resp));
             }
 
@@ -348,13 +348,13 @@ TEST_CASE("proxy[group]: least_connections picks least busy upstream", "[proxy][
         [&]() -> net::awaitable<void>
         {
             server::http_server upstream1(pool.get_executor());
-            upstream1.router().template set_http_handler<http::verb::get>(
+            upstream1.router().template set_http_handler<httplib::method::get>(
                 "/who",
                 [](server::request&, server::response& resp)
                 { resp.set_string_content(std::string("u1"), "text/plain"); });
 
             server::http_server upstream2(pool.get_executor());
-            upstream2.router().template set_http_handler<http::verb::get>(
+            upstream2.router().template set_http_handler<httplib::method::get>(
                 "/who",
                 [](server::request&, server::response& resp)
                 { resp.set_string_content(std::string("u2"), "text/plain"); });
@@ -409,13 +409,13 @@ TEST_CASE("proxy[url-provider]: per-request single upstream URL", "[proxy][url-p
         [&]() -> net::awaitable<void>
         {
             server::http_server upstream1(pool.get_executor());
-            upstream1.router().template set_http_handler<http::verb::get>(
+            upstream1.router().template set_http_handler<httplib::method::get>(
                 "/u1",
                 [](server::request&, server::response& resp)
                 { resp.set_string_content(std::string("u1"), "text/plain"); });
 
             server::http_server upstream2(pool.get_executor());
-            upstream2.router().template set_http_handler<http::verb::get>(
+            upstream2.router().template set_http_handler<httplib::method::get>(
                 "/u2",
                 [](server::request&, server::response& resp)
                 { resp.set_string_content(std::string("u2"), "text/plain"); });

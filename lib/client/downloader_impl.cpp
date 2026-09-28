@@ -15,6 +15,8 @@
 #include <format>
 #include <fstream>
 #include <stdexcept>
+#include "beast_alias.hpp"
+#include "enum_conv.hpp"
 
 namespace httplib::client
 {
@@ -89,9 +91,9 @@ namespace httplib::client
         /// byte count then differs from Content-Length, so size validation must
         /// be skipped for such responses.
         bool
-        response_is_encoded(http::fields const& headers)
+        response_is_encoded(httplib::headers const& headers)
         {
-            auto ce = headers[http::field::content_encoding];
+            auto ce = headers[field::content_encoding];
             if (ce.empty())
             {
                 return false;
@@ -102,27 +104,29 @@ namespace httplib::client
     } // namespace
 
     std::string
-    downloader::impl::cache_auth_scope(http::fields const& headers)
+    downloader::impl::cache_auth_scope(httplib::headers const& headers)
     {
         // Fold the credential-bearing headers into a stable digest. Raw secrets
         // are never stored on disk (the digest is what lands in cache keys and
         // sidecar state files).
         std::string material;
-        auto append = [&](http::field f)
+        auto append = [&](field f)
         {
             auto v = headers[f];
             if (!v.empty())
             {
-                material.append(http::to_string(f).data(), http::to_string(f).size());
+                // 线上写法用 beast 的 to_string；两个枚举的值由 static_assert 保证一致
+                auto name = http::to_string(enum_conv::to_field(f));
+                material.append(name.data(), name.size());
                 material.push_back(':');
                 material.append(v.data(), v.size());
                 material.push_back('\n');
             }
         };
-        append(http::field::authorization);
-        append(http::field::proxy_authorization);
-        append(http::field::cookie);
-        append(http::field::cookie2);
+        append(field::authorization);
+        append(field::proxy_authorization);
+        append(field::cookie);
+        append(field::cookie2);
         if (material.empty())
         {
             return {};
@@ -143,15 +147,15 @@ namespace httplib::client
     }
 
     bool
-    downloader::impl::response_is_cacheable(http::fields const& headers)
+    downloader::impl::response_is_cacheable(httplib::headers const& headers)
     {
         // `no-store` forbids persisting the response; `Vary: *` means the
         // response cannot be selected by request, so caching it is unsafe.
-        if (header_has_token(headers[http::field::cache_control], "no-store"))
+        if (header_has_token(headers[field::cache_control], "no-store"))
         {
             return false;
         }
-        if (header_has_token(headers[http::field::vary], "*"))
+        if (header_has_token(headers[field::vary], "*"))
         {
             return false;
         }
@@ -159,15 +163,15 @@ namespace httplib::client
     }
 
     downloader::impl::http_meta
-    downloader::impl::make_http_meta(http::fields const& response,
-                                     http::fields const& probe,
+    downloader::impl::make_http_meta(httplib::headers const& response,
+                                     httplib::headers const& probe,
                                      url::url_info const& final_ui,
                                      bool has_final_ui)
     {
         // Explicit whitelist of HTTP bookkeeping the downloader needs; the rest
         // (hop-by-hop headers, partial-response framing) is discarded.
         http_meta meta;
-        auto take = [&](http::field f) -> std::string
+        auto take = [&](field f) -> std::string
         {
             auto v = response[f];
             if (v.empty())
@@ -176,22 +180,22 @@ namespace httplib::client
             }
             return std::string(v);
         };
-        meta.content_type = take(http::field::content_type);
-        meta.content_disposition = take(http::field::content_disposition);
-        meta.etag = take(http::field::etag);
-        meta.last_modified = take(http::field::last_modified);
+        meta.content_type = take(field::content_type);
+        meta.content_disposition = take(field::content_disposition);
+        meta.etag = take(field::etag);
+        meta.last_modified = take(field::last_modified);
         if (has_final_ui)
         {
             meta.final_url = final_ui.to_url();
         }
 
-        std::string cache_control = take(http::field::cache_control);
+        std::string cache_control = take(field::cache_control);
         meta.must_revalidate = header_has_token(cache_control, "no-cache");
 
         if (auto max_age = header_directive_int(cache_control, "max-age"); max_age && *max_age >= 0)
         {
             std::int64_t age = 0;
-            if (auto age_header = response[http::field::age]; !age_header.empty())
+            if (auto age_header = response[field::age]; !age_header.empty())
             {
                 try
                 {
@@ -308,9 +312,9 @@ namespace httplib::client
     }
 
     std::uint64_t
-    downloader::impl::parse_content_range_total(http::fields const& headers)
+    downloader::impl::parse_content_range_total(httplib::headers const& headers)
     {
-        auto cr = headers[http::field::content_range];
+        auto cr = headers[field::content_range];
         if (cr.empty())
         {
             return 0;
@@ -337,9 +341,9 @@ namespace httplib::client
     }
 
     std::optional<std::uint64_t>
-    downloader::impl::parse_content_range_start(http::fields const& headers)
+    downloader::impl::parse_content_range_start(httplib::headers const& headers)
     {
-        auto cr = headers[http::field::content_range];
+        auto cr = headers[field::content_range];
         if (cr.empty())
         {
             return std::nullopt;
@@ -367,9 +371,9 @@ namespace httplib::client
     }
 
     std::string
-    downloader::impl::parse_content_disposition_filename(http::fields const& headers)
+    downloader::impl::parse_content_disposition_filename(httplib::headers const& headers)
     {
-        auto cd = headers[http::field::content_disposition];
+        auto cd = headers[field::content_disposition];
         if (cd.empty())
         {
             return {};
@@ -417,9 +421,9 @@ namespace httplib::client
     }
 
     std::optional<url::url_info>
-    downloader::impl::parse_redirect(http::fields const& headers)
+    downloader::impl::parse_redirect(httplib::headers const& headers)
     {
-        auto loc = headers[http::field::location];
+        auto loc = headers[field::location];
         if (loc.empty())
         {
             return std::nullopt;
@@ -745,7 +749,7 @@ namespace httplib::client
     }
 
     void
-    downloader::impl::store_suggested_filename(http::fields const& headers)
+    downloader::impl::store_suggested_filename(httplib::headers const& headers)
     {
         auto fname = parse_content_disposition_filename(headers);
         if (fname.empty())
@@ -765,7 +769,7 @@ namespace httplib::client
     }
 
     void
-    downloader::impl::record_resource_headers(http::fields const& headers)
+    downloader::impl::record_resource_headers(httplib::headers const& headers)
     {
         std::lock_guard lk(resource_mutex_);
         resource_headers_ = headers;
@@ -782,7 +786,7 @@ namespace httplib::client
         {
             co_return false;
         }
-        http::fields req_headers;
+        httplib::headers req_headers;
         if (meta.etag.empty() && meta.last_modified.empty())
         {
             // No validator: there is no way to prove the cached body is still
@@ -791,14 +795,14 @@ namespace httplib::client
         }
         if (!meta.etag.empty())
         {
-            req_headers.set(http::field::if_none_match, meta.etag);
+            req_headers.set(field::if_none_match, meta.etag);
         }
         if (!meta.last_modified.empty())
         {
-            req_headers.set(http::field::if_modified_since, meta.last_modified);
+            req_headers.set(field::if_modified_since, meta.last_modified);
         }
-        auto result = co_await send_request(ui, http::verb::head, req_headers);
-        if (result.status != http::status::not_modified)
+        auto result = co_await send_request(ui, method::head, req_headers);
+        if (result.status != status::not_modified)
         {
             co_return false;
         }
@@ -819,10 +823,12 @@ namespace httplib::client
     downloader::impl::probe_content_length(url::url_info const& ui)
     {
         probe_result res;
-        auto result = co_await send_request(ui, http::verb::head);
-        if (result.status == http::status::ok)
+        auto result = co_await send_request(ui, method::head);
+        if (result.status == status::ok)
         {
-            res.headers = result.headers;
+            // 必须深拷贝：result.headers 只是 result.response 的借用视图，
+            // 而 result 会在 co_return 后随协程帧一起销毁。
+            res.headers.merge(result.headers);
             res.content_length = result.response.content_length().value_or(0);
         }
         co_return res;
@@ -833,15 +839,15 @@ namespace httplib::client
     // =========================================================================
 
     net::awaitable<downloader::impl::request_result>
-    downloader::impl::send_request(url::url_info const& ui, http::verb method, http::fields const& req_headers)
+    downloader::impl::send_request(url::url_info const& ui, httplib::method m, httplib::headers const& req_headers)
     {
-        http::fields merged = custom_headers_;
+        httplib::headers merged = custom_headers_;
         for (auto const& f : req_headers)
         {
             merged.set(f.name_string(), f.value());
         }
         // 下载场景保存原始字节（断点续传/分片合并依赖），不接受内容编码压缩。
-        merged.set(http::field::accept_encoding, "identity");
+        merged.set(field::accept_encoding, "identity");
 
         auto h = ui.host;
         auto p = ui.effective_port();
@@ -874,7 +880,7 @@ namespace httplib::client
             handle->set_verify_ssl(active_config_.verify_ssl);
             handle->set_download_rate_limit(per_connection_rate_);
 
-            auto req = httplib::client::request(method, t);
+            auto req = httplib::client::request(m, t);
             req.merge(merged);
 
             auto resp_result = co_await handle->async_send_request(req, http_client::body_mode::lazy);
@@ -888,9 +894,9 @@ namespace httplib::client
 
             auto status = resp.result();
 
-            if ((status == http::status::moved_permanently || status == http::status::found
-                 || status == http::status::see_other || status == http::status::temporary_redirect
-                 || status == http::status::permanent_redirect)
+            if ((status == status::moved_permanently || status == status::found
+                 || status == status::see_other || status == status::temporary_redirect
+                 || status == status::permanent_redirect)
                 && redir < active_config_.max_redirects)
             {
                 auto rt = parse_redirect(resp.headers());
@@ -931,7 +937,9 @@ namespace httplib::client
             request_result rr;
             rr.handle = std::move(handle);
             rr.response = std::move(resp);
-            rr.headers = rr.response.headers();
+            // 必须深拷贝：headers() 返回 rr.response 的借用视图，rr 随协程帧销毁后
+            // 调用方拿到的就是悬垂指针。
+            rr.headers.merge(rr.response.headers());
             rr.status = status;
             rr.final_ui = url::url_info { std::string(url::to_string(s)), h, p, t, {}, {} };
             record_final_ui(rr.final_ui);
@@ -964,7 +972,7 @@ namespace httplib::client
             }
 
             std::uint64_t existing_size = 0;
-            http::fields req_headers;
+            httplib::headers req_headers;
 
             if (active_config_.resume && attempt == 0)
             {
@@ -981,10 +989,10 @@ namespace httplib::client
 
             if (existing_size > 0)
             {
-                req_headers.set(http::field::range, std::format("bytes={}-", existing_size));
+                req_headers.set(field::range, std::format("bytes={}-", existing_size));
             }
 
-            auto result = co_await send_request(ui, http::verb::get, req_headers);
+            auto result = co_await send_request(ui, method::get, req_headers);
             if (!result.handle)
             {
                 if (attempt == active_config_.max_retries)
@@ -997,7 +1005,7 @@ namespace httplib::client
             }
 
             auto status = result.status;
-            if (status != http::status::ok && status != http::status::partial_content)
+            if (status != status::ok && status != status::partial_content)
             {
                 if (attempt == active_config_.max_retries)
                 {
@@ -1014,11 +1022,11 @@ namespace httplib::client
 
             auto content_length = result.response.content_length().value_or(0);
             auto content_range_total = parse_content_range_total(result.headers);
-            if (status == http::status::ok && existing_size > 0)
+            if (status == status::ok && existing_size > 0)
             {
                 existing_size = 0;
             }
-            else if (status == http::status::partial_content)
+            else if (status == status::partial_content)
             {
                 // Guard against a server that returns 206 with an unexpected
                 // starting offset, which would corrupt the appended data.
@@ -1193,10 +1201,10 @@ namespace httplib::client
                 open_mode |= std::ios::app;
             }
 
-            http::fields req_headers;
-            req_headers.set(http::field::range, std::format("bytes={}-{}", resume_at, end));
+            httplib::headers req_headers;
+            req_headers.set(field::range, std::format("bytes={}-{}", resume_at, end));
 
-            auto result = co_await send_request(ui, http::verb::get, req_headers);
+            auto result = co_await send_request(ui, method::get, req_headers);
             if (!result.handle)
             {
                 if (attempt == active_config_.max_retries)
@@ -1208,14 +1216,14 @@ namespace httplib::client
                 continue;
             }
 
-            if (result.status == http::status::ok)
+            if (result.status == status::ok)
             {
                 // The server ignored the Range request: byte ranges are not
                 // supported, so segmented downloading cannot proceed. Signal the
                 // caller to fall back to a single-segment download.
                 co_return boost::system::errc::make_error_code(boost::system::errc::operation_not_supported);
             }
-            if (result.status != http::status::partial_content)
+            if (result.status != status::partial_content)
             {
                 if (attempt == active_config_.max_retries)
                 {
@@ -1315,7 +1323,7 @@ namespace httplib::client
     downloader::impl::co_download_multi_segment(url::url_info const& ui,
                                                 fs::path const& save_path,
                                                 std::uint64_t content_length,
-                                                http::fields const& probe_headers)
+                                                httplib::headers const& probe_headers)
     {
         int seg_count = active_config_.segments;
         if (seg_count < 2)
@@ -1621,7 +1629,7 @@ namespace httplib::client
     // =========================================================================
 
     net::awaitable<boost::system::error_code>
-    downloader::impl::async_download(std::string_view url, fs::path const& save_path, http::fields const& headers)
+    downloader::impl::async_download(std::string_view url, fs::path const& save_path, httplib::headers const& headers)
     {
         // A prior cancel()/permanent failure only terminates the run it
         // interrupted. A fresh run starts from a clean slate so callers do not
@@ -1748,7 +1756,7 @@ namespace httplib::client
 
             if (!ec && cache_ && !save_path.empty())
             {
-                http::fields response_headers;
+                httplib::headers response_headers;
                 url::url_info final_ui;
                 bool has_final = false;
                 {
@@ -1861,13 +1869,13 @@ namespace httplib::client
     }
 
     net::awaitable<boost::system::error_code>
-    downloader::async_download(std::string_view url, fs::path const& save_path, http::fields const& headers)
+    downloader::async_download(std::string_view url, fs::path const& save_path, httplib::headers const& headers)
     {
         co_return co_await impl_->async_download(url, save_path, headers);
     }
 
     std::future<boost::system::error_code>
-    downloader::download(std::string_view url, fs::path const& save_path, http::fields const& headers)
+    downloader::download(std::string_view url, fs::path const& save_path, httplib::headers const& headers)
     {
         return net::co_spawn(impl_->executor_, impl_->async_download(url, save_path, headers), net::use_future);
     }

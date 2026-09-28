@@ -30,8 +30,6 @@
 
 using namespace std::string_view_literals;
 namespace fs = std::filesystem;
-namespace beast = httplib::beast;
-namespace http = httplib::http;
 namespace net = httplib::net;
 namespace mw = httplib::server::middleware;
 
@@ -119,13 +117,13 @@ setup_http_routes(httplib::server::router& router)
     // cors_middleware can also be set globally via the post_handler pattern (see setup_global_cors below)
 
     // ---- Basic HTTP methods (with cors_middleware) ----
-    router.set_http_handler<http::verb::get>(
+    router.set_http_handler<httplib::method::get>(
         "/api/hello",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set_string_content("Hello, World!"sv, "text/plain"sv); },
         mw::cors_middleware {});
 
-    router.set_http_handler<http::verb::get>("/api/greet/:name",
+    router.set_http_handler<httplib::method::get>("/api/greet/:name",
                                              [](httplib::server::request& req, httplib::server::response& resp)
                                              {
                                                  auto name = std::string(req.path_param("name"));
@@ -134,12 +132,12 @@ setup_http_routes(httplib::server::router& router)
                                              });
 
     // ---- JSON echo ----
-    router.set_http_handler<http::verb::post>("/api/echo-json",
+    router.set_http_handler<httplib::method::post>("/api/echo-json",
                                               [](httplib::server::request& req, httplib::server::response& resp)
                                               { resp.set_json_content(req.as_json()); });
 
     // ---- URL-encoded form ----
-    router.set_http_handler<http::verb::post>("/api/form-urlencoded",
+    router.set_http_handler<httplib::method::post>("/api/form-urlencoded",
                                               [](httplib::server::request& req, httplib::server::response& resp)
                                               {
                                                   auto const& params = req.as_query_params();
@@ -152,7 +150,7 @@ setup_http_routes(httplib::server::router& router)
                                               });
 
     // ---- Multipart form data ----
-    router.set_http_handler<http::verb::post>("/api/form-multipart",
+    router.set_http_handler<httplib::method::post>("/api/form-multipart",
                                               [](httplib::server::request& req, httplib::server::response& resp)
                                               {
                                                   auto const& fd = req.as_form_data();
@@ -173,7 +171,7 @@ setup_http_routes(httplib::server::router& router)
                                               });
 
     // ---- RESTful: PUT / PATCH / DELETE ----
-    router.set_http_handler<http::verb::put>("/api/resource/:id",
+    router.set_http_handler<httplib::method::put>("/api/resource/:id",
                                              [](httplib::server::request& req, httplib::server::response& resp)
                                              {
                                                  auto id = std::string(req.path_param("id"));
@@ -182,7 +180,7 @@ setup_http_routes(httplib::server::router& router)
                                                  });
                                              });
 
-    router.set_http_handler<http::verb::patch>("/api/resource/:id",
+    router.set_http_handler<httplib::method::patch>("/api/resource/:id",
                                                [](httplib::server::request& req, httplib::server::response& resp)
                                                {
                                                    auto id = std::string(req.path_param("id"));
@@ -191,7 +189,7 @@ setup_http_routes(httplib::server::router& router)
                                                    });
                                                });
 
-    router.set_http_handler<http::verb::delete_>("/api/resource/:id",
+    router.set_http_handler<httplib::method::delete_>("/api/resource/:id",
                                                  [](httplib::server::request& req, httplib::server::response& resp)
                                                  {
                                                      resp.set_json_content({
@@ -200,16 +198,16 @@ setup_http_routes(httplib::server::router& router)
                                                  });
 
     // ---- OPTIONS (cors_middleware preflight handled by cors_middleware) ----
-    router.set_http_handler<http::verb::options>("/*",
+    router.set_http_handler<httplib::method::options>("/*",
                                                  [](httplib::server::request&, httplib::server::response& resp)
                                                  {
-                                                     resp.set(http::field::allow,
+                                                     resp.set(httplib::field::allow,
                                                               "GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS");
-                                                     resp.set_empty_content(http::status::no_content);
+                                                     resp.set_empty_content(httplib::status::no_content);
                                                  });
 
     // ---- Regex path param ----
-    router.set_http_handler<http::verb::get>("/api/regex/{id:^\\d+$}",
+    router.set_http_handler<httplib::method::get>("/api/regex/{id:^\\d+$}",
                                              [](httplib::server::request& req, httplib::server::response& resp)
                                              {
                                                  resp.set_json_content({
@@ -218,7 +216,7 @@ setup_http_routes(httplib::server::router& router)
                                              });
 
     // ---- Wildcard ----
-    router.set_http_handler<http::verb::get>("/api/files/*",
+    router.set_http_handler<httplib::method::get>("/api/files/*",
                                              [](httplib::server::request& req, httplib::server::response& resp)
                                              {
                                                  resp.set_json_content({
@@ -227,19 +225,19 @@ setup_http_routes(httplib::server::router& router)
                                              });
 
     // ---- Redirect ----
-    router.set_http_handler<http::verb::get>("/api/redirect",
+    router.set_http_handler<httplib::method::get>("/api/redirect",
                                              [](httplib::server::request&, httplib::server::response& resp)
-                                             { resp.set_redirect("/api/hello", http::status::moved_permanently); });
+                                             { resp.set_redirect("/api/hello", httplib::status::moved_permanently); });
 
     // ---- Chunked streaming ----
-    router.set_http_handler<http::verb::get>(
+    router.set_http_handler<httplib::method::get>(
         "/api/stream",
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
             auto cw = resp.create_stream_writer();
-            http::fields headers;
-            headers.set(http::field::content_type, "text/plain");
-            co_await cw->write_header(http::status::ok, headers, httplib::server::stream_writer::mode::chunked);
+            httplib::headers headers;
+            headers.set(httplib::field::content_type, "text/plain");
+            co_await cw->write_header(httplib::status::ok, headers, httplib::server::stream_writer::mode::chunked);
             for (int i = 0; i < 5; ++i)
             {
                 co_await cw->write_body(net::buffer(std::format("chunk #{}\n", i)), i < 4);
@@ -247,7 +245,7 @@ setup_http_routes(httplib::server::router& router)
         });
 
     // ---- SSE (Server-Sent Events) ----
-    router.set_http_handler<http::verb::get>(
+    router.set_http_handler<httplib::method::get>(
         "/api/sse",
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
@@ -260,7 +258,7 @@ setup_http_routes(httplib::server::router& router)
         });
 
     // ---- NDJSON (Newline Delimited JSON) ----
-    router.set_http_handler<http::verb::get>(
+    router.set_http_handler<httplib::method::get>(
         "/api/ndjson",
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
@@ -277,7 +275,7 @@ setup_http_routes(httplib::server::router& router)
             }
         });
 
-    router.set_lazy_http_handler<http::verb::post>(
+    router.set_lazy_http_handler<httplib::method::post>(
         "/api/buffer",
         [](httplib::server::request& req, httplib::server::response& resp) -> httplib::net::awaitable<void>
         {
@@ -305,7 +303,7 @@ setup_http_routes(httplib::server::router& router)
         });
 
     // ---- Built-in middleware: Basic Auth ----
-    router.set_http_handler<http::verb::get>(
+    router.set_http_handler<httplib::method::get>(
         "/api/admin",
         [](httplib::server::request&, httplib::server::response& resp)
         {
@@ -318,7 +316,7 @@ setup_http_routes(httplib::server::router& router)
                                   "Admin Area"));
 
     // ---- Built-in middleware: Bearer Token Auth ----
-    router.set_http_handler<http::verb::get>(
+    router.set_http_handler<httplib::method::get>(
         "/api/token-protected",
         [](httplib::server::request&, httplib::server::response& resp)
         {
@@ -330,7 +328,7 @@ setup_http_routes(httplib::server::router& router)
 
     // ---- Built-in middleware: Rate Limit (10 req / 10 seconds per IP) ----
     auto limiter = std::make_shared<mw::rate_limit_middleware>(10, std::chrono::seconds(10));
-    router.set_http_handler<http::verb::get>(
+    router.set_http_handler<httplib::method::get>(
         "/api/limited",
         [](httplib::server::request&, httplib::server::response& resp)
         {
@@ -356,7 +354,7 @@ setup_http_routes(httplib::server::router& router)
         }
     };
 
-    router.set_http_handler<http::verb::get>(
+    router.set_http_handler<httplib::method::get>(
         "/api/custom-data",
         [](httplib::server::request& req, httplib::server::response& resp)
         {
@@ -376,7 +374,7 @@ setup_http_routes(httplib::server::router& router)
                     { "error",             "not found" },
                     {  "path", std::string(req.path()) }
             },
-                http::status::not_found);
+                httplib::status::not_found);
         },
         log_t {});
 }
@@ -482,7 +480,7 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
         {
             spdlog::info("OPTIONS /api/hello -> {} Allow={}",
                          r.value().result_int(),
-                         std::string(r.value()[http::field::allow]));
+                         std::string(r.value()[httplib::field::allow]));
         }
     }
 
@@ -493,13 +491,13 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
         {
             spdlog::info("GET /api/redirect -> {} Location={}",
                          r.value().result_int(),
-                         std::string(r.value()[http::field::location]));
+                         std::string(r.value()[httplib::field::location]));
         }
     }
 
     // Stream with chunk handler
     {
-        auto resp = co_await client.async_send_request(httplib::client::request(http::verb::get, "/api/stream"),
+        auto resp = co_await client.async_send_request(httplib::client::request(httplib::method::get, "/api/stream"),
                                                        httplib::client::http_client::body_mode::lazy);
         if (resp)
         {
@@ -520,7 +518,7 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 
     // SSE (Server-Sent Events)
     {
-        auto resp = co_await client.async_send_request(httplib::client::request(http::verb::get, "/api/sse"),
+        auto resp = co_await client.async_send_request(httplib::client::request(httplib::method::get, "/api/sse"),
                                                        httplib::client::http_client::body_mode::lazy);
         if (resp)
         {
@@ -545,7 +543,7 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 
     // NDJSON (Newline Delimited JSON)
     {
-        auto resp = co_await client.async_send_request(httplib::client::request(http::verb::get, "/api/ndjson"),
+        auto resp = co_await client.async_send_request(httplib::client::request(httplib::method::get, "/api/ndjson"),
                                                        httplib::client::http_client::body_mode::lazy);
         if (resp)
         {
@@ -579,9 +577,9 @@ run_http_client_demo(net::any_io_executor ex, std::string host, uint16_t port)
 
     // Auth: Basic (with correct credentials)
     {
-        auto hdrs = httplib::http::fields();
-        hdrs.set(http::field::authorization, "Basic YWRtaW46c2VjcmV0");
-        auto r = co_await client.async_send_request(httplib::client::request(http::verb::get, "/api/admin", hdrs));
+        auto hdrs = httplib::headers();
+        hdrs.set(httplib::field::authorization, "Basic YWRtaW46c2VjcmV0");
+        auto r = co_await client.async_send_request(httplib::client::request(httplib::method::get, "/api/admin", hdrs));
         if (r)
         {
             spdlog::info("GET /api/admin (with auth) -> {}", r.value().result_int());
@@ -772,7 +770,7 @@ main(int argc, char** argv)
         svr.set_reverse_proxy("/proxy", "http://127.0.0.1:18080");
         svr.set_ws_forward("/ws/forward", "ws://127.0.0.1:18080/ws");
 
-        router.set_http_handler<http::verb::post>("/api/shutdown",
+        router.set_http_handler<httplib::method::post>("/api/shutdown",
                                                   [&](httplib::server::request&, httplib::server::response& resp)
                                                   {
                                                       resp.set_json_content({

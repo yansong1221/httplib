@@ -8,6 +8,7 @@
 #include <boost/asio/use_future.hpp>
 #include <chrono>
 #include <spdlog/spdlog.h>
+#include "beast_alias.hpp"
 
 namespace httplib::client
 {
@@ -24,7 +25,7 @@ namespace httplib::client
 
     net::awaitable<void>
     ws_client::impl::async_connect(std::string_view target,
-                                   http::fields const& headers,
+                                   httplib::headers const& headers,
                                    std::chrono::steady_clock::duration timeout,
                                    boost::system::error_code& ec)
     {
@@ -69,12 +70,13 @@ namespace httplib::client
                 }
                 auto s = std::make_shared<websocket_stream>(std::move(stream));
                 s->set_option(websocket::stream_base::decorator(
-                    [&](websocket::request_type& req)
-                    {
-                        req.set(http::field::origin, url::make_url_value(host_, port_, scheme_));
-                        req.set(http::field::host, url::make_host_value(host_, port_, scheme_));
-                        req.set(http::field::user_agent,
-                                std::string(BOOST_BEAST_VERSION_STRING) + "websocket-client-coro");
+                     [&](websocket::request_type& req)
+                     {
+                         // request_type 是 beast 的 http::request<empty_body>
+                         req.set(http::field::origin, url::make_url_value(host_, port_, scheme_));
+                         req.set(http::field::host, url::make_host_value(host_, port_, scheme_));
+                         req.set(http::field::user_agent,
+                                 std::string(BOOST_BEAST_VERSION_STRING) + "websocket-client-coro");
                         for (auto const& field : headers)
                         {
                             req.set(field.name_string(), field.value());
@@ -335,7 +337,7 @@ namespace httplib::client
                          coro_open_handler_type&& open_handler,
                          coro_message_handler_type&& message_handler,
                          coro_close_handler_type&& close_handler,
-                         http::fields const& headers /*= {}*/)
+                         httplib::headers const& headers /*= {}*/)
     {
         boost::asio::co_spawn(
             strand_,
@@ -400,7 +402,7 @@ namespace httplib::client
 
     net::awaitable<void>
     ws_client::impl::async_run(std::string_view target,
-                               http::fields const& headers,
+                               httplib::headers const& headers,
                                coro_message_handler_type&& message_handler,
                                coro_close_handler_type&& close_handler,
                                boost::system::error_code& ec)
@@ -517,7 +519,7 @@ namespace httplib::client
 
     net::awaitable<void>
     ws_client::async_connect(std::string_view target,
-                             http::fields const& headers,
+                             httplib::headers const& headers,
                              std::chrono::steady_clock::duration timeout,
                              boost::system::error_code& ec)
     {
@@ -610,7 +612,7 @@ namespace httplib::client
 
     net::awaitable<void>
     ws_client::async_run_impl(std::string_view target,
-                              http::fields const& headers,
+                              httplib::headers const& headers,
                               coro_message_handler_type&& message_handler,
                               coro_close_handler_type&& close_handler,
                               boost::system::error_code& ec)
@@ -623,7 +625,7 @@ namespace httplib::client
                         coro_open_handler_type&& open_handler,
                         coro_message_handler_type&& message_handler,
                         coro_close_handler_type&& close_handler,
-                        http::fields const& headers /*= {}*/)
+                        httplib::headers const& headers /*= {}*/)
     {
         impl_->run(target, std::move(open_handler), std::move(message_handler), std::move(close_handler), headers);
     }

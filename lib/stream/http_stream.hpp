@@ -10,6 +10,7 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core/basic_stream.hpp>
 #include <boost/system/result.hpp>
+#include "beast_alias.hpp"
 
 namespace httplib
 {

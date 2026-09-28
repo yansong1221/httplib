@@ -7,7 +7,6 @@
 #include <catch2/catch_test_macros.hpp>
 
 namespace net = httplib::net;
-namespace http = httplib::http;
 namespace mw = httplib::server::middleware;
 
 namespace
@@ -18,11 +17,11 @@ namespace
 
     template <typename Client>
     net::awaitable<std::string>
-    send_chunked(Client& client, http::verb method, std::string_view path, std::vector<std::string> chunks)
+    send_chunked(Client& client, httplib::method m, std::string_view path, std::vector<std::string> chunks)
     {
         auto writer = client.create_lazy_request();
 
-        co_await writer->write_header(method, path, {}, httplib::client::lazy_request::mode::chunked);
+        co_await writer->write_header(m, path, {}, httplib::client::lazy_request::mode::chunked);
         for (size_t i = 0; i < chunks.size(); ++i)
         {
             auto more = (i + 1 < chunks.size());
@@ -61,7 +60,7 @@ TEST_CASE("Chunked: Content-Length hits chunked handler", "[chunked]")
     run(
         [](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/chunked-only",
                 [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -72,7 +71,7 @@ TEST_CASE("Chunked: Content-Length hits chunked handler", "[chunked]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_post("/chunked-only", "data"sv, "text/plain"sv));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(as_string(resp) == "chunked-handled");
             co_return;
         });
@@ -83,7 +82,7 @@ TEST_CASE("Chunked: regular POST takes precedence over chunked", "[chunked]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::post>(
+            server.router().template set_http_handler<httplib::method::post>(
                 "/chunked/precedence",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
@@ -91,7 +90,7 @@ TEST_CASE("Chunked: regular POST takes precedence over chunked", "[chunked]")
                     resp.set_string_content("regular-" + body, "text/plain");
                 });
 
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/chunked/precedence",
                 [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -102,7 +101,7 @@ TEST_CASE("Chunked: regular POST takes precedence over chunked", "[chunked]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_post("/chunked/precedence", "data"sv, "text/plain"sv));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(as_string(resp) == "regular-data");
             co_return;
         });
@@ -113,12 +112,12 @@ TEST_CASE("Chunked: GET coexists with chunked POST", "[chunked]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/chunked/both",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("get-ok"sv, "text/plain"); });
 
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/chunked/both",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -132,11 +131,11 @@ TEST_CASE("Chunked: GET coexists with chunked POST", "[chunked]")
         [](auto& client) -> net::awaitable<void>
         {
             auto get_resp = UNWRAP(co_await client.async_get("/chunked/both"));
-            REQUIRE(get_resp.result() == http::status::ok);
+            REQUIRE(get_resp.result() == httplib::status::ok);
             REQUIRE(as_string(get_resp) == "get-ok");
 
             auto post_resp = UNWRAP(co_await client.async_post("/chunked/both", "data"sv, "text/plain"sv));
-            REQUIRE(post_resp.result() == http::status::ok);
+            REQUIRE(post_resp.result() == httplib::status::ok);
             REQUIRE(as_string(post_resp) == "chunked-ok");
             co_return;
         });
@@ -147,7 +146,7 @@ TEST_CASE("Chunked: is_body_done() true for regular handler", "[chunked]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::post>(
+            server.router().template set_http_handler<httplib::method::post>(
                 "/chunked/check",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
@@ -158,7 +157,7 @@ TEST_CASE("Chunked: is_body_done() true for regular handler", "[chunked]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_post("/chunked/check", "data"sv, "text/plain"sv));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(as_string(resp) == "not-chunked");
             co_return;
         });
@@ -169,7 +168,7 @@ TEST_CASE("Chunked: multi-verb chunked handler registration", "[chunked]")
     run(
         [](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::post, http::verb::put>(
+            server.router().template set_lazy_http_handler<httplib::method::post, httplib::method::put>(
                 "/chunked/multi",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -183,11 +182,11 @@ TEST_CASE("Chunked: multi-verb chunked handler registration", "[chunked]")
         [](auto& client) -> net::awaitable<void>
         {
             auto post_resp = UNWRAP(co_await client.async_post("/chunked/multi", "data"sv, "text/plain"sv));
-            REQUIRE(post_resp.result() == http::status::ok);
+            REQUIRE(post_resp.result() == httplib::status::ok);
             REQUIRE(as_string(post_resp) == "chunked-POST");
 
             auto put_resp = UNWRAP(co_await client.async_put("/chunked/multi", "data"sv, "text/plain"sv));
-            REQUIRE(put_resp.result() == http::status::ok);
+            REQUIRE(put_resp.result() == httplib::status::ok);
             REQUIRE(as_string(put_resp) == "chunked-PUT");
             co_return;
         });
@@ -198,7 +197,7 @@ TEST_CASE("Chunked: handler with path param", "[chunked]")
     run(
         [](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/chunked/user/:id",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -206,7 +205,7 @@ TEST_CASE("Chunked: handler with path param", "[chunked]")
                     resp.set_string_content("chunked-" + std::string(id), "text/plain");
                     co_return;
                 });
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/chunked/user/:id",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
@@ -217,11 +216,11 @@ TEST_CASE("Chunked: handler with path param", "[chunked]")
         [](auto& client) -> net::awaitable<void>
         {
             auto get_resp = UNWRAP(co_await client.async_get("/chunked/user/42"));
-            REQUIRE(get_resp.result() == http::status::ok);
+            REQUIRE(get_resp.result() == httplib::status::ok);
             REQUIRE(as_string(get_resp) == "get-42");
 
             auto post_resp = UNWRAP(co_await client.async_post("/chunked/user/42", "data"sv, "text/plain"sv));
-            REQUIRE(post_resp.result() == http::status::ok);
+            REQUIRE(post_resp.result() == httplib::status::ok);
             REQUIRE(as_string(post_resp) == "chunked-42");
             co_return;
         });
@@ -232,7 +231,7 @@ TEST_CASE("Chunked: handler with wildcard path", "[chunked]")
     run(
         [](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/chunked/ws/*",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -240,7 +239,7 @@ TEST_CASE("Chunked: handler with wildcard path", "[chunked]")
                     resp.set_string_content("chunked-" + std::string(wild), "text/plain");
                     co_return;
                 });
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/chunked/ws/*",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
@@ -251,11 +250,11 @@ TEST_CASE("Chunked: handler with wildcard path", "[chunked]")
         [](auto& client) -> net::awaitable<void>
         {
             auto get_resp = UNWRAP(co_await client.async_get("/chunked/ws/a/b/c"));
-            REQUIRE(get_resp.result() == http::status::ok);
+            REQUIRE(get_resp.result() == httplib::status::ok);
             REQUIRE(as_string(get_resp) == "get-a/b/c");
 
             auto post_resp = UNWRAP(co_await client.async_post("/chunked/ws/x/y", "data"sv, "text/plain"sv));
-            REQUIRE(post_resp.result() == http::status::ok);
+            REQUIRE(post_resp.result() == httplib::status::ok);
             REQUIRE(as_string(post_resp) == "chunked-x/y");
             co_return;
         });
@@ -270,7 +269,7 @@ TEST_CASE("Chunked: middleware is wrapped via set_lazy_http_handler", "[chunked]
     run(
         [&](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/chunked/cors_middleware",
                 [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -278,7 +277,7 @@ TEST_CASE("Chunked: middleware is wrapped via set_lazy_http_handler", "[chunked]
                     co_return;
                 },
                 cors_middleware);
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/chunked/cors_middleware",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("cors_middleware-get"sv, "text/plain"); },
@@ -286,13 +285,13 @@ TEST_CASE("Chunked: middleware is wrapped via set_lazy_http_handler", "[chunked]
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto hdrs = httplib::http::fields();
-            hdrs.set(http::field::origin, "https://example.com");
-            httplib::client::request req(http::verb::get, "/chunked/cors_middleware", hdrs);
+            auto hdrs = httplib::headers();
+            hdrs.set(httplib::field::origin, "https://example.com");
+            httplib::client::request req(httplib::method::get, "/chunked/cors_middleware", hdrs);
             auto get_resp = UNWRAP(co_await client.async_send_request(req));
-            REQUIRE(get_resp.result() == http::status::ok);
+            REQUIRE(get_resp.result() == httplib::status::ok);
             REQUIRE(as_string(get_resp) == "cors_middleware-get");
-            REQUIRE(get_resp[http::field::access_control_allow_origin] == "https://example.com");
+            REQUIRE(get_resp[httplib::field::access_control_allow_origin] == "https://example.com");
             co_return;
         });
 }
@@ -302,7 +301,7 @@ TEST_CASE("Chunked: regular PUT coexists with chunked POST", "[chunked]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::put>(
+            server.router().template set_http_handler<httplib::method::put>(
                 "/chunked/mixed",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
@@ -310,7 +309,7 @@ TEST_CASE("Chunked: regular PUT coexists with chunked POST", "[chunked]")
                     resp.set_string_content("regular-put-" + body, "text/plain");
                 });
 
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/chunked/mixed",
                 [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -321,11 +320,11 @@ TEST_CASE("Chunked: regular PUT coexists with chunked POST", "[chunked]")
         [](auto& client) -> net::awaitable<void>
         {
             auto put_resp = UNWRAP(co_await client.async_put("/chunked/mixed", "hello"sv, "text/plain"sv));
-            REQUIRE(put_resp.result() == http::status::ok);
+            REQUIRE(put_resp.result() == httplib::status::ok);
             REQUIRE(as_string(put_resp) == "regular-put-hello");
 
             auto post_resp = UNWRAP(co_await client.async_post("/chunked/mixed", "data"sv, "text/plain"sv));
-            REQUIRE(post_resp.result() == http::status::ok);
+            REQUIRE(post_resp.result() == httplib::status::ok);
             REQUIRE(as_string(post_resp) == "chunked-post");
             co_return;
         });
@@ -336,7 +335,7 @@ TEST_CASE("Chunked: chunked handler does not affect path that only has regular h
     run(
         [](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/chunked/isolated",
                 [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -344,7 +343,7 @@ TEST_CASE("Chunked: chunked handler does not affect path that only has regular h
                     co_return;
                 });
 
-            server.router().template set_http_handler<http::verb::post>(
+            server.router().template set_http_handler<httplib::method::post>(
                 "/regular/path",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
@@ -355,7 +354,7 @@ TEST_CASE("Chunked: chunked handler does not affect path that only has regular h
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_post("/regular/path", "data"sv, "text/plain"sv));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(as_string(resp) == "regular-data");
             co_return;
         });
@@ -366,7 +365,7 @@ TEST_CASE("Chunked: buffer_body receives de-chunked data", "[chunked]")
     run(
         [](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/chunked/read",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -387,7 +386,7 @@ TEST_CASE("Chunked: buffer_body receives de-chunked data", "[chunked]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto result = co_await send_chunked(client, http::verb::post, "/chunked/read", { "Hello", " World" });
+            auto result = co_await send_chunked(client, httplib::method::post, "/chunked/read", { "Hello", " World" });
             REQUIRE(result == "Hello World");
             co_return;
         });
@@ -398,7 +397,7 @@ TEST_CASE("Chunked: multiple chunks are de-chunked into single body", "[chunked]
     run(
         [](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/chunked/read-ext",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -420,7 +419,7 @@ TEST_CASE("Chunked: multiple chunks are de-chunked into single body", "[chunked]
         [](auto& client) -> net::awaitable<void>
         {
             auto result = co_await send_chunked(client,
-                                                http::verb::post,
+                                                httplib::method::post,
                                                 "/chunked/read-ext",
                                                 { "chunk1", "chunk2", "chunk3" });
             REQUIRE(result == "chunk1chunk2chunk3");
@@ -433,7 +432,7 @@ TEST_CASE("Chunked: large chunk via buffer_body", "[chunked]")
     run(
         [](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/chunked/read-large",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -455,7 +454,7 @@ TEST_CASE("Chunked: large chunk via buffer_body", "[chunked]")
         [](auto& client) -> net::awaitable<void>
         {
             std::string large_chunk(10000, 'X');
-            auto result = co_await send_chunked(client, http::verb::post, "/chunked/read-large", { large_chunk });
+            auto result = co_await send_chunked(client, httplib::method::post, "/chunked/read-large", { large_chunk });
             REQUIRE(result == "10000");
             co_return;
         });
@@ -466,7 +465,7 @@ TEST_CASE("Chunked: empty chunks via buffer_body", "[chunked]")
     run(
         [](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/chunked/read-empty",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -479,7 +478,7 @@ TEST_CASE("Chunked: empty chunks via buffer_body", "[chunked]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto result = co_await send_chunked(client, http::verb::post, "/chunked/read-empty", {});
+            auto result = co_await send_chunked(client, httplib::method::post, "/chunked/read-empty", {});
             REQUIRE(result == "0");
             co_return;
         });
@@ -490,7 +489,7 @@ TEST_CASE("Chunked: is_body_done() is false", "[chunked]")
     run(
         [](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/chunked/read-is-chunked",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -503,7 +502,7 @@ TEST_CASE("Chunked: is_body_done() is false", "[chunked]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto result = co_await send_chunked(client, http::verb::post, "/chunked/read-is-chunked", { "data" });
+            auto result = co_await send_chunked(client, httplib::method::post, "/chunked/read-is-chunked", { "data" });
             REQUIRE(result == "yes:data");
             co_return;
         });
@@ -514,7 +513,7 @@ TEST_CASE("Chunked: with path parameters via buffer_body", "[chunked]")
     run(
         [](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/chunked/read/:id",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -536,7 +535,7 @@ TEST_CASE("Chunked: with path parameters via buffer_body", "[chunked]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto result = co_await send_chunked(client, http::verb::post, "/chunked/read/42", { "hello" });
+            auto result = co_await send_chunked(client, httplib::method::post, "/chunked/read/42", { "hello" });
             REQUIRE(result == "42:hello");
             co_return;
         });
@@ -547,7 +546,7 @@ TEST_CASE("Chunked: with wildcard path via buffer_body", "[chunked]")
     run(
         [](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/chunked/read-ws/*",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -569,7 +568,7 @@ TEST_CASE("Chunked: with wildcard path via buffer_body", "[chunked]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto result = co_await send_chunked(client, http::verb::post, "/chunked/read-ws/a/b", { "xyz" });
+            auto result = co_await send_chunked(client, httplib::method::post, "/chunked/read-ws/a/b", { "xyz" });
             REQUIRE(result == "a/b:xyz");
             co_return;
         });
@@ -580,7 +579,7 @@ TEST_CASE("Chunked: PUT via buffer_body", "[chunked]")
     run(
         [](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::put>(
+            server.router().template set_lazy_http_handler<httplib::method::put>(
                 "/chunked/read-put",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -601,7 +600,7 @@ TEST_CASE("Chunked: PUT via buffer_body", "[chunked]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto result = co_await send_chunked(client, http::verb::put, "/chunked/read-put", { "put-body" });
+            auto result = co_await send_chunked(client, httplib::method::put, "/chunked/read-put", { "put-body" });
             REQUIRE(result == "PUT:put-body");
             co_return;
         });
@@ -612,7 +611,7 @@ TEST_CASE("Chunked: multi-verb via buffer_body", "[chunked]")
     run(
         [](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::post, http::verb::patch>(
+            server.router().template set_lazy_http_handler<httplib::method::post, httplib::method::patch>(
                 "/chunked/read-multi",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -634,11 +633,11 @@ TEST_CASE("Chunked: multi-verb via buffer_body", "[chunked]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto post_result = co_await send_chunked(client, http::verb::post, "/chunked/read-multi", { "from-post" });
+            auto post_result = co_await send_chunked(client, httplib::method::post, "/chunked/read-multi", { "from-post" });
             REQUIRE(post_result == "POST:from-post");
 
             auto patch_result
-                = co_await send_chunked(client, http::verb::patch, "/chunked/read-multi", { "from-patch" });
+                = co_await send_chunked(client, httplib::method::patch, "/chunked/read-multi", { "from-patch" });
             REQUIRE(patch_result == "PATCH:from-patch");
             co_return;
         });
@@ -649,7 +648,7 @@ TEST_CASE("Chunked: sync send_chunked_request via buffer_body", "[chunked]")
     run(
         [](auto& server)
         {
-            server.router().template set_lazy_http_handler<http::verb::post>(
+            server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/chunked/sync",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
@@ -670,7 +669,7 @@ TEST_CASE("Chunked: sync send_chunked_request via buffer_body", "[chunked]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto result = co_await send_chunked(client, http::verb::post, "/chunked/sync", { "via", "sync" });
+            auto result = co_await send_chunked(client, httplib::method::post, "/chunked/sync", { "via", "sync" });
             REQUIRE(result == "viasync");
             co_return;
         });

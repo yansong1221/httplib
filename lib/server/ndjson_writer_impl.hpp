@@ -3,6 +3,7 @@
 #include "httplib/server/stream_writer.hpp"
 #include <boost/json/serialize.hpp>
 #include <string>
+#include "beast_alias.hpp"
 
 namespace httplib::server
 {
@@ -25,9 +26,9 @@ namespace httplib::server
         net::awaitable<void>
         begin(boost::system::error_code& ec) override
         {
-            http::fields headers;
-            headers.set(http::field::content_type, "application/x-ndjson");
-            co_await cw_->write_header(http::status::ok, headers, stream_writer::mode::chunked, ec);
+            headers headers;
+            headers.set(field::content_type, "application/x-ndjson");
+            co_await cw_->write_header(status::ok, headers, stream_writer::mode::chunked, ec);
         }
 
         net::awaitable<void>

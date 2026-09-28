@@ -1,6 +1,7 @@
 #pragma once
 #include "httplib/client/client_fwd.hpp"
 #include "httplib/client/downloader.hpp"
+#include "httplib/headers.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <boost/system/error_code.hpp>
 #include <cstdint>
@@ -26,7 +27,7 @@ namespace httplib::client
         struct task_options
         {
             downloader::config dl_config;
-            http::fields headers;
+            httplib::headers headers;
         };
 
         struct task_status

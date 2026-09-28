@@ -53,6 +53,7 @@ add_httplib_test(httplib_test_core core
 
 add_httplib_test(httplib_test_http http
     compressor_test.cpp
+    headers_test.cpp
     http_methods_test.cpp
     ndjson_test.cpp
     response_test.cpp

@@ -89,7 +89,7 @@ TEST_CASE("proxy: GET forwards to upstream", "[proxy]")
     run_proxy(
         [](auto& upstream)
         {
-            upstream.router().template set_http_handler<http::verb::get>(
+            upstream.router().template set_http_handler<httplib::method::get>(
                 "/resource",
                 [](server::request&, server::response& resp)
                 { resp.set_string_content(std::string("upstream-resource"), "text/plain"); });
@@ -97,7 +97,7 @@ TEST_CASE("proxy: GET forwards to upstream", "[proxy]")
         [](auto&, auto& proxy_client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await proxy_client.async_get("/api/resource"));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(as_string(resp) == "upstream-resource");
         });
 }
@@ -107,7 +107,7 @@ TEST_CASE("proxy: POST with body forwards to upstream", "[proxy]")
     run_proxy(
         [](auto& upstream)
         {
-            upstream.router().template set_http_handler<http::verb::post>(
+            upstream.router().template set_http_handler<httplib::method::post>(
                 "/echo",
                 [](server::request& req, server::response& resp)
                 { resp.set_string_content(as_string(req), "text/plain"); });
@@ -116,12 +116,12 @@ TEST_CASE("proxy: POST with body forwards to upstream", "[proxy]")
         {
             auto direct
                 = UNWRAP(co_await upstream_client.async_post("/echo", std::string_view("direct-post"), "text/plain"sv));
-            REQUIRE(direct.result() == http::status::ok);
+            REQUIRE(direct.result() == httplib::status::ok);
             REQUIRE(as_string(direct) == "direct-post");
 
             auto resp = UNWRAP(
                 co_await proxy_client.async_post("/api/echo", std::string_view("hello-proxy"), "text/plain"sv));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(as_string(resp) == "hello-proxy");
         });
 }
@@ -131,17 +131,17 @@ TEST_CASE("proxy: GET empty body forwards to upstream", "[proxy]")
     run_proxy(
         [](auto& upstream)
         {
-            upstream.router().template set_http_handler<http::verb::get>(
+            upstream.router().template set_http_handler<httplib::method::get>(
                 "/echo",
                 [](server::request&, server::response& resp) { resp.set_string_content(std::string(), "text/plain"); });
         },
         [](auto& upstream_client, auto& proxy_client) -> net::awaitable<void>
         {
             auto direct = UNWRAP(co_await upstream_client.async_get("/echo"));
-            REQUIRE(direct.result() == http::status::ok);
+            REQUIRE(direct.result() == httplib::status::ok);
 
             auto resp = UNWRAP(co_await proxy_client.async_get("/api/echo"));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
         });
 }
 
@@ -150,7 +150,7 @@ TEST_CASE("proxy: PUT with body forwards to upstream", "[proxy]")
     run_proxy(
         [](auto& upstream)
         {
-            upstream.router().template set_http_handler<http::verb::put>(
+            upstream.router().template set_http_handler<httplib::method::put>(
                 "/echo-put",
                 [](server::request& req, server::response& resp)
                 { resp.set_string_content(as_string(req), "text/plain"); });
@@ -159,12 +159,12 @@ TEST_CASE("proxy: PUT with body forwards to upstream", "[proxy]")
         {
             auto direct
                 = UNWRAP(co_await upstream_client.async_put("/echo-put", std::string_view("put-data"), "text/plain"sv));
-            REQUIRE(direct.result() == http::status::ok);
+            REQUIRE(direct.result() == httplib::status::ok);
             REQUIRE(as_string(direct) == "put-data");
 
             auto resp = UNWRAP(
                 co_await proxy_client.async_put("/api/echo-put", std::string_view("put-data"), "text/plain"sv));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(as_string(resp) == "put-data");
         });
 }
@@ -178,18 +178,18 @@ TEST_CASE("proxy: status code 201", "[proxy]")
     run_proxy(
         [](auto& upstream)
         {
-            upstream.router().template set_http_handler<http::verb::get>(
+            upstream.router().template set_http_handler<httplib::method::get>(
                 "/status/:code",
                 [](server::request& req, server::response& resp)
                 {
                     auto code = std::stoi(std::string(req.path_param("code")));
-                    resp.set_empty_content(static_cast<http::status>(code));
+                    resp.set_empty_content(static_cast<httplib::status>(code));
                 });
         },
         [](auto&, auto& proxy_client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await proxy_client.async_get("/api/status/201"));
-            REQUIRE(resp.result() == http::status::created);
+            REQUIRE(resp.result() == httplib::status::created);
         });
 }
 
@@ -198,18 +198,18 @@ TEST_CASE("proxy: status code 404", "[proxy]")
     run_proxy(
         [](auto& upstream)
         {
-            upstream.router().template set_http_handler<http::verb::get>(
+            upstream.router().template set_http_handler<httplib::method::get>(
                 "/status/:code",
                 [](server::request& req, server::response& resp)
                 {
                     auto code = std::stoi(std::string(req.path_param("code")));
-                    resp.set_empty_content(static_cast<http::status>(code));
+                    resp.set_empty_content(static_cast<httplib::status>(code));
                 });
         },
         [](auto&, auto& proxy_client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await proxy_client.async_get("/api/status/404"));
-            REQUIRE(resp.result() == http::status::not_found);
+            REQUIRE(resp.result() == httplib::status::not_found);
         });
 }
 
@@ -218,18 +218,18 @@ TEST_CASE("proxy: status code 204", "[proxy]")
     run_proxy(
         [](auto& upstream)
         {
-            upstream.router().template set_http_handler<http::verb::get>(
+            upstream.router().template set_http_handler<httplib::method::get>(
                 "/status/:code",
                 [](server::request& req, server::response& resp)
                 {
                     auto code = std::stoi(std::string(req.path_param("code")));
-                    resp.set_empty_content(static_cast<http::status>(code));
+                    resp.set_empty_content(static_cast<httplib::status>(code));
                 });
         },
         [](auto&, auto& proxy_client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await proxy_client.async_get("/api/status/204"));
-            REQUIRE(resp.result() == http::status::no_content);
+            REQUIRE(resp.result() == httplib::status::no_content);
         });
 }
 
@@ -238,18 +238,18 @@ TEST_CASE("proxy: status code 304", "[proxy]")
     run_proxy(
         [](auto& upstream)
         {
-            upstream.router().template set_http_handler<http::verb::get>(
+            upstream.router().template set_http_handler<httplib::method::get>(
                 "/status/:code",
                 [](server::request& req, server::response& resp)
                 {
                     auto code = std::stoi(std::string(req.path_param("code")));
-                    resp.set_empty_content(static_cast<http::status>(code));
+                    resp.set_empty_content(static_cast<httplib::status>(code));
                 });
         },
         [](auto&, auto& proxy_client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await proxy_client.async_get("/api/status/304"));
-            REQUIRE(resp.result() == http::status::not_modified);
+            REQUIRE(resp.result() == httplib::status::not_modified);
         });
 }
 
@@ -258,18 +258,18 @@ TEST_CASE("proxy: status code 102 (1xx)", "[proxy]")
     run_proxy(
         [](auto& upstream)
         {
-            upstream.router().template set_http_handler<http::verb::get>(
+            upstream.router().template set_http_handler<httplib::method::get>(
                 "/status/:code",
                 [](server::request& req, server::response& resp)
                 {
                     auto code = std::stoi(std::string(req.path_param("code")));
-                    resp.set_empty_content(static_cast<http::status>(code));
+                    resp.set_empty_content(static_cast<httplib::status>(code));
                 });
         },
         [](auto&, auto& proxy_client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await proxy_client.async_get("/api/status/102"));
-            REQUIRE(resp.result() == http::status::processing);
+            REQUIRE(resp.result() == httplib::status::processing);
         });
 }
 
@@ -282,7 +282,7 @@ TEST_CASE("proxy: X-Forwarded-For is appended", "[proxy]")
     run_proxy(
         [](auto& upstream)
         {
-            upstream.router().template set_http_handler<http::verb::get>(
+            upstream.router().template set_http_handler<httplib::method::get>(
                 "/headers",
                 [](server::request& req, server::response& resp)
                 {
@@ -293,7 +293,7 @@ TEST_CASE("proxy: X-Forwarded-For is appended", "[proxy]")
         [](auto&, auto& proxy_client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await proxy_client.async_get("/api/headers"));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(as_string(resp).find("127.0.0.1") != std::string::npos);
         });
 }
@@ -303,7 +303,7 @@ TEST_CASE("proxy: Host header set to upstream host", "[proxy]")
     run_proxy(
         [](auto& upstream)
         {
-            upstream.router().template set_http_handler<http::verb::get>(
+            upstream.router().template set_http_handler<httplib::method::get>(
                 "/check-host",
                 [](server::request& req, server::response& resp)
                 { resp.set_string_content(std::string(req["Host"]), "text/plain"); });
@@ -311,7 +311,7 @@ TEST_CASE("proxy: Host header set to upstream host", "[proxy]")
         [](auto& upstream_client, auto& proxy_client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await proxy_client.async_get("/api/check-host"));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(as_string(resp) == std::format("{}:{}", upstream_client.host(), upstream_client.port()));
         });
 }
@@ -326,7 +326,7 @@ TEST_CASE("proxy: path not matching prefix returns 404", "[proxy]")
               [](auto&, auto& proxy_client) -> net::awaitable<void>
               {
                   auto resp = UNWRAP(co_await proxy_client.async_get("/other/resource"));
-                  REQUIRE(resp.result() == http::status::not_found);
+                  REQUIRE(resp.result() == httplib::status::not_found);
               });
 }
 
@@ -335,18 +335,18 @@ TEST_CASE("proxy: empty Content-Length:0 response", "[proxy]")
     run_proxy(
         [](auto& upstream)
         {
-            upstream.router().template set_http_handler<http::verb::get>(
+            upstream.router().template set_http_handler<httplib::method::get>(
                 "/empty-ok",
                 [](server::request&, server::response& resp) { resp.set_string_content(std::string(), "text/plain"); });
         },
         [](auto& upstream_client, auto& proxy_client) -> net::awaitable<void>
         {
             auto direct = UNWRAP(co_await upstream_client.async_get("/empty-ok"));
-            REQUIRE(direct.result() == http::status::ok);
+            REQUIRE(direct.result() == httplib::status::ok);
             REQUIRE(as_string(direct).empty());
 
             auto resp = UNWRAP(co_await proxy_client.async_get("/api/empty-ok"));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(as_string(resp).empty());
         });
 }
@@ -360,7 +360,7 @@ TEST_CASE("proxy: POST large body", "[proxy]")
     run_proxy(
         [](auto& upstream)
         {
-            upstream.router().template set_http_handler<http::verb::post>(
+            upstream.router().template set_http_handler<httplib::method::post>(
                 "/body-size",
                 [](server::request& req, server::response& resp)
                 {
@@ -372,11 +372,11 @@ TEST_CASE("proxy: POST large body", "[proxy]")
         {
             std::string large_body(10000, 'x');
             auto direct = UNWRAP(co_await upstream_client.async_post("/body-size", large_body, "text/plain"sv));
-            REQUIRE(direct.result() == http::status::ok);
+            REQUIRE(direct.result() == httplib::status::ok);
             REQUIRE(as_string(direct) == "10000");
 
             auto resp = UNWRAP(co_await proxy_client.async_post("/api/body-size", large_body, "text/plain"sv));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(as_string(resp) == "10000");
         });
 }
@@ -386,7 +386,7 @@ TEST_CASE("proxy: POST with empty body", "[proxy]")
     run_proxy(
         [](auto& upstream)
         {
-            upstream.router().template set_http_handler<http::verb::post>(
+            upstream.router().template set_http_handler<httplib::method::post>(
                 "/echo",
                 [](server::request& req, server::response& resp)
                 { resp.set_string_content(as_string(req), "text/plain"); });
@@ -394,10 +394,10 @@ TEST_CASE("proxy: POST with empty body", "[proxy]")
         [](auto& upstream_client, auto& proxy_client) -> net::awaitable<void>
         {
             auto direct = UNWRAP(co_await upstream_client.async_post("/echo", std::string_view(""), "text/plain"sv));
-            REQUIRE(direct.result() == http::status::ok);
+            REQUIRE(direct.result() == httplib::status::ok);
 
             auto resp = UNWRAP(co_await proxy_client.async_post("/api/echo", std::string_view(""), "text/plain"sv));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
         });
 }
 
@@ -406,11 +406,11 @@ TEST_CASE("proxy: repeated requests", "[proxy]")
     run_proxy(
         [](auto& upstream)
         {
-            upstream.router().template set_http_handler<http::verb::get, http::verb::post>(
+            upstream.router().template set_http_handler<httplib::method::get, httplib::method::post>(
                 "/echo",
                 [](server::request& req, server::response& resp)
                 { resp.set_string_content(as_string(req), "text/plain"); });
-            upstream.router().template set_http_handler<http::verb::get>(
+            upstream.router().template set_http_handler<httplib::method::get>(
                 "/resource",
                 [](server::request&, server::response& resp)
                 { resp.set_string_content(std::string("upstream-resource"), "text/plain"); });
@@ -420,13 +420,13 @@ TEST_CASE("proxy: repeated requests", "[proxy]")
             for (int i = 0; i < 5; ++i)
             {
                 auto resp1 = UNWRAP(co_await proxy_client.async_get("/api/resource"));
-                REQUIRE(resp1.result() == http::status::ok);
+                REQUIRE(resp1.result() == httplib::status::ok);
                 REQUIRE(as_string(resp1) == "upstream-resource");
 
                 auto resp2 = UNWRAP(co_await proxy_client.async_post("/api/echo",
                                                                      std::string_view("p" + std::to_string(i)),
                                                                      "text/plain"sv));
-                REQUIRE(resp2.result() == http::status::ok);
+                REQUIRE(resp2.result() == httplib::status::ok);
                 REQUIRE(as_string(resp2) == "p" + std::to_string(i));
             }
         });
@@ -437,12 +437,12 @@ TEST_CASE("proxy: status 200/404/204 on same connection", "[proxy]")
     run_proxy(
         [](auto& upstream)
         {
-            upstream.router().template set_http_handler<http::verb::get>(
+            upstream.router().template set_http_handler<httplib::method::get>(
                 "/status/:code",
                 [](server::request& req, server::response& resp)
                 {
                     auto code = std::stoi(std::string(req.path_param("code")));
-                    resp.set_empty_content(static_cast<http::status>(code));
+                    resp.set_empty_content(static_cast<httplib::status>(code));
                 });
         },
         [](auto&, auto& proxy_client) -> net::awaitable<void>
@@ -450,11 +450,11 @@ TEST_CASE("proxy: status 200/404/204 on same connection", "[proxy]")
             for (int i = 0; i < 5; ++i)
             {
                 auto r = UNWRAP(co_await proxy_client.async_get("/api/status/200"));
-                REQUIRE(r.result() == http::status::ok);
+                REQUIRE(r.result() == httplib::status::ok);
                 r = UNWRAP(co_await proxy_client.async_get("/api/status/404"));
-                REQUIRE(r.result() == http::status::not_found);
+                REQUIRE(r.result() == httplib::status::not_found);
                 r = UNWRAP(co_await proxy_client.async_get("/api/status/204"));
-                REQUIRE(r.result() == http::status::no_content);
+                REQUIRE(r.result() == httplib::status::no_content);
             }
         });
 }
@@ -464,16 +464,16 @@ TEST_CASE("proxy: mixed requests with body then status", "[proxy]")
     run_proxy(
         [](auto& upstream)
         {
-            upstream.router().template set_http_handler<http::verb::get, http::verb::post>(
+            upstream.router().template set_http_handler<httplib::method::get, httplib::method::post>(
                 "/echo",
                 [](server::request& req, server::response& resp)
                 { resp.set_string_content(as_string(req), "text/plain"); });
-            upstream.router().template set_http_handler<http::verb::get>(
+            upstream.router().template set_http_handler<httplib::method::get>(
                 "/status/:code",
                 [](server::request& req, server::response& resp)
                 {
                     auto code = std::stoi(std::string(req.path_param("code")));
-                    resp.set_empty_content(static_cast<http::status>(code));
+                    resp.set_empty_content(static_cast<httplib::status>(code));
                 });
         },
         [](auto&, auto& proxy_client) -> net::awaitable<void>
@@ -483,11 +483,11 @@ TEST_CASE("proxy: mixed requests with body then status", "[proxy]")
                 auto r = UNWRAP(co_await proxy_client.async_post("/api/echo",
                                                                  std::string_view("b" + std::to_string(i)),
                                                                  "text/plain"sv));
-                REQUIRE(r.result() == http::status::ok);
+                REQUIRE(r.result() == httplib::status::ok);
                 r = UNWRAP(co_await proxy_client.async_get("/api/status/404"));
-                REQUIRE(r.result() == http::status::not_found);
+                REQUIRE(r.result() == httplib::status::not_found);
                 r = UNWRAP(co_await proxy_client.async_get("/api/status/200"));
-                REQUIRE(r.result() == http::status::ok);
+                REQUIRE(r.result() == httplib::status::ok);
             }
         });
 }
@@ -501,18 +501,18 @@ TEST_CASE("proxy: redirect (301) proxying", "[proxy]")
     run_proxy(
         [](auto& upstream)
         {
-            upstream.router().template set_http_handler<http::verb::get>(
+            upstream.router().template set_http_handler<httplib::method::get>(
                 "/redirect",
                 [](server::request&, server::response& resp)
-                { resp.set_redirect("/resource", http::status::moved_permanently); });
+                { resp.set_redirect("/resource", httplib::status::moved_permanently); });
         },
         [](auto& upstream_client, auto& proxy_client) -> net::awaitable<void>
         {
             auto direct = UNWRAP(co_await upstream_client.async_get("/redirect"));
-            REQUIRE(direct.result() == http::status::moved_permanently);
+            REQUIRE(direct.result() == httplib::status::moved_permanently);
 
             auto resp = UNWRAP(co_await proxy_client.async_get("/api/redirect"));
-            REQUIRE(resp.result() == http::status::moved_permanently);
+            REQUIRE(resp.result() == httplib::status::moved_permanently);
         });
 }
 
@@ -538,7 +538,7 @@ TEST_CASE("proxy: forwards Cookie header unchanged", "[proxy]")
             auto u_port = u_ep.port();
             proxy.set_reverse_proxy("/api/*", std::format("http://{}:{}", u_host, u_port));
 
-            upstream.router().template set_http_handler<http::verb::get>(
+            upstream.router().template set_http_handler<httplib::method::get>(
                 "/check-cookie",
                 [](server::request& req, server::response& resp)
                 { resp.set_string_content(std::string(req["Cookie"]), "text/plain"); });
@@ -549,11 +549,11 @@ TEST_CASE("proxy: forwards Cookie header unchanged", "[proxy]")
             client::http_client c(pool.get_executor(), "127.0.0.1", proxy.local_endpoint().port());
             c.set_timeout(std::chrono::seconds(5));
 
-            auto hdrs = http::fields();
-            hdrs.set(http::field::cookie, "token=abc; Domain=upstream.com; Path=/api");
-            httplib::client::request req(http::verb::get, "/api/check-cookie", hdrs);
+            auto hdrs = httplib::headers();
+            hdrs.set(httplib::field::cookie, "token=abc; Domain=upstream.com; Path=/api");
+            httplib::client::request req(httplib::method::get, "/api/check-cookie", hdrs);
             auto resp = UNWRAP(co_await c.async_send_request(req));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             auto body = as_string(resp);
             // The Cookie request header is scoped per origin and must be forwarded
             // verbatim; Domain/Path are Set-Cookie attributes and must not be
@@ -591,10 +591,10 @@ TEST_CASE("proxy: rewrites Referer to upstream", "[proxy]")
             auto p_port = proxy.local_endpoint().port();
             proxy.set_reverse_proxy("/api/*", std::format("http://{}:{}", u_host, u_port));
 
-            upstream.router().template set_http_handler<http::verb::get>(
+            upstream.router().template set_http_handler<httplib::method::get>(
                 "/echo-referer",
                 [](server::request& req, server::response& resp)
-                { resp.set_string_content(std::string(req[http::field::referer]), "text/plain"); });
+                { resp.set_string_content(std::string(req[httplib::field::referer]), "text/plain"); });
 
             upstream.run();
             proxy.run();
@@ -602,11 +602,11 @@ TEST_CASE("proxy: rewrites Referer to upstream", "[proxy]")
             client::http_client c(pool.get_executor(), "127.0.0.1", p_port);
             c.set_timeout(std::chrono::seconds(5));
 
-            auto hdrs = http::fields();
-            hdrs.set(http::field::referer, std::format("http://127.0.0.1:{}/api/some-page?a=1&b=2#sec", p_port));
-            httplib::client::request req(http::verb::get, "/api/echo-referer", hdrs);
+            auto hdrs = httplib::headers();
+            hdrs.set(httplib::field::referer, std::format("http://127.0.0.1:{}/api/some-page?a=1&b=2#sec", p_port));
+            httplib::client::request req(httplib::method::get, "/api/echo-referer", hdrs);
             auto resp = UNWRAP(co_await c.async_send_request(req));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             auto body = as_string(resp);
             REQUIRE(body.find(u_host) != std::string::npos);
             REQUIRE(body.find("/some-page?a=1&b=2#sec") != std::string::npos);
@@ -641,7 +641,7 @@ TEST_CASE("proxy: forwards X-Forwarded-Proto and X-Forwarded-Host", "[proxy]")
             auto u_port = u_ep.port();
             proxy.set_reverse_proxy("/api/*", std::format("http://{}:{}", u_host, u_port));
 
-            upstream.router().template set_http_handler<http::verb::get>(
+            upstream.router().template set_http_handler<httplib::method::get>(
                 "/echo-headers",
                 [](server::request& req, server::response& resp)
                 {
@@ -657,7 +657,7 @@ TEST_CASE("proxy: forwards X-Forwarded-Proto and X-Forwarded-Host", "[proxy]")
             client::http_client c(pool.get_executor(), "127.0.0.1", proxy.local_endpoint().port());
             c.set_timeout(std::chrono::seconds(5));
             auto resp = UNWRAP(co_await c.async_get("/api/echo-headers"));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             auto body = as_string(resp);
             REQUIRE(body.find("proto=http") != std::string::npos);
             REQUIRE(body.find("host=127.0.0.1:") != std::string::npos);
@@ -695,17 +695,17 @@ TEST_CASE("proxy: rewrites redirect Location", "[proxy]")
             auto u_port = u_ep.port();
             proxy.set_reverse_proxy("/api/*", std::format("http://{}:{}", u_host, u_port));
 
-            upstream.router().template set_http_handler<http::verb::get>(
+            upstream.router().template set_http_handler<httplib::method::get>(
                 "/redirect-me",
                 [&](server::request&, server::response& resp)
                 {
                     resp.set_redirect(std::format("http://{}:{}/new-place", u_host, u_port),
-                                      http::status::moved_permanently);
+                                      httplib::status::moved_permanently);
                 });
-            upstream.router().template set_http_handler<http::verb::get>(
+            upstream.router().template set_http_handler<httplib::method::get>(
                 "/redirect-root",
                 [&](server::request&, server::response& resp)
-                { resp.set_redirect(std::format("http://{}:{}/", u_host, u_port), http::status::found); });
+                { resp.set_redirect(std::format("http://{}:{}/", u_host, u_port), httplib::status::found); });
 
             upstream.run();
             proxy.run();
@@ -715,11 +715,11 @@ TEST_CASE("proxy: rewrites redirect Location", "[proxy]")
             c.set_max_redirects(0);
 
             auto resp = UNWRAP(co_await c.async_get("/api/redirect-me"));
-            REQUIRE(resp.result() == http::status::moved_permanently);
+            REQUIRE(resp.result() == httplib::status::moved_permanently);
             REQUIRE(std::string(resp["Location"]) == "/api/new-place");
 
             auto resp2 = UNWRAP(co_await c.async_get("/api/redirect-root"));
-            REQUIRE(resp2.result() == http::status::found);
+            REQUIRE(resp2.result() == httplib::status::found);
             REQUIRE(std::string(resp2["Location"]) == "/api/");
 
             upstream.stop();
@@ -751,12 +751,12 @@ TEST_CASE("proxy: rewrites redirect Location with base path", "[proxy]")
             auto u_port = u_ep.port();
             proxy.set_reverse_proxy("/api/*", std::format("http://{}:{}/qqq", u_host, u_port));
 
-            upstream.router().template set_http_handler<http::verb::get>(
+            upstream.router().template set_http_handler<httplib::method::get>(
                 "/qqq/redirect-me",
                 [&](server::request&, server::response& resp)
                 {
                     resp.set_redirect(std::format("http://{}:{}/new-place", u_host, u_port),
-                                      http::status::moved_permanently);
+                                      httplib::status::moved_permanently);
                 });
 
             upstream.run();
@@ -767,7 +767,7 @@ TEST_CASE("proxy: rewrites redirect Location with base path", "[proxy]")
             c.set_max_redirects(0);
 
             auto resp = UNWRAP(co_await c.async_get("/api/redirect-me"));
-            REQUIRE(resp.result() == http::status::moved_permanently);
+            REQUIRE(resp.result() == httplib::status::moved_permanently);
             REQUIRE(std::string(resp["Location"]) == "/api/new-place");
 
             upstream.stop();
@@ -802,7 +802,7 @@ TEST_CASE("proxy: interceptor all steps called", "[proxy]")
             auto p_ep = proxy.local_endpoint();
             auto u_url = std::format("http://{}:{}", u_ep.address().to_string(), u_ep.port());
 
-            upstream.router().template set_http_handler<http::verb::post>(
+            upstream.router().template set_http_handler<httplib::method::post>(
                 "/echo",
                 [](server::request& req, server::response& resp)
                 { resp.set_string_content(std::string(req.as_string()), "text/plain"); });
@@ -817,7 +817,7 @@ TEST_CASE("proxy: interceptor all steps called", "[proxy]")
                 std::atomic<int>* resp_body_called;
 
                 net::awaitable<void>
-                on_upstream_request(server::request&, http::fields&, std::string const&) override
+                on_upstream_request(server::request&, httplib::headers&, std::string const&) override
                 {
                     (*req_called)++;
                     co_return;
@@ -829,7 +829,7 @@ TEST_CASE("proxy: interceptor all steps called", "[proxy]")
                     co_return;
                 }
                 net::awaitable<void>
-                on_upstream_response(server::request&, http::status, http::fields const&) override
+                on_upstream_response(server::request&, httplib::status, httplib::headers const&) override
                 {
                     (*resp_called)++;
                     co_return;
@@ -861,7 +861,7 @@ TEST_CASE("proxy: interceptor all steps called", "[proxy]")
             c.set_timeout(std::chrono::seconds(5));
             auto resp = UNWRAP(co_await c.async_post("/api/echo", std::string_view("hello"), "text/plain"sv));
 
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(as_string(resp) == "hello");
             REQUIRE(req_called.load() == 1);
             REQUIRE(req_body_called.load() >= 1);
@@ -1071,7 +1071,7 @@ TEST_CASE("ws-interceptor: messages intercepted", "[proxy][ws-forward]")
         std::atomic<int>* upstream_msg_called;
 
         net::awaitable<void>
-        on_upstream_request(server::request&, http::fields&, std::string const&) override
+        on_upstream_request(server::request&, httplib::headers&, std::string const&) override
         {
             (*req_called)++;
             co_return;
@@ -1230,16 +1230,16 @@ TEST_CASE("CONNECT: rejected by default", "[proxy]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/",
                 [](server::request&, server::response& resp) { resp.set_string_content("ok"sv, "text/plain"sv); });
         },
         [](auto& client) -> net::awaitable<void>
         {
             // 未注册任何 CONNECT 目标 => 路由未命中 => 404（默认拒绝，不会建立隧道）。
-            httplib::client::request req(http::verb::connect, "example.com:80");
+            httplib::client::request req(httplib::method::connect, "example.com:80");
             auto resp = UNWRAP(co_await client.async_send_request(req));
-            REQUIRE(resp.result() == http::status::not_found);
+            REQUIRE(resp.result() == httplib::status::not_found);
             co_return;
         });
 }
@@ -1261,13 +1261,13 @@ TEST_CASE("CONNECT: route handler can approve", "[proxy]")
                     REQUIRE(req.target() == "example.com:80");
                     handler_called = true;
                     // CONNECT 与普通方法一致：必须显式给出 2xx 才会放行进入隧道。
-                    resp.set_empty_content(http::status::ok);
+                    resp.set_empty_content(httplib::status::ok);
                     co_return;
                 });
         },
         [&](auto& client) -> net::awaitable<void>
         {
-            httplib::client::request req(http::verb::connect, "example.com:80");
+            httplib::client::request req(httplib::method::connect, "example.com:80");
             co_await client.async_send_request(req);
             REQUIRE(handler_called);
             co_return;
@@ -1285,15 +1285,15 @@ TEST_CASE("CONNECT: route handler can reject", "[proxy]")
             server.router().set_connect_handler("example.com:80",
                                                 [](server::request& req, server::response& resp) -> net::awaitable<void>
                                                 {
-                                                    resp.set_error_content(http::status::forbidden);
+                                                    resp.set_error_content(httplib::status::forbidden);
                                                     co_return;
                                                 });
         },
         [](auto& client) -> net::awaitable<void>
         {
-            httplib::client::request req(http::verb::connect, "example.com:80");
+            httplib::client::request req(httplib::method::connect, "example.com:80");
             auto resp = UNWRAP(co_await client.async_send_request(req));
-            REQUIRE(resp.result() == http::status::forbidden);
+            REQUIRE(resp.result() == httplib::status::forbidden);
             co_return;
         });
 }
@@ -1313,13 +1313,13 @@ TEST_CASE("CONNECT: wildcard handler matches any target", "[proxy]")
                 [&](server::request& req, server::response& resp) -> net::awaitable<void>
                 {
                     handler_called = true;
-                    resp.set_empty_content(http::status::ok);
+                    resp.set_empty_content(httplib::status::ok);
                     co_return;
                 });
         },
         [&](auto& client) -> net::awaitable<void>
         {
-            httplib::client::request req(http::verb::connect, "any.host:443");
+            httplib::client::request req(httplib::method::connect, "any.host:443");
             co_await client.async_send_request(req);
             REQUIRE(handler_called);
             co_return;
@@ -1337,16 +1337,16 @@ TEST_CASE("CONNECT: path-specific handlers don't interfere", "[proxy]")
             server.router().set_connect_handler("allowed.host:80",
                                                 [](server::request&, server::response& resp) -> net::awaitable<void>
                                                 {
-                                                    resp.set_empty_content(http::status::ok);
+                                                    resp.set_empty_content(httplib::status::ok);
                                                     co_return;
                                                 });
         },
         [](auto& client) -> net::awaitable<void>
         {
             // 只注册了 allowed.host:80；其它目标没有路由 => 404，不会被误放行。
-            httplib::client::request req(http::verb::connect, "other.host:80");
+            httplib::client::request req(httplib::method::connect, "other.host:80");
             auto resp = UNWRAP(co_await client.async_send_request(req));
-            REQUIRE(resp.result() == http::status::not_found);
+            REQUIRE(resp.result() == httplib::status::not_found);
             co_return;
         });
 }
@@ -1371,10 +1371,10 @@ TEST_CASE("CONNECT: empty handler does not tunnel (explicit 2xx required)", "[pr
         [&](auto& client) -> net::awaitable<void>
         {
             // handler 未设置状态 => 响应保持默认 404 => 不满足 <300，拒绝建隧。
-            httplib::client::request req(http::verb::connect, "any.host:443");
+            httplib::client::request req(httplib::method::connect, "any.host:443");
             auto resp = UNWRAP(co_await client.async_send_request(req));
             REQUIRE(handler_called);
-            REQUIRE(resp.result() == http::status::not_found);
+            REQUIRE(resp.result() == httplib::status::not_found);
             co_return;
         });
 }
@@ -1420,16 +1420,16 @@ TEST_CASE("CONNECT: global middleware, route Aspects and post-routing all run", 
                 [order](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     order->push_back("handler");
-                    resp.set_error_content(http::status::forbidden);
+                    resp.set_error_content(httplib::status::forbidden);
                     co_return;
                 },
                 order_mw { "route", order });
         },
         [&](auto& client) -> net::awaitable<void>
         {
-            httplib::client::request req(http::verb::connect, "example.com:80");
+            httplib::client::request req(httplib::method::connect, "example.com:80");
             auto resp = UNWRAP(co_await client.async_send_request(req));
-            REQUIRE(resp.result() == http::status::forbidden);
+            REQUIRE(resp.result() == httplib::status::forbidden);
             REQUIRE(*order
                     == std::vector<std::string> { "global_before",
                                                   "route_before",
@@ -1479,7 +1479,7 @@ TEST_CASE("CONNECT: tunnel forwards data bidirectionally", "[proxy]")
         [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
         {
             // 显式放行：2xx 才会建立隧道。
-            resp.set_empty_content(http::status::ok);
+            resp.set_empty_content(httplib::status::ok);
             co_return;
         });
     proxy.listen("127.0.0.1", 0);
@@ -1528,7 +1528,7 @@ TEST_CASE("proxy: chunked request body forwarded", "[proxy]")
     run_proxy(
         [](auto& upstream)
         {
-            upstream.router().template set_http_handler<http::verb::post>(
+            upstream.router().template set_http_handler<httplib::method::post>(
                 "/echo",
                 [](server::request& req, server::response& resp)
                 { resp.set_string_content(as_string(req), "text/plain"); });
@@ -1536,7 +1536,7 @@ TEST_CASE("proxy: chunked request body forwarded", "[proxy]")
         [](auto& upstream_client, auto& proxy_client) -> net::awaitable<void>
         {
             auto writer = proxy_client.create_lazy_request();
-            co_await writer->write_header(http::verb::post,
+            co_await writer->write_header(httplib::method::post,
                                           "/api/echo",
                                           {},
                                           httplib::client::lazy_request::mode::chunked);
@@ -1544,7 +1544,7 @@ TEST_CASE("proxy: chunked request body forwarded", "[proxy]")
             co_await writer->write_body(net::buffer(std::string(" World")), false);
             auto resp = co_await writer->read_response_lazy();
             REQUIRE(resp.has_value());
-            REQUIRE(resp->result() == http::status::ok);
+            REQUIRE(resp->result() == httplib::status::ok);
             auto body_res = co_await resp->read_string();
             REQUIRE(body_res.has_value());
             REQUIRE(*body_res == "Hello World");
@@ -1556,23 +1556,23 @@ TEST_CASE("proxy: Set-Cookie Domain dropped for IP public host", "[proxy]")
     run_proxy(
         [](auto& upstream)
         {
-            upstream.router().template set_http_handler<http::verb::get>(
+            upstream.router().template set_http_handler<httplib::method::get>(
                 "/set-cookie",
                 [](server::request&, server::response& resp)
                 {
-                    resp.base().insert(http::field::set_cookie, "sid=abc; Domain=upstream.internal; Path=/api");
-                    resp.base().insert(http::field::set_cookie, "theme=dark; Path=/");
+                    resp.base().insert(httplib::field::set_cookie, "sid=abc; Domain=upstream.internal; Path=/api");
+                    resp.base().insert(httplib::field::set_cookie, "theme=dark; Path=/");
                     resp.set_string_content("ok"sv, "text/plain"sv);
                 });
         },
         [](auto& upstream_client, auto& proxy_client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await proxy_client.async_get("/api/set-cookie"));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             std::vector<std::string> cookies;
             for (auto const& f : resp.base())
             {
-                if (f.name() == http::field::set_cookie)
+                if (f.name() == httplib::field::set_cookie)
                 {
                     cookies.push_back(std::string(f.value()));
                 }
@@ -1620,11 +1620,11 @@ TEST_CASE("proxy: Set-Cookie Domain rewritten to public hostname", "[proxy]")
         {
             upstream = std::make_unique<server::http_server>(ioc.get_executor());
             proxy = std::make_unique<server::http_server>(ioc.get_executor());
-            upstream->router().template set_http_handler<http::verb::get>(
+            upstream->router().template set_http_handler<httplib::method::get>(
                 "/set-cookie",
                 [](server::request&, server::response& resp)
                 {
-                    resp.base().insert(http::field::set_cookie, "sid=abc; Domain=upstream.internal; Path=/api");
+                    resp.base().insert(httplib::field::set_cookie, "sid=abc; Domain=upstream.internal; Path=/api");
                     resp.set_string_content(std::string_view("ok"), "text/plain");
                 });
             upstream->listen("127.0.0.1", 0);

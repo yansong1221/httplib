@@ -1,6 +1,9 @@
 #include "httplib/server/request.hpp"
 #include "httplib/util/misc.hpp"
+#include "headers_impl.hpp"
 #include "request_impl.hpp"
+#include "beast_alias.hpp"
+#include "enum_conv.hpp"
 
 namespace httplib::server
 {
@@ -16,37 +19,42 @@ namespace httplib::server
         return *this;
     }
     request::~request() {}
-    http::verb
+
+    httplib::method
     request::method() const
     {
-        return impl_->get().method();
+        return enum_conv::to_method(impl_->get().method());
     }
+
     std::string_view
     request::method_string() const
     {
         return impl_->get().method_string();
     }
+
     std::string_view
     request::target() const
     {
         return impl_->get().target();
     }
-    httplib::http::fields&
+
+    httplib::headers
     request::base()
     {
-        return impl_->get();
+        return httplib::detail::headers_access::borrow(impl_->get());
     }
 
-    httplib::http::fields const&
+    httplib::headers
     request::base() const
     {
-        return impl_->get();
+        // unique_ptr 的 const 不传递到被指对象，impl_ 可变，视图直接借用消息的字段集合。
+        return httplib::detail::headers_access::borrow(impl_->get());
     }
 
     std::string_view
-    request::operator[](http::field name) const
+    request::operator[](httplib::field name) const
     {
-        return impl_->get()[name];
+        return impl_->get()[enum_conv::to_field(name)];
     }
 
     std::string_view
@@ -56,9 +64,9 @@ namespace httplib::server
     }
 
     std::string_view
-    request::at(http::field name) const
+    request::at(httplib::field name) const
     {
-        return impl_->get().at(name);
+        return impl_->get().at(enum_conv::to_field(name));
     }
 
     std::string_view
@@ -68,15 +76,27 @@ namespace httplib::server
     }
 
     bool
-    request::has(http::field name) const
+    request::has(httplib::field name) const
     {
-        return impl_->get().find(name) != impl_->get().end();
+        return impl_->get().find(enum_conv::to_field(name)) != impl_->get().end();
     }
 
     bool
     request::has(std::string_view name) const
     {
         return impl_->get().find(name) != impl_->get().end();
+    }
+
+    std::size_t
+    request::count(httplib::field name) const
+    {
+        return impl_->get().count(enum_conv::to_field(name));
+    }
+
+    std::size_t
+    request::count(std::string_view name) const
+    {
+        return impl_->get().count(name);
     }
 
     std::string_view

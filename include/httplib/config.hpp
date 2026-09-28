@@ -15,16 +15,6 @@ namespace boost
         }
     } // namespace asio
 
-    namespace beast
-    {
-        namespace http
-        {
-        }
-        namespace websocket
-        {
-        }
-    } // namespace beast
-
 } // namespace boost
 
 namespace spdlog
@@ -35,12 +25,12 @@ namespace spdlog
 namespace httplib
 {
 
+    // 公共面上刻意没有 boost::beast 的别名：公共 API 不出现 Beast，beast 的别名
+    // 在 lib/beast_alias.hpp。Asio 的别名保留，因为 net::awaitable 是本库公开的
+    // 协程模型。
     namespace net = boost::asio;
     namespace ssl = boost::asio::ssl;
     using tcp = net::ip::tcp;
-    namespace beast = boost::beast;
-    namespace http = beast::http;
-    namespace websocket = beast::websocket;
     namespace fs = std::filesystem;
 
 } // namespace httplib

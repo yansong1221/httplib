@@ -7,6 +7,7 @@
 #include <atomic>
 #include <mutex>
 #include <random>
+#include "beast_alias.hpp"
 
 namespace httplib::server::middleware
 {
@@ -229,7 +230,7 @@ namespace httplib::server::middleware
             ck.http_only = cfg.http_only;
             ck.secure = cfg.secure;
             ck.same_site = cfg.same_site;
-            resp.base().insert(http::field::set_cookie, ck.to_set_cookie_string());
+            resp.base().insert(field::set_cookie, ck.to_set_cookie_string());
         }
     };
 
@@ -311,7 +312,7 @@ namespace httplib::server::middleware
     bool
     session_middleware::before(request& req, response&)
     {
-        auto jar = html::cookie_jar::parse(req[http::field::cookie]);
+        auto jar = html::cookie_jar::parse(req[field::cookie]);
         auto sid = jar.get(impl_->config_.cookie_name);
         auto sess = sid ? impl_->store_->load(*sid) : nullptr;
 

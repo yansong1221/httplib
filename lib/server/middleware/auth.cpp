@@ -1,6 +1,7 @@
 #include "httplib/server/middleware/auth.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
+#include "beast_alias.hpp"
 
 namespace httplib::server::middleware
 {
@@ -78,7 +79,7 @@ namespace httplib::server::middleware
     bool
     basic_auth_middleware::before(request& req, response& resp)
     {
-        auto auth = std::string(req.base()[http::field::authorization]);
+        auto auth = std::string(req.base()[field::authorization]);
         if (auth.starts_with("Basic "))
         {
             auto creds = base64_decode(std::string_view(auth).substr(6));
@@ -92,12 +93,12 @@ namespace httplib::server::middleware
             }
         }
 
-        resp.set(http::field::www_authenticate, std::string("Basic realm=\"") + impl_->realm_ + '"');
+        resp.set(field::www_authenticate, std::string("Basic realm=\"") + impl_->realm_ + '"');
         resp.set_json_content(
             {
                 { "error", "unauthorized" }
         },
-            http::status::unauthorized);
+            status::unauthorized);
         return false;
     }
 
@@ -138,7 +139,7 @@ namespace httplib::server::middleware
     bool
     bearer_auth_middleware::before(request& req, response& resp)
     {
-        auto auth = std::string(req.base()[http::field::authorization]);
+        auto auth = std::string(req.base()[field::authorization]);
         if (auth.starts_with("Bearer "))
         {
             auto token = std::string_view(auth).substr(7);
@@ -148,12 +149,12 @@ namespace httplib::server::middleware
             }
         }
 
-        resp.set(http::field::www_authenticate, std::string("Bearer realm=\"") + impl_->realm_ + '"');
+        resp.set(field::www_authenticate, std::string("Bearer realm=\"") + impl_->realm_ + '"');
         resp.set_json_content(
             {
                 { "error", "unauthorized" }
         },
-            http::status::unauthorized);
+            status::unauthorized);
         return false;
     }
 

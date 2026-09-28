@@ -5,6 +5,7 @@
 #include <boost/algorithm/string/join.hpp>
 #include <boost/beast/version.hpp>
 #include <string_view>
+#include "beast_alias.hpp"
 
 namespace httplib::client
 {

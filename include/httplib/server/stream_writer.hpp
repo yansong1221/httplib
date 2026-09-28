@@ -1,8 +1,7 @@
 #pragma once
 #include "httplib/config.hpp"
+#include "httplib/headers.hpp"
 #include <boost/asio/awaitable.hpp>
-#include <boost/beast/http/fields.hpp>
-#include <boost/beast/http/status.hpp>
 #include <boost/system/error_code.hpp>
 
 namespace httplib::server
@@ -21,9 +20,9 @@ namespace httplib::server
             chunked,
         };
 
-        virtual net::awaitable<void> write_header(http::status status, http::fields const& headers, mode m) = 0;
-        virtual net::awaitable<void> write_header(http::status status,
-                                                  http::fields const& headers,
+        virtual net::awaitable<void> write_header(httplib::status status, httplib::headers const& headers, mode m) = 0;
+        virtual net::awaitable<void> write_header(httplib::status status,
+                                                  httplib::headers const& headers,
                                                   mode m,
                                                   boost::system::error_code& ec)
             = 0;

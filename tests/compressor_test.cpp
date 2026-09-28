@@ -6,7 +6,6 @@
 #include <vector>
 
 namespace body = httplib::body;
-namespace http = httplib::http;
 
 TEST_CASE("Compressor: factory instance is singleton", "[compressor]")
 {

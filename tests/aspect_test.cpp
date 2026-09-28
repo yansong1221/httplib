@@ -13,9 +13,9 @@ namespace
     using test_common::setup_logger;
 
     void
-    set_text(httplib::server::response& resp, std::string_view body, http::status status = http::status::ok)
+    set_text(httplib::server::response& resp, std::string_view body, httplib::status st = httplib::status::ok)
     {
-        resp.set_string_content(body, "text/plain"sv, status);
+        resp.set_string_content(body, "text/plain"sv, st);
     }
 
 } // namespace
@@ -46,7 +46,7 @@ TEST_CASE("Aspect: before and after are called", "[aspect]")
     run(
         [&](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/aspect",
                 [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "handler"); },
                 logging_aspect { log });
@@ -54,7 +54,7 @@ TEST_CASE("Aspect: before and after are called", "[aspect]")
         [&](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/aspect"));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(as_string(resp) == "handler");
             REQUIRE(log == "before;after;");
         });
@@ -67,7 +67,7 @@ TEST_CASE("Aspect: before returning false stops handler chain", "[aspect]")
         bool
         before(httplib::server::request&, httplib::server::response& resp)
         {
-            resp.set_string_content("blocked"sv, "text/plain"sv, http::status::forbidden);
+            resp.set_string_content("blocked"sv, "text/plain"sv, httplib::status::forbidden);
             return false;
         }
         bool
@@ -80,7 +80,7 @@ TEST_CASE("Aspect: before returning false stops handler chain", "[aspect]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/blocked",
                 [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "should-not-reach"); },
                 blocking_aspect {});
@@ -88,7 +88,7 @@ TEST_CASE("Aspect: before returning false stops handler chain", "[aspect]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/blocked"));
-            REQUIRE(resp.result() == http::status::forbidden);
+            REQUIRE(resp.result() == httplib::status::forbidden);
             REQUIRE(as_string(resp) == "blocked");
         });
 }
@@ -134,7 +134,7 @@ TEST_CASE("Aspect: multiple aspects chain in order", "[aspect]")
     run(
         [&](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/multi-aspect",
                 [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "ok"); },
                 aspect_a { order },
@@ -143,7 +143,7 @@ TEST_CASE("Aspect: multiple aspects chain in order", "[aspect]")
         [&](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/multi-aspect"));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(order == "A.before;B.before;A.after;B.after;");
         });
 }
@@ -156,13 +156,13 @@ TEST_CASE("Aspect: 404 handler also supports aspects", "[aspect]")
         [&](auto& server)
         {
             server.router().set_http_not_found_handler([](httplib::server::request&, httplib::server::response& resp)
-                                                       { set_text(resp, "custom-404", http::status::not_found); },
+                                                       { set_text(resp, "custom-404", httplib::status::not_found); },
                                                        logging_aspect { log });
         },
         [&](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/non-existent"));
-            REQUIRE(resp.result() == http::status::not_found);
+            REQUIRE(resp.result() == httplib::status::not_found);
             REQUIRE(as_string(resp) == "custom-404");
             REQUIRE(log == "before;after;");
         });

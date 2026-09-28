@@ -14,6 +14,7 @@
 #include <cstring>
 #include <filesystem>
 #include <functional>
+#include "beast_alias.hpp"
 
 namespace httplib::server
 {

@@ -3,11 +3,12 @@
 #include "httplib/client/stream_reader.hpp"
 #include "httplib/config.hpp"
 #include "httplib/form_data.hpp"
+#include "httplib/headers.hpp"
 #include "httplib/query_params.hpp"
 #include <boost/asio/awaitable.hpp>
-#include <boost/beast/http/fields.hpp>
 #include <boost/json/value.hpp>
 #include <boost/system/result.hpp>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -26,14 +27,22 @@ namespace httplib::client
         response& operator=(response&&) noexcept;
         ~response();
 
-        http::status result() const;
+        httplib::status result() const;
         unsigned result_int() const;
-        std::string_view operator[](http::field name) const;
+        std::string_view operator[](httplib::field name) const;
         std::string_view operator[](std::string_view name) const;
-        http::fields const& headers() const;
-        http::fields& headers();
-        http::fields const& base() const;
-        http::fields& base();
+        std::string_view at(httplib::field name) const;
+        std::string_view at(std::string_view name) const;
+        bool has(httplib::field name) const;
+        bool has(std::string_view name) const;
+        /// 该响应头出现的次数（1 = 无重复头）。
+        std::size_t count(httplib::field name) const;
+        std::size_t count(std::string_view name) const;
+        /// 全部响应头。返回的是「借用」视图，不拥有数据。
+        httplib::headers headers() const;
+        httplib::headers headers();
+        httplib::headers base() const;
+        httplib::headers base();
 
         /// Content-Length（由 beast 解析所得），无该字段或非法时为空。
         std::optional<std::uint64_t> content_length() const;

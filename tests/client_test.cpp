@@ -174,7 +174,7 @@ TEST_CASE("client: pool acquire and use", "[client]")
     run_pool(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/echo",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 { resp.set_string_content(std::string(req.query_params().at("msg")), "text/plain"); });
@@ -184,7 +184,7 @@ TEST_CASE("client: pool acquire and use", "[client]")
             auto handle = co_await pool.async_acquire(ep.address().to_string(), ep.port(), httplib::url::scheme::plain);
             REQUIRE(handle);
             auto resp = UNWRAP(co_await handle->async_get("/echo", make_params()));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(resp.as_string() == "hello");
         });
 }
@@ -194,7 +194,7 @@ TEST_CASE("client: pool multiple acquires", "[client]")
     run_pool(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/echo",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 { resp.set_string_content(std::string(req.query_params().at("msg")), "text/plain"); });
@@ -210,9 +210,9 @@ TEST_CASE("client: pool multiple acquires", "[client]")
             auto r1 = UNWRAP(co_await h1->async_get("/echo", make_params()));
             auto r2 = UNWRAP(co_await h2->async_get("/echo", make_params()));
             auto r3 = UNWRAP(co_await h3->async_get("/echo", make_params()));
-            REQUIRE(r1.result() == http::status::ok);
-            REQUIRE(r2.result() == http::status::ok);
-            REQUIRE(r3.result() == http::status::ok);
+            REQUIRE(r1.result() == httplib::status::ok);
+            REQUIRE(r2.result() == httplib::status::ok);
+            REQUIRE(r3.result() == httplib::status::ok);
         });
 }
 
@@ -221,7 +221,7 @@ TEST_CASE("client: pool connection reuse", "[client]")
     run_pool(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/echo",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 { resp.set_string_content(std::string(req.query_params().at("msg")), "text/plain"); });
@@ -236,7 +236,7 @@ TEST_CASE("client: pool connection reuse", "[client]")
             auto h2 = co_await pool.async_acquire(ep.address().to_string(), ep.port(), httplib::url::scheme::plain);
             REQUIRE(h2.get() == raw);
             auto resp = UNWRAP(co_await h2->async_get("/echo", make_params()));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
         });
 }
 
@@ -245,7 +245,7 @@ TEST_CASE("client: pool closed connection reusable", "[client]")
     run_pool(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/echo",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 { resp.set_string_content(std::string(req.query_params().at("msg")), "text/plain"); });
@@ -259,7 +259,7 @@ TEST_CASE("client: pool closed connection reusable", "[client]")
             }
             auto h2 = co_await pool.async_acquire(ep.address().to_string(), ep.port(), httplib::url::scheme::plain);
             auto resp = UNWRAP(co_await h2->async_get("/echo", make_params()));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
         });
 }
 
@@ -272,7 +272,7 @@ TEST_CASE("client: close and is_open", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/echo",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 { resp.set_string_content(std::string(req.query_params().at("msg")), "text/plain"); });
@@ -280,7 +280,7 @@ TEST_CASE("client: close and is_open", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/echo", make_params()));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(client.is_open());
             client.close();
             REQUIRE_FALSE(client.is_open());
@@ -292,7 +292,7 @@ TEST_CASE("client: host and port", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/echo",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 { resp.set_string_content(std::string(req.query_params().at("msg")), "text/plain"); });
@@ -302,7 +302,7 @@ TEST_CASE("client: host and port", "[client]")
             REQUIRE(client.host() == "127.0.0.1");
             REQUIRE(client.port() > 0);
             auto resp = UNWRAP(co_await client.async_get("/echo", make_params()));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
         });
 }
 
@@ -316,7 +316,7 @@ TEST_CASE("client: URL constructor", "[client]")
         {
             httplib::server::http_server server(pool.get_executor());
             setup_logger(server);
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/url-test",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("url-ok"sv, "text/plain"); });
@@ -327,7 +327,7 @@ TEST_CASE("client: URL constructor", "[client]")
             httplib::client::http_client client(pool.get_executor(), url);
             client.set_timeout(std::chrono::seconds(5));
             auto resp = UNWRAP(co_await client.async_get("/url-test"));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             server.stop();
         },
         [&](std::exception_ptr e) { err = e; });
@@ -361,7 +361,7 @@ TEST_CASE("client: GET with query params", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/echo",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 { resp.set_string_content(std::string(req.query_params().at("msg")), "text/plain"); });
@@ -369,7 +369,7 @@ TEST_CASE("client: GET with query params", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/echo", make_params()));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(resp.as_string() == "hello");
         });
 }
@@ -379,20 +379,20 @@ TEST_CASE("client: HEAD request", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::head>(
+            server.router().template set_http_handler<httplib::method::head>(
                 "/head-test",
                 [](httplib::server::request&, httplib::server::response& resp)
                 {
-                    resp.set(http::field::content_type, "text/plain");
-                    resp.set(http::field::content_length, "4");
-                    resp.set_empty_content(http::status::ok);
+                    resp.set(httplib::field::content_type, "text/plain");
+                    resp.set(httplib::field::content_length, "4");
+                    resp.set_empty_content(httplib::status::ok);
                 });
         },
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_head("/head-test"));
-            REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(resp[http::field::content_type] == "text/plain");
+            REQUIRE(resp.result() == httplib::status::ok);
+            REQUIRE(resp[httplib::field::content_type] == "text/plain");
         });
 }
 
@@ -401,7 +401,7 @@ TEST_CASE("client: POST string body", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::post>(
+            server.router().template set_http_handler<httplib::method::post>(
                 "/post-echo",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 { resp.set_string_content(req.as_string(), "text/plain"); });
@@ -409,7 +409,7 @@ TEST_CASE("client: POST string body", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_post("/post-echo", std::string_view("post-body"), "text/plain"sv));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
         });
 }
 
@@ -418,12 +418,12 @@ TEST_CASE("client: POST JSON body", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::post>(
+            server.router().template set_http_handler<httplib::method::post>(
                 "/json-echo",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
                     auto val = req.as_json();
-                    resp.set_json_content(val, http::status::ok);
+                    resp.set_json_content(val, httplib::status::ok);
                 });
         },
         [](auto& client) -> net::awaitable<void>
@@ -433,7 +433,7 @@ TEST_CASE("client: POST JSON body", "[client]")
                 { "num",      42 }
             };
             auto resp = UNWRAP(co_await client.async_post("/json-echo", std::move(body)));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             auto val = resp.as_json();
             REQUIRE(val.at("key") == "value");
             REQUIRE(val.at("num") == 42);
@@ -445,7 +445,7 @@ TEST_CASE("client: PUT string body", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::put>(
+            server.router().template set_http_handler<httplib::method::put>(
                 "/put-echo",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 { resp.set_string_content(req.as_string(), "text/plain"); });
@@ -453,7 +453,7 @@ TEST_CASE("client: PUT string body", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_put("/put-echo", std::string_view("put-data"), "text/plain"sv));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
         });
 }
 
@@ -462,7 +462,7 @@ TEST_CASE("client: PATCH string body", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::patch>(
+            server.router().template set_http_handler<httplib::method::patch>(
                 "/patch-echo",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 { resp.set_string_content(req.as_string(), "text/plain"); });
@@ -471,7 +471,7 @@ TEST_CASE("client: PATCH string body", "[client]")
         {
             auto resp
                 = UNWRAP(co_await client.async_patch("/patch-echo", std::string_view("patch-data"), "text/plain"sv));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
         });
 }
 
@@ -480,7 +480,7 @@ TEST_CASE("client: DELETE request", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::delete_>(
+            server.router().template set_http_handler<httplib::method::delete_>(
                 "/delete-test",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("deleted"sv, "text/plain"); });
@@ -488,7 +488,7 @@ TEST_CASE("client: DELETE request", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_del("/delete-test"));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
         });
 }
 
@@ -497,19 +497,19 @@ TEST_CASE("client: OPTIONS request", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::options>(
+            server.router().template set_http_handler<httplib::method::options>(
                 "/options-test",
                 [](httplib::server::request&, httplib::server::response& resp)
                 {
-                    resp.set(http::field::allow, "GET, POST, OPTIONS");
-                    resp.set_empty_content(http::status::ok);
+                    resp.set(httplib::field::allow, "GET, POST, OPTIONS");
+                    resp.set_empty_content(httplib::status::ok);
                 });
         },
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_options("/options-test"));
-            REQUIRE(resp.result() == http::status::ok);
-            REQUIRE(!resp[http::field::allow].empty());
+            REQUIRE(resp.result() == httplib::status::ok);
+            REQUIRE(!resp[httplib::field::allow].empty());
         });
 }
 
@@ -522,15 +522,15 @@ TEST_CASE("client: 204 No Content", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/empty-204",
                 [](httplib::server::request&, httplib::server::response& resp)
-                { resp.set_empty_content(http::status::no_content); });
+                { resp.set_empty_content(httplib::status::no_content); });
         },
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/empty-204"));
-            REQUIRE(resp.result() == http::status::no_content);
+            REQUIRE(resp.result() == httplib::status::no_content);
         });
 }
 
@@ -539,15 +539,15 @@ TEST_CASE("client: 304 Not Modified", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/not-modified",
                 [](httplib::server::request&, httplib::server::response& resp)
-                { resp.set_empty_content(http::status::not_modified); });
+                { resp.set_empty_content(httplib::status::not_modified); });
         },
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/not-modified"));
-            REQUIRE(resp.result() == http::status::not_modified);
+            REQUIRE(resp.result() == httplib::status::not_modified);
         });
 }
 
@@ -557,7 +557,7 @@ TEST_CASE("client: 404 Not Found", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/non-existent"));
-            REQUIRE(resp.result() == http::status::not_found);
+            REQUIRE(resp.result() == httplib::status::not_found);
         });
 }
 
@@ -570,7 +570,7 @@ TEST_CASE("client: timeout_policy step", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/echo",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 { resp.set_string_content(std::string(req.query_params().at("msg")), "text/plain"); });
@@ -580,7 +580,7 @@ TEST_CASE("client: timeout_policy step", "[client]")
             client.set_timeout_policy(httplib::client::http_client::timeout_policy::step);
             client.set_timeout(std::chrono::seconds(2));
             auto resp = UNWRAP(co_await client.async_get("/echo", make_params()));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
         });
 }
 
@@ -589,7 +589,7 @@ TEST_CASE("client: timeout_policy never", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/echo",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 { resp.set_string_content(std::string(req.query_params().at("msg")), "text/plain"); });
@@ -598,7 +598,7 @@ TEST_CASE("client: timeout_policy never", "[client]")
         {
             client.set_timeout_policy(httplib::client::http_client::timeout_policy::never);
             auto resp = UNWRAP(co_await client.async_get("/echo", make_params()));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
         });
 }
 
@@ -611,14 +611,14 @@ TEST_CASE("client: chunked transfer via sessions", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/chunked",
                 [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
                 {
                     auto cw = resp.create_stream_writer();
-                    http::fields headers;
-                    headers.set(http::field::content_type, "text/plain");
-                    co_await cw->write_header(http::status::ok, headers, httplib::server::stream_writer::mode::chunked);
+                    httplib::headers headers;
+                    headers.set(httplib::field::content_type, "text/plain");
+                    co_await cw->write_header(httplib::status::ok, headers, httplib::server::stream_writer::mode::chunked);
                     for (int i = 0; i < 5; ++i)
                     {
                         co_await cw->write_body(net::buffer(std::string("Chunk") + std::to_string(i)), i < 4);
@@ -628,7 +628,7 @@ TEST_CASE("client: chunked transfer via sessions", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             auto writer = client.create_lazy_request();
-            co_await writer->write_header(http::verb::get, "/chunked", {}, httplib::client::lazy_request::mode::relay);
+            co_await writer->write_header(httplib::method::get, "/chunked", {}, httplib::client::lazy_request::mode::relay);
             co_await writer->write_body(net::buffer("", 0), false);
 
             auto resp = UNWRAP(co_await writer->read_response_lazy());
@@ -644,7 +644,7 @@ TEST_CASE("client: chunked transfer via sessions", "[client]")
                 }
                 streamed.append(buf.data(), result);
             }
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(streamed == "Chunk0Chunk1Chunk2Chunk3Chunk4");
         });
 }
@@ -654,7 +654,7 @@ TEST_CASE("client: lazy request reads full response", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::post>(
+            server.router().template set_http_handler<httplib::method::post>(
                 "/echo-full",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
@@ -665,14 +665,14 @@ TEST_CASE("client: lazy request reads full response", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             auto writer = client.create_lazy_request();
-            co_await writer->write_header(http::verb::post,
+            co_await writer->write_header(httplib::method::post,
                                           "/echo-full",
                                           {},
                                           httplib::client::lazy_request::mode::chunked);
             co_await writer->write_body(net::buffer(std::string_view("hello")), false);
 
             auto resp = UNWRAP(co_await writer->read_response());
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(resp.as_string() == "echo:hello");
         });
 }
@@ -682,7 +682,7 @@ TEST_CASE("client: has_active_session after request", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/simple",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("ok"sv, "text/plain"); });
@@ -690,7 +690,7 @@ TEST_CASE("client: has_active_session after request", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/simple"));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE_FALSE(client.has_active_session());
         });
 }
@@ -710,14 +710,14 @@ TEST_CASE("client: download to file", "[client]")
     run(
         [&](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/dl-file",
                 [&](httplib::server::request&, httplib::server::response& resp) { resp.set_file_content(srv); });
         },
         [&](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_download(http::verb::get, "/dl-file", dl));
-            REQUIRE(resp.result() == http::status::ok);
+            auto resp = UNWRAP(co_await client.async_download(httplib::method::get, "/dl-file", dl));
+            REQUIRE(resp.result() == httplib::status::ok);
             std::ifstream f(dl, std::ios::binary);
             REQUIRE(f.is_open());
             std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
@@ -750,14 +750,14 @@ TEST_CASE("client: download randomized round-trip", "[client]")
         run(
             [&](auto& server)
             {
-                server.router().template set_http_handler<http::verb::get>(
+                server.router().template set_http_handler<httplib::method::get>(
                     "/dl-fuzz",
                     [&](httplib::server::request&, httplib::server::response& resp) { resp.set_file_content(srv); });
             },
             [&](auto& client) -> net::awaitable<void>
             {
-                auto resp = UNWRAP(co_await client.async_download(http::verb::get, "/dl-fuzz", dl));
-                REQUIRE(resp.result() == http::status::ok);
+                auto resp = UNWRAP(co_await client.async_download(httplib::method::get, "/dl-fuzz", dl));
+                REQUIRE(resp.result() == httplib::status::ok);
                 std::ifstream f(dl, std::ios::binary);
                 std::string received((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
                 REQUIRE(received == sent);
@@ -778,17 +778,17 @@ TEST_CASE("client: download with Range", "[client]")
     run(
         [&](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/dl-range",
                 [&](httplib::server::request& req, httplib::server::response& resp)
                 { resp.set_file_content(srv, req.base()); });
         },
         [&](auto& client) -> net::awaitable<void>
         {
-            auto hdrs = httplib::http::fields();
-            hdrs.set(http::field::range, "bytes=0-4");
-            auto resp = UNWRAP(co_await client.async_download(http::verb::get, "/dl-range", dl, hdrs));
-            REQUIRE(resp.result() == http::status::partial_content);
+            auto hdrs = httplib::headers();
+            hdrs.set(httplib::field::range, "bytes=0-4");
+            auto resp = UNWRAP(co_await client.async_download(httplib::method::get, "/dl-range", dl, hdrs));
+            REQUIRE(resp.result() == httplib::status::partial_content);
             std::ifstream f(dl, std::ios::binary);
             REQUIRE(f.is_open());
             std::string content((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
@@ -807,11 +807,11 @@ TEST_CASE("client: follows 302 redirect", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/redirect-me",
                 [](httplib::server::request&, httplib::server::response& resp)
-                { resp.set_redirect("/target", http::status::found); });
-            server.router().template set_http_handler<http::verb::get>(
+                { resp.set_redirect("/target", httplib::status::found); });
+            server.router().template set_http_handler<httplib::method::get>(
                 "/target",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("arrived"sv, "text/plain"sv); });
@@ -820,7 +820,7 @@ TEST_CASE("client: follows 302 redirect", "[client]")
         {
             client.set_max_redirects(5);
             auto resp = UNWRAP(co_await client.async_get("/redirect-me"));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(resp.as_string() == "arrived");
         });
 }
@@ -830,16 +830,16 @@ TEST_CASE("client: redirect loop limited", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/loop",
                 [](httplib::server::request&, httplib::server::response& resp)
-                { resp.set_redirect("/loop", http::status::found); });
+                { resp.set_redirect("/loop", httplib::status::found); });
         },
         [](auto& client) -> net::awaitable<void>
         {
             client.set_max_redirects(3);
             auto resp = UNWRAP(co_await client.async_get("/loop"));
-            REQUIRE(resp.result() == http::status::found);
+            REQUIRE(resp.result() == httplib::status::found);
         });
 }
 
@@ -848,14 +848,14 @@ TEST_CASE("client: redirect full URL", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ext-redirect",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
                     auto port = req.local_endpoint().port();
-                    resp.set_redirect(std::format("http://127.0.0.1:{}/target-page", port), http::status::found);
+                    resp.set_redirect(std::format("http://127.0.0.1:{}/target-page", port), httplib::status::found);
                 });
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/target-page",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("target-reached"sv, "text/plain"); });
@@ -864,7 +864,7 @@ TEST_CASE("client: redirect full URL", "[client]")
         {
             client.set_max_redirects(1);
             auto resp = UNWRAP(co_await client.async_get("/ext-redirect"));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
         });
 }
 
@@ -881,12 +881,12 @@ TEST_CASE("client: strips sensitive headers on cross-origin redirect", "[client]
         {
             httplib::server::http_server target(pool.get_executor());
             setup_logger(target);
-            target.router().template set_http_handler<http::verb::get>(
+            target.router().template set_http_handler<httplib::method::get>(
                 "/target",
                 [&](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    leaked_auth = req.has(http::field::authorization);
-                    leaked_cookie = req.has(http::field::cookie);
+                    leaked_auth = req.has(httplib::field::authorization);
+                    leaked_cookie = req.has(httplib::field::cookie);
                     resp.set_string_content("target-ok"sv, "text/plain");
                 });
             target.listen("127.0.0.1", 0);
@@ -895,10 +895,10 @@ TEST_CASE("client: strips sensitive headers on cross-origin redirect", "[client]
 
             httplib::server::http_server origin(pool.get_executor());
             setup_logger(origin);
-            origin.router().template set_http_handler<http::verb::get>(
+            origin.router().template set_http_handler<httplib::method::get>(
                 "/start",
                 [&](httplib::server::request&, httplib::server::response& resp)
-                { resp.set_redirect(std::format("http://127.0.0.1:{}/target", target_port), http::status::found); });
+                { resp.set_redirect(std::format("http://127.0.0.1:{}/target", target_port), httplib::status::found); });
             origin.listen("127.0.0.1", 0);
             auto origin_port = origin.local_endpoint().port();
             origin.run();
@@ -907,11 +907,11 @@ TEST_CASE("client: strips sensitive headers on cross-origin redirect", "[client]
             client.set_timeout(std::chrono::seconds(5));
             client.set_max_redirects(2);
 
-            auto req = httplib::client::request(http::verb::get, "/start");
-            req.set(http::field::authorization, "Bearer secret");
-            req.set(http::field::cookie, "session=abc");
+            auto req = httplib::client::request(httplib::method::get, "/start");
+            req.set(httplib::field::authorization, "Bearer secret");
+            req.set(httplib::field::cookie, "session=abc");
             auto resp = UNWRAP(co_await client.async_send_request(req));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(resp.as_string() == "target-ok");
             REQUIRE_FALSE(leaked_auth.load());
             REQUIRE_FALSE(leaked_cookie.load());
@@ -966,7 +966,7 @@ TEST_CASE("client: async_send_request with headers", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/custom-headers",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
@@ -976,11 +976,11 @@ TEST_CASE("client: async_send_request with headers", "[client]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            http::fields hdrs;
+            httplib::headers hdrs;
             hdrs.set("X-Forwarded-For", "10.0.0.1");
-            httplib::client::request req(http::verb::get, "/custom-headers", hdrs);
+            httplib::client::request req(httplib::method::get, "/custom-headers", hdrs);
             auto resp = UNWRAP(co_await client.async_send_request(req));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
         });
 }
 
@@ -989,7 +989,7 @@ TEST_CASE("client: async_send_request form_data", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::post>(
+            server.router().template set_http_handler<httplib::method::post>(
                 "/form-upload",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
@@ -1003,10 +1003,10 @@ TEST_CASE("client: async_send_request form_data", "[client]")
             httplib::form_data form;
             form.boundary = "----TestFormBoundary";
             form.fields.push_back({ "name", "", "text/plain", "alice" });
-            auto req = httplib::client::request(http::verb::post, "/form-upload");
+            auto req = httplib::client::request(httplib::method::post, "/form-upload");
             req.set_body(std::move(form));
             auto resp = UNWRAP(co_await client.async_send_request(req));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
         });
 }
 
@@ -1015,7 +1015,7 @@ TEST_CASE("client: async_send_request query_params body", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::post>(
+            server.router().template set_http_handler<httplib::method::post>(
                 "/form-post",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
@@ -1027,10 +1027,10 @@ TEST_CASE("client: async_send_request query_params body", "[client]")
         {
             httplib::query_params body;
             body.add("key", "url-value");
-            auto req = httplib::client::request(http::verb::post, "/form-post");
+            auto req = httplib::client::request(httplib::method::post, "/form-post");
             req.set_body(std::move(body));
             auto resp = UNWRAP(co_await client.async_send_request(req));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
         });
 }
 
@@ -1048,18 +1048,18 @@ TEST_CASE("client: send file body upload", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::put>(
+            server.router().template set_http_handler<httplib::method::put>(
                 "/upload",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 { resp.set_string_content(req.as_string(), "text/plain"); });
         },
         [&](auto& client) -> net::awaitable<void>
         {
-            auto req = httplib::client::request(http::verb::put, "/upload");
+            auto req = httplib::client::request(httplib::method::put, "/upload");
             boost::system::error_code ec;
             req.set_file_body(up, ec);
             auto resp = UNWRAP(co_await client.async_send_request(req));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
         });
     std::filesystem::remove(up);
 }
@@ -1073,16 +1073,16 @@ TEST_CASE("client: lazy read text", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/lazy-text",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("lazy-hello"sv, "text/plain"); });
         },
         [](auto& client) -> net::awaitable<void>
         {
-            httplib::client::request req(http::verb::get, "/lazy-text");
+            httplib::client::request req(httplib::method::get, "/lazy-text");
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             auto text = UNWRAP(co_await resp.read_string());
             REQUIRE(text == "lazy-hello");
         });
@@ -1099,26 +1099,26 @@ TEST_CASE("client: empty body with Content-Encoding reads as empty string", "[cl
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/empty-encoded",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content(std::string {}, "text/plain"); });
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/after-empty-encoded",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("ok"sv, "text/plain"); });
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto headers = httplib::http::fields();
-            headers.set(http::field::accept_encoding, "gzip");
+            auto headers = httplib::headers();
+            headers.set(httplib::field::accept_encoding, "gzip");
 
-            httplib::client::request req(http::verb::get, "/empty-encoded", headers);
+            httplib::client::request req(httplib::method::get, "/empty-encoded", headers);
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             // 确认这条路径真的产出了"空 body 却带 Content-Encoding"，否则本测试是空转。
-            REQUIRE(resp[http::field::content_encoding] == "gzip");
-            REQUIRE(resp[http::field::content_length] == "0");
+            REQUIRE(resp[httplib::field::content_encoding] == "gzip");
+            REQUIRE(resp[httplib::field::content_length] == "0");
 
             auto text = co_await resp.read_string();
             REQUIRE(text);
@@ -1126,7 +1126,7 @@ TEST_CASE("client: empty body with Content-Encoding reads as empty string", "[cl
 
             // 读失败曾污染连接池，使同一 client 的后续请求全部失败。
             auto next = UNWRAP(co_await client.async_get("/after-empty-encoded"));
-            REQUIRE(next.result() == http::status::ok);
+            REQUIRE(next.result() == httplib::status::ok);
             auto next_text = UNWRAP(co_await next.read_string());
             REQUIRE(next_text == "ok");
         });
@@ -1137,7 +1137,7 @@ TEST_CASE("client: lazy read json", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/lazy-json",
                 [](httplib::server::request&, httplib::server::response& resp)
                 {
@@ -1150,9 +1150,9 @@ TEST_CASE("client: lazy read json", "[client]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            httplib::client::request req(http::verb::get, "/lazy-json");
+            httplib::client::request req(httplib::method::get, "/lazy-json");
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             auto val = UNWRAP(co_await resp.read_json());
             REQUIRE(val.at("key") == "value");
             REQUIRE(val.at("num") == 7);
@@ -1164,14 +1164,14 @@ TEST_CASE("client: lazy read body typed", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/lazy-body",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("lazy-body"sv, "text/plain"); });
         },
         [](auto& client) -> net::awaitable<void>
         {
-            httplib::client::request req(http::verb::get, "/lazy-body");
+            httplib::client::request req(httplib::method::get, "/lazy-body");
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             auto text = UNWRAP(co_await resp.read_string());
             REQUIRE(text == "lazy-body");
@@ -1183,7 +1183,7 @@ TEST_CASE("client: lazy read multipart body", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/lazy-form",
                 [](httplib::server::request&, httplib::server::response& resp)
                 {
@@ -1199,7 +1199,7 @@ TEST_CASE("client: lazy read multipart body", "[client]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            httplib::client::request req(http::verb::get, "/lazy-form");
+            httplib::client::request req(httplib::method::get, "/lazy-form");
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             auto fd = UNWRAP(co_await resp.read_form_data());
             REQUIRE(fd.fields.size() == 2);
@@ -1216,14 +1216,14 @@ TEST_CASE("client: lazy read to file", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/lazy-file",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("lazy-file-content"sv, "text/plain"); });
         },
         [&](auto& client) -> net::awaitable<void>
         {
-            httplib::client::request req(http::verb::get, "/lazy-file");
+            httplib::client::request req(httplib::method::get, "/lazy-file");
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
             auto ec = co_await resp.read_to_file(save);
             REQUIRE(!ec);
@@ -1242,11 +1242,11 @@ TEST_CASE("client: lazy redirect", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/lazy-redirect-me",
                 [](httplib::server::request&, httplib::server::response& resp)
-                { resp.set_redirect("/lazy-target", http::status::found); });
-            server.router().template set_http_handler<http::verb::get>(
+                { resp.set_redirect("/lazy-target", httplib::status::found); });
+            server.router().template set_http_handler<httplib::method::get>(
                 "/lazy-target",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("lazy-arrived"sv, "text/plain"sv); });
@@ -1254,9 +1254,9 @@ TEST_CASE("client: lazy redirect", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             client.set_max_redirects(5);
-            httplib::client::request req(http::verb::get, "/lazy-redirect-me");
+            httplib::client::request req(httplib::method::get, "/lazy-redirect-me");
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             auto text = UNWRAP(co_await resp.read_string());
             REQUIRE(text == "lazy-arrived");
         });
@@ -1267,17 +1267,17 @@ TEST_CASE("client: lazy redirect loop limited", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/lazy-loop",
                 [](httplib::server::request&, httplib::server::response& resp)
-                { resp.set_redirect("/lazy-loop", http::status::found); });
+                { resp.set_redirect("/lazy-loop", httplib::status::found); });
         },
         [](auto& client) -> net::awaitable<void>
         {
             client.set_max_redirects(3);
-            httplib::client::request req(http::verb::get, "/lazy-loop");
+            httplib::client::request req(httplib::method::get, "/lazy-loop");
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
-            REQUIRE(resp.result() == http::status::found);
+            REQUIRE(resp.result() == httplib::status::found);
         });
 }
 
@@ -1286,14 +1286,14 @@ TEST_CASE("client: lazy redirect full URL", "[client]")
     run(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/lazy-ext-redirect",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
                     auto port = req.local_endpoint().port();
-                    resp.set_redirect(std::format("http://127.0.0.1:{}/lazy-target-page", port), http::status::found);
+                    resp.set_redirect(std::format("http://127.0.0.1:{}/lazy-target-page", port), httplib::status::found);
                 });
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/lazy-target-page",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("lazy-target-reached"sv, "text/plain"); });
@@ -1301,9 +1301,9 @@ TEST_CASE("client: lazy redirect full URL", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             client.set_max_redirects(1);
-            httplib::client::request req(http::verb::get, "/lazy-ext-redirect");
+            httplib::client::request req(httplib::method::get, "/lazy-ext-redirect");
             auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
             auto text = UNWRAP(co_await resp.read_string());
             REQUIRE(text == "lazy-target-reached");
         });
@@ -1320,7 +1320,7 @@ TEST_CASE("client: SSL verify off with set_verify_ssl", "[client]")
     run_ssl(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ssl-test",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("ssl-ok"sv, "text/plain"); });
@@ -1330,7 +1330,7 @@ TEST_CASE("client: SSL verify off with set_verify_ssl", "[client]")
             client.set_verify_ssl(false);
             auto resp = co_await client.async_get("/ssl-test");
             REQUIRE(resp.has_value());
-            REQUIRE(resp->result() == http::status::ok);
+            REQUIRE(resp->result() == httplib::status::ok);
         });
 }
 
@@ -1339,7 +1339,7 @@ TEST_CASE("client: set_verify_ssl fails self-signed", "[client]")
     run_ssl(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ssl-verify",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("ssl-ok"sv, "text/plain"); });
@@ -1357,7 +1357,7 @@ TEST_CASE("client: verify with custom CA cert", "[client]")
     run_ssl(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ssl-ca",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("ssl-ca-ok"sv, "text/plain"); });
@@ -1368,7 +1368,7 @@ TEST_CASE("client: verify with custom CA cert", "[client]")
             client.set_ca_cert(kTestCert);
             auto resp = co_await client.async_get("/ssl-ca");
             REQUIRE(resp.has_value());
-            REQUIRE(resp->result() == http::status::ok);
+            REQUIRE(resp->result() == httplib::status::ok);
         });
 }
 
@@ -1377,7 +1377,7 @@ TEST_CASE("client: SSL verify enabled by default", "[client]")
     run_ssl(
         [](auto& server)
         {
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/ssl-default",
                 [](httplib::server::request&, httplib::server::response& resp)
                 { resp.set_string_content("ssl-ok"sv, "text/plain"); });
@@ -1387,7 +1387,7 @@ TEST_CASE("client: SSL verify enabled by default", "[client]")
             client.set_ca_cert(kTestCert);
             auto resp = co_await client.async_get("/ssl-default");
             REQUIRE(resp.has_value());
-            REQUIRE(resp->result() == http::status::ok);
+            REQUIRE(resp->result() == httplib::status::ok);
         });
 }
 

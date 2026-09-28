@@ -20,14 +20,14 @@ namespace httplib::client
             chunked,
         };
 
-        virtual net::awaitable<void> write_header(http::verb method,
+        virtual net::awaitable<void> write_header(httplib::method method,
                                                   std::string_view target,
-                                                  http::fields const& headers,
+                                                  httplib::headers const& headers,
                                                   mode m)
             = 0;
-        virtual net::awaitable<void> write_header(http::verb method,
+        virtual net::awaitable<void> write_header(httplib::method method,
                                                   std::string_view target,
-                                                  http::fields const& headers,
+                                                  httplib::headers const& headers,
                                                   mode m,
                                                   boost::system::error_code& ec)
             = 0;

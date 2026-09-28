@@ -19,7 +19,6 @@
 #include <vector>
 
 using namespace std::string_view_literals;
-namespace http = httplib::http;
 namespace net = httplib::net;
 namespace po = boost::program_options;
 
@@ -32,7 +31,7 @@ struct stress_config
     std::string content_type = "application/json";
     std::string method = "GET";
     std::string url;
-    http::verb verb = http::verb::get;
+    httplib::method verb = httplib::method::get;
     int threads = 2;
     int connections = 10;
     int duration_sec = 10;
@@ -316,7 +315,7 @@ main(int argc, char** argv)
     {
         c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
     }
-    cfg.verb = http::string_to_verb(upper);
+    cfg.verb = httplib::string_to_method(upper);
     if (cfg.threads <= 0)
     {
         cfg.threads = 1;
@@ -326,7 +325,7 @@ main(int argc, char** argv)
         cfg.connections = cfg.threads;
     }
 
-    http::fields req_headers;
+    httplib::headers req_headers;
     for (auto& h : cfg.headers)
     {
         auto pos = h.find(':');

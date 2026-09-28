@@ -2707,7 +2707,7 @@ TEST_CASE("db_middleware: throws when not registered", "[db][middleware]")
         [&]() -> net::awaitable<void>
         {
             httplib::server::http_server server(ioc.get_executor());
-            server.router().template set_http_handler<http::verb::get>(
+            server.router().template set_http_handler<httplib::method::get>(
                 "/db/nomw",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
@@ -2722,7 +2722,7 @@ TEST_CASE("db_middleware: throws when not registered", "[db][middleware]")
             client.set_timeout(std::chrono::seconds(5));
 
             auto resp = UNWRAP(co_await client.async_get("/db/nomw"));
-            REQUIRE(resp.result() == http::status::ok);
+            REQUIRE(resp.result() == httplib::status::ok);
 
             client.close();
             server.stop();

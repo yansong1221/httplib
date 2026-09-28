@@ -4,6 +4,8 @@
 #include <boost/beast/http/field.hpp>
 #include <boost/system/error_code.hpp>
 #include <string>
+#include "beast_alias.hpp"
+#include "enum_conv.hpp"
 
 namespace httplib::server
 {
@@ -14,7 +16,7 @@ namespace httplib::server
         explicit stream_writer_impl(response::impl& resp) : resp_(resp) {}
 
         net::awaitable<void>
-        write_header(http::status status, http::fields const& headers, mode m) override
+        write_header(httplib::status status, httplib::headers const& headers, mode m) override
         {
             boost::system::error_code ec;
             co_await write_header(status, headers, m, ec);
@@ -24,13 +26,16 @@ namespace httplib::server
             }
         }
         net::awaitable<void>
-        write_header(http::status status, http::fields const& headers, mode m, boost::system::error_code& ec) override
+        write_header(httplib::status status,
+                     httplib::headers const& headers,
+                     mode m,
+                     boost::system::error_code& ec) override
         {
             for (auto const& f : headers)
             {
                 resp_.base().erase(f.name_string());
             }
-            resp_.base().result(status);
+            resp_.base().result(enum_conv::to_status(status));
             for (auto const& f : headers)
             {
                 resp_.base().insert(f.name_string(), f.value());

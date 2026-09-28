@@ -1,4 +1,6 @@
 #include "router_impl.h"
+#include "beast_alias.hpp"
+#include "enum_conv.hpp"
 #include "request_impl.hpp"
 #include "response_impl.hpp"
 #include <boost/algorithm/string/join.hpp>
@@ -30,12 +32,12 @@ namespace httplib::server
     router_impl::router_impl() : root_(std::make_unique<Node>()) {}
 
     void
-    router_impl::set_http_handler_impl(http::verb method, std::string_view key, coro_http_handler_type&& handler)
+    router_impl::set_http_handler_impl(method m, std::string_view key, coro_http_handler_type&& handler)
     {
         std::unique_lock lock(mutex_);
         auto segments = detail::split_segments(key);
         auto node = insert(root_.get(), segments, 0);
-        node->handlers[method] = wrap_global(std::move(handler));
+        node->handlers[m] = wrap_global(std::move(handler));
     }
 
     router::router::coro_http_handler_type
@@ -387,24 +389,25 @@ namespace httplib::server
     }
 
     void
-    router_impl::set_lazy_http_handler_impl(http::verb method, std::string_view key, coro_http_handler_type&& handler)
+    router_impl::set_lazy_http_handler_impl(method m, std::string_view key, coro_http_handler_type&& handler)
     {
         std::unique_lock lock(mutex_);
         auto segments = detail::split_segments(key);
         auto node = insert(root_.get(), segments, 0);
-        node->lazy_handlers[method] = wrap_global(std::move(handler));
+        node->lazy_handlers[m] = wrap_global(std::move(handler));
     }
 
     void
     router_impl::collect_allows(std::set<std::string>& allows, Node const* node)
     {
+        // 键是公共的 httplib::method，要拿线上写法得先转回 beast 的 verb。
         for (auto const& v : node->handlers)
         {
-            allows.insert(to_string(v.first));
+            allows.insert(to_string(enum_conv::to_verb(v.first)));
         }
         for (auto const& v : node->lazy_handlers)
         {
-            allows.insert(to_string(v.first));
+            allows.insert(to_string(enum_conv::to_verb(v.first)));
         }
         if (node->ws_handler)
         {

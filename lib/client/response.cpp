@@ -1,4 +1,5 @@
 #include "httplib/client/response.hpp"
+#include "headers_impl.hpp"
 #include "ndjson_reader_impl.hpp"
 #include "response_impl.h"
 #include "sse_reader_impl.hpp"
@@ -6,6 +7,8 @@
 #include <fstream>
 #include <utility>
 #include <variant>
+#include "beast_alias.hpp"
+#include "enum_conv.hpp"
 
 namespace httplib::client
 {
@@ -18,10 +21,10 @@ namespace httplib::client
 
     response::response(std::shared_ptr<impl> impl) : impl_(std::move(impl)) {}
 
-    http::status
+    httplib::status
     response::result() const
     {
-        return impl_->get().result();
+        return enum_conv::to_status(impl_->get().result());
     }
 
     unsigned
@@ -31,9 +34,9 @@ namespace httplib::client
     }
 
     std::string_view
-    response::operator[](http::field name) const
+    response::operator[](httplib::field name) const
     {
-        return impl_->get()[name];
+        return impl_->get()[enum_conv::to_field(name)];
     }
 
     std::string_view
@@ -42,25 +45,62 @@ namespace httplib::client
         return impl_->get()[name];
     }
 
-    http::fields const&
+    std::string_view
+    response::at(httplib::field name) const
+    {
+        return impl_->get().at(enum_conv::to_field(name));
+    }
+
+    std::string_view
+    response::at(std::string_view name) const
+    {
+        return impl_->get().at(name);
+    }
+
+    bool
+    response::has(httplib::field name) const
+    {
+        return impl_->get().find(enum_conv::to_field(name)) != impl_->get().end();
+    }
+
+    bool
+    response::has(std::string_view name) const
+    {
+        return impl_->get().find(name) != impl_->get().end();
+    }
+
+    std::size_t
+    response::count(httplib::field name) const
+    {
+        return impl_->get().count(enum_conv::to_field(name));
+    }
+
+    std::size_t
+    response::count(std::string_view name) const
+    {
+        return impl_->get().count(name);
+    }
+
+    httplib::headers
     response::headers() const
     {
-        return impl_->get();
+        // shared_ptr 的 const 不传递到被指对象，impl_ 可变，视图直接借用消息的字段集合。
+        return httplib::detail::headers_access::borrow(impl_->get());
     }
 
-    http::fields&
+    httplib::headers
     response::headers()
     {
-        return impl_->get();
+        return httplib::detail::headers_access::borrow(impl_->get());
     }
 
-    http::fields const&
+    httplib::headers
     response::base() const
     {
         return headers();
     }
 
-    http::fields&
+    httplib::headers
     response::base()
     {
         return headers();

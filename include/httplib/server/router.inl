@@ -168,14 +168,14 @@ namespace httplib::server
 
     template <typename Func, typename... Aspects>
     void
-    router::set_http_handler(http::verb method, std::string_view key, Func&& handler, Aspects&&... asps)
+    router::set_http_handler(httplib::method method, std::string_view key, Func&& handler, Aspects&&... asps)
     {
         set_http_handler_impl(method,
                               key,
                               make_coro_http_handler(std::forward<Func>(handler), std::forward<Aspects>(asps)...));
     }
 
-    template <http::verb... method, typename Func, typename... Aspects>
+    template <httplib::method... method, typename Func, typename... Aspects>
         requires std::is_member_function_pointer_v<Func>
     void
     router::set_http_handler(std::string_view key, Func handler, util::class_type_t<Func>& owner, Aspects&&... asps)
@@ -189,7 +189,7 @@ namespace httplib::server
         set_http_handler<method...>(key, std::move(f), std::forward<Aspects>(asps)...);
     }
 
-    template <http::verb... method, typename Func, typename... Aspects>
+    template <httplib::method... method, typename Func, typename... Aspects>
         requires std::is_member_function_pointer_v<Func>
     void
     router::set_lazy_http_handler(std::string_view key,
@@ -243,7 +243,7 @@ namespace httplib::server
         }
         key += "*";
 
-        set_http_handler<http::verb::get, http::verb::head>(
+        set_http_handler<httplib::method::get, httplib::method::head>(
             key,
             [entry = std::move(entry)](request& req, response& resp) -> void
             {
@@ -265,12 +265,12 @@ namespace httplib::server
     router::set_connect_handler(std::string_view key, Func&& handler, Aspects&&... asps)
     {
         // CONNECT 只是路由表中的一个普通动词：与其它 HTTP 方法共用注册/匹配/中间件管线。
-        set_http_handler(http::verb::connect, key, std::forward<Func>(handler), std::forward<Aspects>(asps)...);
+        set_http_handler(httplib::method::connect, key, std::forward<Func>(handler), std::forward<Aspects>(asps)...);
     }
 
     template <typename Func, typename... Aspects>
     void
-    router::set_lazy_http_handler(http::verb method, std::string_view key, Func&& handler, Aspects... asps)
+    router::set_lazy_http_handler(httplib::method method, std::string_view key, Func&& handler, Aspects... asps)
     {
         set_lazy_http_handler_impl(method,
                                    key,

@@ -3,6 +3,7 @@
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include <any>
+#include "beast_alias.hpp"
 
 namespace httplib::server::middleware
 {
@@ -98,7 +99,7 @@ namespace httplib::server::middleware
                     }
                     if (ok)
                     {
-                        resp.set_error_content(http::status::internal_server_error);
+                        resp.set_error_content(status::internal_server_error);
                     }
                 }
             }

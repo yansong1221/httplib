@@ -2,6 +2,7 @@
 #include "httplib/body_type.hpp"
 #include "httplib/config.hpp"
 #include "httplib/form_data.hpp"
+#include "httplib/headers.hpp"
 #include "httplib/query_params.hpp"
 #include "httplib/server/request_data.hpp"
 #include "httplib/server/server_fwd.hpp"
@@ -9,7 +10,6 @@
 #include <any>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/ip/tcp.hpp>
-#include <boost/beast/http/message.hpp>
 #include <boost/json/value.hpp>
 #include <charconv>
 #include <cstddef>
@@ -34,20 +34,25 @@ namespace httplib::server
         ~request();
 
       public:
-        http::verb method() const;
+        httplib::method method() const;
         std::string_view method_string() const;
         std::string_view target() const;
 
-        http::fields& base();
-        http::fields const& base() const;
+        /// 全部请求头。返回的是「借用」视图：写入直接落到本请求上，拷贝它仍指向同一集合。
+        /// 遍历用 all()，按名字查用 operator[]/at/count/values。
+        httplib::headers base();
+        httplib::headers base() const;
 
-        std::string_view operator[](http::field name) const;
+        std::string_view operator[](httplib::field name) const;
         std::string_view operator[](std::string_view name) const;
-        std::string_view at(http::field name) const;
+        std::string_view at(httplib::field name) const;
         std::string_view at(std::string_view name) const;
 
-        bool has(http::field name) const;
+        bool has(httplib::field name) const;
         bool has(std::string_view name) const;
+        /// 该请求头出现的次数（1 = 无重复头）。
+        std::size_t count(httplib::field name) const;
+        std::size_t count(std::string_view name) const;
 
         std::string_view path() const;
         httplib::query_params const& query_params() const;
