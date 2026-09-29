@@ -50,6 +50,7 @@ add_httplib_test(httplib_test_core core
     body_reader_test.cpp
     body_utils_test.cpp
     chunked_test.cpp
+    client_ip_test.cpp
     lazy_request_test.cpp
     middleware_test.cpp
     router_test.cpp

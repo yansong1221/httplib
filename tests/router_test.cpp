@@ -3,6 +3,8 @@
 #include "httplib/server/response.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <regex>
+#include <stdexcept>
+#include <string>
 
 namespace net = httplib::net;
 
@@ -80,6 +82,98 @@ TEST_CASE("Router: regex path parameter rejects non-matching input", "[router]")
             auto resp = UNWRAP(co_await client.async_get("/regex/abc"));
             REQUIRE(resp.result() == httplib::status::not_found);
             REQUIRE(as_string(resp) == "not-found");
+            co_return;
+        });
+}
+
+TEST_CASE("Router: regex pattern with catastrophic backtracking shape is rejected", "[router]")
+{
+    net::thread_pool pool { 1 };
+    httplib::server::http_server server(pool.get_executor());
+    auto noop = [](httplib::server::request&, httplib::server::response&) {};
+
+    // 量词嵌套：经典 ReDoS 形态，注册期即应报错，而不是在请求期挂死线程。
+    REQUIRE_THROWS_AS(server.router().set_http_handler<httplib::method::get>("/a/{id:(a+)+}", noop),
+                      std::invalid_argument);
+    REQUIRE_THROWS_AS(server.router().set_http_handler<httplib::method::get>("/b/{id:(a*)*}", noop),
+                      std::invalid_argument);
+    REQUIRE_THROWS_AS(server.router().set_http_handler<httplib::method::get>("/c/{id:^(a+)+$}", noop),
+                      std::invalid_argument);
+    REQUIRE_THROWS_AS(server.router().set_http_handler<httplib::method::get>("/d/{id:(a{2,})+}", noop),
+                      std::invalid_argument);
+
+    // 被量词作用、且内部含交替的分组。
+    REQUIRE_THROWS_AS(server.router().set_http_handler<httplib::method::get>("/e/{id:(a|aa)+}", noop),
+                      std::invalid_argument);
+    REQUIRE_THROWS_AS(server.router().set_http_handler<httplib::method::get>("/f/{id:^(a|a?)+$}", noop),
+                      std::invalid_argument);
+
+    pool.join();
+}
+
+TEST_CASE("Router: safe regex patterns are still accepted", "[router]")
+{
+    net::thread_pool pool { 1 };
+    httplib::server::http_server server(pool.get_executor());
+    auto noop = [](httplib::server::request&, httplib::server::response&) {};
+
+    // 无分组的字符类/量词/锚点。
+    REQUIRE_NOTHROW(server.router().set_http_handler<httplib::method::get>("/a/{id:^\\d+$}", noop));
+    REQUIRE_NOTHROW(server.router().set_http_handler<httplib::method::get>("/b/{id:^[a-z]{2,8}$}", noop));
+    REQUIRE_NOTHROW(server.router().set_http_handler<httplib::method::get>("/c/{id:^[A-Z][a-z]*$}", noop));
+    REQUIRE_NOTHROW(server.router().set_http_handler<httplib::method::get>("/d/{id:^\\w+\\-\\w+$}", noop));
+
+    // 分组内无「量词 + 交替」危险组合：普通分组、分组量词、字符类里的元字符。
+    REQUIRE_NOTHROW(server.router().set_http_handler<httplib::method::get>("/e/{id:^(abc)+$}", noop));
+    REQUIRE_NOTHROW(server.router().set_http_handler<httplib::method::get>("/f/{id:^(a|b|c)$}", noop));
+    REQUIRE_NOTHROW(server.router().set_http_handler<httplib::method::get>("/g/{id:^([0-9]+)$}", noop));
+    REQUIRE_NOTHROW(server.router().set_http_handler<httplib::method::get>("/h/{id:^[()+*]{3}$}", noop));
+    REQUIRE_NOTHROW(server.router().set_http_handler<httplib::method::get>("/i/{id:^\\(\\)\\*$}", noop));
+    REQUIRE_NOTHROW(server.router().set_http_handler<httplib::method::get>("/j/{id:^(?:ab)+$}", noop));
+
+    pool.join();
+}
+
+TEST_CASE("Router: over-long regex pattern is rejected", "[router]")
+{
+    net::thread_pool pool { 1 };
+    httplib::server::http_server server(pool.get_executor());
+    auto noop = [](httplib::server::request&, httplib::server::response&) {};
+
+    std::string pattern = "^";
+    pattern.append(300, 'a');
+    pattern += "$";
+
+    REQUIRE_THROWS_AS(server.router().set_http_handler<httplib::method::get>("/long/{id:" + pattern + "}", noop),
+                      std::invalid_argument);
+
+    pool.join();
+}
+
+TEST_CASE("Router: over-long subject is not regex matched", "[router]")
+{
+    // 病态 pattern 未被完全杜绝时，超长路径段应直接判定为不匹配（快速 404），
+    // 而不是把无意义的回溯算到请求头上。
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/bounded/{id:^[a-z]+$}",
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "matched"); });
+            server.router().set_http_not_found_handler([](httplib::server::request&, httplib::server::response& resp)
+                                                       { set_text(resp, "not-found", httplib::status::not_found); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            // 上限之内：正常匹配。
+            auto ok = UNWRAP(co_await client.async_get("/bounded/abc"));
+            REQUIRE(ok.result() == httplib::status::ok);
+            REQUIRE(as_string(ok) == "matched");
+
+            // 远超上限：不进入正则匹配，直接 404。
+            auto too_long = UNWRAP(co_await client.async_get("/bounded/" + std::string(2000, 'a')));
+            REQUIRE(too_long.result() == httplib::status::not_found);
+            REQUIRE(as_string(too_long) == "not-found");
             co_return;
         });
 }

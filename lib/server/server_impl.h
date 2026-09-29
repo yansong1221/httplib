@@ -5,6 +5,7 @@
 #include "httplib/util/async_event.hpp"
 #include "router_impl.h"
 #include "session.hpp"
+#include "trusted_proxies.hpp"
 #include "util/logging.hpp"
 #include <atomic>
 #include <boost/asio/co_spawn.hpp>
@@ -87,6 +88,14 @@ namespace httplib::server
             return body_limit_.load();
         }
 
+        /// 整体替换可信代理集合。空列表表示不采信任何 X-Forwarded-For（默认）。
+        void set_trusted_proxies(std::vector<std::string> const& cidrs);
+        std::shared_ptr<trusted_proxies const>
+        get_trusted_proxies() const
+        {
+            return trusted_proxies_.load();
+        }
+
         void set_reverse_proxy(std::string_view location,
                                std::string_view upstream_url,
                                http_server::proxy_interceptor_factory factory);
@@ -148,6 +157,10 @@ namespace httplib::server
         std::atomic<std::uint32_t> header_limit_ = 65536;
         std::atomic<std::uint64_t> body_limit_ = 1024ULL * 1024 * 1024;
         std::atomic<bool> running_ = false;
+
+        /// 可信代理来源。默认空指针 = 不信任任何代理，请求只按 TCP 对端地址识别
+        /// 客户端。原子换指针而非改内容：读方拿到的是一份不可变快照。
+        std::atomic<std::shared_ptr<trusted_proxies const>> trusted_proxies_;
 
         /// Closed by `async_run()` when it exits; awaited by `async_stop()`.
         util::async_event stop_event_;

@@ -4,15 +4,106 @@
 #include "request_impl.hpp"
 #include "response_impl.hpp"
 #include <boost/algorithm/string/join.hpp>
+#include <cstddef>
 #include <exception>
 #include <iostream>
 #include <set>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
 namespace httplib::server
 {
 
     namespace detail
     {
+
+        /// 单条路由正则的长度上限。超长 pattern 既是编译期开销，也是匹配期开销。
+        constexpr std::size_t regex_pattern_max = 256;
+
+        /// 参与正则匹配的路径段长度上限。超长段直接判定为不匹配，
+        /// 避免病态 pattern 在超长输入上做无意义的回溯。
+        constexpr std::size_t regex_subject_max = 1024;
+
+        /// 路由正则走 `std::regex`（回溯实现，非 RE2），而**被匹配的路径段完全由
+        /// 请求方控制**。因此在注册阶段做一次准入检查，把「灾难性回溯」从请求期
+        /// 挂死执行线程前移成启动期报错。
+        ///
+        /// 拒绝的结构（经典 ReDoS 形态）：
+        /// - 量词嵌套：`(a+)+`、`(a*)*`、`(a{2,})+` …；
+        /// - 被量词作用且内部含交替的分组：`(a|aa)+` …。
+        ///
+        /// 这是一层启发式防线，不等价于线性时间保证；未覆盖的形态（例如不带分组的
+        /// 多重无界量词 `a*a*a*b`）由 regex_subject_max 限制最坏输入规模来兜底。
+        bool
+        has_redos_shape(std::string_view pattern)
+        {
+            // 每个分组内是否已出现「量词」或「交替」。
+            std::vector<bool> groups;
+            bool in_class = false;
+
+            for (std::size_t i = 0; i < pattern.size(); ++i)
+            {
+                auto c = pattern[i];
+
+                if (c == '\\')
+                {
+                    ++i; // 跳过被转义的字符
+                    continue;
+                }
+                if (in_class)
+                {
+                    if (c == ']')
+                    {
+                        in_class = false;
+                    }
+                    continue;
+                }
+
+                switch (c)
+                {
+                    case '[':
+                        in_class = true;
+                        break;
+                    case '(':
+                        groups.push_back(false);
+                        break;
+                    case ')':
+                    {
+                        if (groups.empty())
+                        {
+                            // 括号不配对，交给 std::regex 报 std::regex_error。
+                            return false;
+                        }
+                        // 必须显式取 bool：vector<bool>::back() 返回代理引用，
+                        // 用 auto 承接会得到一个指向内部存储的悬垂代理。
+                        bool const risky = groups.back();
+                        groups.pop_back();
+                        if (risky && i + 1 < pattern.size())
+                        {
+                            auto q = pattern[i + 1];
+                            if (q == '*' || q == '+' || q == '{')
+                            {
+                                return true;
+                            }
+                        }
+                        break;
+                    }
+                    case '|':
+                    case '*':
+                    case '+':
+                    case '{':
+                        if (!groups.empty())
+                        {
+                            groups.back() = true;
+                        }
+                        break;
+                    default:
+                        break;
+                }
+            }
+            return false;
+        }
 
         static auto
         split_segments(std::string_view path)
@@ -139,6 +230,18 @@ namespace httplib::server
             std::string_view inside = seg.substr(1, seg.size() - 2);
             size_t pos = inside.find(':');
             auto key = inside.substr(pos + 1);
+
+            if (key.size() > detail::regex_pattern_max)
+            {
+                throw std::invalid_argument("httplib: route regex pattern is too long (limit "
+                                            + std::to_string(detail::regex_pattern_max) + "): " + std::string(key));
+            }
+            if (detail::has_redos_shape(key))
+            {
+                throw std::invalid_argument("httplib: route regex pattern rejected, it may backtrack catastrophically "
+                                            "(nested quantifier or quantified alternation): "
+                                            + std::string(key));
+            }
 
             auto node = std::make_unique<Node>();
             node->key = seg;
@@ -303,17 +406,20 @@ namespace httplib::server
         }
 
         // 2) regex
-        for (auto& child : parent->regex_children)
+        if (seg.size() <= detail::regex_subject_max)
         {
-            if (std::regex_match(seg.data(), seg.data() + seg.length(), child->regex))
+            for (auto& child : parent->regex_children)
             {
-                params[child->param_name] = std::string(seg);
-                if (auto node = match_nodes(child.get(), segments, index + 1, params, handler); node)
+                if (std::regex_match(seg.data(), seg.data() + seg.length(), child->regex))
                 {
-                    return node;
-                }
+                    params[child->param_name] = std::string(seg);
+                    if (auto node = match_nodes(child.get(), segments, index + 1, params, handler); node)
+                    {
+                        return node;
+                    }
 
-                params.erase(child->param_name);
+                    params.erase(child->param_name);
+                }
             }
         }
 

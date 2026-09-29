@@ -585,6 +585,22 @@ namespace httplib::server
     }
 
     void
+    http_server::set_trusted_proxies(std::vector<std::string> const& cidrs)
+    {
+        impl_->set_trusted_proxies(cidrs);
+    }
+
+    void
+    http_server::impl::set_trusted_proxies(std::vector<std::string> const& cidrs)
+    {
+        // 空列表归一化成空指针：get_client_ip() 用它表示「不采信任何 XFF」，
+        // 避免每个请求都带着一个空的可信集合到处传。
+        trusted_proxies_.store(
+            cidrs.empty() ? nullptr
+                          : std::static_pointer_cast<trusted_proxies const>(std::make_shared<trusted_proxies>(cidrs)));
+    }
+
+    void
     http_server::set_reverse_proxy(std::string_view location, std::string_view url, proxy_interceptor_factory factory)
     {
         impl_->set_reverse_proxy(location, url, std::move(factory));

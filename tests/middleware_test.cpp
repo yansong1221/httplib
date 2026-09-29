@@ -5,6 +5,7 @@
 #include "httplib/server/response.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <thread>
 
 namespace mw = httplib::server::middleware;
 namespace net = httplib::net;
@@ -576,6 +577,215 @@ TEST_CASE("Rate Limit: shared limits apply across routes", "[middleware]")
             REQUIRE(resp2->result() == httplib::status::too_many_requests);
             client2->close();
             co_return;
+        });
+}
+
+TEST_CASE("Rate Limit: idle buckets are reclaimed", "[middleware]")
+{
+    // 窗口很长，所以计数不会自然过期；桶的回收只能来自 idle_expiration。
+    mw::rate_limit_middleware limiter(1, std::chrono::seconds(60));
+    limiter.idle_expiration(std::chrono::milliseconds(50));
+
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/limited",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); },
+                limiter);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            REQUIRE(limiter.tracked_clients() == 0);
+
+            auto first = UNWRAP(co_await client.async_get("/limited"));
+            REQUIRE(first.result() == httplib::status::ok);
+            REQUIRE(limiter.tracked_clients() == 1);
+
+            auto blocked = UNWRAP(co_await client.async_get("/limited"));
+            REQUIRE(blocked.result() == httplib::status::too_many_requests);
+            REQUIRE(limiter.tracked_clients() == 1);
+
+            // 空闲超过 idle_expiration 后，桶应被回收并重建，计数随之归零。
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+
+            auto after_idle = UNWRAP(co_await client.async_get("/limited"));
+            REQUIRE(after_idle.result() == httplib::status::ok);
+            REQUIRE(limiter.tracked_clients() == 1);
+            co_return;
+        });
+}
+
+TEST_CASE("Rate Limit: tracked client count stays bounded", "[middleware]")
+{
+    mw::rate_limit_middleware limiter(100, std::chrono::seconds(60));
+    limiter.max_tracked_clients(4);
+
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/limited",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); },
+                limiter);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            for (int i = 0; i < 20; ++i)
+            {
+                auto resp = UNWRAP(co_await client.async_get("/limited"));
+                REQUIRE(resp.result() == httplib::status::ok);
+                // 上限之内（这里是单 IP，但断言对任何 IP 数量都成立）。
+                REQUIRE(limiter.tracked_clients() <= 4);
+            }
+            co_return;
+        });
+}
+
+TEST_CASE("Rate Limit: max_tracked_clients does not disturb counting", "[middleware]")
+{
+    // 容量上限为 1，且该 IP 的桶已存在：仍应正常计数并在超限时拦截。
+    mw::rate_limit_middleware limiter(2, std::chrono::seconds(60));
+    limiter.max_tracked_clients(1);
+
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/limited",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); },
+                limiter);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto first = UNWRAP(co_await client.async_get("/limited"));
+            REQUIRE(first.result() == httplib::status::ok);
+            auto second = UNWRAP(co_await client.async_get("/limited"));
+            REQUIRE(second.result() == httplib::status::ok);
+
+            auto third = UNWRAP(co_await client.async_get("/limited"));
+            REQUIRE(third.result() == httplib::status::too_many_requests);
+            co_return;
+        });
+}
+
+// 以下用例用 X-Forwarded-For 模拟不同客户端 IP：真实连接都来自 127.0.0.1，
+// 只有把 127.0.0.1 配成可信代理后，get_client_ip() 才会采信 XFF。默认不配置时
+// XFF 一律被忽略（见 client_ip_test.cpp）。
+
+TEST_CASE("Rate Limit: new clients are still counted once the table is full", "[middleware]")
+{
+    // 默认策略 evict_oldest。桶满时如果放行不计数，IP 轮换的攻击者就能完全绕过
+    // 限流，限流恰好在最需要它的时刻失效——这里锁死「桶满也要计数」。
+    mw::rate_limit_middleware limiter(2, std::chrono::seconds(60));
+    limiter.max_tracked_clients(2);
+
+    run(
+        [&](auto& server)
+        {
+            server.set_trusted_proxies({ "127.0.0.1" });
+            server.router().template set_http_handler<httplib::method::get>(
+                "/limited",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); },
+                limiter);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto call = [&](std::string_view ip, httplib::status expected) -> net::awaitable<void>
+            {
+                auto hdrs = httplib::headers();
+                hdrs.set("X-Forwarded-For", std::string(ip));
+                httplib::client::request req(httplib::method::get, "/limited", hdrs);
+                auto resp = UNWRAP(co_await client.async_send_request(req));
+                REQUIRE(resp.result() == expected);
+                co_return;
+            };
+
+            // 两个客户端把桶表占满。
+            co_await call("10.0.0.1", httplib::status::ok);
+            co_await call("10.0.0.2", httplib::status::ok);
+            REQUIRE(limiter.tracked_clients() == 2);
+
+            // 第三个客户端挤掉最久未访问的桶，并且**照样计入配额**。
+            co_await call("10.0.0.3", httplib::status::ok);
+            co_await call("10.0.0.3", httplib::status::ok);
+            co_await call("10.0.0.3", httplib::status::too_many_requests);
+            REQUIRE(limiter.tracked_clients() <= 2);
+        });
+}
+
+TEST_CASE("Rate Limit: evict_oldest keeps the hottest client tracked", "[middleware]")
+{
+    mw::rate_limit_middleware limiter(2, std::chrono::seconds(60));
+    limiter.max_tracked_clients(2);
+
+    run(
+        [&](auto& server)
+        {
+            server.set_trusted_proxies({ "127.0.0.1" });
+            server.router().template set_http_handler<httplib::method::get>(
+                "/limited",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); },
+                limiter);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto call = [&](std::string_view ip, httplib::status expected) -> net::awaitable<void>
+            {
+                auto hdrs = httplib::headers();
+                hdrs.set("X-Forwarded-For", std::string(ip));
+                httplib::client::request req(httplib::method::get, "/limited", hdrs);
+                auto resp = UNWRAP(co_await client.async_send_request(req));
+                REQUIRE(resp.result() == expected);
+                co_return;
+            };
+
+            co_await call("10.0.1.1", httplib::status::ok); // 最久未访问
+            co_await call("10.0.1.2", httplib::status::ok); // 最近访问
+            co_await call("10.0.1.3", httplib::status::ok); // 挤掉 10.0.1.1
+
+            // 10.0.1.2 的桶没被挤掉，计数延续，因此第 3 次请求仍然被限。
+            co_await call("10.0.1.2", httplib::status::ok);
+            co_await call("10.0.1.2", httplib::status::too_many_requests);
+        });
+}
+
+TEST_CASE("Rate Limit: reject policy refuses new clients when the table is full", "[middleware]")
+{
+    mw::rate_limit_middleware limiter(2, std::chrono::seconds(60));
+    limiter.max_tracked_clients(1).when_full(mw::capacity_action::reject);
+
+    run(
+        [&](auto& server)
+        {
+            server.set_trusted_proxies({ "127.0.0.1" });
+            server.router().template set_http_handler<httplib::method::get>(
+                "/limited",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); },
+                limiter);
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            auto call = [&](std::string_view ip, httplib::status expected) -> net::awaitable<void>
+            {
+                auto hdrs = httplib::headers();
+                hdrs.set("X-Forwarded-For", std::string(ip));
+                httplib::client::request req(httplib::method::get, "/limited", hdrs);
+                auto resp = UNWRAP(co_await client.async_send_request(req));
+                REQUIRE(resp.result() == expected);
+                co_return;
+            };
+
+            co_await call("10.0.2.1", httplib::status::ok);
+            REQUIRE(limiter.tracked_clients() == 1);
+            co_await call("10.0.2.2", httplib::status::too_many_requests);
+            REQUIRE(limiter.tracked_clients() == 1);
         });
 }
 

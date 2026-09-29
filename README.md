@@ -471,6 +471,30 @@ router.set_http_handler<method::get>(
     middleware::rate_limit_middleware(100, std::chrono::seconds(60)));
 ```
 
+跟踪的客户端数有上限（默认 8192）并按空闲时间回收，内存不会无界增长：
+
+```cpp
+middleware::rate_limit_middleware limiter(100, std::chrono::seconds(60));
+limiter.max_tracked_clients(8192)                        // 桶表容量硬上限
+      .idle_expiration(std::chrono::minutes(5))         // 空闲桶保留时长
+      .when_full(middleware::capacity_action::evict_oldest); // 桶满时的策略
+```
+
+`when_full` 有两种取值：`evict_oldest`（默认）淘汰最久未访问的桶腾位，每个请求
+都被计数，限流不会因为桶满而失效；`reject` 直接返回 429，保护性更强，但攻击者
+只要占满桶表就能把之后到达的新客户端挡在门外。
+
+> 限流按 `request::get_client_ip()` 识别的客户端计数。**默认不信任任何代理**，
+> 该函数一律返回 TCP 对端地址，忽略 `X-Forwarded-For`——否则任何客户端都能自己
+> 声明 IP 从而绕过限流。只有当服务确实部署在反向代理之后时才需要配置可信来源：
+>
+> ```cpp
+> svr.set_trusted_proxies({ "10.0.0.0/8", "::1/128" });
+> ```
+>
+> 配好之后才会从 `X-Forwarded-For` **右往左**跳过同样可信的地址，取第一个非可信
+> 地址作为真实客户端（取最左端会被客户端预置的伪造值骗过）。
+
 ### Session（基于 Cookie）
 
 ```cpp

@@ -51,8 +51,8 @@ namespace httplib::server
      *     - @ref http_server::set_compress_content_types
      *       "set_compress_content_types()"
      *     - @ref http_server::set_form_data_config "set_form_data_config()"
-     *     - @ref http_server::set_header_limit "set_header_limit()" / @ref
-     *       http_server::set_body_limit "set_body_limit()"
+ *     - @ref http_server::set_header_limit "set_header_limit()" / @ref
+ *       http_server::set_body_limit "set_body_limit()"
      *     - @ref http_server::stop "stop()" / @ref http_server::async_stop
      *       "async_stop()"
      * @li <b>生命周期</b>。每个实例只允许一个运行周期。运行期间再次调用
@@ -267,6 +267,27 @@ namespace httplib::server
          * 可随时从任意线程调用；对后续请求生效。
          */
         void set_body_limit(std::uint64_t limit);
+
+        /**
+         * @brief 配置可信代理来源，决定 request::get_client_ip() 是否采信
+         *        X-Forwarded-For。
+         *
+         * 默认（从未调用本方法）**不信任任何代理**：get_client_ip() 一律返回 TCP
+         * 对端地址。`X-Forwarded-For` 的内容完全由客户端填写，直接采信等于允许
+         * 任何人自己声明 IP——按 IP 限流、访问日志、审计全部可被伪造。
+         *
+         * 只有当本机确实部署在反向代理（CDN / nginx / 另一台 httplib 服务器）
+         * 之后时才需要配置。此时从 X-Forwarded-For **右往左**跳过同样属于可信
+         * 集合的地址，取第一个非可信地址作为真实客户端；全部可信或无法解析时
+         * 退回对端地址。
+         *
+         * @param cidrs CIDR（如 "10.0.0.0/8"）或单个地址（如 "192.0.2.7"）列表。
+         *              传空列表等价于取消配置。非法项抛 std::invalid_argument。
+         *
+         * @par 线程安全
+         * 配置阶段。必须在服务器启动前调用。
+         */
+        void set_trusted_proxies(std::vector<std::string> const& cidrs);
 
         /**
          * @brief 将 location 前缀下的请求反向代理到固定的上游 URL。

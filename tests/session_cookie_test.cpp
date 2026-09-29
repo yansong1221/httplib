@@ -6,6 +6,8 @@
 #include "server/middleware/memory_store.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <string>
+#include <thread>
 
 namespace mw = httplib::server::middleware;
 namespace net = httplib::net;
@@ -283,4 +285,88 @@ TEST_CASE("Session: max_age cookie attribute", "[session]")
             REQUIRE(set_cookie.find("Max-Age=1800") != std::string::npos);
             co_return;
         });
+}
+
+// ===== memory_session_store 的容量与回收 =====
+
+TEST_CASE("Session store: max_sessions caps the number of retained sessions", "[session]")
+{
+    mw::memory_session_store store(std::chrono::seconds(600));
+    store.set_max_sessions(3);
+
+    for (int i = 0; i < 20; ++i)
+    {
+        mw::session s("id-" + std::to_string(i));
+        store.save(s);
+    }
+
+    REQUIRE(store.size() == 3);
+}
+
+TEST_CASE("Session store: max_sessions does not drop existing ids on update", "[session]")
+{
+    mw::memory_session_store store(std::chrono::seconds(600));
+    store.set_max_sessions(2);
+
+    mw::session a("a");
+    a.set("k", "1");
+    store.save(a);
+
+    // 同一个 id 反复保存属于更新，不应触发淘汰。
+    for (int i = 0; i < 10; ++i)
+    {
+        store.save(a);
+    }
+    REQUIRE(store.size() == 1);
+
+    auto loaded = store.load("a");
+    REQUIRE(loaded != nullptr);
+    REQUIRE(loaded->get("k") == "1");
+}
+
+TEST_CASE("Session store: expired sessions are reclaimed on save", "[session]")
+{
+    // TTL 1s：窗口远短于测试时长，过期回收只能来自 save() 里的顺带清扫。
+    mw::memory_session_store store(std::chrono::seconds(1));
+
+    for (int i = 0; i < 5; ++i)
+    {
+        store.save(mw::session("old-" + std::to_string(i)));
+    }
+    REQUIRE(store.size() == 5);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+
+    // 顺带清扫的节流间隔是 TTL 的四分之一（下限 1s），此时应已可触发。
+    store.save(mw::session("fresh"));
+    REQUIRE(store.size() == 1);
+    REQUIRE(store.load("fresh") != nullptr);
+}
+
+TEST_CASE("Session store: explicit cleanup reclaims expired sessions", "[session]")
+{
+    mw::memory_session_store store(std::chrono::seconds(1));
+
+    store.save(mw::session("gone"));
+    REQUIRE(store.size() == 1);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+
+    store.cleanup();
+    REQUIRE(store.size() == 0);
+    REQUIRE(store.load("gone") == nullptr);
+}
+
+TEST_CASE("Session store: max_sessions prefers evicting expired sessions", "[session]")
+{
+    mw::memory_session_store store(std::chrono::seconds(1));
+    store.set_max_sessions(2);
+
+    store.save(mw::session("a"));
+    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+
+    // 上限为 2，此刻只有 1 条（且已过期）：新条目应直接占用，不该淘汰任何东西。
+    store.save(mw::session("b"));
+    REQUIRE(store.size() == 1);
+    REQUIRE(store.load("b") != nullptr);
 }

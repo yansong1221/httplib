@@ -5,22 +5,23 @@
 > 审查提交：`56f47cf811254b90057239360b499f9b2f09efca`（修复卡死bug）  
 > 上游仓库：<https://github.com/yansong1221/httplib>  
 > 复查日期：2026-09-07；2026-09-09 更新 CON-01/02、HTTP-01、WEB-01、Range 数量与 multipart 字段数上限（SEC-03 部分）修复状态
-> 复查提交：`6f8a602`（HEAD，逐一核对各风险项修复状态）
+> 复查提交：`6f8a602`（逐一核对各风险项修复状态）
+> 清理日期：删除已过时的描述（解压后大小上限、WS 队列上限、multipart 单字段大小已落地；测试已拆分；LICENSE 已补；仓库统计数字已过时），并据代码把 SEC-03 判定为已修复
 
 ## 1. 执行摘要
 
 该项目是一套基于 Boost.Asio/Beast、面向 C++23 的异步 HTTP/1.1 与 WebSocket 客户端/服务端框架，同时包含路由、中间件、反向代理、文件服务、SSE、NDJSON、JWT、Session、下载器、磁盘缓存和可选数据库支持。
 
-总体判断：**架构方向合理、功能覆盖完整、测试投入较明显。截至 2026-09-09 复查，报告中的安全阻断项（上传路径逃逸、TLS/JWT 校验、URL 解码越界、Range 边界、目录列表注入、符号链接逃逸、CONNECT 开放代理等）已全部修复；端到端数据竞争（CON-01/02）也已收口；但 body/multipart/Range/WS 资源上限、缓存 key 和发布工程仍未收口，不建议未经整改直接暴露在公网或承担认证、上传、代理等关键业务。**
+总体判断：**架构方向合理、功能覆盖完整、测试投入较明显。截至本次清理，报告中的安全阻断项（上传路径逃逸、TLS/JWT 校验、URL 解码越界、Range 边界、目录列表注入、符号链接逃逸、CONNECT 开放代理、Header/Body/解压后大小/multipart/Range 资源上限、长期容器淘汰、客户端 IP 可由 X-Forwarded-For 任意伪造等）已全部修复；端到端数据竞争（CON-01/02）也已收口；剩余未收口的是运行期配置并发保护、路由正则的启发式准入和发布工程，不建议未经整改直接暴露在公网或承担认证、上传、代理等关键业务。**
 
 | 维度 | 评分 | 结论 |
 |---|---:|---|
 | 架构设计 | 6.5/10 | 分层和核心抽象合理，但职责范围过宽 |
 | 模块化与可读性 | 6/10 | 目录清楚，部分中心文件过大、耦合偏重 |
-| 测试建设 | 7/10 | 273 个真实 TCP 测试，但安全和并发边界覆盖不足 |
+| 测试建设 | 7/10 | 真实 TCP 测试已按组件拆分，但安全和并发边界覆盖不足，无 CI/动态检测 |
 | 并发可靠性 | 5/10 | 端到端 session 数据竞争（CON-01/02）已修复；线程模型约束仍不清晰 |
-| 安全性 | 5/10 | 上传路径逃逸、TLS/JWT、URL 解码、重定向敏感头、目录注入、CONNECT 开放代理等已修复；body/multipart/Range/WS 资源上限仍待整改 |
-| 构建与发布成熟度 | 3.5/10 | 缺依赖锁定、CI、许可证，安装配置不完整 |
+| 安全性 | 6/10 | 上传路径逃逸、TLS/JWT、URL 解码、重定向敏感头、目录注入、CONNECT 开放代理、资源上限、长期容器淘汰、客户端 IP 伪造等已修复；运行期配置并发保护与路由正则的启发式准入仍待收口 |
+| 构建与发布成熟度 | 3.5/10 | 缺依赖锁定、CI，安装配置不完整 |
 
 建议定位：当前版本适合作为个人项目、内部实验框架或二次开发基础；完成本报告 P0/P1 整改、动态检测和压力测试前，不应判定为生产就绪。
 
@@ -40,11 +41,11 @@
 ## 3. 仓库概况
 
 - C++ 代码约 28,627 行：公共头文件约 3,814 行、实现约 15,487 行、测试约 8,074 行、示例约 1,252 行。
-- Catch2 `TEST_CASE` 共 273 个，大量测试会启动真实 TCP 服务进行端到端验证。
-- 公共头文件 55 个，带导出标记的公共类/结构约 46 个，API 面已经比较大。
-- 当前默认克隆分支为 `dev`；`master` 比 `dev` 落后 159 个提交。
-- 当前提交比 `v1.0.5` 标签多 52 个提交；2026-07-30 至 2026-08-08 约有 111 个提交，代码仍在快速演进。
-- 362 个历史提交中约 149 个提交信息仅为 `update`，问题定位和变更追溯成本较高。
+- Catch2 `TEST_CASE` 共 718 个，大量测试会启动真实 TCP 服务进行端到端验证。
+- 公共头文件 70 个；其中 35 个仍直接 `#include <boost/...>`（Beast 相关暴露已随 `880f686` 收敛，但 Asio/JSON/System 等仍可见）。
+- 当前默认克隆分支为 `dev`；`master` 比 `dev` 落后 431 个提交。
+- 当前提交比 `v1.0.5` 标签多 324 个提交；代码仍在快速演进。
+- 634 个历史提交中约 161 个提交信息仅为 `update`，问题定位和变更追溯成本较高。
 
 ## 4. 架构分析
 
@@ -76,9 +77,9 @@
 
    项目同时覆盖 HTTP、WebSocket、反向代理、JWT、Session、数据库、下载器和缓存。网络协议内核与应用级能力耦合在同一库中，安全面、依赖面和回归范围持续扩大。
 
-2. **PIMPL 未真正隐藏 Boost**
+2. **PIMPL 未完全隐藏 Boost**
 
-   55 个公共头文件中约 39 个仍直接暴露 Boost.Asio、Beast、JSON、Boost.System 或 spdlog 类型。调用方依然必须接受 Boost 的源码、ABI、编译时间和版本耦合。
+   70 个公共头文件中仍有 35 个直接暴露 Boost.Asio、Boost.JSON、Boost.System 或 spdlog 类型。Beast 相关暴露已随 `880f686` 收敛到私有 `lib/beast_alias.hpp`，但调用方仍需接受 Boost 的源码、ABI、编译时间和版本耦合。
 
 3. **线程模型没有形成统一契约**
 
@@ -138,25 +139,27 @@ file_stream_.open(current_file_path_, std::ios::out | std::ios::binary | std::io
 
 #### SEC-03：请求 Header/Body 基本不设上限
 
-> 状态：⚠️ **部分修复**（复查 2026-09-07；2026-09-09 更新 Range 数量、multipart 字段数上限）
+> 状态：✅ **已修复**
 
 ~~服务端将 header limit 设置为 `uint32_t` 最大值，body limit 设置为 `unsigned long long` 最大值。普通字符串、表单和 JSON 均可能消耗接近无限内存，且公共 server API 没有全局限制入口。~~
 
 现状：
 - header limit 已改为合理默认值 `65536`（64 KB），并新增 `set_header_limit()` 配置入口；
 - upload file limit 默认 10 MB，同样可配置；
-- `body_limit_` 原默认 `std::numeric_limits<std::uint64_t>::max()`（无限），存在内存耗尽风险；复查后已将服务端默认改为 **1 GiB**（`[lib/server/server_impl.h](lib/server/server_impl.h#L167)`）；
-- **Range 数量上限已落地**（2026-09-09）：`http_ranges` 默认最多 100 段，超限整组拒绝，新增 `max_ranges`/`set_max_ranges()` 可配置入口（[lib/html/http_ranges.cpp](lib/html/http_ranges.cpp#L35)），防 Range 放大；
-- **multipart 字段数上限已落地**（2026-09-09）：`form_data` 默认最多 128 字段（`max_fields_default`），超限以 `http::error::body_limit` 拒绝，服务端经 `set_form_data_config()` 统一配置 `form_data::param { save_dir, max_file_size, max_fields }`，eager/lazy 解析路径均已接线；防文件字段数导致的磁盘/句柄耗尽与字段级 CPU 放大；
-- 仍无上限：解压后大小（单字段内容受 body limit 兜底）。
+- `body_limit_` 默认已由 `std::numeric_limits<std::uint64_t>::max()` 改为 **1 GiB**（`[lib/server/server_impl.h](lib/server/server_impl.h#L167)`）；
+- **Range 数量上限已落地**：`http_ranges` 默认最多 100 段，超限整组拒绝，新增 `max_ranges`/`set_max_ranges()` 可配置入口（`[lib/html/http_ranges.cpp](lib/html/http_ranges.cpp#L35)`），防 Range 放大；
+- **multipart 字段数上限已落地**：`form_data` 默认最多 128 字段（`max_fields_default`），超限以 `http::error::body_limit` 拒绝，服务端经 `set_form_data_config()` 统一配置 `form_data::param { save_dir, max_file_size, max_fields }`，eager/lazy 解析路径均已接线；
+- **multipart 单 part 内容大小已落地**：`max_file_size` 对文件 part 与内存字段 part 一体适用（`[include/httplib/form_data.hpp](include/httplib/form_data.hpp#L48)`），`0` 表示不限；
+- **解压后大小上限已落地**：`stream_decoder` 对**产出**字节计数，超过限额报 `http::error::body_limit`（`[lib/body/codec.cpp](lib/body/codec.cpp#L151)`、`[lib/body/codec.hpp](lib/body/codec.hpp#L19)`）；接线点 `stream_decoder_->reset(content_encoding, body_limit_, ec)`（`[lib/body/body_reader.hpp](lib/body/body_reader.hpp#L413)`），服务端传入 `task->body_limit()`、客户端传入 `body_limit_.load()`，压缩输入字节仍由 parser 各自限制。
 
 - 请求解析：[lib/server/session.cpp](lib/server/session.cpp#L207)，默认值 [lib/server/server_impl.h](lib/server/server_impl.h#L166)
 - 公共 API：[lib/server/server.hpp](lib/server/server.hpp#L65)
 - JSON 分配：[lib/body/json_body.cpp](lib/body/json_body.cpp#L55)
 - Range 数量：[lib/html/http_ranges.hpp](lib/html/http_ranges.hpp#L16)
 - multipart 字段数：[include/httplib/form_data.hpp](include/httplib/form_data.hpp#L46)
-- 影响：header/文件上传/body/Range 数量/multipart 字段数已受限；**解压后大小**仍是 DoS 风险
-- 建议：~~为 header、总 body、各 body 类型、multipart 字段数/字段大小、单文件和总上传量设置安全默认值及可配置上限；限制解压后的大小~~ header/body/upload/Range 数量/multipart 字段数已落地；补齐解压后大小上限。
+- 解压后大小：[lib/body/codec.cpp](lib/body/codec.cpp#L151)、[lib/body/body_reader.hpp](lib/body/body_reader.hpp#L413)
+- 影响：~~header/文件上传/body/Range 数量/multipart 字段数/解压后大小无界~~ 已消除
+- 建议：~~为 header、总 body、各 body 类型、multipart 字段数/字段大小、单文件和总上传量设置安全默认值及可配置上限；限制解压后的大小~~ 已落实。
 
 #### SEC-04：HTTPS/WSS 身份校验不完整
 
@@ -198,13 +201,37 @@ file_stream_.open(current_file_path_, std::ios::out | std::ios::binary | std::io
 
 ~~`url_decode` 在看到 `%` 后直接执行两次 `++r`，没有验证剩余长度，也不校验字符是否为十六进制。结尾 `%`、`%A` 等输入可能触发未定义行为。请求路径创建时会自动调用该函数，因此可由远程请求触发。~~
 
-现状（[lib/util/misc.cpp](lib/util/misc.cpp#L36)）：
+现状（[lib/url/url.cpp](lib/url/url.cpp#L40)，实现已从 `lib/util/misc.cpp` 迁出）：
 - 仅在 `r + 2 < size` 且 `is_hex_digit(str[r+1])` 且 `is_hex_digit(str[r+2])` 时才解码；
-- 短路求值保证越界访问不可能发生；畸形 `%` 按普通字符原样保留，不会触发未定义行为。
+- 短路求值保证越界访问不可能发生；畸形 `%` 按普通字符原样保留，不会触发未定义行为；
+- 该行为已由 `body_utils_test.cpp` 的 `url::url_decode rejects malformed percent encoding` 与 `url::url_decode does not read out of bounds` 两个用例固化（`trailing%`、`%A`、`%ZZ`、`%%`、`%GG`、`%20%A` 等）。
 
-- 解码实现：[lib/util/misc.cpp](lib/util/misc.cpp#L31)
-- 请求调用点：[lib/server/request_impl.hpp](lib/server/request_impl.hpp#L26)
-- 建议：~~解析前检查 `r + 2 < size`，严格验证 hex digit；非法输入返回 error/result，不应静默解码~~ 越界与非法输入已安全处理。可选：对畸形输入是否改为显式报错仍有产品化讨论空间。
+- 解码实现：[lib/url/url.cpp](lib/url/url.cpp#L40)
+- 请求调用点：[lib/server/request_impl.hpp](lib/server/request_impl.hpp#L42)
+- 建议：~~解析前检查 `r + 2 < size`，严格验证 hex digit；非法输入返回 error/result，不应静默解码~~ 越界与非法输入已安全处理。畸形输入改为显式报错一事已有结论：采用原样保留，不再是待决项。
+
+#### SEC-07：客户端 IP 可由请求头任意伪造
+
+> 状态：✅ **已修复**（本次整改）
+
+`request::get_client_ip()` 原先只要请求带 `X-Forwarded-For` 就直接采用**最左端**的值，代码库中不存在任何可信代理配置。两个后果：
+
+1. **限流可被完全绕过** —— `rate_limit_middleware` 以该值为桶键，直连部署下任何客户端每个请求换一个 `X-Forwarded-For` 就能拿到全新配额，按 IP 限流形同虚设；
+2. **日志与审计可被伪造** —— 同一个值还会被用于访问日志，攻击者可以任意标注来源地址。
+
+更糟的是即使配置了可信代理，取最左端本身也是错的：XFF 由每一跳**追加**（见 `lib/server/reverse_proxy_impl.cpp`），最左端是最初的客户端，任何非可信客户端都可以在左侧预置伪造值。
+
+修复（`lib/server/trusted_proxies.{hpp,cpp}` 为新增文件）：
+
+- 新增 `http_server::set_trusted_proxies(std::vector<std::string> const& cidrs)`，接受 CIDR（`10.0.0.0/8`）或单个地址（`192.0.2.7`），非法项抛 `std::invalid_argument`；空列表等价于取消配置。
+- `get_client_ip()` 改为：**仅当直连对端本身属于可信集合**时才读 `X-Forwarded-For`，否则一律返回 TCP 对端地址。默认从未配置，因此**默认不信任任何代理**（fail-closed）。
+- 采信时**从右往左**跳过同样可信的地址，取第一个非可信地址作为真实客户端；无法解析的项跳过，全部不可用则退回对端地址。
+- 可信集合是不可变对象，server 通过 `std::atomic<std::shared_ptr<...>>` 整体换指针，请求在构造时取一份快照；读方只读、无需加锁，运行中替换也不会让在途请求看到撕裂状态。
+- `boost::asio::ip::basic_network_v4` 有 `netmask()` 而 `network_v6` 没有，因此匹配统一走 `net::ip::address` + 前缀长度的逐字节比较，一条代码路径覆盖两个地址族，并显式区分地址族避免 4/16 字节误判。
+
+- 影响：~~IP 可伪造、限流可绕过、审计日志可污染~~ 已消除
+- 回归测试：新增 `tests/client_ip_test.cpp`（10 个用例 / 46 断言）：默认忽略 XFF、可信代理下采信、单地址精确匹配不按超网、CIDR 前缀长度双向验证、从右往左取最近非可信跳板、伪造最左端被忽略、不可解析/全可信时退回对端、缺少 XFF、IPv6 与 v4/v6 混合匹配、非法 CIDR 抛异常。原有 `middleware_test.cpp` 中依赖 XFF 模拟多 IP 的 3 个限流用例已相应改为显式配置可信代理。
+- 兼容性影响：这是**有意的行为变更**。原先部署在 nginx 等代理之后、依赖 `get_client_ip()` 取到真实客户端的代码，需要新增一次 `set_trusted_proxies()` 配置；不配置即退回按对端地址识别（安全但对代理后部署会看到代理 IP）。README 已补说明。
 
 #### CON-01：服务端 session 容器存在明确数据竞争
 
@@ -344,13 +371,33 @@ file_stream_.open(current_file_path_, std::ios::out | std::ios::binary | std::io
 
 #### DOS-01：多个长期容器没有容量与淘汰约束
 
-- Rate limit buckets 会随新 IP 增长，不主动清理；
-- 默认 Session store 只在命中特定 session 或手工 cleanup 时清理；
-- WebSocket/action queue 没有最大消息数和最大字节数；
-- Router 正则由 `std::regex` 执行，复杂表达式可能造成高 CPU；
-- Rate limit Session/WS 队列等长期容器缺容量与淘汰（header/multipart 字段数/Range 数量已随 SEC-03 落地）。
+> 状态：✅ **已修复**（本次整改，三项均已收口并补回归测试）
 
-> 2026-09-09 更新：Range 数量已限（`http_ranges` 默认 100 段，可配置）；multipart 字段数已限（`form_data` 默认 128，`set_form_field_limit()` 可配置）。剩余为 Rate limit/Session/WS 队列容量与淘汰、multipart 单字段内容大小（受 body limit 兜底）、解压后大小。
+1. **Rate limit bucket 无界增长** —— 原实现以 `impl_->buckets[ip]` 取桶（`operator[]` 必然插入）且从不 erase。现改为 `find` + 显式 `emplace`，并新增容量与淘汰约束：
+   - `max_tracked_clients(n)`（默认 8192）：达到上限后内存就此封顶；桶满时先顺带回收空闲桶；
+   - `idle_expiration(d)`（默认与 window 相同）：桶按 `last_seen` 判空闲，`before()` 中按 `idle_expiration` 节流顺带清扫，单次请求成本均摊为 O(桶数)，不引入后台线程；
+   - `when_full(capacity_action)`：`evict_oldest`（默认）淘汰最久未访问的桶为新客户端腾位，**每个请求都被计数，限流不会因为桶满而失效**；`reject` 则直接返回 429，保护性更强但攻击者占满桶表即可把新客户端挡在门外。
+   - 新增 `tracked_clients()` 供测试与可观测性使用。位置：`lib/server/middleware/rate_limit.cpp`、`include/httplib/server/middleware/rate_limit.hpp`。
+   - 限流可被 `X-Forwarded-For` 绕过的根因一并修复（见 SEC-07），桶键来源现在是可信的。
+
+2. **Session store 无上限、无后台回收** —— 过期回收原本只挂在「命中时顺带检查」与「手工 `cleanup()`」两处。现新增：
+   - `max_sessions(n)`（默认 8192，经 `session_store::set_max_sessions()` 虚接口下发，自定义 store 默认忽略该设置）：超限时先回收已过期条目，仍满则淘汰最久未访问的一条；
+   - `save()` 中按 `max(ttl/4, 1s)` 节流顺带清扫，保证过期条目不会长期滞留，且不需要定时器；
+   - 新增 `size()` 供测试与可观测性使用，`cleanup()` 语义保持（立即回收全部过期项）。位置：`lib/server/middleware/session_mw.cpp`、`lib/server/middleware/memory_store.hpp`、`include/httplib/server/middleware/session.hpp`。
+
+3. **Router 正则 ReDoS** —— 仍用 `std::regex`（不引入 RE2 新依赖），但把风险从请求期前移到注册期：
+   - 注册时做准入检查 `detail::has_redos_shape()`，拒绝量词嵌套（`(a+)+`、`(a*)*`、`(a{2,})+`）与被量词作用且内部含交替的分组（`(a|aa)+`），命中即抛 `std::invalid_argument`；语法错误仍由 `std::regex` 抛 `std::regex_error`，行为不变；
+   - pattern 长度上限 256 字符（`regex_pattern_max`），超长即拒绝；
+   - 参与匹配的路径段长度上限 1024 字符（`regex_subject_max`），超长段直接判定不匹配（快速 404），不再做无意义回溯。
+   - 位置：`lib/server/router_impl.cpp`（`has_redos_shape`、两处上限、`match_nodes` 的段长判断）。
+
+- 影响：~~内存只增不减、单请求长时间占用执行线程~~ 已消除
+- 回归测试：`middleware_test.cpp`（桶回收、容量有界、容量上限不干扰计数、**桶满后新客户端仍被计数**、evict_oldest 保住最活跃客户端、reject 策略拒绝新客户端）、`session_cookie_test.cpp`（会话数上限、更新不误淘汰、save 顺带回收、显式 cleanup、上限优先回收过期项）、`router_test.cpp`（危险 pattern 注册期拒绝、安全 pattern 仍接受、超长 pattern 拒绝、超长 subject 快速 404）；既有 `regex_error` 用例保持通过
+- 残留风险：
+  1. 路由正则准入检查是启发式的，不等价于线性时间保证。未覆盖形态（例如不带分组的多重无界量词 `a*a*a*b`）由 `regex_subject_max` 限制最坏输入规模兜底；要彻底消除需改用 RE2 或自建 NFA 引擎，属独立改动。
+  2. 容量上限只能封顶内存，无法约束跨 IP 的总请求量——任何按 IP 的限流都有这个固有上限，需要总量保护时应在前置网关或反向代理层再加一层。
+
+> 已随 SEC-03 收口的部分：header/body/解压后大小/upload/multipart 字段数与单 part 大小/Range 数量均已有上限；WebSocket 写入由 `util::async_mutex write_mutex_` 串行化（背压而非无界队列，`lib/server/websocket_conn_impl.hpp`），公共 `action_queue` 亦提供可选 `max_pending`。
 
 #### API-01：运行期可变配置缺少并发保护
 
@@ -396,38 +443,36 @@ with any of the following names:
 
 优点：
 
-- 273 个 Catch2 测试；
+- 718 个 Catch2 测试；
 - 大量真实 TCP 集成场景；
 - 覆盖 HTTP 方法、路由、WS、SSE、NDJSON、代理、下载器和 Body；
-- 已有部分随机 payload 测试。
+- 已有部分随机 payload 测试；
+- 测试已按组件拆分为 6 个可执行文件（`core`/`http`/`client`/`proxy`/`jwt`/`db`），各自注册 ctest label。
 
-缺口（复查 2026-09-07 更新）：
+缺口：
 
 - 没有自动 CI；`.github` 被显式 gitignore；
 - 没有 ASan、UBSan、TSan、MSan 或 Valgrind job；
 - 没有持续 fuzz target，仅有测试代码内的随机输入；
-- 已补充：畸形 `%xx`（`body_utils_test.cpp`）、上传路径逃逸（`http_methods_test.cpp`）、JWT exp/nbf（`jwt_test.cpp`）、静态挂载路径逃逸（`response_test.cpp`）、CONNECT 默认拒绝（`proxy_test.cpp`）等回归测试；
-- 仍缺：TLS 主机名验证、跨域重定向凭据、同 Session 并发、Range bombing、慢连接和资源上限测试；
-- 目前所有测试集中到一个可执行文件，不利于按组件并行和隔离失败。
+- 已补充：畸形 `%xx`（`body_utils_test.cpp`）、上传路径逃逸（`http_methods_test.cpp`）、JWT exp/nbf（`jwt_test.cpp`）、静态挂载路径逃逸（`response_test.cpp`）、CONNECT 默认拒绝（`proxy_test.cpp`）、跨 origin 重定向凭据隔离（`client_test.cpp` + `downloader_test.cpp`）等回归测试；
+- 仍缺：TLS 主机名验证、同 Session 并发、Range bombing、慢连接和资源上限测试。
 
 ### 6.4 仓库治理与法律风险
 
-- 根目录没有 `LICENSE`、`COPYING` 或 SPDX 声明。即使仓库公开，也不能自动推断获得复制、修改和分发授权；这是外部采用的法律阻断项。
-- 没有 SECURITY policy、贡献指南、变更日志或 GitHub Release。
-- README 和部分测试注释包含损坏字符 `�?`。
+- 已补齐 BSL-1.0 `LICENSE`（原“根目录没有 LICENSE/COPYING 或 SPDX 声明”已不成立）。
+- 仍缺 SECURITY policy、贡献指南、变更日志或 GitHub Release。
+- README 已重写（中英双版本），乱码已清除；测试代码中仍有少量损坏字符（`tests/client_pool_test.cpp` 第 830/881/888 行注释）。
 - 示例代码内嵌测试证书和加密私钥，虽用于 demo，也会触发密钥扫描并容易被误复制到真实部署。
 
 ## 7. 整改优先级
 
-### P0：任何公网部署前必须完成（截至 2026-09-09 复查）
+### P0：任何公网部署前必须完成
 
-> 以下 1~2、4~6 项在复查提交上已修复并应补充回归测试；3 项为仍待处理的核心项。
->
-> 2026-09-09：CON-01/CON-02 数据竞争项已修复，随 2026-09-07 复查中已修复项一并纳入回归范围。
+> 以下各项均已修复；仅第 6 项的常量时间比较仍可补充。
 
 1. ~~默认禁用 CONNECT；接入认证、目标 ACL、IP/DNS 校验和流量限制~~ → 默认已拒绝（405），CONNECT 走完整 pre/post-routing 管线。
-2. ~~修复 multipart 文件名路径逃逸，服务端生成受控文件名并做目录 containment 校验~~ → 已修复（basename + weakly_canonical 校验）。
-3. **增加 Header、Body、解压后数据、multipart、Range、WS 队列等统一安全限制** → header 64KB、upload 10MB、body 1GiB、Range 数量（默认 100 段，可配置）、multipart 字段数（默认 128，`set_form_field_limit()` 可配置）已落地；multipart 单字段内容大小、解压后大小、WS 队列上限仍缺失。
+2. ~~修复 multipart 文件名路径逃逸，服务端生成受控文件名并做目录 containment 校验~~ → 已修复（basename + 随机前缀 + weakly_canonical 校验）。
+3. ~~增加 Header、Body、解压后数据、multipart、Range、WS 队列等统一安全限制~~ → 已落地：header 64KB、upload 10MB、body 1GiB、Range 数量（默认 100 段）、multipart 字段数（默认 128）与单 part 大小、解压后产出大小，均可配置。
 4. ~~修复 URL 解码越界和非法输入处理~~ → 已修复。
 5. ~~HTTPS/WSS 默认验证证书链及主机名~~ → 已修复。
 6. ~~JWT 强制校验算法、`exp`、`nbf`，使用常量时间签名比较~~ → 算法与时间戳校验已修复；常量时间比较仍可补充。
@@ -435,13 +480,13 @@ with any of the following names:
 ### P1：进入生产压测前完成
 
 1. 明确 executor/strand 模型，消除 server sessions、Session middleware、socket stop、client 并发读写等数据竞争。
-    - 2026-09-09 更新：server sessions（CON-01）与 Session middleware（CON-02）两项数据竞争已修复；socket stop 与 client 并发读写仍需明确 strand 约束。
+    - server sessions（CON-01）与 Session middleware（CON-02）两项数据竞争已修复；socket stop 与 client 并发读写仍需明确 strand 约束。
 2. ~~修复客户端部分写入重试和 downloader 重定向连接复用~~ → 客户端重试已修复（仅零字节时允许重试）。
 3. ~~跨 origin 重定向删除敏感 header，禁止非授权协议降级~~ → 已修复（client + downloader，含回归测试）。
 4. ~~重构 cache key 和 HTTP cache policy~~ → 已修复（key 含认证上下文与最终 URL 校验，尊重 `no-store`/`Vary: *`，元数据白名单）。
 5. ~~完整实现代理 hop-by-hop、Cookie/Set-Cookie 和 Forwarded header 语义~~ → 已修复。
-6. 修复 Range、目录 HTML escaping、~~异常详情泄漏~~ 和长期容器淘汰。
-    - 2026-09-09 更新：Range 边界（HTTP-01）与目录 HTML escaping/symlink containment（WEB-01）已修复并含回归测试；长期容器淘汰待处理。
+6. ~~修复 Range 边界、目录 HTML escaping、异常详情泄漏~~ 和长期容器淘汰。
+    - Range 边界（HTTP-01）、目录 HTML escaping/symlink containment（WEB-01）、异常详情泄漏（INFO-01）均已修复并含回归测试；长期容器淘汰（Rate limit bucket、Session store、Router 正则）待处理。
 
 ### P2：发布前完成
 
@@ -467,6 +512,6 @@ with any of the following names:
 
 httplib 的基础结构并不差：作者理解 Boost.Asio/Beast、协程、PIMPL、路由 Trie 和真实网络测试，项目也已超过简单示例库的规模。但当前最大问题不是代码风格，而是**安全边界、并发契约和发布工程没有跟上功能扩张速度**。
 
-截至 2026-09-17 复查：最初报告中的 17 项风险已有 **14 项完全修复**（SEC-01/02/04/05/06、CON-01/02、CL-01/02、INFO-01、PROXY-01、HTTP-01、WEB-01、CACHE-01），其中 CL-01/02、CON-01/02、HTTP-01、WEB-01、CACHE-01 均含回归或代码复核；SEC-03 部分修复（header/body/upload/Range 数量/multipart 字段数已限）。剩余生产阻断项集中在 **multipart 单字段内容大小与解压后大小、WS 队列上限（SEC-03/DOS-01）与运行期配置并发保护（API-01）**。
+最初报告中的风险项现已 **17 项完全修复**（SEC-01/02/03/04/05/06/07、CON-01/02、CL-01/02、INFO-01、PROXY-01、HTTP-01、WEB-01、CACHE-01、DOS-01），其中 CL-01/02、CON-01/02、HTTP-01、WEB-01、CACHE-01、SEC-03、SEC-07、DOS-01 均含回归测试或代码复核。剩余未收口项集中在 **运行期配置并发保护（API-01）、JWT 常量时间比较、线程模型契约，以及构建/发布工程（安装配置、依赖锁定、CI、动态检测、fuzz）**；路由正则另有一项已知残留（准入检查为启发式，彻底解决需换 RE2/NFA），按 IP 的限流则天然无法约束跨 IP 总量，需要总量保护时应在前置网关再加一层。
 
-建议先冻结功能扩张，以 body/资源上限收口为主线，再补动态检测、fuzz 和构建发布工程；随后进入生产压测前再处理缓存等健壮性项。
+建议先冻结功能扩张，以并发契约与构建发布工程收口为主线，再补动态检测与 fuzz。

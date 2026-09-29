@@ -261,7 +261,8 @@ namespace httplib::server
                                                    local_endp,
                                                    remote_endp,
                                                    std::move(header_parser),
-                                                   stream_.is_ssl());
+                                                   stream_.is_ssl(),
+                                                   server_impl_->get_trusted_proxies());
 
             if (websocket::is_upgrade(get_impl(req).get()))
             {

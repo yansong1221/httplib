@@ -130,10 +130,69 @@ namespace httplib::server::middleware
         std::mutex mutex_;
         util::string_map<std::shared_ptr<session>> sessions_;
 
+        std::size_t max_sessions_ = 8192;
+        time_point last_sweep_ {};
+
         bool
         is_expired(session const& s) const
         {
             return (clock::now() - s.last_access()) > ttl_;
+        }
+
+        /// 回收扫描的节流间隔：TTL 的四分之一，下限 1s。
+        /// 既保证过期条目不会长期滞留，又让单次请求的额外成本保持均摊。
+        std::chrono::seconds
+        sweep_interval() const
+        {
+            auto quarter = ttl_ / 4;
+            return quarter < std::chrono::seconds(1) ? std::chrono::seconds(1) : quarter;
+        }
+
+        /// 调用方必须持有 mutex_。
+        void
+        sweep(time_point now)
+        {
+            if (last_sweep_ != time_point {} && now - last_sweep_ < sweep_interval())
+            {
+                return;
+            }
+            last_sweep_ = now;
+            erase_expired(now);
+        }
+
+        /// 调用方必须持有 mutex_。
+        void
+        erase_expired(time_point now)
+        {
+            for (auto it = sessions_.begin(); it != sessions_.end();)
+            {
+                if ((now - it->second->last_access()) > ttl_)
+                {
+                    it = sessions_.erase(it);
+                }
+                else
+                {
+                    ++it;
+                }
+            }
+        }
+
+        /// 调用方必须持有 mutex_。淘汰最久未访问的一条，保证插入后不越界。
+        void
+        evict_oldest()
+        {
+            auto victim = sessions_.end();
+            for (auto it = sessions_.begin(); it != sessions_.end(); ++it)
+            {
+                if (victim == sessions_.end() || it->second->last_access() < victim->second->last_access())
+                {
+                    victim = it;
+                }
+            }
+            if (victim != sessions_.end())
+            {
+                sessions_.erase(victim);
+            }
         }
     };
 
@@ -169,6 +228,19 @@ namespace httplib::server::middleware
     memory_session_store::save(session const& s)
     {
         std::lock_guard lock(impl_->mutex_);
+        auto now = session::clock::now();
+        impl_->sweep(now);
+
+        auto it = impl_->sessions_.find(s.id());
+        if (it == impl_->sessions_.end() && impl_->sessions_.size() >= impl_->max_sessions_)
+        {
+            // 已达上限：先确保没有过期条目可回收，再淘汰最久未访问的一条。
+            impl_->erase_expired(now);
+            if (impl_->sessions_.size() >= impl_->max_sessions_)
+            {
+                impl_->evict_oldest();
+            }
+        }
         impl_->sessions_[s.id()] = std::make_shared<session>(s);
     }
 
@@ -180,20 +252,25 @@ namespace httplib::server::middleware
     }
 
     void
+    memory_session_store::set_max_sessions(std::size_t max_sessions)
+    {
+        std::lock_guard lock(impl_->mutex_);
+        impl_->max_sessions_ = max_sessions;
+    }
+
+    std::size_t
+    memory_session_store::size() const
+    {
+        std::lock_guard lock(impl_->mutex_);
+        return impl_->sessions_.size();
+    }
+
+    void
     memory_session_store::cleanup()
     {
         std::lock_guard lock(impl_->mutex_);
-        for (auto it = impl_->sessions_.begin(); it != impl_->sessions_.end();)
-        {
-            if (impl_->is_expired(*it->second))
-            {
-                it = impl_->sessions_.erase(it);
-            }
-            else
-            {
-                ++it;
-            }
-        }
+        impl_->last_sweep_ = session::clock::now();
+        impl_->erase_expired(impl_->last_sweep_);
     }
 
     // ---- session_middleware ----
@@ -306,6 +383,13 @@ namespace httplib::server::middleware
     session_middleware::store_ttl(std::chrono::seconds ttl)
     {
         impl_->config_.store_ttl = ttl;
+        return *this;
+    }
+
+    session_middleware&
+    session_middleware::max_sessions(std::size_t n)
+    {
+        impl_->store_->set_max_sessions(n);
         return *this;
     }
 

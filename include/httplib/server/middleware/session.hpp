@@ -3,6 +3,7 @@
 #include "httplib/server/server_fwd.hpp"
 #include "httplib/util/string_hash.hpp"
 #include <chrono>
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string>
@@ -49,6 +50,13 @@ namespace httplib::server::middleware
         virtual std::shared_ptr<session> load(std::string_view id) = 0;
         virtual void save(session const& s) = 0;
         virtual void destroy(std::string_view id) = 0;
+
+        /// 可选：限制该实现同时保留的会话数上界，让长期存活的 store 内存有界。
+        /// 默认实现忽略该设置；外部自定义 store 不受影响。
+        virtual void
+        set_max_sessions(std::size_t)
+        {
+        }
     };
 
     class HTTPLIB_API session_middleware
@@ -69,6 +77,11 @@ namespace httplib::server::middleware
         session_middleware& same_site_strict();
         session_middleware& same_site_none();
         session_middleware& store_ttl(std::chrono::seconds ttl);
+
+        /// 会话存储同时保留的会话数上限，默认 8192。仅对实现了该设置的 store
+        /// （内置 `memory_session_store`）生效。超出上限时先回收已过期会话，
+        /// 仍满则淘汰最久未访问的一条，保证内存有界。
+        session_middleware& max_sessions(std::size_t n);
 
         bool before(request& req, response& resp);
         bool after(request& req, response& resp);

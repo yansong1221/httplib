@@ -1,4 +1,5 @@
 #pragma once
+#include "beast_alias.hpp"
 #include "body/body_reader.hpp"
 #include "body/sink.hpp"
 #include "httplib/server/request.hpp"
@@ -6,6 +7,7 @@
 #include "httplib/util/misc.hpp"
 #include "httplib/util/string_hash.hpp"
 #include "session.hpp"
+#include "trusted_proxies.hpp"
 #include <algorithm>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/http/empty_body.hpp>
@@ -15,7 +17,6 @@
 #include <cstring>
 #include <filesystem>
 #include <functional>
-#include "beast_alias.hpp"
 
 namespace httplib::server
 {
@@ -29,11 +30,13 @@ namespace httplib::server
              tcp::endpoint const& remote_endpoint,
              std::unique_ptr<http::request_parser<http::empty_body>> header_parser,
              std::shared_ptr<session::http_task> task,
-             bool is_ssl)
+             bool is_ssl,
+             std::shared_ptr<trusted_proxies const> trusted_proxies = {})
             : body_reader_t(task->executor(), task.get(), std::move(*header_parser), task->body_limit())
             , local_endpoint_(local_endpoint)
             , remote_endpoint_(remote_endpoint)
             , is_ssl_(is_ssl)
+            , trusted_proxies_(std::move(trusted_proxies))
             , task_(std::move(task))
         {
             auto const target = get().target();
@@ -70,25 +73,41 @@ namespace httplib::server
         net::ip::address
         get_client_ip() const
         {
+            auto const peer = remote_endpoint_.address();
+
+            // 直连对端不在可信集合里：X-Forwarded-For 完全由客户端填写，
+            // 采信它等于让任何人自己声明 IP（限流、日志、审计全部可伪造）。
+            if (!trusted_proxies_ || !trusted_proxies_->contains(peer))
+            {
+                return peer;
+            }
+
             auto iter = get().find("X-Forwarded-For");
             if (iter == get().end())
             {
-                return this->remote_endpoint_.address();
+                return peer;
             }
 
+            // X-Forwarded-For 由每一跳代理追加（见 reverse_proxy_impl.cpp），因此
+            // 最右侧是离本机最近的一跳。从右往左跳过可信代理本身，取第一个非可信
+            // 地址——它才是真正的客户端。取最左端（最常见的错误写法）会被客户端
+            // 预置伪造值直接骗过。
             auto tokens = util::split(iter->value(), ",");
-            if (tokens.empty())
+            for (auto it = tokens.rbegin(); it != tokens.rend(); ++it)
             {
-                return this->remote_endpoint_.address();
+                boost::system::error_code ec;
+                auto const addr = net::ip::make_address(*it, ec);
+                if (ec)
+                {
+                    // 无法解析的项直接跳过，继续往左找；全都不合法则退回对端地址。
+                    continue;
+                }
+                if (!trusted_proxies_->contains(addr))
+                {
+                    return addr;
+                }
             }
-
-            boost::system::error_code ec;
-            auto address = net::ip::make_address(tokens.front(), ec);
-            if (ec)
-            {
-                return this->remote_endpoint_.address();
-            }
-            return address;
+            return peer;
         }
         tcp::endpoint const&
         local_endpoint() const
@@ -145,13 +164,15 @@ namespace httplib::server
                      tcp::endpoint const& local_endpoint,
                      tcp::endpoint const& remote_endpoint,
                      std::unique_ptr<http::request_parser<http::empty_body>> header_parser,
-                     bool is_ssl = false)
+                     bool is_ssl = false,
+                     std::shared_ptr<trusted_proxies const> trusted_proxies = {})
         {
             auto _impl = std::make_unique<request::impl>(local_endpoint,
                                                          remote_endpoint,
                                                          std::move(header_parser),
                                                          std::move(task),
-                                                         is_ssl);
+                                                         is_ssl,
+                                                         std::move(trusted_proxies));
             return request(std::move(_impl));
         }
 
@@ -162,6 +183,10 @@ namespace httplib::server
         tcp::endpoint local_endpoint_;
         tcp::endpoint remote_endpoint_;
         bool is_ssl_ = false;
+
+        /// server 的可信代理配置快照（默认空 = 不采信任何 XFF）。不可变，跨线程
+        /// 只读，无需加锁。
+        std::shared_ptr<trusted_proxies const> trusted_proxies_;
 
         util::string_map<std::string> path_params_;
         request_data data_;
