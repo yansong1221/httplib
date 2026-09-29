@@ -1,8 +1,49 @@
 
 #include "httplib/form_data.hpp"
+#include <filesystem>
 #include <sstream>
+#include <system_error>
 namespace httplib
 {
+
+    form_data::form_data(form_data&& other) noexcept
+        : fields(std::move(other.fields))
+        , boundary(std::move(other.boundary))
+        , params(other.params)
+    {
+        // 字段文件已交给目标对象，moved-from 对象不再负责清理。
+        other.params.remove_uploaded_files = false;
+    }
+
+    form_data&
+    form_data::operator=(form_data&& other) noexcept
+    {
+        if (this != &other)
+        {
+            fields = std::move(other.fields);
+            boundary = std::move(other.boundary);
+            params = other.params;
+            other.params.remove_uploaded_files = false;
+        }
+        return *this;
+    }
+
+    form_data::~form_data()
+    {
+        if (!params.remove_uploaded_files)
+        {
+            return;
+        }
+        for (auto const& field : fields)
+        {
+            if (field.file_path)
+            {
+                // 处理器若已移走文件，这里删除失败也不会有任何影响。
+                std::error_code ec;
+                fs::remove(*field.file_path, ec);
+            }
+        }
+    }
 
     std::optional<form_data::field>
     form_data::field_by_name(std::string_view field_name) const

@@ -731,6 +731,317 @@ TEST_CASE("Multipart file upload exceeds size limit", "[http-methods]")
     std::filesystem::remove_all(upload_dir);
 }
 
+TEST_CASE("Multipart in-memory file upload exceeds size limit", "[http-methods][security]")
+{
+    run(
+        [](auto& server)
+        {
+            server.set_form_data_config({ .max_file_size = 4 });
+            server.router().template set_http_handler<httplib::method::post>(
+                "/upload-mem-limit",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            std::string boundary = "----MemLimitBoundary";
+            std::string body = std::format("--{}\r\n"
+                                           "Content-Disposition: form-data; name=\"file\"; filename=\"big.bin\"\r\n"
+                                           "\r\n"
+                                           "too-large\r\n"
+                                           "--{}--\r\n",
+                                           boundary,
+                                           boundary);
+
+            auto hdrs = httplib::headers();
+            hdrs.set(httplib::field::content_type, std::format("multipart/form-data; boundary={}", boundary));
+            auto req = httplib::client::request(httplib::method::post, "/upload-mem-limit", hdrs);
+            req.set_body(body, hdrs[httplib::field::content_type]);
+            auto resp = co_await client.async_send_request(req);
+            REQUIRE_FALSE(resp.has_value());
+            co_return;
+        });
+}
+
+TEST_CASE("Multipart in-memory file upload within size limit", "[http-methods][security]")
+{
+    run(
+        [](auto& server)
+        {
+            server.set_form_data_config({ .max_file_size = 4 });
+            server.router().template set_http_handler<httplib::method::post>(
+                "/upload-mem-ok",
+                [](httplib::server::request& req, httplib::server::response& resp)
+                {
+                    auto const& fd = req.as_form_data();
+                    REQUIRE(fd.fields.size() == 1);
+                    REQUIRE(fd.fields[0].filename == "a.bin");
+                    REQUIRE(fd.fields[0].content == "data");
+                    resp.set_string_content("ok"sv, "text/plain"sv);
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            std::string boundary = "----MemOkBoundary";
+            std::string body = std::format("--{}\r\n"
+                                           "Content-Disposition: form-data; name=\"file\"; filename=\"a.bin\"\r\n"
+                                           "\r\n"
+                                           "data\r\n"
+                                           "--{}--\r\n",
+                                           boundary,
+                                           boundary);
+
+            auto hdrs = httplib::headers();
+            hdrs.set(httplib::field::content_type, std::format("multipart/form-data; boundary={}", boundary));
+            auto req = httplib::client::request(httplib::method::post, "/upload-mem-ok", hdrs);
+            req.set_body(body, hdrs[httplib::field::content_type]);
+            auto resp = UNWRAP(co_await client.async_send_request(req));
+            REQUIRE(resp.result() == httplib::status::ok);
+            REQUIRE(resp.as_string() == "ok");
+            co_return;
+        });
+}
+
+TEST_CASE("Multipart regular field content exceeds max_file_size", "[http-methods][security]")
+{
+    run(
+        [](auto& server)
+        {
+            server.set_form_data_config({ .max_file_size = 4 });
+            server.router().template set_http_handler<httplib::method::post>(
+                "/field-size-limit",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            std::string boundary = "----FieldSizeBoundary";
+            std::string body = std::format("--{}\r\n"
+                                           "Content-Disposition: form-data; name=\"text\"\r\n"
+                                           "\r\n"
+                                           "too-large\r\n"
+                                           "--{}--\r\n",
+                                           boundary,
+                                           boundary);
+
+            auto hdrs = httplib::headers();
+            hdrs.set(httplib::field::content_type, std::format("multipart/form-data; boundary={}", boundary));
+            auto req = httplib::client::request(httplib::method::post, "/field-size-limit", hdrs);
+            req.set_body(body, hdrs[httplib::field::content_type]);
+            auto resp = co_await client.async_send_request(req);
+            REQUIRE_FALSE(resp.has_value());
+            co_return;
+        });
+}
+
+TEST_CASE("Multipart uploaded file is removed after the request", "[http-methods][security]")
+{
+    auto upload_dir = std::filesystem::temp_directory_path() / "httplib_uploads_cleanup";
+    std::filesystem::create_directories(upload_dir);
+    auto saved = std::make_shared<std::filesystem::path>();
+
+    run(
+        [&](auto& server)
+        {
+            server.set_form_data_config({ .save_dir = upload_dir, .remove_uploaded_files = true });
+            server.router().template set_http_handler<httplib::method::post>(
+                "/upload-cleanup",
+                [saved](httplib::server::request& req, httplib::server::response& resp)
+                {
+                    auto const& fd = req.as_form_data();
+                    REQUIRE(fd.fields.size() == 1);
+                    REQUIRE(fd.fields[0].file_path.has_value());
+                    *saved = fd.fields[0].file_path.value();
+                    REQUIRE(std::filesystem::exists(*saved));
+                    resp.set_string_content("ok"sv, "text/plain"sv);
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            std::string boundary = "----CleanupBoundary";
+            std::string body = std::format("--{}\r\n"
+                                           "Content-Disposition: form-data; name=\"file\"; filename=\"temp.bin\"\r\n"
+                                           "\r\n"
+                                           "payload\r\n"
+                                           "--{}--\r\n",
+                                           boundary,
+                                           boundary);
+
+            auto hdrs = httplib::headers();
+            hdrs.set(httplib::field::content_type, std::format("multipart/form-data; boundary={}", boundary));
+            auto req = httplib::client::request(httplib::method::post, "/upload-cleanup", hdrs);
+            req.set_body(body, hdrs[httplib::field::content_type]);
+            auto resp = UNWRAP(co_await client.async_send_request(req));
+            REQUIRE(resp.result() == httplib::status::ok);
+            co_return;
+        });
+
+    REQUIRE_FALSE(saved->empty());
+    REQUIRE_FALSE(std::filesystem::exists(*saved));
+    std::filesystem::remove_all(upload_dir);
+}
+
+TEST_CASE("Multipart uploaded file kept when cleanup disabled", "[http-methods][security]")
+{
+    auto upload_dir = std::filesystem::temp_directory_path() / "httplib_uploads_keep";
+    std::filesystem::create_directories(upload_dir);
+    auto saved = std::make_shared<std::filesystem::path>();
+
+    run(
+        [&](auto& server)
+        {
+            server.set_form_data_config({ .save_dir = upload_dir, .remove_uploaded_files = false });
+            server.router().template set_http_handler<httplib::method::post>(
+                "/upload-keep",
+                [saved](httplib::server::request& req, httplib::server::response& resp)
+                {
+                    auto const& fd = req.as_form_data();
+                    REQUIRE(fd.fields.size() == 1);
+                    REQUIRE(fd.fields[0].file_path.has_value());
+                    *saved = fd.fields[0].file_path.value();
+                    resp.set_string_content("ok"sv, "text/plain"sv);
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            std::string boundary = "----KeepBoundary";
+            std::string body = std::format("--{}\r\n"
+                                           "Content-Disposition: form-data; name=\"file\"; filename=\"keep.bin\"\r\n"
+                                           "\r\n"
+                                           "payload\r\n"
+                                           "--{}--\r\n",
+                                           boundary,
+                                           boundary);
+
+            auto hdrs = httplib::headers();
+            hdrs.set(httplib::field::content_type, std::format("multipart/form-data; boundary={}", boundary));
+            auto req = httplib::client::request(httplib::method::post, "/upload-keep", hdrs);
+            req.set_body(body, hdrs[httplib::field::content_type]);
+            auto resp = UNWRAP(co_await client.async_send_request(req));
+            REQUIRE(resp.result() == httplib::status::ok);
+            co_return;
+        });
+
+    REQUIRE_FALSE(saved->empty());
+    REQUIRE(std::filesystem::exists(*saved));
+    std::filesystem::remove(*saved);
+    std::filesystem::remove_all(upload_dir);
+}
+
+TEST_CASE("Client form_data upload file is removed after the request", "[http-methods]")
+{
+    auto upload_file = std::filesystem::temp_directory_path() / "httplib_client_upload.bin";
+    {
+        std::ofstream ofs(upload_file, std::ios::binary);
+        ofs << "payload";
+    }
+    REQUIRE(std::filesystem::exists(upload_file));
+
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::post>(
+                "/client-upload",
+                [](httplib::server::request& req, httplib::server::response& resp)
+                {
+                    auto const& fd = req.as_form_data();
+                    REQUIRE(fd.fields.size() == 1);
+                    REQUIRE(fd.content("file") == "payload");
+                    resp.set_string_content("ok"sv, "text/plain"sv);
+                });
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            httplib::form_data data;
+            data.boundary = "----ClientUploadBoundary";
+            data.params.remove_uploaded_files = true;
+            data.fields.push_back({ .name = "file",
+                                    .filename = "client.bin",
+                                    .content_type = "application/octet-stream",
+                                    .file_path = upload_file });
+            auto req = httplib::client::request(httplib::method::post, "/client-upload");
+            req.set_body(std::move(data));
+            auto resp = UNWRAP(co_await client.async_send_request(req));
+            REQUIRE(resp.result() == httplib::status::ok);
+            co_return;
+        });
+
+    // 客户端请求对象销毁后，库按 remove_uploaded_files 清掉这次上传的临时文件。
+    REQUIRE_FALSE(std::filesystem::exists(upload_file));
+}
+
+TEST_CASE("Client form_data upload file kept when cleanup disabled", "[http-methods]")
+{
+    auto upload_file = std::filesystem::temp_directory_path() / "httplib_client_upload_keep.bin";
+    {
+        std::ofstream ofs(upload_file, std::ios::binary);
+        ofs << "payload";
+    }
+
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::post>(
+                "/client-upload-keep",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("ok"sv, "text/plain"sv); });
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            httplib::form_data data;
+            data.boundary = "----ClientKeepBoundary";
+            data.params.remove_uploaded_files = false;
+            data.fields.push_back({ .name = "file",
+                                    .filename = "client.bin",
+                                    .content_type = "application/octet-stream",
+                                    .file_path = upload_file });
+            auto req = httplib::client::request(httplib::method::post, "/client-upload-keep");
+            req.set_body(std::move(data));
+            auto resp = UNWRAP(co_await client.async_send_request(req));
+            REQUIRE(resp.result() == httplib::status::ok);
+            co_return;
+        });
+
+    REQUIRE(std::filesystem::exists(upload_file));
+    std::filesystem::remove(upload_file);
+}
+
+TEST_CASE("Response form_data file is not removed", "[http-methods]")
+{
+    auto source_file = std::filesystem::temp_directory_path() / "httplib_response_form_data.bin";
+    {
+        std::ofstream ofs(source_file, std::ios::binary);
+        ofs << "payload";
+    }
+
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/form-data-out",
+                [&](httplib::server::request&, httplib::server::response& resp)
+                {
+                    std::vector<httplib::form_data::field> fields;
+                    fields.push_back({ .name = "file",
+                                       .filename = "out.bin",
+                                       .content_type = "application/octet-stream",
+                                       .file_path = source_file });
+                    resp.set_form_data_content(std::move(fields));
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/form-data-out"));
+            REQUIRE(resp.result() == httplib::status::ok);
+            REQUIRE(resp.as_form_data().content("file") == "payload");
+            co_return;
+        });
+
+    // 响应里的 file_path 属于调用方，响应对象销毁不能删掉它。
+    REQUIRE(std::filesystem::exists(source_file));
+    std::filesystem::remove(source_file);
+}
+
 TEST_CASE("Multipart multiple files saved to disk", "[http-methods]")
 {
     auto upload_dir = std::filesystem::temp_directory_path() / "httplib_uploads_multi";

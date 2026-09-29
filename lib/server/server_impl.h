@@ -141,7 +141,8 @@ namespace httplib::server
         std::atomic<std::shared_ptr<http_server::compress_predicate>> compress_predicate_;
 
         std::atomic<std::shared_ptr<httplib::form_data::param>> form_data_params_ {
-            std::make_shared<httplib::form_data::param>(httplib::form_data::param { .max_file_size = 10 * 1024 * 1024 })
+            std::make_shared<httplib::form_data::param>(httplib::form_data::param { .max_file_size = 10 * 1024 * 1024,
+                                                                                   .remove_uploaded_files = true })
         };
 
         std::atomic<std::uint32_t> header_limit_ = 65536;

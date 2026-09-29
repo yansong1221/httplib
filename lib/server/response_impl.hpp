@@ -173,6 +173,8 @@ namespace httplib::server
             httplib::form_data value;
             value.boundary = html::generate_boundary();
             value.fields = std::move(data);
+            // 响应里的 file_path 属于调用方，不能随响应对象销毁而删除。
+            value.params.remove_uploaded_files = false;
             this->set_form_data(std::move(value));
             this->base().result(http::status::ok);
         }

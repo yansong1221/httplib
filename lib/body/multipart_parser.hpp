@@ -40,6 +40,8 @@ namespace httplib::body
 
       private:
         void write_content(std::string_view data, boost::system::error_code& ec);
+        /// 关闭并删除当前已写了一半的文件（触发大小限制时用）。
+        void abort_file();
 
         httplib::form_data body_;
         std::string content_type_;
@@ -66,6 +68,6 @@ namespace httplib::body
 
         std::ofstream file_stream_;
         fs::path current_file_path_;
-        std::uint64_t file_bytes_written_ = 0;
+        std::uint64_t field_bytes_ = 0;
     };
 } // namespace httplib::body

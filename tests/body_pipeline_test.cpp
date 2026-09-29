@@ -361,7 +361,7 @@ TEST_CASE("form_data_source builds, form_data_sink parses", "[body_pipeline]")
     httplib::form_data form;
     form.boundary = boundary;
     form.fields = std::move(fields);
-    body::form_data_source src(form);
+    body::form_data_source src(std::move(form));
     auto wire = pull(src);
 
     std::string expected = "--" + boundary + "\r\nContent-Disposition: form-data; name=\"a\"\r\n\r\n1\r\n--" + boundary

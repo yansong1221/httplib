@@ -11,6 +11,11 @@ namespace httplib
     /**
      * Type to represent the data held by an HTML form.
      *
+     * Move-only: one form_data is the single holder of its fields' `file_path`,
+     * so ownership of those files is never ambiguous. When
+     * `params.remove_uploaded_files` is true, the destructor removes every
+     * field's `file_path`.
+     *
      * @sa form
      */
     class HTTPLIB_API form_data
@@ -37,15 +42,25 @@ namespace httplib
         };
 
         /**
-         * The parsing configuration for a form. The default `max_fields =
-         * max_fields_default` caps the number of fields the parser accepts;
-         * `max_file_size = 0` means unlimited.
+         * The parsing configuration for a form.
+         * - `max_fields` (default 128) caps the number of fields the parser
+         *   accepts;
+         * - `max_file_size` caps the content size of a single part — file or
+         *   regular field alike — whether the content is written to `save_dir`
+         *   or buffered in memory; `0` means unlimited;
+         * - `remove_uploaded_files` makes a form_data remove every field's
+         *   `file_path` when it is destroyed (default false). It covers both the
+         *   parts the parser wrote to `save_dir` and the temporary files a
+         *   client attached to a request body, so either side can let the
+         *   library clean up after the transfer. Leave it false when the files
+         *   belong to the caller and must outlive the form_data.
          */
         struct param
         {
             fs::path save_dir;
             std::uint64_t max_file_size = 0;
-            std::size_t max_fields = max_fields_default;
+            std::size_t max_fields = 128;
+            bool remove_uploaded_files = false;
         };
 
         /**
@@ -56,7 +71,12 @@ namespace httplib
         std::string boundary;
         param params;
 
-        static constexpr std::size_t max_fields_default = 128;
+        form_data() = default;
+        form_data(form_data const& other) = delete;
+        form_data& operator=(form_data const& other) = delete;
+        form_data(form_data&& other) noexcept;
+        form_data& operator=(form_data&& other) noexcept;
+        ~form_data();
 
         /**
          * Get a field by name.

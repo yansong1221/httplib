@@ -184,6 +184,11 @@ namespace httplib::body
             delim_final_ = "\r\n--" + boundary_ + "--\r\n";
             pending_.clear();
             combined_.clear();
+            field_bytes_ = 0;
+            if (file_stream_.is_open())
+            {
+                file_stream_.close();
+            }
         }
     }
 
@@ -309,6 +314,7 @@ namespace httplib::body
                     }
 
                     field_data_ = std::move(field_data);
+                    field_bytes_ = 0;
                     sv.remove_prefix(pos + 4);
                     step_ = step::boundary_content;
                     continue;
@@ -341,14 +347,22 @@ namespace httplib::body
                     bool save_to_file = !field_data_.filename.empty() && !body_.params.save_dir.empty();
                     auto commit_content = [&](std::string_view data)
                     {
+                        // 单个 part 内容上限对文件与普通字段一视同仁：文件可能落盘、
+                        // 也可能（save_dir 为空时）缓冲在内存，普通字段总是缓冲在内存。
+                        // 若不在这里统一约束，默认配置就能绕过 max_file_size 把整个上传读进内存。
+                        field_bytes_ += data.size();
+                        if (body_.params.max_file_size && field_bytes_ > body_.params.max_file_size)
+                        {
+                            abort_file();
+                            ec = http::error::body_limit;
+                            return;
+                        }
                         if (save_to_file)
                         {
                             write_content(data, ec);
+                            return;
                         }
-                        else
-                        {
-                            field_data_.content.append(data.data(), data.size());
-                        }
+                        field_data_.content.append(data.data(), data.size());
                     };
 
                     if (pos != std::string_view::npos)
@@ -450,22 +464,20 @@ namespace httplib::body
                 return;
             }
             current_file_path_ = candidate;
-            file_bytes_written_ = 0;
             file_stream_.open(current_file_path_, std::ios::out | std::ios::binary | std::ios::trunc);
         }
-        if (body_.params.max_file_size)
-        {
-            file_bytes_written_ += data.size();
-            if (file_bytes_written_ > body_.params.max_file_size)
-            {
-                file_stream_.close();
-                std::error_code rm_ec;
-                fs::remove(current_file_path_, rm_ec);
-                ec = http::error::body_limit;
-                return;
-            }
-        }
         file_stream_.write(data.data(), static_cast<std::streamsize>(data.size()));
+    }
+
+    void
+    multipart_parser::abort_file()
+    {
+        if (file_stream_.is_open())
+        {
+            file_stream_.close();
+            std::error_code rm_ec;
+            fs::remove(current_file_path_, rm_ec);
+        }
     }
 
 } // namespace httplib::body
