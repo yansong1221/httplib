@@ -32,6 +32,7 @@ function(add_httplib_test name label)
 
     add_test(NAME ${name} COMMAND $<TARGET_FILE:${name}>)
     set_tests_properties(${name} PROPERTIES LABELS "${label}" TIMEOUT 300)
+
 endfunction()
 
 add_httplib_test(httplib_test_core core
@@ -53,6 +54,7 @@ add_httplib_test(httplib_test_core core
 
 add_httplib_test(httplib_test_http http
     compressor_test.cpp
+    enum_conv_test.cpp
     headers_test.cpp
     http_methods_test.cpp
     ndjson_test.cpp
