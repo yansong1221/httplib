@@ -462,7 +462,7 @@ with any of the following names:
 
 优点：
 
-- 743 个 Catch2 测试；
+- 746 个 Catch2 测试；
 - 大量真实 TCP 集成场景；
 - 覆盖 HTTP 方法、路由、WS、SSE、NDJSON、代理、下载器和 Body；
 - 已有部分随机 payload 测试；
@@ -487,14 +487,16 @@ with any of the following names:
 
 ### P0：任何公网部署前必须完成
 
-> 以下各项均已修复；仅第 6 项的常量时间比较仍可补充。
+> 以下各项均已修复。
 
 1. ~~默认禁用 CONNECT；接入认证、目标 ACL、IP/DNS 校验和流量限制~~ → 默认已拒绝（405），CONNECT 走完整 pre/post-routing 管线。
 2. ~~修复 multipart 文件名路径逃逸，服务端生成受控文件名并做目录 containment 校验~~ → 已修复（basename + 随机前缀 + weakly_canonical 校验）。
 3. ~~增加 Header、Body、解压后数据、multipart、Range、WS 队列等统一安全限制~~ → 已落地：header 64KB、upload 10MB、body 1GiB、Range 数量（默认 100 段）、multipart 字段数（默认 128）与单 part 大小、解压后产出大小，均可配置。
 4. ~~修复 URL 解码越界和非法输入处理~~ → 已修复。
 5. ~~HTTPS/WSS 默认验证证书链及主机名~~ → 已修复。
-6. ~~JWT 强制校验算法、`exp`、`nbf`，使用常量时间签名比较~~ → 算法与时间戳校验已修复；常量时间比较仍可补充。
+6. ~~JWT 强制校验算法、`exp`、`nbf`，使用常量时间签名比较~~ → 已修复。
+    - 算法白名单（`allow_algorithm`，拒绝 `alg` 混淆/降级）与 `exp`/`nbf`/clock skew 校验此前已落地（SEC-05）。
+    - 本次补上常量时间签名比较。原 `verify()` 用 `signature_ == alg.sign(msg)`（`std::string` 的 `==`，内部短路 `memcmp`），会让「前 k 字节是否正确」反映在耗时上，可被逐字节 timing 爆破（RFC 7519 §7.2 要求签名比较不得泄露信息）。现改为 `constant_time_equal()`：长度不等直接返回（长度由 alg 决定、非秘密），长度相等则对所有字节 XOR 累积到 `volatile` diff 后一次性判断，分支次数与首个差异位置无关；启用 SSL 时优先用 OpenSSL 的 `CRYPTO_memcmp`。同时给 `verify()` 加了解析失败短路（避免对残缺 token 算 HMAC）。位置：`lib/jwt.cpp`。回归：`jwt_test.cpp` 新增逐字节签名突变、长度不符（前缀/超长/空签名）与解析失败短路用例。
 
 ### P1：进入生产压测前完成
 
@@ -531,6 +533,6 @@ with any of the following names:
 
 httplib 的基础结构并不差：作者理解 Boost.Asio/Beast、协程、PIMPL、路由 Trie 和真实网络测试，项目也已超过简单示例库的规模。但当前最大问题不是代码风格，而是**安全边界、并发契约和发布工程没有跟上功能扩张速度**。
 
-最初报告中的风险项现已 **18 项完全修复**（SEC-01/02/03/04/05/06/07、CON-01/02、CL-01/02、INFO-01、PROXY-01、HTTP-01、WEB-01、CACHE-01、DOS-01、API-01），其中 CL-01/02、CON-01/02、HTTP-01、WEB-01、CACHE-01、SEC-03、SEC-07、DOS-01 均含回归测试或代码复核。剩余未收口项集中在 **JWT 常量时间比较、socket stop / client 并发读写的 strand 契约，以及构建/发布工程（安装配置、依赖锁定、CI、动态检测、fuzz）**；路由正则另有一项已知残留（准入检查为启发式，彻底解决需换 RE2/NFA），按 IP 的限流则天然无法约束跨 IP 总量，需要总量保护时应在前置网关再加一层。
+最初报告中的风险项现已 **18 项完全修复**（SEC-01/02/03/04/05/06/07、CON-01/02、CL-01/02、INFO-01、PROXY-01、HTTP-01、WEB-01、CACHE-01、DOS-01、API-01），其中 CL-01/02、CON-01/02、HTTP-01、WEB-01、CACHE-01、SEC-03、SEC-05/06/07、DOS-01 均含回归测试或代码复核。剩余未收口项集中在 **socket stop / client 并发读写的 strand 契约，以及构建/发布工程（安装配置、依赖锁定、CI、动态检测、fuzz）**；路由正则另有一项已知残留（准入检查为启发式，彻底解决需换 RE2/NFA），按 IP 的限流则天然无法约束跨 IP 总量，需要总量保护时应在前置网关再加一层。
 
 建议先冻结功能扩张，以并发契约与构建发布工程收口为主线，再补动态检测与 fuzz。

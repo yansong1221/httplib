@@ -7,8 +7,9 @@
 #include <string>
 
 #ifdef HTTPLIB_ENABLED_SSL
-#include <openssl/hmac.h>
 #include "beast_alias.hpp"
+#include <openssl/crypto.h>
+#include <openssl/hmac.h>
 #endif
 
 namespace httplib::jwt
@@ -120,6 +121,48 @@ namespace httplib::jwt
             auto [n, _] = beast::detail::base64::decode(result.data(), padded.data(), padded.size());
             result.resize(n);
             return result;
+        }
+
+        // 比较两个签名的常量时间相等性。
+        //
+        // 为什么必须常量时间：JWT 的签名就是校验凭据。若用 std::string 的 == 或
+        // memcmp，短路行为会让「前 k 个字节是否正确」反映在耗时上，攻击者可以逐字节
+        // 爆破出正确签名（经典 timing side channel）。RFC 7519 §7.2 也要求签名比较
+        // 不得泄露信息。
+        //
+        // 实现要点：
+        //   1. 长度不等直接返回 false —— 长度不是秘密，它由 alg 决定，攻击者本来就知道
+        //      自己提交的长度，只是不匹配而已，泄露不出额外信息；
+        //   2. 长度相等则对所有字节做 XOR 累积到 diff，最后一次性判断 diff 是否为 0，
+        //      分支次数与首个不同字节的位置无关；
+        //   3. diff 声明为 volatile，防止编译器把循环优化回带短路的 memcmp。
+        //
+        // 优先用 OpenSSL 的 CRYPTO_memcmp（它用 volatile 指针逐字节读，是本库的既有
+        // 依赖且经过审计）；未启用 SSL 时 JWT 本身无法签名（sign() 会抛），此时用等价
+        // 的手写实现兜底，保证函数在两种编译配置下都可用且行为一致。
+        bool
+        constant_time_equal(std::string_view a, std::string_view b) noexcept
+        {
+            if (a.size() != b.size())
+            {
+                return false;
+            }
+
+            if (a.empty())
+            {
+                return true;
+            }
+
+#ifdef HTTPLIB_ENABLED_SSL
+            return CRYPTO_memcmp(a.data(), b.data(), a.size()) == 0;
+#else
+            volatile unsigned char diff = 0;
+            for (size_t i = 0; i < a.size(); i++)
+            {
+                diff |= static_cast<unsigned char>(a[i]) ^ static_cast<unsigned char>(b[i]);
+            }
+            return diff == 0;
+#endif
         }
 
     } // namespace
@@ -307,10 +350,22 @@ namespace httplib::jwt
     bool
     decoded_jwt::verify(algorithm const& alg, boost::system::error_code& ec) const
     {
+        // 解析阶段就失败的 token 不可能有合法签名，直接短路：既省掉一次 HMAC 计算，
+        // 也避免拿残缺的 token_/signature_ 去做无意义的比较。
+        if (error_)
+        {
+            ec = error_;
+            return false;
+        }
+
         auto dot1 = token_.find('.');
         auto dot2 = token_.find('.', dot1 + 1);
         auto msg = std::string_view(token_).substr(0, dot2);
-        auto ok = (signature_ == alg.sign(msg));
+
+        // alg.sign() 返回 base64url 编码的签名，signature_ 也是同一编码，故可直接
+        // 逐字节常量时间比较；不能退化成 std::string 的 == （见 constant_time_equal）。
+        auto expected = alg.sign(msg);
+        auto ok = constant_time_equal(signature_, expected);
         if (!ok)
         {
             ec = make_error_code(error::signature_verification);

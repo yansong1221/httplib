@@ -475,3 +475,90 @@ TEST_CASE("JWT: valid token passes all time checks", "[jwt]")
     httplib::jwt::verify(httplib::jwt::hs256("secret")).with_subject("alice").verify(decoded, ec);
     REQUIRE_FALSE(ec);
 }
+
+// verify() 内部改用常量时间比较签名（timing side channel 修复）。下面是该改动的可观测
+// 行为回归：语义上必须与原来的 == 完全一致——正确的过、任何一个字节错就不过。
+TEST_CASE("JWT: signature comparison rejects every single-byte mutation", "[jwt]")
+{
+    auto token = httplib::jwt::create().set_subject("alice").sign(httplib::jwt::hs256("secret"));
+    auto dot = token.rfind('.');
+    REQUIRE(dot != std::string::npos);
+
+    auto head = token.substr(0, dot + 1);
+    auto sig = token.substr(dot + 1);
+    REQUIRE_FALSE(sig.empty());
+
+    // 基线：原 token 必须通过
+    {
+        auto decoded = httplib::jwt::decode(token).value();
+        boost::system::error_code ec;
+        REQUIRE(decoded.verify(httplib::jwt::hs256("secret"), ec));
+        REQUIRE_FALSE(ec);
+    }
+
+    // 逐位翻转签名的每一个字符都必须失败。base64url 字母表为 A-Za-z0-9-_。
+    // 特别地，改动最后一个字符也要失败——这正是短路的 == 最容易「放过」的位置，
+    // 之前的实现里最后一个字符不同会最快返回，现在耗时与首个差异位置无关。
+    for (size_t i = 0; i < sig.size(); i++)
+    {
+        auto mutated = sig;
+        // 在 base64url 字母表内换一个不同的字符
+        char c = sig[i];
+        char replacement = (c == 'A') ? 'B' : 'A';
+        mutated[i] = replacement;
+
+        auto bad = head + mutated;
+        auto decoded = httplib::jwt::decode(bad).value();
+        boost::system::error_code ec;
+        REQUIRE_FALSE(decoded.verify(httplib::jwt::hs256("secret"), ec));
+        REQUIRE(ec == make_error_code(httplib::jwt::error::signature_verification));
+    }
+}
+
+TEST_CASE("JWT: signature comparison rejects wrong length, prefix and suffix", "[jwt]")
+{
+    auto token = httplib::jwt::create().set_subject("alice").sign(httplib::jwt::hs256("secret"));
+    auto dot = token.rfind('.');
+    auto head = token.substr(0, dot + 1);
+    auto sig = token.substr(dot + 1);
+
+    boost::system::error_code ec;
+
+    SECTION("truncated signature is rejected")
+    {
+        auto decoded = httplib::jwt::decode(head + sig.substr(0, sig.size() - 1)).value();
+        REQUIRE_FALSE(decoded.verify(httplib::jwt::hs256("secret"), ec));
+        REQUIRE(ec == make_error_code(httplib::jwt::error::signature_verification));
+    }
+
+    SECTION("over-long signature is rejected")
+    {
+        auto decoded = httplib::jwt::decode(head + sig + "A").value();
+        REQUIRE_FALSE(decoded.verify(httplib::jwt::hs256("secret"), ec));
+        REQUIRE(ec == make_error_code(httplib::jwt::error::signature_verification));
+    }
+
+    SECTION("empty signature is rejected")
+    {
+        auto decoded = httplib::jwt::decode(head).value();
+        REQUIRE_FALSE(decoded.verify(httplib::jwt::hs256("secret"), ec));
+        REQUIRE(ec == make_error_code(httplib::jwt::error::signature_verification));
+    }
+}
+
+TEST_CASE("JWT: verify on an unparsable token short-circuits", "[jwt]")
+{
+    // 解析阶段就失败（payload 不是合法 JSON）的 token 不可能有有效签名，verify()
+    // 直接返回解析错误，而不是继续算 HMAC 再报 signature_verification。
+    auto bad = std::string("eyJhbGciOiJIUzI1NiJ9.e3t7.sig");
+    auto decoded = httplib::jwt::decode(bad);
+    REQUIRE_FALSE(decoded.has_value());
+
+    // 直接构造的 decoded_jwt 带着 error_，verify() 应当原样回报该错误。
+    httplib::jwt::decoded_jwt d(bad);
+    REQUIRE(d.get_error() == make_error_code(httplib::jwt::error::invalid_token));
+
+    boost::system::error_code ec;
+    REQUIRE_FALSE(d.verify(httplib::jwt::hs256("secret"), ec));
+    REQUIRE(ec == make_error_code(httplib::jwt::error::invalid_token));
+}
