@@ -27,6 +27,9 @@ namespace httplib::client
      * \par 线程安全
      * 不可拷贝。除标注「可任意线程调用」的配置接口外，其余接口建议在连接空闲时
      * （无在途请求、无未读完的 lazy 响应）调用。
+     *
+     * \note 完整 strand 拓扑、超时计时与「必须空闲时调用」的接口清单见仓库根目录的
+     *       \c THREAD_MODEL.md。
      */
     class HTTPLIB_API http_client
     {

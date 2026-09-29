@@ -12,14 +12,14 @@
 
 该项目是一套基于 Boost.Asio/Beast、面向 C++23 的异步 HTTP/1.1 与 WebSocket 客户端/服务端框架，同时包含路由、中间件、反向代理、文件服务、SSE、NDJSON、JWT、Session、下载器、磁盘缓存和可选数据库支持。
 
-总体判断：**架构方向合理、功能覆盖完整、测试投入较明显。截至本次清理，报告中的安全阻断项（上传路径逃逸、TLS/JWT 校验、URL 解码越界、Range 边界、目录列表注入、符号链接逃逸、CONNECT 开放代理、Header/Body/解压后大小/multipart/Range 资源上限、长期容器淘汰、客户端 IP 可由 X-Forwarded-For 任意伪造等）已全部修复；端到端数据竞争（CON-01/02）与运行期配置并发契约（API-01）也已收口；剩余未收口的是路由正则的启发式准入、socket stop / client 并发读写的 strand 约束，以及构建发布工程，不建议未经整改直接暴露在公网或承担认证、上传、代理等关键业务。**
+总体判断：**架构方向合理、功能覆盖完整、测试投入较明显。截至本次清理，报告中的安全阻断项（上传路径逃逸、TLS/JWT 校验、URL 解码越界、Range 边界、目录列表注入、符号链接逃逸、CONNECT 开放代理、Header/Body/解压后大小/multipart/Range 资源上限、长期容器淘汰、客户端 IP 可由 X-Forwarded-For 任意伪造等）已全部修复；端到端数据竞争（CON-01/02）、运行期配置并发契约（API-01）与线程/strand 模型（P1-1）也已收口；剩余未收口的是路由正则的启发式准入，以及构建发布工程，不建议未经整改直接暴露在公网或承担认证、上传、代理等关键业务。**
 
 | 维度 | 评分 | 结论 |
 |---|---:|---|
 | 架构设计 | 6.5/10 | 分层和核心抽象合理，但职责范围过宽 |
 | 模块化与可读性 | 6/10 | 目录清楚，部分中心文件过大、耦合偏重 |
 | 测试建设 | 7/10 | 真实 TCP 测试已按组件拆分，但安全和并发边界覆盖不足，无 CI/动态检测 |
-| 并发可靠性 | 5/10 | 端到端 session 数据竞争（CON-01/02）已修复；线程模型约束仍不清晰 |
+| 并发可靠性 | 7/10 | 端到端 session 数据竞争（CON-01/02）已修复；线程/strand 模型已梳理成文（`THREAD_MODEL.md`），配置期与运行期契约明确 |
 | 安全性 | 6/10 | 上传路径逃逸、TLS/JWT、URL 解码、重定向敏感头、目录注入、CONNECT 开放代理、资源上限、长期容器淘汰、客户端 IP 伪造、运行期配置并发契约等已修复；路由正则的启发式准入仍待收口 |
 | 构建与发布成熟度 | 3.5/10 | 缺依赖锁定、CI，安装配置不完整 |
 
@@ -81,9 +81,11 @@
 
    70 个公共头文件中仍有 35 个直接暴露 Boost.Asio、Boost.JSON、Boost.System 或 spdlog 类型。Beast 相关暴露已随 `880f686` 收敛到私有 `lib/beast_alias.hpp`，但调用方仍需接受 Boost 的源码、ABI、编译时间和版本耦合。
 
-3. **线程模型没有形成统一契约**
+3. **线程模型没有形成统一契约** → 已收口。
 
    一些容器使用 mutex，一些状态使用 atomic，但 socket、serializer、middleware 和路由更新没有统一通过 strand 串行化。公共 API 也未明确哪些对象允许跨线程、哪些仅允许在 executor 线程调用。
+
+   现状：socket 读写、serializer 与 Beast 限速记账均已收口到各自 strand 路径（无锁串行），跨 `co_await` 的不变量用 mutex/atomic 保护，路由明确为配置期专用；完整拓扑与契约已写入 [`THREAD_MODEL.md`](THREAD_MODEL.md)，`README.md` 增设「线程模型」小节作为入口。
 
 4. **缺少统一资源治理层**
 
@@ -500,8 +502,10 @@ with any of the following names:
 
 ### P1：进入生产压测前完成
 
-1. 明确 executor/strand 模型，消除 server sessions、Session middleware、socket stop、client 并发读写等数据竞争。
-    - server sessions（CON-01）与 Session middleware（CON-02）两项数据竞争已修复；socket stop 与 client 并发读写仍需明确 strand 约束。
+1. ~~明确 executor/strand 模型，消除 server sessions、Session middleware、socket stop、client 并发读写等数据竞争~~ → 已完成。
+    - server sessions（CON-01）与 Session middleware（CON-02）两项数据竞争已修复。
+    - socket stop 与 client 并发读写的 strand 约束已梳理成文：新增 [`THREAD_MODEL.md`](THREAD_MODEL.md)，汇总服务端两级 strand 拓扑（`strand_` 全局 + 每连接一个）、`sessions_` 仅归 `strand_`、停机时序为何使 `router_.reset()` 无锁安全、客户端单飞行约束、`stream_mutex_` 只保护 lazy 配对不保护 I/O、连接池池 strand 不碰 socket、以及必须空闲时调用的接口清单（`is_alive` / `is_open` / 限速 setter）。`README.md` 增设「线程模型」小节点出核心约束与该文档。
+    - 复核结论：这些路径**未发现新的数据竞争**。`session::abort()` 已 post 回本连接 strand、`client::async_close()` 已 dispatch 到自身 strand、`pool::on_stop()` 已改为先清空池状态再关连接，均为安全写法。
 2. ~~修复客户端部分写入重试和 downloader 重定向连接复用~~ → 客户端重试已修复（仅零字节时允许重试）。
 3. ~~跨 origin 重定向删除敏感 header，禁止非授权协议降级~~ → 已修复（client + downloader，含回归测试）。
 4. ~~重构 cache key 和 HTTP cache policy~~ → 已修复（key 含认证上下文与最终 URL 校验，尊重 `no-store`/`Vary: *`，元数据白名单）。
@@ -533,6 +537,6 @@ with any of the following names:
 
 httplib 的基础结构并不差：作者理解 Boost.Asio/Beast、协程、PIMPL、路由 Trie 和真实网络测试，项目也已超过简单示例库的规模。但当前最大问题不是代码风格，而是**安全边界、并发契约和发布工程没有跟上功能扩张速度**。
 
-最初报告中的风险项现已 **18 项完全修复**（SEC-01/02/03/04/05/06/07、CON-01/02、CL-01/02、INFO-01、PROXY-01、HTTP-01、WEB-01、CACHE-01、DOS-01、API-01），其中 CL-01/02、CON-01/02、HTTP-01、WEB-01、CACHE-01、SEC-03、SEC-05/06/07、DOS-01 均含回归测试或代码复核。剩余未收口项集中在 **socket stop / client 并发读写的 strand 契约，以及构建/发布工程（安装配置、依赖锁定、CI、动态检测、fuzz）**；路由正则另有一项已知残留（准入检查为启发式，彻底解决需换 RE2/NFA），按 IP 的限流则天然无法约束跨 IP 总量，需要总量保护时应在前置网关再加一层。
+最初报告中的风险项现已 **18 项完全修复**（SEC-01/02/03/04/05/06/07、CON-01/02、CL-01/02、INFO-01、PROXY-01、HTTP-01、WEB-01、CACHE-01、DOS-01、API-01），其中 CL-01/02、CON-01/02、HTTP-01、WEB-01、CACHE-01、SEC-03、SEC-05/06/07、DOS-01 均含回归测试或代码复核。剩余未收口项集中在 **构建/发布工程（安装配置、依赖锁定、CI、动态检测、fuzz）**；另有两项已知残留：路由正则的准入检查是启发式的（彻底解决需换 RE2/NFA），按 IP 的限流天然无法约束跨 IP 总量（需要总量保护时应在前置网关再加一层）。
 
 建议先冻结功能扩张，以并发契约与构建发布工程收口为主线，再补动态检测与 fuzz。

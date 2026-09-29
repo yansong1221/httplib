@@ -59,6 +59,9 @@ namespace httplib::server
      *     @ref run "run()" 会返回 @c already_started 错误码。@ref stop
      *     "stop()" 与 @ref async_stop "async_stop()" 可从任意线程调用，
      *     其返回的 future 在服务器完全停止、所有会话排空后变为就绪。
+     *
+     * @note 每个连接在服务器 strand 派生的独立 strand 上执行，连接内串行、连接间并行。
+     *       完整拓扑与停机时序见仓库根目录的 \c THREAD_MODEL.md。
      */
     class HTTPLIB_API http_server
     {

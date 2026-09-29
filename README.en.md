@@ -648,6 +648,29 @@ router.set_static_mount_point("/secure-storage", "/data",
     middleware::basic_auth_middleware{...});
 ```
 
+## Threading Model
+
+This library is built on Boost.Asio coroutines. The constraints most easily tripped over:
+
+- **Coroutines are not serialization.** Two coroutines spawned onto the same strand still
+  interleave at every `co_await`. strand guarantees "never simultaneously", not
+  "never interleaved". Invariants that span an `co_await` must be protected by a mutex or
+  atomic; strand alone is not enough.
+- **Socket I/O is serialized by strand, not by mutex.** Every `async_read` / `async_write`
+  entry point hops onto the target strand first and holds no mutex during the socket
+  operation. Re-snapshot `stream_` before each operation: a concurrent `async_close()` only
+  makes in-flight operations return an error code, never a null dereference.
+- **At most one request in flight per client** (single-flight). This is not enforced at
+  runtime; violating it interleaves reads and writes on the same socket, which is undefined.
+- **Routes are configuration-time only.** `httplib::server::router` has no internal locking;
+  registering routes while serving is undefined behavior.
+- **Scalar configuration is changeable at runtime**: always via `std::atomic`; pointer-shaped
+  configuration via `std::atomic<std::shared_ptr<T>>` snapshots.
+
+For the full picture (per-component strand topology, `sessions_` ownership, the shutdown
+sequence that makes `router_.reset()` lock-free, and the list of APIs that require an idle
+connection) see [THREAD_MODEL.md](THREAD_MODEL.md).
+
 ## Client Features
 
 ```cpp

@@ -671,6 +671,21 @@ router.set_static_mount_point("/secure-storage", "/data",
     middleware::basic_auth_middleware{...});
 ```
 
+## 线程模型
+
+本库基于 Boost.Asio 协程。几条最容易踩的约束：
+
+- **协程不等于串行**：两个 `co_spawn` 到同一 strand 的协程仍会在 `co_await` 点交错。跨
+  `co_await` 的不变量必须用 mutex / atomic 保护，strand 只保证「不同时执行」。
+- **socket 读写靠 strand 串行化，路径上不加锁**：每次操作前重新取 `stream_` 快照，并发
+  `close()` 只会让在途操作以错误码返回。
+- **同一 client 同时最多一个请求在途**（single-flight）。此约束无运行时防护，违反是未定义行为。
+- **路由仅配置期可写**：`httplib::server::router` 内部没有锁，运行期注册路由是 UB。
+- **标量配置运行期可改**：一律 `std::atomic`；指针型配置用 `std::atomic<std::shared_ptr<T>>` 快照。
+
+完整说明（各组件 strand 拓扑、`sessions_` 归属、停机时序、必须空闲时调用的接口清单）见
+[THREAD_MODEL.md](THREAD_MODEL.md)。
+
 ## 客户端功能
 
 ```cpp

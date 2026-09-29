@@ -31,6 +31,21 @@ Tests use Catch2 via `Catch2::Catch2WithMain` (auto-generated main). The server/
 - **Middleware**: Per-route aspects, passed as trailing variadic args to `set_http_handler`, or globally via `router::use()`. Each aspect may provide `before(request&, response&)` and/or `after(request&, response&)`, returning `bool` or `net::awaitable<bool>`. Return `false` from `before` to short-circuit (handler + `after` skipped). WebSocket handlers take open/message/close callbacks and do not accept aspects.
 - **Body types**: a runtime `body_state` (a `std::variant` of the body kinds, replaced the old `any_body::value_type`) selected by `Content-Type`. Public access is via typed accessors `as_string()` / `as_json()` / `as_form_data()` / `as_query_params()`; `type()` returns the `httplib::body_type` enum (`none`, `empty`, `string`, `json`, `query_params`, `form_data`).
 - **Examples**: `examples/demo/` (server + client + ws), `examples/download_demo/` (downloader/scheduler) and `examples/stress_test/` (wrk-like benchmark). All auto-built via `GLOB_RECURSE` within their own `CMakeLists.txt` when `HTTPLIB_ENABLED_EXAMPLES=ON`; stress test additionally links `Boost::program_options`.
+- **Threading**: full strand/mutex topology is documented in `THREAD_MODEL.md`. Read it before touching socket I/O, session lifetime, or the client connection pool.
+
+## Threading invariants
+
+Violating any of these introduces a data race or undefined behavior. `THREAD_MODEL.md` has the full picture; these are the ones that are easy to break by accident:
+
+- **strand serializes, it does not sequence.** Two coroutines on the same strand still interleave at every `co_await`. Anything that must hold across an `co_await` needs a mutex or atomic — not just a strand.
+- **Socket I/O takes no mutex.** Every `async_read`/`async_write` entry point hops onto the target strand and holds nothing during the operation. Never add a lock around a socket op; fix ordering with the strand instead.
+- **Re-snapshot the stream before every operation.** Read `stream_->load()` immediately before use. A concurrent `async_close()` exchanging it to nullptr is legal and only makes the in-flight op fail with an error code.
+- **Never touch another object's socket from the calling thread.** `session::abort()` and `http_client::async_close()` both `post`/`dispatch` back to the owning strand first. Copy that pattern.
+- **Session registration must precede `co_spawn`.** `co_accept()` inserts into `sessions_` synchronously on `strand_` before spawning `conn->run()`. Reordering breaks the shutdown drain, which is what makes `router_.reset()` safe without a lock.
+- **Tear down state before closing handles.** In pool `on_stop()`, move connections out and clear pool bookkeeping *first*, then `close()` them — otherwise close-time callbacks re-enter live pool state.
+- **Router has no internal locking.** Registration is configuration-time only (before `run()`). Do not add a lock; document the contract instead. `reset()` runs on the strand after all sessions drain.
+- **Single-flight per client.** At most one request in flight per `http_client`; not enforced at runtime. The pool checks `has_active_session()` before reuse.
+- **APIs needing an idle connection**: `is_alive()`/`async_is_alive()` (sync `MSG_PEEK`), `is_open()`, and the rate-limit setters. These are documented as such in the public headers — keep those notes accurate if the implementation changes.
 
 ## Style
 
