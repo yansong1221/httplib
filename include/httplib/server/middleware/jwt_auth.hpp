@@ -1,6 +1,6 @@
 #pragma once
+#include "httplib/jwt.hpp"
 #include "httplib/server/server_fwd.hpp"
-#include "httplib/util/jwt.hpp"
 #include <memory>
 
 namespace httplib::server::middleware

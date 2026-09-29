@@ -341,8 +341,8 @@ router.set_http_handler<http::verb::get>(
 ### JWT Auth
 
 ```cpp
+#include <httplib/jwt.hpp>
 #include <httplib/server/middleware/jwt_auth.hpp>
-#include <httplib/util/jwt.hpp>
 
 // Per-route
 router.set_http_handler<http::verb::get>(

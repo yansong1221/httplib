@@ -1,7 +1,8 @@
 #pragma once
 #include "httplib/config.hpp"
 #include "httplib/util/string_hash.hpp"
-#include <boost/json.hpp>
+#include <boost/json/value.hpp>
+#include <boost/json/value_to.hpp>
 #include <boost/system/error_code.hpp>
 #include <boost/system/result.hpp>
 #include <chrono>

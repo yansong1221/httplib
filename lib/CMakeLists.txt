@@ -13,7 +13,7 @@ source_group(TREE ${HTTPLIB_INCLUDE_DIR} PREFIX "include" FILES ${HTTPLIB_HEADER
 file(GLOB_RECURSE HTTPLIB_SOURCE_FILES ${HTTPLIB_LIB_DIR}/*.h ${HTTPLIB_LIB_DIR}/*.c ${HTTPLIB_LIB_DIR}/*.cxx ${HTTPLIB_LIB_DIR}/*.cpp ${HTTPLIB_LIB_DIR}/*.hpp)
 source_group(TREE ${HTTPLIB_LIB_DIR} PREFIX "lib" FILES ${HTTPLIB_SOURCE_FILES})
 
-find_package(Boost REQUIRED COMPONENTS beast json url CONFIG)
+find_package(Boost REQUIRED COMPONENTS asio beast json url CONFIG)
 find_package(spdlog CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
 
@@ -35,8 +35,9 @@ if(WIN32 AND HTTPLIB_SHARED_LIBRARY)
 endif()
 
 target_link_libraries(${MODULE} 
-PUBLIC  Boost::beast Boost::json Boost::url
+PUBLIC  Boost::json Boost::asio
 PUBLIC  spdlog::spdlog fmt::fmt
+PRIVATE Boost::beast Boost::url
 )
 
 target_include_directories(${MODULE} 
@@ -67,7 +68,7 @@ if(HTTPLIB_ENABLED_DATABASE)
     find_package(Boost REQUIRED COMPONENTS mysql charconv CONFIG)
 
     target_compile_definitions(${MODULE} PUBLIC HTTPLIB_ENABLED_DATABASE)
-    target_link_libraries(${MODULE} PUBLIC Boost::mysql Boost::charconv)
+    target_link_libraries(${MODULE} PRIVATE Boost::mysql Boost::charconv)
 
     find_library(SQLITE3_LIB sqlite3 REQUIRED)
     target_link_libraries(${MODULE} PRIVATE ${SQLITE3_LIB})

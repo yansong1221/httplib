@@ -11,10 +11,9 @@
 #pragma once
 
 #include <boost/asio/awaitable.hpp>
-#include <boost/asio/io_context.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/use_awaitable.hpp>
-#include <boost/type_traits.hpp>
+#include <type_traits>
 namespace httplib::util
 {
     namespace detail
@@ -30,7 +29,7 @@ namespace httplib::util
             }
 
             inline boost::asio::redirect_error_t<
-                typename boost::decay<decltype(boost::asio::use_awaitable_t<Executor>())>::type>
+                std::decay_t<decltype(boost::asio::use_awaitable_t<Executor>())>>
             operator[](boost::system::error_code& ec) const noexcept
             {
                 return boost::asio::redirect_error(boost::asio::use_awaitable_t<Executor>(), ec);
@@ -49,9 +48,5 @@ namespace httplib::util
 
     // Executor is any_io_executor
     [[maybe_unused]] inline constexpr detail::asio_use_awaitable_t<> net_awaitable;
-
-    // Executor is boost::asio::io_context::executor_type
-    [[maybe_unused]] inline constexpr detail::asio_use_awaitable_t<boost::asio::io_context::executor_type>
-        ioc_awaitable;
 
 } // namespace httplib::util

@@ -5,7 +5,6 @@
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/buffer.hpp>
-#include <boost/asio/io_context.hpp>
 #include <boost/system/error_code.hpp>
 #include <boost/system/result.hpp>
 #include <future>

@@ -181,12 +181,12 @@ file_stream_.open(current_file_path_, std::ios::out | std::ios::binary | std::io
 
 ~~JWT builder 和 decoded object 支持 `exp`、`nbf`、`iat`，但 verifier 只检查签名以及可选 issuer、subject、audience、id、自定义 claim，没有检查令牌是否过期或尚未生效，也没有校验 Header 中声明的算法名是否与配置算法一致。~~
 
-现状（[lib/util/jwt.cpp](lib/util/jwt.cpp#L482)）：
+现状（[lib/jwt.cpp](lib/jwt.cpp#L482)）：
 - 校验 Header 中 `alg` 是否与配置算法一致（不一致报 `algorithm_mismatch`）；
 - 校验 `exp`（超时返回 `expired`）与 `nbf`（未生效返回 `not_yet_valid`），均支持 `with_clock_skew()` 容忍时钟偏差；
 - 保留 iss/sub/aud/jti 及自定义 claim 校验，失败即返回对应 error_code。
 
-- 位置：[lib/util/jwt.cpp](lib/util/jwt.cpp#L469)
+- 位置：[lib/jwt.cpp](lib/jwt.cpp#L469)
 - 影响：~~过期或提前使用的 Token 可继续访问受保护资源~~ 已消除
 - 建议：~~默认强制校验 `exp`/`nbf`，支持 clock skew；核对 `alg`；使用常量时间签名比较；增加缺失/类型错误 claim 的安全失败路径~~ 时间与算法校验已落实，可补充常量时间比较与缺失 claim 的显式测试。
 

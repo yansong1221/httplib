@@ -1,5 +1,7 @@
-#include "httplib/util/jwt.hpp"
+#include "httplib/jwt.hpp"
 #include <boost/beast/core/detail/base64.hpp>
+#include <boost/json/parse.hpp>
+#include <boost/json/serialize.hpp>
 #include <span>
 #include <stdexcept>
 #include <string>

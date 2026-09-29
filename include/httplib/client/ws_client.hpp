@@ -6,7 +6,6 @@
 #include "httplib/websocket_message.hpp"
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
-#include <boost/asio/io_context.hpp>
 #include <boost/system/error_code.hpp>
 #include <chrono>
 #include <functional>

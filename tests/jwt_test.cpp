@@ -1,9 +1,9 @@
 #include "common.hpp"
+#include "httplib/jwt.hpp"
 #include "httplib/server/middleware/data.hpp"
 #include "httplib/server/middleware/jwt_auth.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
-#include "httplib/util/jwt.hpp"
 
 #include <catch2/catch_test_macros.hpp>
 #include <jwt-cpp/jwt.h>
