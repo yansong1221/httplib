@@ -834,6 +834,66 @@ TEST_CASE("Multipart regular field content exceeds max_file_size", "[http-method
         });
 }
 
+TEST_CASE("Multipart same filename uploads do not collide", "[http-methods][security]")
+{
+    auto upload_dir = std::filesystem::temp_directory_path() / "httplib_uploads_collide";
+    std::filesystem::create_directories(upload_dir);
+    auto seen = std::make_shared<std::vector<std::filesystem::path>>();
+
+    run(
+        [&](auto& server)
+        {
+            server.set_form_data_config({ .save_dir = upload_dir, .remove_uploaded_files = false });
+            server.router().template set_http_handler<httplib::method::post>(
+                "/upload-collide",
+                [seen](httplib::server::request& req, httplib::server::response& resp)
+                {
+                    auto const& fd = req.as_form_data();
+                    REQUIRE(fd.fields.size() == 1);
+                    auto const& fp = fd.fields[0].file_path.value();
+                    std::ifstream f(fp, std::ios::binary);
+                    std::string content { std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>() };
+                    seen->push_back(fp);
+                    resp.set_string_content(std::move(content), "text/plain"sv);
+                });
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            for (auto const& payload : { "first", "second" })
+            {
+                std::string boundary = "----CollideBoundary";
+                std::string body = std::format("--{}\r\n"
+                                               "Content-Disposition: form-data; name=\"file\"; "
+                                               "filename=\"same.bin\"\r\n"
+                                               "\r\n"
+                                               "{}\r\n"
+                                               "--{}--\r\n",
+                                               boundary,
+                                               payload,
+                                               boundary);
+
+                auto hdrs = httplib::headers();
+                hdrs.set(httplib::field::content_type, std::format("multipart/form-data; boundary={}", boundary));
+                auto req = httplib::client::request(httplib::method::post, "/upload-collide", hdrs);
+                req.set_body(body, hdrs[httplib::field::content_type]);
+                auto resp = UNWRAP(co_await client.async_send_request(req));
+                REQUIRE(resp.result() == httplib::status::ok);
+                REQUIRE(resp.as_string() == payload);
+            }
+            co_return;
+        });
+
+    // 两次上传的客户端文件名相同：落盘路径必须不同，先落盘的那个也不能被覆盖。
+    REQUIRE(seen->size() == 2);
+    REQUIRE((*seen)[0] != (*seen)[1]);
+    for (auto const& p : *seen)
+    {
+        REQUIRE(std::filesystem::exists(p));
+        std::filesystem::remove(p);
+    }
+    std::filesystem::remove_all(upload_dir);
+}
+
 TEST_CASE("Multipart uploaded file is removed after the request", "[http-methods][security]")
 {
     auto upload_dir = std::filesystem::temp_directory_path() / "httplib_uploads_cleanup";
@@ -1213,7 +1273,7 @@ TEST_CASE("Multipart upload rejects path traversal via parent dir", "[http-metho
                     auto canonical_fp = std::filesystem::weakly_canonical(fp);
                     auto canonical_dir = std::filesystem::weakly_canonical(upload_dir);
                     REQUIRE(canonical_fp.string().find(canonical_dir.string()) == 0);
-                    REQUIRE(fp.filename() == "passwd");
+                    REQUIRE(fp.filename().string().ends_with("_passwd"));
                     resp.set_string_content("ok"sv, "text/plain"sv);
                 });
         },
@@ -1264,7 +1324,7 @@ TEST_CASE("Multipart upload strips absolute path filename to basename", "[http-m
                     REQUIRE(fd.fields.size() == 1);
                     REQUIRE(fd.fields[0].file_path.has_value());
                     auto const& fp = fd.fields[0].file_path.value();
-                    REQUIRE(fp.filename() == "evil.dll");
+                    REQUIRE(fp.filename().string().ends_with("_evil.dll"));
                     auto canonical_fp = std::filesystem::weakly_canonical(fp);
                     auto canonical_dir = std::filesystem::weakly_canonical(upload_dir);
                     REQUIRE(canonical_fp.string().find(canonical_dir.string()) == 0);
@@ -1314,7 +1374,7 @@ TEST_CASE("Multipart upload basename-only safe filename", "[http-methods]")
                     REQUIRE(fd.fields[0].filename == "a/b/c/legit.txt");
                     REQUIRE(fd.fields[0].file_path.has_value());
                     auto const& fp = fd.fields[0].file_path.value();
-                    REQUIRE(fp.filename() == "legit.txt");
+                    REQUIRE(fp.filename().string().ends_with("_legit.txt"));
                     REQUIRE(fp.parent_path() == upload_dir);
                     resp.set_string_content("ok"sv, "text/plain"sv);
                 });

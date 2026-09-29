@@ -517,11 +517,18 @@ Global middleware applies to proxy routes automatically. Use `set_http_handler` 
 svr.set_read_timeout(std::chrono::seconds(10));
 svr.set_write_timeout(std::chrono::seconds(10));
 svr.set_acceptor_count(64);     // concurrent listen sockets (default 32)
-svr.set_form_data_config({ .save_dir = "/tmp/uploads", .max_file_size = 10 * 1024 * 1024 });  // 10MB per part
+svr.set_form_data_config({ .save_dir = "/tmp/uploads", .max_file_size = 10 * 1024 * 1024,
+                           .remove_uploaded_files = true });  // 10MB per part, delete after the request
 svr.set_compress_content_types([](std::string_view ct) {
     return ct.starts_with("text/") || ct.starts_with("application/json");
 });
 ```
+
+Uploaded parts are written as `<16 hex>_<client filename>` so concurrent requests
+never overwrite each other; read the real path from `field::file_path`. With
+`remove_uploaded_files` the server deletes each part once the response has been
+sent, which is right for throwaway uploads — move the file inside the handler to
+keep it.
 
 ## SSL/TLS
 

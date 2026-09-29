@@ -6,6 +6,7 @@
 #include <boost/beast/http/error.hpp>
 #include <cctype>
 #include <cstddef>
+#include <random>
 #include <utility>
 #include "beast_alias.hpp"
 
@@ -15,6 +16,24 @@ namespace httplib::body
 
     namespace
     {
+        // 落盘文件名的唯一前缀。客户端给的 filename 只保证请求内唯一：两个并发
+        // 请求、乃至同一请求的两个 part 都可能同名，直接按原名落盘会互相覆盖，
+        // 还会被先完成的那次请求的清理删掉，于是后一个 handler 读到半个或空文件。
+        std::string
+        unique_prefix()
+        {
+            static thread_local std::mt19937_64 gen(std::random_device {}());
+            static constexpr std::string_view digits = "0123456789abcdef";
+            std::uniform_int_distribution<std::size_t> dist(0, digits.size() - 1);
+
+            std::string prefix(16, '0');
+            for (auto& c : prefix)
+            {
+                c = digits[dist(gen)];
+            }
+            return prefix;
+        }
+
         // 把 Asio const_buffer 当作借用视图（不拷贝、不持有）。
         std::string_view
         buffer_to_string_view(net::const_buffer const& buffer) noexcept
@@ -455,7 +474,7 @@ namespace httplib::body
             {
                 safe_name = "upload";
             }
-            auto candidate = body_.params.save_dir / safe_name;
+            auto candidate = body_.params.save_dir / (unique_prefix() + "_" + safe_name);
             auto canonical_dir = fs::weakly_canonical(body_.params.save_dir);
             auto canonical_file = fs::weakly_canonical(candidate);
             if (canonical_file.string().rfind(canonical_dir.string(), 0) != 0)
