@@ -13,7 +13,27 @@
 
 namespace httplib::server
 {
-
+    /**
+     * @brief HTTP/WebSocket 路由表：把请求方法 + 路径映射到 handler，并承载
+     *        全局与每路由中间件。
+     *
+     * @par 线程安全
+     * 路由注册属于**配置阶段**，必须在 @ref http_server::run "run()" 之前由
+     * 单一线程完成。内部**不做任何同步**：派发路径上的匹配与 handler 读取都是
+     * 无锁的，服务运行期间调用下列任一方法属于未定义行为：
+     *     - @ref use "use()"
+     *     - @ref set_http_handler "set_http_handler()" / @ref
+     *       set_lazy_http_handler "set_lazy_http_handler()"
+     *     - @ref set_ws_handler "set_ws_handler()"
+     *     - @ref set_http_not_found_handler "set_http_not_found_handler()" /
+     *       @ref set_post_routing_handler "set_post_routing_handler()"
+     *     - @ref set_static_mount_point "set_static_mount_point()" /
+     *       @ref set_connect_handler "set_connect_handler()"
+     *
+     * @note 服务器停止时（@ref http_server::stop "stop()" 之后所有在途会话排空），
+     *       框架会自动清空路由表。若同一个 @ref http_server 实例要再次
+     *       @ref http_server::run "run()"，需在此之前重新注册路由。
+     */
     class HTTPLIB_API router
     {
       public:

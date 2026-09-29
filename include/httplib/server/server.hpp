@@ -51,10 +51,10 @@ namespace httplib::server
      *     - @ref http_server::set_compress_content_types
      *       "set_compress_content_types()"
      *     - @ref http_server::set_form_data_config "set_form_data_config()"
- *     - @ref http_server::set_header_limit "set_header_limit()" / @ref
- *       http_server::set_body_limit "set_body_limit()"
-     *     - @ref http_server::stop "stop()" / @ref http_server::async_stop
-     *       "async_stop()"
+     *     - @ref http_server::set_header_limit "set_header_limit()" / @ref
+     *       http_server::set_body_limit "set_body_limit()"
+     *     - @ref http_server::stop "stop()" / @ref
+     * http_server::async_stop "async_stop()"
      * @li <b>生命周期</b>。每个实例只允许一个运行周期。运行期间再次调用
      *     @ref run "run()" 会返回 @c already_started 错误码。@ref stop
      *     "stop()" 与 @ref async_stop "async_stop()" 可从任意线程调用，
@@ -172,7 +172,9 @@ namespace httplib::server
          * @return 指向服务器 router 的引用。
          *
          * @par 线程安全
-         * 配置阶段。路由注册不与在途请求同步，必须在服务器启动前完成。
+         * 配置阶段。路由注册不与在途请求同步，必须在服务器启动前完成。router
+         * 内部**不加锁**，运行期间修改路由属于未定义行为（详见
+         * @ref httplib::server::router 的线程安全说明）。
          */
         httplib::server::router& router();
 

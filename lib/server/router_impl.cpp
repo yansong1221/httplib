@@ -125,7 +125,6 @@ namespace httplib::server
     void
     router_impl::set_http_handler_impl(method m, std::string_view key, coro_http_handler_type&& handler)
     {
-        std::unique_lock lock(mutex_);
         auto segments = detail::split_segments(key);
         auto node = insert(root_.get(), segments, 0);
         node->handlers[m] = wrap_global(std::move(handler));
@@ -292,7 +291,6 @@ namespace httplib::server
     void
     router_impl::use_impl(coro_mw_handler_type&& before, coro_mw_handler_type&& after)
     {
-        std::unique_lock lock(mutex_);
         global_before_.push_back(std::move(before));
         global_after_.push_back(std::move(after));
     }
@@ -309,7 +307,6 @@ namespace httplib::server
                                      websocket_conn::coro_message_handler_type&& message_handler,
                                      websocket_conn::coro_close_handler_type&& close_handler)
     {
-        std::unique_lock lock(mutex_);
         auto segments = detail::split_segments(path);
 
         auto node = insert(root_.get(), segments, 0);
@@ -324,7 +321,6 @@ namespace httplib::server
     std::optional<router_impl::ws_handler_entry>
     router_impl::query_ws_handler(request& req) const
     {
-        std::shared_lock lock(mutex_);
         auto segments = detail::split_segments(req.path());
 
         util::string_map<std::string> params;
@@ -346,7 +342,6 @@ namespace httplib::server
     {
         route_match result;
 
-        std::shared_lock lock(mutex_);
         auto segments = detail::split_segments(req.path());
 
         result.node = match_nodes(root_.get(),
@@ -481,7 +476,6 @@ namespace httplib::server
     void
     router_impl::reset()
     {
-        std::unique_lock lock(mutex_);
         root_ = std::make_unique<Node>();
         post_routing_handler_ = nullptr;
         not_found_handler_ = nullptr;
@@ -497,7 +491,6 @@ namespace httplib::server
     void
     router_impl::set_lazy_http_handler_impl(method m, std::string_view key, coro_http_handler_type&& handler)
     {
-        std::unique_lock lock(mutex_);
         auto segments = detail::split_segments(key);
         auto node = insert(root_.get(), segments, 0);
         node->lazy_handlers[m] = wrap_global(std::move(handler));

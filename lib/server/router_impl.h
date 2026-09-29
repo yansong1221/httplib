@@ -1,4 +1,5 @@
 #pragma once
+#include "beast_alias.hpp"
 #include "httplib/server/router.hpp"
 #include "httplib/util/string_hash.hpp"
 #include <boost/beast/http/verb.hpp>
@@ -6,11 +7,9 @@
 #include <memory>
 #include <regex>
 #include <set>
-#include <shared_mutex>
 #include <string>
 #include <unordered_map>
 #include <vector>
-#include "beast_alias.hpp"
 
 namespace httplib::server
 {
@@ -81,8 +80,11 @@ namespace httplib::server
         static void collect_allows(std::set<std::string>& allows, Node const* node);
 
         std::unique_ptr<Node> root_;
-        mutable std::shared_mutex mutex_;
 
+        // 这里刻意不加锁：路由表只在配置阶段（run 之前）写入，stop 时框架会在
+        // 排空所有会话之后从 strand 上调用 reset()。请求期只读，且每次请求的
+        // pre_routing -> process_routing 之间不持有任何同步原语。详见
+        // httplib::server::router 的线程安全说明。
         coro_http_handler_type post_routing_handler_;
         coro_http_handler_type not_found_handler_;
 

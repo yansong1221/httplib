@@ -12,7 +12,7 @@
 
 该项目是一套基于 Boost.Asio/Beast、面向 C++23 的异步 HTTP/1.1 与 WebSocket 客户端/服务端框架，同时包含路由、中间件、反向代理、文件服务、SSE、NDJSON、JWT、Session、下载器、磁盘缓存和可选数据库支持。
 
-总体判断：**架构方向合理、功能覆盖完整、测试投入较明显。截至本次清理，报告中的安全阻断项（上传路径逃逸、TLS/JWT 校验、URL 解码越界、Range 边界、目录列表注入、符号链接逃逸、CONNECT 开放代理、Header/Body/解压后大小/multipart/Range 资源上限、长期容器淘汰、客户端 IP 可由 X-Forwarded-For 任意伪造等）已全部修复；端到端数据竞争（CON-01/02）也已收口；剩余未收口的是运行期配置并发保护、路由正则的启发式准入和发布工程，不建议未经整改直接暴露在公网或承担认证、上传、代理等关键业务。**
+总体判断：**架构方向合理、功能覆盖完整、测试投入较明显。截至本次清理，报告中的安全阻断项（上传路径逃逸、TLS/JWT 校验、URL 解码越界、Range 边界、目录列表注入、符号链接逃逸、CONNECT 开放代理、Header/Body/解压后大小/multipart/Range 资源上限、长期容器淘汰、客户端 IP 可由 X-Forwarded-For 任意伪造等）已全部修复；端到端数据竞争（CON-01/02）与运行期配置并发契约（API-01）也已收口；剩余未收口的是路由正则的启发式准入、socket stop / client 并发读写的 strand 约束，以及构建发布工程，不建议未经整改直接暴露在公网或承担认证、上传、代理等关键业务。**
 
 | 维度 | 评分 | 结论 |
 |---|---:|---|
@@ -20,7 +20,7 @@
 | 模块化与可读性 | 6/10 | 目录清楚，部分中心文件过大、耦合偏重 |
 | 测试建设 | 7/10 | 真实 TCP 测试已按组件拆分，但安全和并发边界覆盖不足，无 CI/动态检测 |
 | 并发可靠性 | 5/10 | 端到端 session 数据竞争（CON-01/02）已修复；线程模型约束仍不清晰 |
-| 安全性 | 6/10 | 上传路径逃逸、TLS/JWT、URL 解码、重定向敏感头、目录注入、CONNECT 开放代理、资源上限、长期容器淘汰、客户端 IP 伪造等已修复；运行期配置并发保护与路由正则的启发式准入仍待收口 |
+| 安全性 | 6/10 | 上传路径逃逸、TLS/JWT、URL 解码、重定向敏感头、目录注入、CONNECT 开放代理、资源上限、长期容器淘汰、客户端 IP 伪造、运行期配置并发契约等已修复；路由正则的启发式准入仍待收口 |
 | 构建与发布成熟度 | 3.5/10 | 缺依赖锁定、CI，安装配置不完整 |
 
 建议定位：当前版本适合作为个人项目、内部实验框架或二次开发基础；完成本报告 P0/P1 整改、动态检测和压力测试前，不应判定为生产就绪。
@@ -401,7 +401,26 @@ file_stream_.open(current_file_path_, std::ios::out | std::ios::binary | std::io
 
 #### API-01：运行期可变配置缺少并发保护
 
-Router 注册、not-found/post handler、logger、timeout、压缩 predicate 等 setter 看起来可以随时调用，但部分读写没有锁或只保护了部分结构。应明确“仅启动前配置”，或提供 executor/strand 内的原子配置更新机制。
+> 状态：✅ **已修复**（本次整改，明确契约而非引入运行期更新机制）
+
+原问题拆分后，实际只有 router 未经同步：
+
+1. **标量配置本就线程安全** —— `read_timeout` / `write_timeout`、`header_limit` / `body_limit`、`logger`、`compress_predicate`、`form_data` 参数、`trusted_proxies`、`ssl_context` 全部以 `std::atomic` 或 `std::atomic<std::shared_ptr<...>>` 快照存储（见 `lib/server/server_impl.h`、`lib/util/logging.hpp`），运行期修改与请求期读取不会撕裂，与 `http_server` 文档标注的“运行期可改”一致。
+2. **router 是唯一真正无同步的部分** —— 原先 `router_impl` 持有 `std::shared_mutex`，但保护并不完整且有误导性：
+   - `set_not_found_handler_impl` / `set_post_routing_handler_impl` 写无锁、`post_routing` 读亦无锁；
+   - `global_before_` / `global_after_` 仅在 `use_impl` 写加锁，而派发时在 `wrap_global` 的协程体内无锁遍历（无法在 `co_await` 期间持锁）；
+   - `pre_routing` 在 `shared_lock` 下返回裸 `Node const*`，而 `process_routing` 在锁**释放之后**才解引用它——即便有并发写，该锁也挡不住这次 use-after-free。
+
+修复：**把“仅启动前配置”明确为强制契约，并移除 router 的锁**。
+
+- `lib/server/router_impl.{h,cpp}` 删除 `std::shared_mutex mutex_` 及全部 7 处 lock/unique_lock/shared_lock。路由表只在配置阶段写入；请求期只读。
+- `reset()` **保留**：它在 `async_run()` 停机路径中被调用（`lib/server/server_impl.cpp:189`），时序是「accept 全部结束 → `while (!sessions_.empty())` 排空在途会话 → `reset()`」。会话是在 `strand_` 上同步 `sessions_.insert()` 后才 `co_spawn`（`server_impl.cpp:242-246`），accept 已停即不可能再有新会话，因此 `reset()` 执行时确无并发读者——无需锁。
+- `router` 补充类级线程安全说明（配置阶段、无同步、运行期注册属未定义行为），并注明停止后框架会清空路由表、再次 `run()` 前需重新注册；`http_server::router()` 文档同步点明“内部不加锁”。
+- 选型说明：报告原本给出「明确仅启动前配置」**或**「提供 strand 内原子更新机制」二选一。鉴于路由注册发生在进程启动阶段、运行期重配路由无实际场景，选择前者；后者需把路由树改为 copy-on-write 共享所有权（消除裸指针悬垂），改动触及最热匹配路径，收益不成比例，故不做。
+
+- 影响：~~部分结构读写无锁，运行期修改配置存在数据竞争~~ 已消除（契约明确 + 唯一无同步处以“不可并发修改”约束）
+- 热路径副作用：`pre_routing`（每请求）与 `query_ws_handler`（每次 WS 升级）不再各做一次 `shared_lock` 获取/释放。
+- 回归：现有 router / middleware / 生命周期测试全量通过（`ctest` 6/6）。
 
 ## 6. 构建、测试与发布质量
 
@@ -443,7 +462,7 @@ with any of the following names:
 
 优点：
 
-- 718 个 Catch2 测试；
+- 743 个 Catch2 测试；
 - 大量真实 TCP 集成场景；
 - 覆盖 HTTP 方法、路由、WS、SSE、NDJSON、代理、下载器和 Body；
 - 已有部分随机 payload 测试；
@@ -485,8 +504,8 @@ with any of the following names:
 3. ~~跨 origin 重定向删除敏感 header，禁止非授权协议降级~~ → 已修复（client + downloader，含回归测试）。
 4. ~~重构 cache key 和 HTTP cache policy~~ → 已修复（key 含认证上下文与最终 URL 校验，尊重 `no-store`/`Vary: *`，元数据白名单）。
 5. ~~完整实现代理 hop-by-hop、Cookie/Set-Cookie 和 Forwarded header 语义~~ → 已修复。
-6. ~~修复 Range 边界、目录 HTML escaping、异常详情泄漏~~ 和长期容器淘汰。
-    - Range 边界（HTTP-01）、目录 HTML escaping/symlink containment（WEB-01）、异常详情泄漏（INFO-01）均已修复并含回归测试；长期容器淘汰（Rate limit bucket、Session store、Router 正则）待处理。
+6. ~~修复 Range 边界、目录 HTML escaping、异常详情泄漏，以及长期容器淘汰~~ → 全部已修复。
+    - Range 边界（HTTP-01）、目录 HTML escaping/symlink containment（WEB-01）、异常详情泄漏（INFO-01）均已修复并含回归测试；长期容器淘汰（DOS-01：Rate limit bucket、Session store、Router 正则准入）已修复并含回归测试。
 
 ### P2：发布前完成
 
@@ -512,6 +531,6 @@ with any of the following names:
 
 httplib 的基础结构并不差：作者理解 Boost.Asio/Beast、协程、PIMPL、路由 Trie 和真实网络测试，项目也已超过简单示例库的规模。但当前最大问题不是代码风格，而是**安全边界、并发契约和发布工程没有跟上功能扩张速度**。
 
-最初报告中的风险项现已 **17 项完全修复**（SEC-01/02/03/04/05/06/07、CON-01/02、CL-01/02、INFO-01、PROXY-01、HTTP-01、WEB-01、CACHE-01、DOS-01），其中 CL-01/02、CON-01/02、HTTP-01、WEB-01、CACHE-01、SEC-03、SEC-07、DOS-01 均含回归测试或代码复核。剩余未收口项集中在 **运行期配置并发保护（API-01）、JWT 常量时间比较、线程模型契约，以及构建/发布工程（安装配置、依赖锁定、CI、动态检测、fuzz）**；路由正则另有一项已知残留（准入检查为启发式，彻底解决需换 RE2/NFA），按 IP 的限流则天然无法约束跨 IP 总量，需要总量保护时应在前置网关再加一层。
+最初报告中的风险项现已 **18 项完全修复**（SEC-01/02/03/04/05/06/07、CON-01/02、CL-01/02、INFO-01、PROXY-01、HTTP-01、WEB-01、CACHE-01、DOS-01、API-01），其中 CL-01/02、CON-01/02、HTTP-01、WEB-01、CACHE-01、SEC-03、SEC-07、DOS-01 均含回归测试或代码复核。剩余未收口项集中在 **JWT 常量时间比较、socket stop / client 并发读写的 strand 契约，以及构建/发布工程（安装配置、依赖锁定、CI、动态检测、fuzz）**；路由正则另有一项已知残留（准入检查为启发式，彻底解决需换 RE2/NFA），按 IP 的限流则天然无法约束跨 IP 总量，需要总量保护时应在前置网关再加一层。
 
 建议先冻结功能扩张，以并发契约与构建发布工程收口为主线，再补动态检测与 fuzz。
