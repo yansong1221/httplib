@@ -6,6 +6,7 @@
 #include "httplib/headers.hpp"
 #include "httplib/query_params.hpp"
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/buffer.hpp>
 #include <boost/json/value.hpp>
 #include <boost/system/result.hpp>
 #include <cstddef>

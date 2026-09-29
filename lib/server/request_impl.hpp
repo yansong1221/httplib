@@ -4,6 +4,7 @@
 #include "httplib/server/request.hpp"
 #include "httplib/url/url.hpp"
 #include "httplib/util/misc.hpp"
+#include "httplib/util/string_hash.hpp"
 #include "session.hpp"
 #include <algorithm>
 #include <boost/asio/ip/tcp.hpp>
@@ -132,7 +133,7 @@ namespace httplib::server
             path_params_[key] = val;
         }
         void
-        set_path_param(std::unordered_map<std::string, std::string>&& params)
+        set_path_param(util::string_map<std::string>&& params)
         {
             path_params_ = std::move(params);
         }
@@ -162,7 +163,7 @@ namespace httplib::server
         tcp::endpoint remote_endpoint_;
         bool is_ssl_ = false;
 
-        std::unordered_map<std::string, std::string> path_params_;
+        util::string_map<std::string> path_params_;
         request_data data_;
 
         // 连接所有者（http_task），作用同 client 的 parent_（http_client::impl）。

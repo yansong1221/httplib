@@ -29,7 +29,7 @@ namespace httplib::server
             std::set<std::string> allows;
             bool lazy = false;
             Node const* node = nullptr;
-            std::unordered_map<std::string, std::string> params;
+            util::string_map<std::string> params;
         };
 
         net::awaitable<void> process_routing(route_match const& match, request& req, response& resp) const;
@@ -97,7 +97,7 @@ namespace httplib::server
         Node const* match_nodes(Node const* node,
                                 std::vector<std::string_view> const& segments,
                                 size_t index,
-                                std::unordered_map<std::string, std::string>& params,
+                                util::string_map<std::string>& params,
                                 MatchHandlerType const& handler) const;
     };
 } // namespace httplib::server

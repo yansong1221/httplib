@@ -3,6 +3,7 @@
 #include "backend.hpp"
 #include "httplib/db/binder.hpp"
 #include "httplib/db/exception.hpp"
+#include "httplib/util/string_hash.hpp"
 #include <cctype>
 #include <cstdint>
 #include <span>
@@ -198,7 +199,7 @@ namespace httplib::db::detail
     {
         bool has_named = false;
         bool has_pos = false;
-        std::unordered_map<std::string, param const*> named;
+        util::string_map<param const*> named;
         std::vector<param const*> pos;
     };
 
@@ -227,7 +228,7 @@ namespace httplib::db::detail
     /// 解析 `:name` 绑定：命名查表，位置按序消费。
     inline param const*
     resolve_param(std::string const& name,
-                  std::unordered_map<std::string, param const*> const& named,
+                  util::string_map<param const*> const& named,
                   std::vector<param const*> const& pos,
                   size_t& pos_idx,
                   bool has_named)

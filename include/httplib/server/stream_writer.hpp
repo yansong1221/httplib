@@ -2,6 +2,7 @@
 #include "httplib/config.hpp"
 #include "httplib/headers.hpp"
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/buffer.hpp>
 #include <boost/system/error_code.hpp>
 
 namespace httplib::server

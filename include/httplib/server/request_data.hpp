@@ -1,4 +1,5 @@
 #pragma once
+#include "httplib/util/string_hash.hpp"
 #include <any>
 #include <mutex>
 #include <stdexcept>
@@ -93,7 +94,7 @@ namespace httplib::server
         }
 
         mutable std::mutex mutex_;
-        std::unordered_map<std::string, std::any> map_;
+        util::string_map<std::any> map_;
     };
 
 } // namespace httplib::server

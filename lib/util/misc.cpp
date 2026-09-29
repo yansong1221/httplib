@@ -59,10 +59,4 @@ namespace httplib::util
         return parts;
     }
 
-    std::string_view
-    buffer_to_string_view(boost::asio::const_buffer const& buffer)
-    {
-        return std::string_view(static_cast<char const*>(buffer.data()), buffer.size());
-    }
-
 } // namespace httplib::util

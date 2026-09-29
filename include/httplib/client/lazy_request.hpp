@@ -2,6 +2,7 @@
 #include "httplib/client/response.hpp"
 #include "httplib/config.hpp"
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/buffer.hpp>
 #include <boost/system/error_code.hpp>
 #include <boost/system/result.hpp>
 #include <optional>

@@ -166,7 +166,7 @@ namespace httplib::server
             co_return;
         }
 
-        get_impl(req).set_path_param(std::unordered_map<std::string, std::string>(match.params));
+        get_impl(req).set_path_param(util::string_map<std::string>(match.params));
 
         if (match.lazy)
         {
@@ -224,7 +224,7 @@ namespace httplib::server
         std::shared_lock lock(mutex_);
         auto segments = detail::split_segments(req.path());
 
-        std::unordered_map<std::string, std::string> params;
+        util::string_map<std::string> params;
         auto node = match_nodes(root_.get(),
                                 segments,
                                 0,
@@ -271,7 +271,7 @@ namespace httplib::server
     router_impl::match_nodes(Node const* parent,
                              std::vector<std::string_view> const& segments,
                              size_t index,
-                             std::unordered_map<std::string, std::string>& params,
+                             util::string_map<std::string>& params,
                              MatchHandlerType const& handler) const
     {
         if (!parent)

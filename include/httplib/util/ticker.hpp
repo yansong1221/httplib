@@ -1,12 +1,11 @@
 #pragma once
 #include "httplib/config.hpp"
-#include <atomic>
+#include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
-#include <boost/asio/cancellation_signal.hpp>
-#include <boost/asio/strand.hpp>
+#include <boost/system/error_code.hpp>
 #include <chrono>
+#include <exception>
 #include <memory>
-#include <mutex>
 
 namespace httplib::util
 {
@@ -39,17 +38,18 @@ namespace httplib::util
             co_return;
         }
 
-      private:
-        net::awaitable<boost::system::error_code> co_run();
+        /// run loop 内部抛出的异常都会交给这里，然后循环停止。默认忽略。
+        virtual void
+        on_error(std::exception_ptr ep)
+        {
+            (void)ep;
+        }
 
       private:
-        net::any_io_executor executor_;
+        net::awaitable<void> co_run();
 
-        std::atomic<std::chrono::steady_clock::duration> interval_;
-        std::atomic<bool> is_running_ { false };
-        std::atomic<uint64_t> run_id_ { 0 };
-
-        std::mutex state_mutex_;
-        std::shared_ptr<net::cancellation_signal> cs_;
+      private:
+        class impl;
+        std::unique_ptr<impl> impl_;
     };
 } // namespace httplib::util

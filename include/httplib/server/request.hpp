@@ -9,6 +9,7 @@
 #include "httplib/util/misc.hpp"
 #include <any>
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/buffer.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/json/value.hpp>
 #include <charconv>

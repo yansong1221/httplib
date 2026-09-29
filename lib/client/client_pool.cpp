@@ -2,6 +2,7 @@
 #include "httplib/client/client.hpp"
 #include "httplib/util/async_event.hpp"
 #include "httplib/util/misc.hpp"
+#include "httplib/util/string_hash.hpp"
 #include "httplib/util/ticker.hpp"
 #include "util/logging.hpp"
 #include "httplib/url/url.hpp"
@@ -666,12 +667,12 @@ namespace httplib::client
         net::any_io_executor executor_;
         using waiters_list = std::deque<std::weak_ptr<waiter_node>>;
 
-        std::unordered_map<std::string, pool_state> pools_;
+        util::string_map<pool_state> pools_;
         std::atomic<size_t> total_connections_ { 0 };
         std::atomic<size_t> total_active_ { 0 };
         pool_params cfg_;
 
-        std::unordered_map<std::string, waiters_list> waiters_;
+        util::string_map<waiters_list> waiters_;
     };
 
     // ---- client_handle ----

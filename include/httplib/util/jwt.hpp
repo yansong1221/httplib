@@ -1,5 +1,6 @@
 #pragma once
 #include "httplib/config.hpp"
+#include "httplib/util/string_hash.hpp"
 #include <boost/json.hpp>
 #include <boost/system/error_code.hpp>
 #include <boost/system/result.hpp>
@@ -217,7 +218,7 @@ namespace httplib::jwt
       private:
         boost::json::object header_;
         boost::json::object payload_;
-        std::unordered_map<std::string, boost::json::value> claims_;
+        util::string_map<boost::json::value> claims_;
         std::string type_;
         std::chrono::system_clock clock_ {};
         std::chrono::system_clock::time_point iat_ {};

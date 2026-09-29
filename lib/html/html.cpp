@@ -5,6 +5,7 @@
 #include <boost/algorithm/string/trim.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/system/error_code.hpp>
+#include <array>
 #include <cctype>
 #include <charconv>
 #include <chrono>

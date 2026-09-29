@@ -1,6 +1,7 @@
 #include "httplib/server/middleware/rate_limit.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
+#include "httplib/util/string_hash.hpp"
 #include <mutex>
 #include <unordered_map>
 #include "beast_alias.hpp"
@@ -24,7 +25,7 @@ namespace httplib::server::middleware
         uint32_t max_requests;
         duration window;
         std::mutex mutex;
-        std::unordered_map<std::string, bucket> buckets;
+        util::string_map<bucket> buckets;
     };
 
     rate_limit_middleware::rate_limit_middleware(uint32_t max_requests, std::chrono::steady_clock::duration window)

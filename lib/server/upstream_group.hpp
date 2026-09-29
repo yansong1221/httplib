@@ -1,5 +1,6 @@
 #pragma once
 #include "httplib/server/proxy_strategy.hpp"
+#include "httplib/util/string_hash.hpp"
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -70,7 +71,7 @@ namespace httplib::server
 
         /// backend url -> index; built once in the constructor and read-only after,
         /// so concurrent lookups need no lock.
-        std::unordered_map<std::string, size_t> url_index_;
+        util::string_map<size_t> url_index_;
 
         mutable std::mutex mu_;
         std::vector<std::ptrdiff_t> current_;

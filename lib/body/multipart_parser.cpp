@@ -15,6 +15,13 @@ namespace httplib::body
 
     namespace
     {
+        // 把 Asio const_buffer 当作借用视图（不拷贝、不持有）。
+        std::string_view
+        buffer_to_string_view(net::const_buffer const& buffer) noexcept
+        {
+            return std::string_view(static_cast<char const*>(buffer.data()), buffer.size());
+        }
+
         // 返回 sv 的最长后缀，且该后缀是 a 或 b 的前缀。用于把可能被切开的
         // multipart boundary 分隔符保留在 pending 中，而不是当成正文提交。
         std::size_t
@@ -184,7 +191,7 @@ namespace httplib::body
     multipart_parser::put(net::const_buffer const& buffers, boost::system::error_code& ec)
     {
         ec = {};
-        auto incoming = util::buffer_to_string_view(buffers);
+        auto incoming = buffer_to_string_view(buffers);
 
         std::string_view sv;
         if (pending_.empty())

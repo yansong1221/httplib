@@ -1,7 +1,6 @@
 #pragma once
 #include "httplib/config.hpp"
 #include "httplib/util/type_traits.h"
-#include <boost/asio/buffer.hpp>
 #include <charconv>
 #include <cstdint>
 #include <string>
@@ -44,7 +43,5 @@ namespace httplib::util
     HTTPLIB_API std::vector<std::string_view> split(std::string_view str,
                                                     std::string_view delimiter,
                                                     bool compress = true);
-
-    HTTPLIB_API std::string_view buffer_to_string_view(boost::asio::const_buffer const& buffer);
 
 } // namespace httplib::util
