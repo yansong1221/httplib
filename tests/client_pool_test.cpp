@@ -827,7 +827,7 @@ TEST_CASE("client_pool: idle eviction wakes a waiting acquire", "[client_pool]")
 
             REQUIRE(result->completed);
             CHECK(result->success);
-            CHECK(result->elapsed < std::chrono::milliseconds(1500)); // 被驱逐唤醒，而不是睡�?2s
+            CHECK(result->elapsed < std::chrono::milliseconds(1500)); // 被驱逐唤醒，而不是睡满 2s
             b.release();
             p.stop();
         });
@@ -878,14 +878,14 @@ TEST_CASE("client_pool: idle_check_interval decouples eviction tick from idle_ti
             }
             CHECK((co_await p.async_stats(host, port, httplib::url::scheme::plain)).idle == 1);
 
-            // idle_timeout 已到，但检查周期尚未到：不应回收�?
+            // idle_timeout 已到，但检查周期尚未到：不应回收。
             net::steady_timer t1(ioc.get_executor());
             t1.expires_after(std::chrono::milliseconds(200));
             boost::system::error_code ec;
             co_await t1.async_wait(httplib::util::net_awaitable[ec]);
             CHECK((co_await p.async_stats(host, port, httplib::url::scheme::plain)).idle == 1);
 
-            // 检查周期到达后，按 idle_timeout 回收�?
+            // 检查周期到达后，按 idle_timeout 回收。
             net::steady_timer t2(ioc.get_executor());
             t2.expires_after(std::chrono::milliseconds(600));
             co_await t2.async_wait(httplib::util::net_awaitable[ec]);
