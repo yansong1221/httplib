@@ -33,6 +33,12 @@ function(add_httplib_test name label)
     add_test(NAME ${name} COMMAND $<TARGET_FILE:${name}>)
     set_tests_properties(${name} PROPERTIES LABELS "${label}" TIMEOUT 300)
 
+    # 测试必须保持 TU 隔离，不参与 unity build：
+    #   1. 各测试文件在匿名 namespace 里定义了同名辅助函数（set_text / read_file /
+    #      arm_watchdog / as_string），凑批后匿名 namespace 合并，直接撞名；
+    #   2. http_methods_test.cpp 给 httplib::headers 补了构造函数，跨 TU 给库类加
+    #      成员只在"每个测试文件自成一个 TU"的前提下才成立。
+    set_target_properties(${name} PROPERTIES UNITY_BUILD OFF)
 endfunction()
 
 add_httplib_test(httplib_test_core core
