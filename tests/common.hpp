@@ -1,4 +1,5 @@
 #pragma once
+#include "feature_flags.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/client/stream_reader.hpp"
 #include "httplib/server/router.hpp"

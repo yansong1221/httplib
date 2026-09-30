@@ -1,4 +1,5 @@
 #include "httplib/jwt.hpp"
+#include "beast_alias.hpp"
 #include <boost/beast/core/detail/base64.hpp>
 #include <boost/json/parse.hpp>
 #include <boost/json/serialize.hpp>
@@ -7,7 +8,6 @@
 #include <string>
 
 #ifdef HTTPLIB_ENABLED_SSL
-#include "beast_alias.hpp"
 #include <openssl/crypto.h>
 #include <openssl/hmac.h>
 #endif

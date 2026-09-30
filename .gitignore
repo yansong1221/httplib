@@ -1,6 +1,7 @@
 /build
 /build-db
 /build-unity
+/build-asan
 /.vscode
 /.idea
 /.DS_Store

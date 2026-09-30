@@ -1,3 +1,4 @@
+#ifdef HTTPLIB_ENABLED_DATABASE
 #include "httplib/db/session.hpp"
 #include "httplib/db/exception.hpp"
 #include "httplib/util/string_hash.hpp"
@@ -424,3 +425,4 @@ namespace httplib::db
     }
 
 } // namespace httplib::db
+#endif // HTTPLIB_ENABLED_DATABASE

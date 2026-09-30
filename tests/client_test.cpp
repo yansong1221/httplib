@@ -1096,6 +1096,7 @@ TEST_CASE("client: lazy read text", "[client]")
 // 读取失败还会波及连接复用，所以这里额外验证同一 client 的下一个请求仍然成功。
 TEST_CASE("client: empty body with Content-Encoding reads as empty string", "[client]")
 {
+    SKIP_WITHOUT_COMPRESS();
     run(
         [](auto& server)
         {

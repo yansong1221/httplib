@@ -82,15 +82,23 @@ add_httplib_test(httplib_test_proxy proxy
     proxy_test.cpp
 )
 
-add_httplib_test(httplib_test_jwt jwt
-    jwt_test.cpp
-)
-target_link_libraries(httplib_test_jwt PRIVATE jwt-cpp::jwt-cpp)
+if(HTTPLIB_ENABLED_SSL)
+    add_httplib_test(httplib_test_jwt jwt
+        jwt_test.cpp
+    )
+    target_link_libraries(httplib_test_jwt PRIVATE jwt-cpp::jwt-cpp)
+else()
+    message(STATUS "HTTPLIB: skipping httplib_test_jwt (HTTPLIB_ENABLED_SSL=OFF)")
+endif()
 
-add_httplib_test(httplib_test_db db
-    db_bug_test.cpp
-    db_regression_test.cpp
-    mysql_test.cpp
-    odbc_test.cpp
-    sqlite_test.cpp
-)
+if(HTTPLIB_ENABLED_DATABASE)
+    add_httplib_test(httplib_test_db db
+        db_bug_test.cpp
+        db_regression_test.cpp
+        mysql_test.cpp
+        odbc_test.cpp
+        sqlite_test.cpp
+    )
+else()
+    message(STATUS "HTTPLIB: skipping httplib_test_db (HTTPLIB_ENABLED_DATABASE=OFF)")
+endif()

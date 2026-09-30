@@ -1,6 +1,7 @@
 #include "beast_alias.hpp"
 #include "body/body_state.hpp"
 #include "body/body_writer.hpp"
+#include "feature_flags.hpp"
 #include "body/codec.hpp"
 #include "body/sink.hpp"
 #include "body/source.hpp"
@@ -591,6 +592,7 @@ TEST_CASE("codec: compressed Content-Length must not pre-reject a within-limit b
 // （session.cpp），HEAD 响应也会带上 GET 的 Content-Encoding，所以这是可达路径。
 TEST_CASE("stream_decoder: flushing a never-fed decoder is an empty success", "[body]")
 {
+    SKIP_WITHOUT_COMPRESS();
     boost::system::error_code ec;
 
     SECTION("gzip, nothing ever fed")
@@ -644,6 +646,7 @@ TEST_CASE("stream_decoder: flushing a never-fed decoder is an empty success", "[
 
 TEST_CASE("stream_encoder: encoding an empty string still emits a valid gzip stream", "[body]")
 {
+    SKIP_WITHOUT_COMPRESS();
     // 与 decoder 的空输入跳过相反：编码空串必须产出合法空载荷流，否则对端拿到 0 字节。
     auto wire = body::encode("", "gzip");
     REQUIRE(wire);

@@ -21,6 +21,39 @@ ctest --test-dir build -C Debug   # add -L core|http|client|proxy|jwt|db to filt
 
 Tests use Catch2 via `Catch2::Catch2WithMain` (auto-generated main). The server/client/proxy tests spin up a real server on `127.0.0.1:0` and hit it over TCP — no mocks. Tests are split into 6 executables/targets (`httplib_test_core`, `_http`, `_client`, `_proxy`, `_jwt`, `_db`), each registered with a ctest label. New tests link the shared `httplib_test_support` INTERFACE target (carries `httplib`, `Catch2::Catch2WithMain`, OpenSSL, `/bigobj`, and the internal `${HTTPLIB_LIB_DIR}` include) via the `add_httplib_test(<target> <label> <sources...>)` helper, so no per-target boilerplate is needed.
 
+### Feature-gated tests
+
+All four feature combinations build and pass. Two mechanisms, pick per situation:
+
+- **Whole target needs a feature** — gate the target in `tests/CMakeLists.txt` (see `httplib_test_db` on `HTTPLIB_ENABLED_DATABASE`, `httplib_test_jwt` on `HTTPLIB_ENABLED_SSL`). `jwt_test.cpp` is entirely SSL-dependent, so per-test guards there would be noise.
+- **A single test case needs a feature** — put `SKIP_WITHOUT_COMPRESS()` / `SKIP_WITHOUT_SSL()` (from `tests/feature_flags.hpp`, re-exported by `tests/common.hpp`) as the first statement in the `TEST_CASE`. Use this over `#ifdef`/`#endif`: `SKIP` keeps the case registered so the run reports *"skipped: requires HTTPLIB_ENABLED_COMPRESS"*, whereas `#ifdef` makes it vanish and a vanished test is indistinguishable from a passing one.
+
+### Shared output directory
+
+Every build tree writes to the same `bin/x64/[Debug|Release]/`, so **only one configuration's binaries can exist at a time**. Building config B clobbers config A's exes. Consequences:
+
+- Don't keep several build dirs expecting to ctest them independently — rebuild before each run.
+- A failed link deletes the previous good exe, so a later `ctest` reports `***Not Run` (a missing binary), not a test failure. Rebuild that target before investigating.
+- An ASan build is not interchangeable with a normal one: the instrumented `httplib.lib` overwrites the normal one and the next normal build fails with `LNK2038` on `annotate_string` / `annotate_vector`. Delete `bin/` when switching between sanitized and normal builds.
+- With a vcpkg toolchain, pass `-DVCPKG_APPLOCAL_DEPS=ON`, otherwise `spdlog.dll` / `fmt.dll` / the shared Boost DLLs are not copied next to the exes and every test dies at startup with `0xC0000135` (DLL not found).
+
+
+## Sanitizers
+
+`-DHTTPLIB_SANITIZER=address|undefined|thread` instruments the build. `none` is the default.
+
+```bash
+cmake -B build-asan -S . -DCMAKE_PREFIX_PATH=<deps> \
+      -DHTTPLIB_ENABLED_TESTS=ON -DHTTPLIB_SANITIZER=address
+cmake --build build-asan --config Debug
+```
+
+- Forces `CMAKE_UNITY_BUILD OFF` (a unity TU merges unrelated TUs and hides reports).
+- **MSVC**: `address` only, x64 only, and adds `/Zi /Od`. The ASan runtime DLL is not copied next to the binary — prepend the MSVC `bin/Hostx64/x64` dir holding `clang_rt.asan_dbg_dynamic-x86_64.dll` to `PATH` before running. MSVC has **no** UBSan and **no** TSan; use clang for those.
+- **Clang/GCC**: `address`, `undefined`, or `thread`. TSan is mutually exclusive with ASan and must be requested on its own.
+- **Catch2 caveat**: a prebuilt Catch2 (e.g. vcpkg's `Catch2d.lib`) is not ASan-instrumented, so instrumented test targets fail to link with `LNK2038` on Catch2's `annotate_string` / `annotate_vector`. The library itself and the examples link fine — to get a signal today, run the instrumented `demo` server against the instrumented `stress_test`.
+
+
 ## Architecture
 
 - **Public API**: `include/httplib/` — classes with PIMPL, designed to hide Boost types from callers.

@@ -1242,6 +1242,7 @@ TEST_CASE("Response: malformed gzip request body errors cleanly, no exception", 
 // 这里按字节断言：头之后必须正好是 0 字节。
 TEST_CASE("response: empty encoded body writes no bytes past Content-Length: 0", "[response][compression]")
 {
+    SKIP_WITHOUT_COMPRESS();
     test_common::test_scaffold sc;
     sc.server.router().set_http_handler<httplib::method::get>(
         "/empty-encoded",
@@ -1288,6 +1289,7 @@ TEST_CASE("response: empty encoded body writes no bytes past Content-Length: 0",
 // 这条路径 httplib::client 覆盖不到：client 把版本写死成 1.1，发不出 1.0 请求。
 TEST_CASE("response: compressed HTTP/1.0 response is not chunked", "[response][compression]")
 {
+    SKIP_WITHOUT_COMPRESS();
     test_common::test_scaffold sc;
     auto handler = [](httplib::server::request&, httplib::server::response& resp) {
         resp.set_string_content(std::string(2000, 'a'), "text/plain"sv);
