@@ -21,7 +21,7 @@
 | 测试建设 | 7/10 | 真实 TCP 测试已按组件拆分，但安全和并发边界覆盖不足，无 CI/动态检测 |
 | 并发可靠性 | 7/10 | 端到端 session 数据竞争（CON-01/02）已修复；线程/strand 模型已梳理成文（`THREAD_MODEL.md`），配置期与运行期契约明确 |
 | 安全性 | 6/10 | 上传路径逃逸、TLS/JWT、URL 解码、重定向敏感头、目录注入、CONNECT 开放代理、资源上限、长期容器淘汰、客户端 IP 伪造、运行期配置并发契约等已修复；路由正则的启发式准入仍待收口 |
-| 构建与发布成熟度 | 3.5/10 | 缺依赖锁定、CI，安装配置不完整 |
+| 构建与发布成熟度 | 5/10 | 许可证/SECURITY/CHANGELOG 已补齐；ASan 已接入并跑通一轮（无报告）；仍缺依赖锁定、CI、UBSan/TSan/fuzz 与 `install()` 规则 |
 
 建议定位：当前版本适合作为个人项目、内部实验框架或二次开发基础；完成本报告 P0/P1 整改、动态检测和压力测试前，不应判定为生产就绪。
 
@@ -515,10 +515,21 @@ with any of the following names:
 
 ### P2：发布前完成
 
-1. 添加明确开源许可证、SECURITY、CHANGELOG 和版本发布流程。
-2. 增加 vcpkg/Conan manifest 或其他可锁定依赖方案。
+1. ~~添加明确开源许可证、SECURITY、CHANGELOG 和版本发布流程~~ → 文档已补齐。
+    - **许可证**：仓库已有 BSL-1.0 原文（`LICENSE`，`c43a1cd` 补上），无需改动。
+    - **SECURITY**：新增 `SECURITY.md`。漏洞报告走 GitHub 私密 advisory 渠道（不用公开 issue，避免修复前细节可见）；并单列「部署者须知」——本库是可嵌入组件而非完整服务，关闭证书校验、声明可信代理网段、打开 CONNECT、关闭上传文件清理等安全决策的责任在使用方，逐条列明。
+    - **CHANGELOG**：新增 `CHANGELOG.md`，按 Keep a Changelog / 语义化版本组织。记录 18 项安全修复、并发与正则修复、公共 API 变更（Beast 脱钩、body_state、枚举 X-macro、middleware 切面化）、文档更新，以及已知不兼容变更（`merge`→`replace`、`use()` 语义变化、`any_body::value_type` 移除）。
+    - **版本发布流程**：见 `CHANGELOG.md` 与 `SECURITY.md`；当前 1.0.5 尚未打 tag，「支持版本」策略为只维护 `dev` 最新。
+2. 增加 vcpkg/Conan manifest 或其他可锁定依赖方案。（**未采纳**——依赖由使用方自行管理，仓库不提供 manifest）
 3. 建立 Linux/macOS/Windows CI，覆盖 SSL、Compression、Database 和静态/动态库矩阵。
-4. 加入 clang-format check、clang-tidy、ASan、UBSan、TSan 和 fuzz。
+4. ~~加入 clang-format check、clang-tidy、ASan、UBSan、TSan 和 fuzz~~ → ASan 已接入并跑通一轮。
+    - **ASan**：新增 `-DHTTPLIB_SANITIZER=address|undefined|thread`（`none` 为默认），并强制 `CMAKE_UNITY_BUILD OFF`。MSVC 仅支持 `address`（x64），clang/gcc 三者皆可。
+    - **首轮结果（MSVC 14.44 + ASan，服务端与客户端双端插桩）**：`demo` 服务端 + `stress_test` 客户端，32 并发连接 15 秒共 13826 次 POST 全部 200，另扫 7 条不同路由（GET/PUT/DELETE/OPTIONS/正则/重定向/未匹配）各数千次请求，**stderr 零字节，无任何 ASan 报告**；`/api/shutdown` 正常退出时亦无报告。协程与连接池路径未发现内存错误。
+    - **顺带修掉一个默认配置编译失败**：`lib/CMakeLists.txt` 用 `GLOB_RECURSE` 无条件编译 `lib/db/*.cpp`，但 `registry.hpp` / `registry.cpp` 整体包在 `#ifdef HTTPLIB_ENABLED_DATABASE` 里，而 `session.cpp` 未加同一 guard 却调用 `detail::register_backends()` 等符号——导致 `HTTPLIB_ENABLED_DATABASE=OFF`（**默认值**）下 `session.cpp` 编译失败。已按 `connection_pool_impl.cpp` 的既有范式给 `session.cpp` 补上 guard；并将 `httplib_test_db` 按 `HTTPLIB_ENABLED_DATABASE` 条件注册，否则关闭 DB 时该测试目标仍会构建并失败。另修掉 `lib/jwt.cpp` 把 `#include "beast_alias.hpp"` 误放进 `#ifdef HTTPLIB_ENABLED_SSL` 内的问题（文件第 74 行无条件使用 `beast::detail::base64`），此前因主构建常开 SSL 而未暴露，`SSL=OFF` 时无法编译。
+    - **默认配置此前从未被验证过** — 测试套件隐含要求 `HTTPLIB_ENABLED_SSL=ON` + `HTTPLIB_ENABLED_COMPRESS=ON`。全默认配置（两者皆 OFF）下 5 个目标挂 4 个：JWT 27 个用例中 24 个抛 `SSL required for HS256`（`jwt_test.cpp` 零处保护）、`body_pipeline_test.cpp` / `response_test.cpp` / `client_test.cpp` 的 gzip 断言失败。已新增 `tests/feature_flags.hpp`（`SKIP_WITHOUT_SSL()` / `SKIP_WITHOUT_COMPRESS()`，由 `common.hpp` 转发）逐用例 `SKIP()`，`jwt_test.cpp` 与 `httplib_test_db` / `httplib_test_jwt` 则按目标门控（整文件依赖某特性时逐用例 `SKIP` 只会是噪声）。**四种组合现均通过**：全关 4/4、仅 SSL 5/5、仅 COMPRESS 4/4、全开 6/6；`SKIP` 会在输出中显式报 skipped，不会静默消失。
+    - **已知限制**：vcpkg 预编译的 `Catch2d.lib` 未被 ASan 插桩，插桩后的测试目标在链接期报 `LNK2038`（Catch2 的 `annotate_string` / `annotate_vector`）。库与示例本身链接正常，故首轮信号来自 demo/stress_test。要跑全量测试需自建 ASan 版 Catch2。
+    - **构建流程两个坑**（已写入 AGENTS.md）：所有 build 目录共用同一个 `bin/x64/Debug`，配置之间会互相覆盖，且链接失败会删掉上一个可用 exe（表现为 `***Not Run` 而非测试失败）；vcpkg 工具链需 `-DVCPKG_APPLOCAL_DEPS=ON`，否则 `spdlog.dll` / `fmt.dll` / Boost 动态库不会被复制到 exe 旁，所有测试启动即 `0xC0000135`。
+    - **仍未做**：clang-format check、clang-tidy 基线、UBSan、TSan、持续 fuzz。
 5. 拆分协议内核与 JWT、Session、DB、下载缓存等应用级模块，降低核心攻击面。
 
 ## 8. 建议的生产准入条件
@@ -537,6 +548,6 @@ with any of the following names:
 
 httplib 的基础结构并不差：作者理解 Boost.Asio/Beast、协程、PIMPL、路由 Trie 和真实网络测试，项目也已超过简单示例库的规模。但当前最大问题不是代码风格，而是**安全边界、并发契约和发布工程没有跟上功能扩张速度**。
 
-最初报告中的风险项现已 **18 项完全修复**（SEC-01/02/03/04/05/06/07、CON-01/02、CL-01/02、INFO-01、PROXY-01、HTTP-01、WEB-01、CACHE-01、DOS-01、API-01），其中 CL-01/02、CON-01/02、HTTP-01、WEB-01、CACHE-01、SEC-03、SEC-05/06/07、DOS-01 均含回归测试或代码复核。剩余未收口项集中在 **构建/发布工程（安装配置、依赖锁定、CI、动态检测、fuzz）**；另有两项已知残留：路由正则的准入检查是启发式的（彻底解决需换 RE2/NFA），按 IP 的限流天然无法约束跨 IP 总量（需要总量保护时应在前置网关再加一层）。
+最初报告中的风险项现已 **18 项完全修复**（SEC-01/02/03/04/05/06/07、CON-01/02、CL-01/02、INFO-01、PROXY-01、HTTP-01、WEB-01、CACHE-01、DOS-01、API-01），其中 CL-01/02、CON-01/02、HTTP-01、WEB-01、CACHE-01、SEC-03、SEC-05/06/07、DOS-01 均含回归测试或代码复核。剩余未收口项集中在 **构建/发布工程（安装配置、CI、动态检测、fuzz、模块拆分）**；另有两项已知残留：路由正则的准入检查是启发式的（彻底解决需换 RE2/NFA），按 IP 的限流天然无法约束跨 IP 总量（需要总量保护时应在前置网关再加一层）。
 
 建议先冻结功能扩张，以并发契约与构建发布工程收口为主线，再补动态检测与 fuzz。
