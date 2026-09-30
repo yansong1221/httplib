@@ -8,6 +8,7 @@
 #include <chrono>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace mw = httplib::server::middleware;
 namespace net = httplib::net;
@@ -369,4 +370,167 @@ TEST_CASE("Session store: max_sessions prefers evicting expired sessions", "[ses
     store.save(mw::session("b"));
     REQUIRE(store.size() == 1);
     REQUIRE(store.load("b") != nullptr);
+}
+
+// ===== 并发：同一session_id 的并发请求 =====
+
+TEST_CASE("Session store: load returns a copy, not the stored instance", "[session]")
+{
+    // load() 曾返回 map 里那个对象的 shared_ptr 别名，于是两个携带同一 session_id 的
+    // 并发请求会拿到同一个 session，在各自的 strand 上无锁写同一个 unordered_map。
+    mw::memory_session_store store(std::chrono::seconds(600));
+    store.save(mw::session("shared"));
+
+    auto a = store.load("shared");
+    auto b = store.load("shared");
+
+    REQUIRE(a != nullptr);
+    REQUIRE(b != nullptr);
+    REQUIRE(a.get() != b.get());
+}
+
+TEST_CASE("Session store: concurrent writers on one session id do not lose updates", "[session]")
+{
+    // save() 曾整体替换节点，于是同一 id 的并发保存是 last-writer-wins：
+    // 每个线程只写自己的键，最终应当全部保留。
+    mw::memory_session_store store(std::chrono::seconds(600));
+
+    constexpr int n_threads = 8;
+    constexpr int n_keys = 200;
+
+    store.save(mw::session("shared"));
+
+    std::vector<std::thread> threads;
+    threads.reserve(n_threads);
+    for (int t = 0; t < n_threads; ++t)
+    {
+        threads.emplace_back(
+            [&store, t]
+            {
+                for (int i = 0; i < n_keys; ++i)
+                {
+                    // load 与 save 之间不持锁：刻意留下窗口，让并发写入真实交错。
+                    auto s = store.load("shared");
+                    if (!s)
+                    {
+                        continue;
+                    }
+                    s->set("t" + std::to_string(t) + "_k" + std::to_string(i), "v");
+                    store.save(*s);
+                }
+            });
+    }
+    for (auto& th : threads)
+    {
+        th.join();
+    }
+
+    auto final = store.load("shared");
+    REQUIRE(final != nullptr);
+    for (int t = 0; t < n_threads; ++t)
+    {
+        for (int i = 0; i < n_keys; ++i)
+        {
+            INFO("thread " << t << " key " << i);
+            REQUIRE(final->has("t" + std::to_string(t) + "_k" + std::to_string(i)));
+        }
+    }
+}
+
+TEST_CASE("Session store: save merges only keys this request actually touched", "[session]")
+{
+    // 回归测试：合并必须基于"本次请求改动过的键"，而不是遍历整张 data。
+    //
+    // 这里刻意不并发——两个请求**依次**保存，但都基于同一份旧基线 load 出来的副本。
+    // 纯 last-writer-wins 或"遍历整个 data"的合并都会把 A 的写入冲掉；
+    // 只有按 dirty 键增量合并才能同时保留 A 和 B 的结果。
+    mw::memory_session_store store(std::chrono::seconds(600));
+
+    store.save(mw::session("shared"));
+
+    // 两个请求都在"对方保存之前"就 load 完了，各自持有同一份基线快照。
+    auto a = store.load("shared");
+    auto b = store.load("shared");
+    REQUIRE(a != nullptr);
+    REQUIRE(b != nullptr);
+
+    a->set("a_key", "1");
+    b->set("b_key", "2");
+
+    store.save(*a);
+    store.save(*b); // 后保存者不得冲掉先保存者
+
+    auto final = store.load("shared");
+    REQUIRE(final != nullptr);
+    REQUIRE(final->get("a_key") == std::optional<std::string> { "1" });
+    REQUIRE(final->get("b_key") == std::optional<std::string> { "2" });
+}
+
+TEST_CASE("Session store: untouched keys in a stale copy do not clobber newer writes", "[session]")
+{
+    // 反向场景：请求 B 没有碰 key "x"，但它的副本里带着 x 的**旧值**。
+    // 若 save() 遍历整张 data，B 的保存会把 A 刚写入的新值改回旧值。
+    mw::memory_session_store store(std::chrono::seconds(600));
+
+    auto seeded = mw::session("s");
+    seeded.set("x", "old");
+    seeded.set("y", "untouched-by-b");
+    store.save(seeded);
+
+    auto a = store.load("s");
+    auto b = store.load("s");
+    REQUIRE(a != nullptr);
+    REQUIRE(b != nullptr);
+
+    a->set("x", "new");
+    store.save(*a);
+
+    b->set("something_else", "z");
+    store.save(*b); // b 从未碰过 x
+
+    auto final = store.load("s");
+    REQUIRE(final != nullptr);
+    REQUIRE(final->get("x") == std::optional<std::string> { "new" });
+    REQUIRE(final->get("something_else") == std::optional<std::string> { "z" });
+    REQUIRE(final->get("y") == std::optional<std::string> { "untouched-by-b" });
+}
+
+TEST_CASE("Session store: remove survives the merge back into the stored session", "[session]")
+{
+    // 合并语义必须能区分「显式删除」与「从未存在」，否则 remove() 会静默失效。
+    mw::memory_session_store store(std::chrono::seconds(600));
+
+    auto seeded = mw::session("s");
+    seeded.set("keep", "1");
+    seeded.set("drop", "2");
+    store.save(seeded);
+
+    auto loaded = store.load("s");
+    REQUIRE(loaded != nullptr);
+    loaded->remove("drop");
+    store.save(*loaded);
+
+    auto after = store.load("s");
+    REQUIRE(after != nullptr);
+    REQUIRE(after->has("keep"));
+    REQUIRE_FALSE(after->has("drop"));
+}
+
+TEST_CASE("Session store: set after remove wins over the pending removal", "[session]")
+{
+    mw::memory_session_store store(std::chrono::seconds(600));
+
+    auto seeded = mw::session("s");
+    seeded.set("k", "old");
+    store.save(seeded);
+
+    auto loaded = store.load("s");
+    REQUIRE(loaded != nullptr);
+    loaded->remove("k");
+    loaded->set("k", "new");
+    store.save(*loaded);
+
+    auto after = store.load("s");
+    REQUIRE(after != nullptr);
+    REQUIRE(after->get("k") == "new");
 }

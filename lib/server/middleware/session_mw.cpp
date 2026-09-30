@@ -1,4 +1,5 @@
-﻿#include "html/cookie.hpp"
+﻿#include "beast_alias.hpp"
+#include "html/cookie.hpp"
 #include "httplib/server/middleware/session.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
@@ -7,7 +8,6 @@
 #include <atomic>
 #include <mutex>
 #include <random>
-#include "beast_alias.hpp"
 
 namespace httplib::server::middleware
 {
@@ -36,6 +36,40 @@ namespace httplib::server::middleware
         session::time_point created;
         session::time_point last_access;
         util::string_map<std::string> data;
+
+        /// 本副本上"被显式 set/remove 过"的键，即尚未提交到存量会话的增量。
+        ///
+        /// load() 交给请求的是存量会话的**副本**，请求期间的写入都落在这个副本上。
+        /// save() 只允许把本请求真正碰过的键合并回存量会话：若遍历整个 data，
+        /// 基线里那些本次没动过的键也会被写回去，从而覆盖掉并发请求对这些键的
+        /// 修改（lost update）。
+        ///
+        /// 不需要分别记录 set 与 remove —— 合并时以 data 里该键当前是否存在为准：
+        /// 存在则写入、不存在则删除，于是 set 后再 remove、remove 后再 set 都自然正确。
+        util::string_set dirty;
+
+        /// 把本副本的增量合并进存量会话，随后清空增量（save 是唯一的提交点）。
+        ///
+        /// 直接改 target 的 data 而不走 target.set()，避免把存量会话也标成 dirty。
+        void
+        merge_into(session& target)
+        {
+            auto& target_data = target.impl_->data;
+            for (auto const& k : dirty)
+            {
+                if (auto it = data.find(k); it != data.end())
+                {
+                    target_data.insert_or_assign(k, it->second);
+                }
+                else
+                {
+                    // 本请求显式删除过：即便存量里存在（可能是并发请求刚写的），也要删掉。
+                    target_data.erase(k);
+                }
+            }
+            dirty.clear();
+            target.touch();
+        }
     };
 
     session::session(std::string id, time_point created)
@@ -91,6 +125,7 @@ namespace httplib::server::middleware
     void
     session::set(std::string key, std::string value)
     {
+        impl_->dirty.insert(key);
         impl_->data[std::move(key)] = std::move(value);
     }
 
@@ -104,6 +139,7 @@ namespace httplib::server::middleware
     session::remove(std::string_view key)
     {
         impl_->data.erase(std::string(key));
+        impl_->dirty.insert(std::string(key));
     }
 
     bool
@@ -212,14 +248,21 @@ namespace httplib::server::middleware
         auto it = impl_->sessions_.find(id);
         if (it != impl_->sessions_.end())
         {
-            auto s = it->second;
-            if (impl_->is_expired(*s))
+            // 必须返回**副本**而不是 it->second 的别名：返回别名会让两个携带同一
+            // session_id 的并发请求拿到同一个 session 对象，而 handler 里的 set/remove
+            // 不持有 store 的锁，于是 unordered_map 的插入与遍历并发执行。
+            auto& stored = it->second;
+            if (impl_->is_expired(*stored))
             {
                 impl_->sessions_.erase(it);
                 return nullptr;
             }
-            s->touch();
-            return s;
+            stored->touch();
+            // 副本代表"已提交的基线"：交给请求的增量必须是空的，否则它会把上一次
+            // 请求的改动再合并一遍。请求后续的 set/remove 会重新标脏。
+            auto copy = std::make_shared<session>(*stored);
+            copy->impl_->dirty.clear();
+            return copy;
         }
         return nullptr;
     }
@@ -232,7 +275,15 @@ namespace httplib::server::middleware
         impl_->sweep(now);
 
         auto it = impl_->sessions_.find(s.id());
-        if (it == impl_->sessions_.end() && impl_->sessions_.size() >= impl_->max_sessions_)
+        if (it != impl_->sessions_.end())
+        {
+            // 合并而非整体替换：本次请求拿到的是 load() 的副本，期间可能已有另一个请求
+            // 保存了同一 id。整体替换会把对方的写入整块丢掉（last-writer-wins）。
+            s.impl_->merge_into(*it->second);
+            return;
+        }
+
+        if (impl_->sessions_.size() >= impl_->max_sessions_)
         {
             // 已达上限：先确保没有过期条目可回收，再淘汰最久未访问的一条。
             impl_->erase_expired(now);
@@ -241,7 +292,11 @@ namespace httplib::server::middleware
                 impl_->evict_oldest();
             }
         }
-        impl_->sessions_[s.id()] = std::make_shared<session>(s);
+        // 存量会话代表"已提交状态"，它的增量必须为空：若把 s 的 dirty 一并存进去，
+        // 下一个请求 load() 出来的副本就会重复合并本次已经提交过的改动。
+        auto stored = std::make_shared<session>(s);
+        stored->impl_->dirty.clear();
+        impl_->sessions_[s.id()] = std::move(stored);
     }
 
     void
@@ -415,8 +470,19 @@ namespace httplib::server::middleware
     bool
     session_middleware::after(request& req, response& resp)
     {
+        // 前面的 before 可能被短路（例如同一路由上的限流中间件返回 429），
+        // 此时本中间件的 before 从未执行、也没存过 session。此时必须早退：
+        // fetch() 内部是 map_.at()，会抛 std::out_of_range，把 429 变成 500。
+        if (!req.data().has<value_type>())
+        {
+            return true;
+        }
         auto sess = req.data().fetch<value_type>();
-        bool is_new = req.data().fetch<bool>(session_new_tag);
+        if (!sess)
+        {
+            return true;
+        }
+        bool is_new = req.data().has<bool>(session_new_tag) && req.data().fetch<bool>(session_new_tag);
 
         impl_->store_->save(*sess);
 

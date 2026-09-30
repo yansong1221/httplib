@@ -1,4 +1,5 @@
 #include "proxy_client_impl.h"
+#include "beast_alias.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "stream/http_stream.hpp"
@@ -13,7 +14,6 @@
 #include <boost/beast/http/serializer.hpp>
 #include <boost/beast/http/write.hpp>
 #include <spdlog/spdlog.h>
-#include "beast_alias.hpp"
 
 namespace httplib::client
 {
@@ -44,7 +44,13 @@ namespace httplib::client
                 }
                 get_logger()->trace("connecting proxy {}:{} -> {}", host_, port_, target);
 
-                auto stream_result = http_stream::create(strand_, host_, scheme_ == url::scheme::tls, verify_ssl_, ca_cert_);
+                // 取一致快照再读：setter 可能正从另一个线程改这两项。快照持有
+                // shared_ptr，create() 期间底层缓冲区一定存活。
+                auto ca = ca_cert_.load();
+                auto verify = verify_ssl_.load();
+                auto ca_view = ca ? std::string_view(*ca) : std::string_view {};
+
+                auto stream_result = http_stream::create(strand_, host_, scheme_ == url::scheme::tls, verify, ca_view);
                 if (!stream_result)
                 {
                     ec = stream_result.error();
@@ -193,7 +199,10 @@ namespace httplib::client
         return nullptr;
     }
 
-    proxy_client::proxy_client(net::io_context& ex, std::string_view host, uint16_t port, url::scheme s /*= url::scheme::plain*/)
+    proxy_client::proxy_client(net::io_context& ex,
+                               std::string_view host,
+                               uint16_t port,
+                               url::scheme s /*= url::scheme::plain*/)
         : proxy_client(ex.get_executor(), host, port, s)
     {
     }

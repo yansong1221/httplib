@@ -13,6 +13,8 @@
 namespace httplib::server::middleware
 {
 
+    class memory_session_store;
+
     class HTTPLIB_API session
     {
       public:
@@ -41,6 +43,10 @@ namespace httplib::server::middleware
       private:
         struct impl;
         std::unique_ptr<impl> impl_;
+
+        /// `memory_session_store` 需要读取 `impl::removed` 才能把副本的删除同步回存量
+        /// 会话（区分"显式删除"与"从未存在"）。这是内部簿记，不属于公开 API。
+        friend class memory_session_store;
     };
 
     class HTTPLIB_API session_store

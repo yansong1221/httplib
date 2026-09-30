@@ -4,6 +4,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace httplib::util
 {
@@ -40,5 +41,10 @@ namespace httplib::util
      */
     template <typename T>
     using string_map = std::unordered_map<std::string, T, string_view_hash, std::equal_to<>>;
+
+    /**
+     * \brief string_map 的 set 对应物，同样支持 string_view 异构查找。
+     */
+    using string_set = std::unordered_set<std::string, string_view_hash, std::equal_to<>>;
 
 } // namespace httplib::util
