@@ -6,7 +6,6 @@
 #include "httplib/server/request.hpp"
 #include "httplib/server/server_fwd.hpp"
 #include <memory>
-#include <stdexcept>
 
 namespace httplib::server::middleware
 {
@@ -26,7 +25,8 @@ namespace httplib::server::middleware
         inline static std::shared_ptr<db::connection_pool>
         fetch_pool(request& req)
         {
-            return req.data().fetch<std::shared_ptr<db::connection_pool>>();
+            // 保持裸 shared_ptr 签名：调用方期望拿到池子而非 optional。
+            return req.data().fetch<std::shared_ptr<db::connection_pool>>().value_or(nullptr);
         }
 
         explicit db_middleware(std::shared_ptr<db::connection_pool> pool, db_middleware_options opts = {});

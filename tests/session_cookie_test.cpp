@@ -34,7 +34,7 @@ TEST_CASE("Session: middleware creates new session ID", "[session]")
                 "/visit",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto sess = mw::fetch<mw::session_middleware>(req);
+                    auto sess = mw::fetch<mw::session_middleware>(req).value();
                     REQUIRE_FALSE(sess->id().empty());
                     resp.set_string_content("ok"sv, "text/plain"sv);
                 },
@@ -63,7 +63,7 @@ TEST_CASE("Session: middleware persists data across requests", "[session]")
                 "/login",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto sess = mw::fetch<mw::session_middleware>(req);
+                    auto sess = mw::fetch<mw::session_middleware>(req).value();
                     sess->set("user", "alice");
                     resp.set_string_content("logged-in"sv, "text/plain"sv);
                 },
@@ -73,7 +73,7 @@ TEST_CASE("Session: middleware persists data across requests", "[session]")
                 "/whoami",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto sess = mw::fetch<mw::session_middleware>(req);
+                    auto sess = mw::fetch<mw::session_middleware>(req).value();
                     auto user = sess->get("user");
                     resp.set_string_content(user.value_or("anonymous"), "text/plain"sv);
                 },
@@ -106,7 +106,7 @@ TEST_CASE("Session: get_session returns valid pointer", "[session]")
                 "/data",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto sess = mw::fetch<mw::session_middleware>(req);
+                    auto sess = mw::fetch<mw::session_middleware>(req).value();
                     REQUIRE(sess);
                     sess->set("count", "1");
                     auto c = sess->get("count");
@@ -135,7 +135,7 @@ TEST_CASE("Session: session has and remove", "[session]")
                 "/ops",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto sess = mw::fetch<mw::session_middleware>(req);
+                    auto sess = mw::fetch<mw::session_middleware>(req).value();
                     sess->set("temp", "data");
                     REQUIRE(sess->has("temp"));
                     REQUIRE_FALSE(sess->empty());
@@ -166,7 +166,7 @@ TEST_CASE("Session: custom store can be injected", "[session]")
                 "/custom",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto sess = mw::fetch<mw::session_middleware>(req);
+                    auto sess = mw::fetch<mw::session_middleware>(req).value();
                     sess->set("store", "injected");
                     resp.set_string_content("ok"sv, "text/plain"sv);
                 },
@@ -192,7 +192,7 @@ TEST_CASE("Session: configurable cookie name", "[session]")
                 "/named",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    auto sess = mw::fetch<mw::session_middleware>(req);
+                    auto sess = mw::fetch<mw::session_middleware>(req).value();
                     sess->set("key", "val");
                     resp.set_string_content("ok"sv, "text/plain"sv);
                 },
@@ -220,7 +220,7 @@ TEST_CASE("Session: cookie attributes http_only, secure, max_age", "[session]")
                 "/attrs",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    mw::fetch<mw::session_middleware>(req)->set("x", "1");
+                    mw::fetch<mw::session_middleware>(req).value()->set("x", "1");
                     resp.set_string_content("ok"sv, "text/plain"sv);
                 },
                 sm);
@@ -248,7 +248,7 @@ TEST_CASE("Session: same_site strict", "[session]")
                 "/samesite",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    mw::fetch<mw::session_middleware>(req)->set("x", "1");
+                    mw::fetch<mw::session_middleware>(req).value()->set("x", "1");
                     resp.set_string_content("ok"sv, "text/plain"sv);
                 },
                 sm);
@@ -274,7 +274,7 @@ TEST_CASE("Session: max_age cookie attribute", "[session]")
                 "/aged",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    mw::fetch<mw::session_middleware>(req)->set("x", "1");
+                    mw::fetch<mw::session_middleware>(req).value()->set("x", "1");
                     resp.set_string_content("ok"sv, "text/plain"sv);
                 },
                 sm);

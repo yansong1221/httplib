@@ -579,9 +579,9 @@ auto sess = middleware::fetch<middleware::session_middleware>(req);   // shared_
 通用辅助函数为 `middleware::fetch<MW>(req)`、`middleware::store<MW>(req, value)`、`middleware::has<MW>(req)`、`middleware::erase<MW>(req)`。它们封装了请求级原始存储：
 
 ```cpp
-req.data().store(my_tag{42});          // 按值类型作 key
-auto v = req.data().fetch<my_tag>();
-bool exists = req.data().has<my_tag>();
+req.data().store(my_tag{42});                       // 按值类型作 key
+auto v = req.data().fetch<my_tag>();           // std::optional<my_tag>
+bool exists = req.data().has<my_tag>();            // 仅判断，不取值
 req.data().erase<my_tag>();
 ```
 

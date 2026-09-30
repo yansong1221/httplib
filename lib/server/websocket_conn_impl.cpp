@@ -192,9 +192,12 @@ namespace httplib::server
                 {
                     co_return;
                 }
-                if (req_.data().has<detail::ws_forward_state_ptr>())
+                // fetch 单次加锁完成查找+取值：先 has() 判断、再另行取值是两次加锁，
+                // 中间若有并发 erase() 就会漏判。
+                auto state_result = req_.data().fetch<detail::ws_forward_state_ptr>();
+                if (state_result)
                 {
-                    auto state = req_.data().fetch<detail::ws_forward_state_ptr>();
+                    auto state = state_result.value();
                     if (state && state->upstream)
                     {
                         co_await state->upstream->async_abort();

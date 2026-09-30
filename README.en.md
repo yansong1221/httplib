@@ -555,9 +555,9 @@ auto sess = middleware::fetch<middleware::session_middleware>(req);   // shared_
 The generic helpers are `middleware::fetch<MW>(req)`, `middleware::store<MW>(req, value)`, `middleware::has<MW>(req)` and `middleware::erase<MW>(req)`. They wrap the raw request-scoped storage:
 
 ```cpp
-req.data().store(my_tag{42});          // keyed by value type
-auto v = req.data().fetch<my_tag>();
-bool exists = req.data().has<my_tag>();
+req.data().store(my_tag{42});                       // keyed by value type
+auto v = req.data().fetch<my_tag>();           // std::optional<my_tag>
+bool exists = req.data().has<my_tag>();            // predicate only, no copy
 req.data().erase<my_tag>();
 ```
 

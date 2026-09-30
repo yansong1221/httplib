@@ -64,9 +64,10 @@ namespace httplib::server::middleware
     net::awaitable<bool>
     db_middleware::after(request& req, response& resp)
     {
-        if (impl_->opts.auto_transaction && req.data().has<value_type>())
+        if (impl_->opts.auto_transaction)
         {
-            auto sess = req.data().fetch<value_type>();
+            // fetch 单次加锁：has() 后再取值之间若有并发 erase()，会漏判并跳过提交。
+            auto sess = req.data().fetch<value_type>().value_or(nullptr);
             if (sess)
             {
                 // 仅请求成功（<400）时提交；失败状态回滚，避免把业务错误落库。
@@ -105,11 +106,9 @@ namespace httplib::server::middleware
             }
         }
 
-        if (req.data().has<value_type>())
-        {
-            req.data().erase<value_type>();
-            req.data().erase<pool_type>();
-        }
+        // 不需要 has() 守卫：erase 对不存在的键本就是无操作，加守卫只是多一次加锁。
+        req.data().erase<value_type>();
+        req.data().erase<pool_type>();
 
         co_return true;
     }

@@ -2697,7 +2697,7 @@ TEST_CASE("db(mysql): column access on empty resultset", "[db][mysql]")
 // Middleware
 // ===========================================================================
 
-TEST_CASE("db_middleware: throws when not registered", "[db][middleware]")
+TEST_CASE("db_middleware: returns empty when not registered", "[db][middleware]")
 {
     net::io_context ioc;
     std::exception_ptr err;
@@ -2711,7 +2711,8 @@ TEST_CASE("db_middleware: throws when not registered", "[db][middleware]")
                 "/db/nomw",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
-                    REQUIRE_THROWS_AS(mw::fetch<mw::db_middleware>(req), std::exception);
+                    // 未挂载 db_middleware，故取不到值：返回空 optional 而非抛异常。
+                    REQUIRE_FALSE(mw::fetch<mw::db_middleware>(req).has_value());
                     resp.set_string_content("ok"sv, "text/plain"sv);
                 });
             server.listen("127.0.0.1", 0);

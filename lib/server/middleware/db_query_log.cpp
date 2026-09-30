@@ -45,16 +45,19 @@ namespace httplib::server::middleware
     bool
     db_query_log_middleware::before(request& req, response&)
     {
-        if (!has<db_middleware>(req))
+        // 单次加锁完成判断+取值：has() 后再取值是两次加锁，中间若有并发 erase() 会漏判。
+        auto sess = fetch<db_middleware>(req);
+        if (!sess)
         {
             return true;
         }
 
         auto opts = impl_->opts;
         auto log = std::make_shared<query_log_options::value_type>();
-        auto sess = fetch<db_middleware>(req);
 
-        sess->get()->set_query_logger(
+// sess 是 optional<shared_ptr<session_handle>>：先脱掉 optional 拿到 shared_ptr，
+        // 再 get() 才是 session_handle::get()，后一个 get() 拿到 db::session。
+        sess.value()->get()->set_query_logger(
             [log, opts](db::query_log_entry const& entry) mutable
             {
                 if (opts.slow_query_threshold.count() > 0 && entry.duration >= opts.slow_query_threshold
@@ -72,22 +75,21 @@ namespace httplib::server::middleware
     bool
     db_query_log_middleware::after(request& req, response&)
     {
-        if (!has<db_query_log_middleware>(req))
+        auto log = fetch<db_query_log_middleware>(req);
+        if (!log)
         {
             return true;
         }
 
-        auto log = fetch<db_query_log_middleware>(req);
-
         if (impl_->opts.on_request_complete)
         {
-            impl_->opts.on_request_complete(req, *log);
+            impl_->opts.on_request_complete(req, **log);
         }
 
-        if (has<db_middleware>(req))
+        auto sess = fetch<db_middleware>(req);
+        if (sess)
         {
-            auto sess = fetch<db_middleware>(req);
-            sess->get()->set_query_logger({});
+            sess.value()->get()->set_query_logger({});
         }
         return true;
     }

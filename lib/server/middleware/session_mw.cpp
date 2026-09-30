@@ -471,18 +471,19 @@ namespace httplib::server::middleware
     session_middleware::after(request& req, response& resp)
     {
         // 前面的 before 可能被短路（例如同一路由上的限流中间件返回 429），
-        // 此时本中间件的 before 从未执行、也没存过 session。此时必须早退：
-        // fetch() 内部是 map_.at()，会抛 std::out_of_range，把 429 变成 500。
-        if (!req.data().has<value_type>())
+        // 此时本中间件的 before 从未执行、也没存过 session。fetch 单次加锁完成
+        // 判断与取值，has() 后再另行取值之间若有并发 erase() 会漏判。
+        auto sess_result = req.data().fetch<value_type>();
+        if (!sess_result)
         {
             return true;
         }
-        auto sess = req.data().fetch<value_type>();
+        auto sess = sess_result.value();
         if (!sess)
         {
             return true;
         }
-        bool is_new = req.data().has<bool>(session_new_tag) && req.data().fetch<bool>(session_new_tag);
+        bool is_new = req.data().fetch<bool>(session_new_tag).value_or(false);
 
         impl_->store_->save(*sess);
 

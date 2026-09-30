@@ -360,7 +360,7 @@ setup_http_routes(httplib::server::router& router)
         {
             auto tag = req.data().fetch<early_data_tag>();
             resp.set_json_content({
-                { "data", tag.value }
+                { "data", tag->value }
             });
         },
         early_data_middleware {});

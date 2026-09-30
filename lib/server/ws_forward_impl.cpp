@@ -145,13 +145,16 @@ namespace httplib::server::detail
         }
 
         request& req = conn->http_request();
-        if (!req.data().has<ws_forward_state_ptr>())
+        // fetch 单次加锁完成查找+取值：先 has() 判断、再另行取值是两次加锁，
+        // 中间若有并发 erase() 就会漏判。
+        auto state_result = req.data().fetch<ws_forward_state_ptr>();
+        if (!state_result)
         {
             conn->close();
             co_return;
         }
 
-        auto state = req.data().fetch<ws_forward_state_ptr>();
+        auto state = state_result.value();
         if (!state || !state->upstream)
         {
             conn->close();
@@ -181,12 +184,14 @@ namespace httplib::server::detail
         }
 
         request& req = conn->http_request();
-        if (!req.data().has<ws_forward_state_ptr>())
+        // 同上：单次加锁，避免 has() 与取值之间被并发 erase() 打断。
+        auto state_result = req.data().fetch<ws_forward_state_ptr>();
+        if (!state_result)
         {
             co_return;
         }
 
-        auto state = req.data().fetch<ws_forward_state_ptr>();
+        auto state = state_result.value();
         if (state && state->upstream)
         {
             boost::system::error_code ec;
