@@ -8,6 +8,7 @@
 #include <atomic>
 #include <mutex>
 #include <random>
+#include <utility>
 
 namespace httplib::server::middleware
 {
@@ -28,6 +29,38 @@ namespace httplib::server::middleware
 
     } // namespace
 
+    // ---- session_writes ----
+
+    void
+    session_writes::set(std::string key, std::string value)
+    {
+        entries_[std::move(key)] = std::optional<std::string>(std::move(value));
+    }
+
+    void
+    session_writes::remove(std::string_view key)
+    {
+        entries_[std::string(key)] = std::nullopt;
+    }
+
+    bool
+    session_writes::empty() const
+    {
+        return entries_.empty();
+    }
+
+    std::size_t
+    session_writes::size() const
+    {
+        return entries_.size();
+    }
+
+    util::string_map<std::optional<std::string>> const&
+    session_writes::entries() const
+    {
+        return entries_;
+    }
+
     // ---- session ----
 
     struct session::impl
@@ -37,45 +70,24 @@ namespace httplib::server::middleware
         session::time_point last_access;
         util::string_map<std::string> data;
 
-        /// 本副本上"被显式 set/remove 过"的键，即尚未提交到存量会话的增量。
+        /// 本对象上尚未提交到 store 的写入，即这次请求对会话做过的改动。
         ///
-        /// load() 交给请求的是存量会话的**副本**，请求期间的写入都落在这个副本上。
-        /// save() 只允许把本请求真正碰过的键合并回存量会话：若遍历整个 data，
-        /// 基线里那些本次没动过的键也会被写回去，从而覆盖掉并发请求对这些键的
-        /// 修改（lost update）。
-        ///
-        /// 不需要分别记录 set 与 remove —— 合并时以 data 里该键当前是否存在为准：
-        /// 存在则写入、不存在则删除，于是 set 后再 remove、remove 后再 set 都自然正确。
-        util::string_set dirty;
-
-        /// 把本副本的增量合并进存量会话，随后清空增量（save 是唯一的提交点）。
-        ///
-        /// 直接改 target 的 data 而不走 target.set()，避免把存量会话也标成 dirty。
-        void
-        merge_into(session& target)
-        {
-            auto& target_data = target.impl_->data;
-            for (auto const& k : dirty)
-            {
-                if (auto it = data.find(k); it != data.end())
-                {
-                    target_data.insert_or_assign(k, it->second);
-                }
-                else
-                {
-                    // 本请求显式删除过：即便存量里存在（可能是并发请求刚写的），也要删掉。
-                    target_data.erase(k);
-                }
-            }
-            dirty.clear();
-            target.touch();
-        }
+        /// 工作副本来自 `load()` 的基线快照，期间的写入都落在这里。提交时只把这些
+        /// 键交给 store：若把整张 data 交出去，基线里本次没动过的键也会被写回，
+        /// 从而覆盖并发请求对这些键的修改（lost update）。
+        session_writes pending;
     };
 
     session::session(std::string id, time_point created)
         : impl_(std::make_unique<impl>(std::move(id), created, created))
     {
     }
+
+    session::session(std::string id, time_point created, time_point last_access, util::string_map<std::string> data)
+        : impl_(std::make_unique<impl>(std::move(id), created, last_access, std::move(data)))
+    {
+    }
+
     session::session(session const& other) : impl_(std::make_unique<impl>(*other.impl_)) {}
     session::session(session&&) noexcept = default;
     session::~session() = default;
@@ -125,8 +137,8 @@ namespace httplib::server::middleware
     void
     session::set(std::string key, std::string value)
     {
-        impl_->dirty.insert(key);
-        impl_->data[std::move(key)] = std::move(value);
+        impl_->data.insert_or_assign(key, value);
+        impl_->pending.set(std::move(key), std::move(value));
     }
 
     bool
@@ -139,7 +151,7 @@ namespace httplib::server::middleware
     session::remove(std::string_view key)
     {
         impl_->data.erase(std::string(key));
-        impl_->dirty.insert(std::string(key));
+        impl_->pending.remove(key);
     }
 
     bool
@@ -154,6 +166,18 @@ namespace httplib::server::middleware
         return impl_->data;
     }
 
+    session_writes const&
+    session::pending_writes() const
+    {
+        return impl_->pending;
+    }
+
+    session_writes
+    session::take_pending_writes()
+    {
+        return std::exchange(impl_->pending, session_writes {});
+    }
+
     // ---- memory_session_store ----
 
     class memory_session_store::impl
@@ -162,17 +186,29 @@ namespace httplib::server::middleware
         using clock = session::clock;
         using time_point = session::time_point;
 
+        /// 存量会话。
+        ///
+        /// 刻意用裸结构而非 `session`：store 不参与「哪些键被改过」的判断，因此既不
+        /// 需要 `session` 的增量簿记，也不需要它的私有访问权。
+        struct entry
+        {
+            std::string id;
+            time_point created;
+            time_point last_access;
+            util::string_map<std::string> data;
+        };
+
         std::chrono::seconds ttl_;
         std::mutex mutex_;
-        util::string_map<std::shared_ptr<session>> sessions_;
+        util::string_map<entry> sessions_;
 
         std::size_t max_sessions_ = 8192;
         time_point last_sweep_ {};
 
         bool
-        is_expired(session const& s) const
+        is_expired(entry const& e, time_point now) const
         {
-            return (clock::now() - s.last_access()) > ttl_;
+            return (now - e.last_access) > ttl_;
         }
 
         /// 回收扫描的节流间隔：TTL 的四分之一，下限 1s。
@@ -202,7 +238,7 @@ namespace httplib::server::middleware
         {
             for (auto it = sessions_.begin(); it != sessions_.end();)
             {
-                if ((now - it->second->last_access()) > ttl_)
+                if (is_expired(it->second, now))
                 {
                     it = sessions_.erase(it);
                 }
@@ -220,7 +256,7 @@ namespace httplib::server::middleware
             auto victim = sessions_.end();
             for (auto it = sessions_.begin(); it != sessions_.end(); ++it)
             {
-                if (victim == sessions_.end() || it->second->last_access() < victim->second->last_access())
+                if (victim == sessions_.end() || it->second.last_access < victim->second.last_access)
                 {
                     victim = it;
                 }
@@ -228,6 +264,25 @@ namespace httplib::server::middleware
             if (victim != sessions_.end())
             {
                 sessions_.erase(victim);
+            }
+        }
+
+        /// 调用方必须持有 mutex_。只应用补丁里出现的键：存量里没被本次补丁提到的键
+        /// 一律不碰，这样并发请求各自提交的写入才不会互相覆盖。
+        void
+        apply(entry& target, session_writes const& writes)
+        {
+            for (auto const& [key, value] : writes.entries())
+            {
+                if (value)
+                {
+                    target.data.insert_or_assign(key, *value);
+                }
+                else
+                {
+                    // 本次请求显式删除过：即便存量里存在（可能是并发请求刚写的），也要删掉。
+                    target.data.erase(key);
+                }
             }
         }
     };
@@ -241,62 +296,61 @@ namespace httplib::server::middleware
 
     memory_session_store::~memory_session_store() = default;
 
-    std::shared_ptr<session>
+    std::optional<session>
     memory_session_store::load(std::string_view id)
     {
         std::lock_guard lock(impl_->mutex_);
         auto it = impl_->sessions_.find(id);
-        if (it != impl_->sessions_.end())
+        if (it == impl_->sessions_.end())
         {
-            // 必须返回**副本**而不是 it->second 的别名：返回别名会让两个携带同一
-            // session_id 的并发请求拿到同一个 session 对象，而 handler 里的 set/remove
-            // 不持有 store 的锁，于是 unordered_map 的插入与遍历并发执行。
-            auto& stored = it->second;
-            if (impl_->is_expired(*stored))
-            {
-                impl_->sessions_.erase(it);
-                return nullptr;
-            }
-            stored->touch();
-            // 副本代表"已提交的基线"：交给请求的增量必须是空的，否则它会把上一次
-            // 请求的改动再合并一遍。请求后续的 set/remove 会重新标脏。
-            auto copy = std::make_shared<session>(*stored);
-            copy->impl_->dirty.clear();
-            return copy;
+            return std::nullopt;
         }
-        return nullptr;
+
+        auto now = session::clock::now();
+        auto& stored = it->second;
+        if (impl_->is_expired(stored, now))
+        {
+            impl_->sessions_.erase(it);
+            return std::nullopt;
+        }
+        stored.last_access = now;
+
+        // 返回**值**：别名会让两个携带同一 session_id 的并发请求拿到同一份可变数据，
+        // 而 handler 里的 set/remove 不持有 store 的锁，于是同一张 unordered_map
+        // 的插入与遍历并发执行。快照的待提交写入为空，它代表已提交的基线。
+        return session(stored.id, stored.created, stored.last_access, stored.data);
     }
 
     void
-    memory_session_store::save(session const& s)
+    memory_session_store::save(std::string_view id, session_writes const& writes)
     {
         std::lock_guard lock(impl_->mutex_);
         auto now = session::clock::now();
         impl_->sweep(now);
 
-        auto it = impl_->sessions_.find(s.id());
-        if (it != impl_->sessions_.end())
+        auto it = impl_->sessions_.find(id);
+        if (it == impl_->sessions_.end())
         {
-            // 合并而非整体替换：本次请求拿到的是 load() 的副本，期间可能已有另一个请求
-            // 保存了同一 id。整体替换会把对方的写入整块丢掉（last-writer-wins）。
-            s.impl_->merge_into(*it->second);
-            return;
-        }
-
-        if (impl_->sessions_.size() >= impl_->max_sessions_)
-        {
-            // 已达上限：先确保没有过期条目可回收，再淘汰最久未访问的一条。
-            impl_->erase_expired(now);
             if (impl_->sessions_.size() >= impl_->max_sessions_)
             {
-                impl_->evict_oldest();
+                // 已达上限：先确保没有过期条目可回收，再淘汰最久未访问的一条。
+                impl_->erase_expired(now);
+                if (impl_->sessions_.size() >= impl_->max_sessions_)
+                {
+                    impl_->evict_oldest();
+                }
             }
+            // 先构造条目再插入：两处都用到 id 时，直接写 emplace(key, entry{std::move(key), ...})
+            // 会因实参求值顺序未指定而把键 move 成空串。
+            auto key = std::string(id);
+            impl::entry fresh { key, now, now, {} };
+            it = impl_->sessions_.emplace(std::move(key), std::move(fresh)).first;
         }
-        // 存量会话代表"已提交状态"，它的增量必须为空：若把 s 的 dirty 一并存进去，
-        // 下一个请求 load() 出来的副本就会重复合并本次已经提交过的改动。
-        auto stored = std::make_shared<session>(s);
-        stored->impl_->dirty.clear();
-        impl_->sessions_[s.id()] = std::move(stored);
+
+        // 增量应用而非整体替换：本次请求基于 load() 的基线快照，期间可能已有另一个
+        // 请求保存了同一 id，整体替换会把对方的写入整块丢掉（last-writer-wins）。
+        impl_->apply(it->second, writes);
+        it->second.last_access = now;
     }
 
     void
@@ -453,7 +507,15 @@ namespace httplib::server::middleware
     {
         auto jar = html::cookie_jar::parse(req[field::cookie]);
         auto sid = jar.get(impl_->config_.cookie_name);
-        auto sess = sid ? impl_->store_->load(*sid) : nullptr;
+
+        std::shared_ptr<session> sess;
+        if (sid)
+        {
+            if (auto snapshot = impl_->store_->load(*sid))
+            {
+                sess = std::make_shared<session>(std::move(*snapshot));
+            }
+        }
 
         bool is_new = false;
         if (!sess)
@@ -485,7 +547,9 @@ namespace httplib::server::middleware
         }
         bool is_new = req.data().fetch<bool>(session_new_tag).value_or(false);
 
-        impl_->store_->save(*sess);
+        // 只提交本请求真正碰过的键（见 session_store::save 契约）：把整张基线快照
+        // 交出去会让并发请求对同一 id 的写入互相覆盖。
+        impl_->store_->save(sess->id(), sess->take_pending_writes());
 
         if (is_new || sess->last_access() - sess->created() < std::chrono::seconds(1))
         {

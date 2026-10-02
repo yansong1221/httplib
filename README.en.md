@@ -492,6 +492,22 @@ router.set_http_handler<method::get>(
 ```
 
 A custom backing store can be supplied via `session_middleware(std::shared_ptr<session_store>)`.
+`session_store` has three pure virtuals and a small contract:
+
+- `load(id)` returns `std::optional<session>` — a **value snapshot** of the stored session, or
+  `nullopt` when it is missing or expired. Returning by value is mandatory: handing out a reference
+  or alias to internal state would let two concurrent requests carrying the same session_id mutate
+  the same data.
+- `save(id, writes)` applies the `session_writes` patch **atomically, key by key** to `id` (creating
+  it when absent). The patch holds only the keys this request actually `set`/`remove`d, so two
+  concurrent requests starting from the same baseline snapshot cannot overwrite each other — that is
+  why commits are incremental rather than whole-session replacements. A deletion is expressed as
+  `nullopt`, so `session::remove()` is never silently mistaken for "never existed".
+- `destroy(id)` removes the session. It is not sticky: the store keeps no record of the deletion, so
+  any later commit carrying a patch recreates the session.
+
+The patch is recorded by `session` itself (`pending_writes()` / `take_pending_writes()`); the store
+never sees or needs any of `session`'s internal state.
 
 ### Database Middleware
 

@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
@@ -16,8 +17,8 @@ namespace httplib::server::middleware
         explicit memory_session_store(std::chrono::seconds ttl = std::chrono::hours(24));
         ~memory_session_store() override;
 
-        std::shared_ptr<session> load(std::string_view id) override;
-        void save(session const& s) override;
+        std::optional<session> load(std::string_view id) override;
+        void save(std::string_view id, session_writes const& writes) override;
         void destroy(std::string_view id) override;
         void set_max_sessions(std::size_t max_sessions) override;
 

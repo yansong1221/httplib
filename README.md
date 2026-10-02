@@ -515,7 +515,21 @@ router.set_http_handler<method::get>(
     }, sm);
 ```
 
-可通过 `session_middleware(std::shared_ptr<session_store>)` 提供自定义存储后端。
+可通过 `session_middleware(std::shared_ptr<session_store>)` 提供自定义存储后端。`session_store`
+只有三个纯虚函数，契约很简单：
+
+- `load(id)` 返回 `std::optional<session>`，即存量会话的**值快照**；不存在或已过期返回 `nullopt`。
+  按值返回是硬性要求：返回内部对象的引用或别名，会让两个携带同一 session_id 的并发请求拿到
+  同一份可变数据。
+- `save(id, writes)` 把 `session_writes` 补丁**逐键原子地**应用到 `id`（不存在则创建）。
+  补丁只包含本次请求真正 `set`/`remove` 过的键，所以两个基于同一份基线快照的并发请求不会互相
+  覆盖 —— 这是「增量提交」而非「整体替换」的原因。删除以 `nullopt` 显式表达，因此
+  `session::remove()` 不会被当成「从未存在」而静默失效。
+- `destroy(id)` 删除会话。注意它不是粘性的：store 不记录「已删除」这一事实，随后任何带着补丁的
+  提交都会重建会话。
+
+补丁由 `session` 自己记录（`pending_writes()` / `take_pending_writes()`），store 无需也拿不到
+`session` 的任何内部状态。
 
 ### 数据库中间件
 
