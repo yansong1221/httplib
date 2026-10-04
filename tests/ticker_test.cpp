@@ -1,12 +1,14 @@
 #include "httplib/util/ticker.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/system/error_code.hpp>
 #include <boost/system/system_error.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <functional>
 #include <memory>
 
 using namespace std::chrono_literals;
@@ -26,6 +28,11 @@ namespace
         int stop_after_tick = 0; // 0 = never stop on its own
         int throw_at_tick = 0;   // 0 = never throw
 
+        // Invoked synchronously from the first on_tick(). Tests that need to
+        // act "while running" hook this instead of racing a wall-clock timer:
+        // the first tick is then guaranteed to have happened.
+        std::function<void()> on_first_tick;
+
       protected:
         boost::asio::awaitable<bool>
         on_start() override
@@ -38,6 +45,10 @@ namespace
         on_tick() override
         {
             ++tick_calls;
+            if (tick_calls == 1 && on_first_tick)
+            {
+                on_first_tick();
+            }
             if (throw_at_tick > 0 && tick_calls == throw_at_tick)
             {
                 throw boost::system::system_error(
@@ -68,7 +79,15 @@ namespace
         on_tick() override
         {
             tick_started = true;
-            boost::asio::steady_timer t(co_await boost::asio::this_coro::executor);
+
+            auto ex = co_await boost::asio::this_coro::executor;
+
+            // Post the stop and only then park. The 10s wait below is therefore
+            // genuinely in flight when stop() runs, without depending on how
+            // quickly this coroutine gets to start.
+            boost::asio::post(ex, [this] { stop(); });
+
+            boost::asio::steady_timer t(ex);
             t.expires_after(10s);
             boost::system::error_code ec;
             co_await t.async_wait(httplib::util::net_awaitable[ec]);
@@ -108,15 +127,15 @@ TEST_CASE("Ticker: stop() halts the loop and runs on_stop", "[ticker]")
     boost::asio::io_context ioc;
     auto t = std::make_shared<test_ticker>(ioc.get_executor(), 1ms);
 
-    t->start();
+    // Stop from inside the first tick. This keeps the test deterministic: the
+    // tick is guaranteed to have run, so no wall-clock window is involved.
+    t->on_first_tick = [&] { t->stop(); };
 
-    boost::asio::steady_timer stopper(ioc);
-    stopper.expires_after(20ms);
-    stopper.async_wait([&](boost::system::error_code) { t->stop(); });
+    t->start();
 
     ioc.run();
 
-    REQUIRE(t->tick_calls >= 1);
+    REQUIRE(t->tick_calls == 1);
     REQUIRE(t->stop_calls == 1);
     REQUIRE_FALSE(t->is_running());
 }
@@ -126,22 +145,24 @@ TEST_CASE("Ticker: start is idempotent while running", "[ticker]")
     boost::asio::io_context ioc;
     auto t = std::make_shared<test_ticker>(ioc.get_executor(), 1ms);
 
-    t->start();
-    REQUIRE(t->is_running());
-
-    boost::asio::steady_timer stopper(ioc);
-    stopper.expires_after(20ms);
-    stopper.async_wait([&](boost::system::error_code)
+    // Acting from inside the first tick guarantees the ticker is running, so the
+    // second start() below is a genuine "while running" call rather than a race
+    // against a wall-clock timer.
+    t->on_first_tick = [&]
     {
+        REQUIRE(t->is_running());
         // A second start() while running must be a no-op.
         t->start();
         t->stop();
-    });
+    };
+
+    t->start();
+    REQUIRE(t->is_running());
 
     ioc.run();
 
     REQUIRE(t->start_calls == 1);
-    REQUIRE(t->tick_calls >= 1);
+    REQUIRE(t->tick_calls == 1);
     REQUIRE(t->stop_calls == 1);
     REQUIRE_FALSE(t->is_running());
 }
@@ -223,13 +244,11 @@ TEST_CASE("Ticker: set_interval controls the tick period", "[ticker]")
 TEST_CASE("Ticker: stop() interrupts an in-flight on_tick", "[ticker]")
 {
     boost::asio::io_context ioc;
+    // parking_ticker posts stop() from inside on_tick(), so the 10s wait is
+    // already pending when the cancellation arrives.
     auto t = std::make_shared<parking_ticker>(ioc.get_executor(), 1ms);
 
     t->start();
-
-    boost::asio::steady_timer stopper(ioc);
-    stopper.expires_after(20ms);
-    stopper.async_wait([&](boost::system::error_code) { t->stop(); });
 
     auto begin = std::chrono::steady_clock::now();
     ioc.run();
