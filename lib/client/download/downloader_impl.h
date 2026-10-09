@@ -1,12 +1,11 @@
 #pragma once
 #include "cache_manager.hpp"
 #include "disk_writer.h"
-#include "download_strategy.hpp"
 #include "httplib/client/cache.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/downloader.hpp"
 #include "httplib/url/url.hpp"
-#include "request_sender.hpp"
+#include "progress_tracker.hpp"
 #include <atomic>
 #include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/co_spawn.hpp>
@@ -21,8 +20,6 @@
 namespace httplib::client
 {
 
-    class progress_tracker;
-
     class downloader::impl : public std::enable_shared_from_this<downloader::impl>
     {
       public:
@@ -30,6 +27,20 @@ namespace httplib::client
         {
             std::uint64_t content_length = 0;
             httplib::headers headers;
+        };
+
+        /// Terminal response of a logical request after following redirects.
+        struct send_result
+        {
+            http_client_pool::client_handle handle;
+            client::response response;
+            httplib::headers headers;
+            httplib::status status = status::unknown;
+            /// Set when no usable response was obtained (connection/acquire/send
+            /// failure, cancellation, redirect exhaustion).
+            boost::system::error_code error;
+            /// Origin/target actually reached after following redirects.
+            url::url_info final_ui;
         };
 
       public:
@@ -79,12 +90,24 @@ namespace httplib::client
                                                                fs::path const& save_path,
                                                                httplib::headers const& headers);
 
-        net::awaitable<bool> check_remote_cache(url::url_info const& ui, cache_manager::http_meta const& meta);
-        net::awaitable<probe_result> probe_content_length(url::url_info const& ui);
+        net::awaitable<bool> check_remote_cache(url::url_info const& ui,
+                                                cache_manager::http_meta const& meta,
+                                                httplib::headers const& base_headers);
+        net::awaitable<probe_result> probe_content_length(url::url_info const& ui, httplib::headers const& base_headers);
 
-        net::awaitable<request_sender::result> send_request(url::url_info const& ui,
-                                                            httplib::method m,
-                                                            httplib::headers const& req_headers = {});
+        /// Sends one logical request over a pooled connection and follows
+        /// redirects, returning the terminal response. `req_headers` must already
+        /// contain the fully merged per-request headers.
+        net::awaitable<send_result> send_request(url::url_info const& ui,
+                                                 httplib::method m,
+                                                 httplib::headers req_headers);
+
+        /// Single-stream download with resume-on-interruption. Streams the body
+        /// straight to disk and retries within `cfg.max_retries`.
+        net::awaitable<boost::system::error_code> download_single(url::url_info const& ui,
+                                                                  fs::path const& save_path,
+                                                                  downloader::config const& cfg,
+                                                                  httplib::headers const& base_headers);
 
       private:
         net::any_io_executor executor_;
@@ -93,11 +116,6 @@ namespace httplib::client
         std::atomic<downloader::config> config_ { downloader::config {} };
 
         progress_tracker progress_;
-
-        /// Per-connection throughput cap for the current run (bytes/sec, 0 =
-        /// unlimited). For multi-segment downloads this is the configured cap
-        /// divided across the concurrent connections.
-        std::uint64_t per_connection_rate_ = 0;
 
         std::atomic<bool> cancelled_ { false };
 
@@ -108,14 +126,12 @@ namespace httplib::client
         /// cannot leak into the next run.
         std::atomic<std::shared_ptr<net::cancellation_signal>> cancel_signal_ { nullptr };
 
-        std::unique_ptr<cache_manager> cache_manager_;
-        std::unique_ptr<request_sender> sender_;
-        std::unique_ptr<download_strategy> strategy_;
+        cache_manager cache_manager_;
         std::shared_ptr<http_client_pool> pool_;
 
-        /// Captured from the concurrent segment/GET coroutines so the completed
-        /// transfer's real response headers (and final origin after redirects)
-        /// can be written to the cache.
+        /// Captured from the download coroutine so the completed transfer's real
+        /// response headers (and final origin after redirects) can be written to
+        /// the cache.
         mutable std::mutex resource_mutex_;
         httplib::headers resource_headers_;
         url::url_info final_ui_;

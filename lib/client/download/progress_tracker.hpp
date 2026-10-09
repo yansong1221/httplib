@@ -20,14 +20,9 @@ namespace httplib::client
         void set_progress_callback(downloader::progress_callback cb);
         void set_state_callback(downloader::state_callback cb);
 
-        void start(std::uint64_t total_bytes, int total_segments);
+        void start(std::uint64_t total_bytes);
         void set_downloaded(std::uint64_t n);
         void update(std::uint64_t delta_bytes);
-        void record_segment_bytes(int index, std::uint64_t n);
-        std::uint64_t segment_bytes(int index) const;
-        void reset_segment(int index);
-        void set_segment_bytes(int index, std::uint64_t n);
-        void set_all_segment_bytes(std::vector<std::uint64_t> const& v);
 
         net::awaitable<boost::system::error_code> wait_if_paused(std::atomic<bool> const& cancelled);
 
@@ -40,12 +35,8 @@ namespace httplib::client
         void notify_all();
 
         std::uint64_t total_bytes() const;
-        int total_segments() const;
-        void set_active_segments(int n);
-        std::vector<std::uint64_t> seg_downloaded() const;
         void finish();
         void finish_with_bytes(std::uint64_t sz);
-        void notify_initial(std::uint64_t total, std::uint64_t downloaded, int segments);
 
       private:
         net::any_io_executor executor_;
@@ -58,10 +49,7 @@ namespace httplib::client
         mutable std::mutex mutex_;
         std::uint64_t total_bytes_;
         std::uint64_t downloaded_bytes_;
-        int active_segments_;
-        int total_segments_;
         std::chrono::steady_clock::time_point progress_start_;
-        std::vector<std::uint64_t> seg_downloaded_;
 
         std::atomic<bool> paused_;
     };

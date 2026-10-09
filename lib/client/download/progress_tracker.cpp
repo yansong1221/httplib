@@ -1,5 +1,4 @@
 #include "progress_tracker.hpp"
-#include <algorithm>
 
 namespace httplib::client
 {
@@ -12,8 +11,6 @@ namespace httplib::client
         , state_(downloader::state::idle)
         , total_bytes_(0)
         , downloaded_bytes_(0)
-        , active_segments_(0)
-        , total_segments_(1)
         , paused_(false)
     {
     }
@@ -31,15 +28,12 @@ namespace httplib::client
     }
 
     void
-    progress_tracker::start(std::uint64_t total_bytes, int total_segments)
+    progress_tracker::start(std::uint64_t total_bytes)
     {
         std::lock_guard lk(mutex_);
         total_bytes_ = total_bytes;
         downloaded_bytes_ = 0;
-        total_segments_ = total_segments;
-        active_segments_ = total_segments;
         progress_start_ = std::chrono::steady_clock::now();
-        seg_downloaded_.assign(static_cast<std::size_t>(total_segments), 0);
     }
 
     void
@@ -65,8 +59,6 @@ namespace httplib::client
             auto elapsed = std::chrono::duration<double>(now - progress_start_);
             info.total_bytes = total_bytes_;
             info.downloaded_bytes = downloaded_bytes_;
-            info.active_segments = active_segments_;
-            info.total_segments = total_segments_;
             if (elapsed.count() > 0.0 && downloaded_bytes_ > 0)
             {
                 info.speed_bytes_per_sec
@@ -80,59 +72,6 @@ namespace httplib::client
             }
         }
         (*cb)(info);
-    }
-
-    void
-    progress_tracker::record_segment_bytes(int index, std::uint64_t n)
-    {
-        std::lock_guard lk(mutex_);
-        if (index >= 0 && static_cast<std::size_t>(index) < seg_downloaded_.size())
-        {
-            seg_downloaded_[static_cast<std::size_t>(index)] += n;
-        }
-    }
-
-    std::uint64_t
-    progress_tracker::segment_bytes(int index) const
-    {
-        std::lock_guard lk(mutex_);
-        if (index >= 0 && static_cast<std::size_t>(index) < seg_downloaded_.size())
-        {
-            return seg_downloaded_[static_cast<std::size_t>(index)];
-        }
-        return 0;
-    }
-
-    void
-    progress_tracker::reset_segment(int index)
-    {
-        std::lock_guard lk(mutex_);
-        if (index >= 0 && static_cast<std::size_t>(index) < seg_downloaded_.size())
-        {
-            seg_downloaded_[static_cast<std::size_t>(index)] = 0;
-        }
-    }
-
-    void
-    progress_tracker::set_segment_bytes(int index, std::uint64_t n)
-    {
-        std::lock_guard lk(mutex_);
-        if (index >= 0)
-        {
-            auto uidx = static_cast<std::size_t>(index);
-            if (uidx >= seg_downloaded_.size())
-            {
-                seg_downloaded_.resize(uidx + 1, 0);
-            }
-            seg_downloaded_[uidx] = n;
-        }
-    }
-
-    void
-    progress_tracker::set_all_segment_bytes(std::vector<std::uint64_t> const& v)
-    {
-        std::lock_guard lk(mutex_);
-        seg_downloaded_ = v;
     }
 
     net::awaitable<boost::system::error_code>
@@ -200,27 +139,6 @@ namespace httplib::client
         return total_bytes_;
     }
 
-    int
-    progress_tracker::total_segments() const
-    {
-        std::lock_guard lk(mutex_);
-        return total_segments_;
-    }
-
-    void
-    progress_tracker::set_active_segments(int n)
-    {
-        std::lock_guard lk(mutex_);
-        active_segments_ = n;
-    }
-
-    std::vector<std::uint64_t>
-    progress_tracker::seg_downloaded() const
-    {
-        std::lock_guard lk(mutex_);
-        return seg_downloaded_;
-    }
-
     void
     progress_tracker::finish()
     {
@@ -233,7 +151,7 @@ namespace httplib::client
         {
             std::lock_guard lk(mutex_);
             auto final_sz = total_bytes_ > 0 ? total_bytes_ : downloaded_bytes_;
-            info = downloader::progress_info { final_sz, final_sz, 0, std::chrono::seconds(0), 0, 1 };
+            info = downloader::progress_info { final_sz, final_sz, 0, std::chrono::seconds(0) };
         }
         (*cb)(info);
     }
@@ -246,18 +164,7 @@ namespace httplib::client
         {
             return;
         }
-        (*cb)(downloader::progress_info { sz, sz, 0, std::chrono::seconds(0), 0, 1 });
-    }
-
-    void
-    progress_tracker::notify_initial(std::uint64_t total, std::uint64_t downloaded, int segments)
-    {
-        auto cb = progress_cb_.load();
-        if (!cb || !*cb)
-        {
-            return;
-        }
-        (*cb)(downloader::progress_info { total, downloaded, 0, std::chrono::seconds(0), segments, segments });
+        (*cb)(downloader::progress_info { sz, sz, 0, std::chrono::seconds(0) });
     }
 
 } // namespace httplib::client

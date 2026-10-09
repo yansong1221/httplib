@@ -2,6 +2,7 @@
 #include "httplib/client/cache.hpp"
 #include "httplib/headers.hpp"
 #include "httplib/url/url.hpp"
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -34,7 +35,10 @@ namespace httplib::client
             bool must_revalidate = false;
         };
 
-        explicit cache_manager(std::shared_ptr<cache> c);
+        cache_manager() = default;
+
+        /// Enables caching with `c`; a null `c` disables it.
+        void set_cache(std::shared_ptr<cache> c);
 
         bool enabled() const;
         std::shared_ptr<cache> raw_cache() const;
@@ -51,7 +55,9 @@ namespace httplib::client
         static std::optional<http_meta> parse_meta(std::string_view blob);
 
       private:
-        std::shared_ptr<cache> cache_;
+        /// Atomic so set_cache() (public API, any thread) can race safely with
+        /// the read paths (get/put/enabled/raw_cache) running on the executor.
+        std::atomic<std::shared_ptr<cache>> cache_ { nullptr };
     };
 
 } // namespace httplib::client

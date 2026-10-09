@@ -26,7 +26,7 @@ Version: see `httplib::version()` (`<httplib/version.hpp>`).
 - **Global middleware** - `router::use()` applies middleware to all routes; `set_post_routing_handler()` runs after every handler
 - **Custom middleware** - per-route `before`/`after` aspects, sync (`bool`) or coroutine (`awaitable<bool>`) returns
 - **Reverse proxy** - static or dynamic upstreams, weighted/least-connections load balancing, cookie/referer rewriting, `X-Forwarded-*` headers, request/response interceptors
-- **Client download stack** - `downloader` (multi-segment, resume, progress), `download_scheduler` (bounded concurrency), `disk_cache` (size/TTL eviction)
+- **Client download stack** - `downloader` (resume, progress), `download_scheduler` (bounded concurrency), `disk_cache` (size/TTL eviction)
 - **Database** - backend-agnostic `session` with parameter binding, prepared statements, transactions and pooling; SQLite / MySQL / ODBC backends (optional, `-DHTTPLIB_ENABLED_DATABASE=ON`)
 - **URL utilities** - parsing, resolution, percent encoding, Host/URL assembly
 - **Logging** - integrated spdlog, configurable per-component loggers
@@ -734,7 +734,7 @@ client.set_download_rate_limit(1024 * 1024);
 #include <httplib/client/downloader.hpp>
 
 client::downloader dl(ex, pool);   // pool is shared_ptr<client::http_client_pool>
-dl.set_config({ .segments = 4, .resume = true });
+dl.set_config({ .resume = true });
 dl.set_progress_callback([](client::downloader::progress_info const& p) { /* ... */ });
 co_await dl.async_download("https://example.com/big.iso", "big.iso");
 ```

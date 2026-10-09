@@ -181,14 +181,11 @@ lazy 响应），且不得与 `close()` 并发：
 
 ### 6.1 downloader 落盘 `disk_writer`
 
-`downloader` 的载荷落盘集中在 `disk_writer`（`lib/client/disk_writer.h`），它持有**每个
-downloader 一个**的 strand，并独占一次下载的**唯一**输出文件（`open()` 打开一次，`write` /
-`write_at` 不再重新打开）。`write`（顺序游标）/ `write_at`（定位偏移）都先 `net::dispatch` 到
-该 strand，且文件体内不再 `co_await`，因此同一次下载的多个分片对同一文件的写入彼此串行
-（不同 downloader 之间仍并行）。网络协程只负责 `co_await disk_.write_at(...)`，不直接触碰文件。
-
-状态文件 `.dlstate` 只在下载开始前与中止后读写，不与在途分片写入并发，因此走普通同步
-`std::fstream`，不经过 strand。
+`downloader` 的载荷落盘集中在 `disk_writer`（`lib/client/download/disk_writer.h`），它持有
+**每个 downloader 一个**的 strand，并独占一次下载的**唯一**输出文件（`open()` 打开一次，
+`write` 不再重新打开）。`write` 先 `net::dispatch` 到该 strand，且文件体内不再 `co_await`，
+因此同一次下载的写入彼此串行（不同 downloader 之间仍并行）。网络协程只负责
+`co_await disk_.write(...)`，不直接触碰文件。
 
 ---
 

@@ -1,20 +1,32 @@
 #include "downloader_impl.h"
+#include "beast_alias.hpp"
+#include "client/redirect_util.hpp"
 #include "http_header_util.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/client/client_pool.hpp"
+#include "httplib/client/lazy_request.hpp"
 #include "httplib/url/url.hpp"
+#include "httplib/util/sleep.hpp"
 #include "progress_tracker.hpp"
-#include <algorithm>
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/cancellation_state.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/error.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/use_future.hpp>
+#include <cassert>
+#include <format>
+#include <span>
+#include <vector>
 
 namespace httplib::client
 {
+    namespace
+    {
+        constexpr std::size_t kReadBufSize = 64 * 1024;
+    } // namespace
 
     // =========================================================================
     // construction
@@ -55,13 +67,13 @@ namespace httplib::client
     void
     downloader::impl::set_cache(std::shared_ptr<cache> c)
     {
-        cache_manager_ = c ? std::make_unique<cache_manager>(std::move(c)) : nullptr;
+        cache_manager_.set_cache(std::move(c));
     }
 
     std::shared_ptr<cache>
     downloader::impl::get_cache() const
     {
-        return cache_manager_ ? cache_manager_->raw_cache() : nullptr;
+        return cache_manager_.raw_cache();
     }
 
     std::shared_ptr<http_client_pool>
@@ -152,19 +164,21 @@ namespace httplib::client
     // =========================================================================
 
     net::awaitable<bool>
-    downloader::impl::check_remote_cache(url::url_info const& ui, cache_manager::http_meta const& meta)
+    downloader::impl::check_remote_cache(url::url_info const& ui,
+                                         cache_manager::http_meta const& meta,
+                                         httplib::headers const& base_headers)
     {
-        if (!cache_manager_ || !cache_manager_->enabled())
+        if (!cache_manager_.enabled())
         {
             co_return false;
         }
-        httplib::headers req_headers;
         if (meta.etag.empty() && meta.last_modified.empty())
         {
             // No validator: there is no way to prove the cached body is still
             // current, so never serve it.
             co_return false;
         }
+        httplib::headers req_headers = base_headers;
         if (!meta.etag.empty())
         {
             req_headers.set(field::if_none_match, meta.etag);
@@ -173,7 +187,7 @@ namespace httplib::client
         {
             req_headers.set(field::if_modified_since, meta.last_modified);
         }
-        auto result = co_await send_request(ui, method::head, req_headers);
+        auto result = co_await send_request(ui, method::head, std::move(req_headers));
         if (result.status != status::not_modified)
         {
             co_return false;
@@ -192,10 +206,10 @@ namespace httplib::client
     // =========================================================================
 
     net::awaitable<downloader::impl::probe_result>
-    downloader::impl::probe_content_length(url::url_info const& ui)
+    downloader::impl::probe_content_length(url::url_info const& ui, httplib::headers const& base_headers)
     {
         probe_result res;
-        auto result = co_await send_request(ui, method::head);
+        auto result = co_await send_request(ui, method::head, base_headers);
         if (result.status == status::ok)
         {
             // 必须深拷贝：result.headers 只是 result.response 的借用视图，
@@ -210,20 +224,111 @@ namespace httplib::client
     // send_request (with redirect)
     // =========================================================================
 
-    net::awaitable<request_sender::result>
-    downloader::impl::send_request(url::url_info const& ui, httplib::method m, httplib::headers const& req_headers)
+    net::awaitable<downloader::impl::send_result>
+    downloader::impl::send_request(url::url_info const& ui, httplib::method m, httplib::headers req_headers)
     {
-        if (!sender_)
+        downloader::config const cfg = config_.load();
+
+        // 下载场景保存原始字节（断点续传依赖），不接受内容编码压缩。
+        req_headers.set(field::accept_encoding, "identity");
+
+        auto h = ui.host;
+        auto p = ui.effective_port();
+        auto s = ui.transport();
+        auto t = ui.target(false);
+        if (t.empty())
         {
-            request_sender::result rr;
-            rr.error = boost::asio::error::operation_aborted;
+            t = "/";
+        }
+
+        for (int redir = 0; redir <= cfg.max_redirects; ++redir)
+        {
+            if (cancelled_.load(std::memory_order_relaxed))
+            {
+                send_result rr;
+                rr.error = boost::asio::error::operation_aborted;
+                co_return rr;
+            }
+
+            assert(pool_);
+            auto handle = co_await pool_->async_acquire(h, p, s, cfg.acquire_timeout);
+            if (!handle)
+            {
+                send_result rr;
+                rr.error = handle.error();
+                co_return rr;
+            }
+            handle->set_timeout(cfg.timeout);
+            handle->set_max_redirects(0);
+            handle->set_verify_ssl(cfg.verify_ssl);
+            handle->set_download_rate_limit(cfg.max_speed_bytes_per_sec);
+
+            auto req = httplib::client::request(m, t, req_headers);
+
+            auto resp_result = co_await handle->async_send_request(req, http_client::body_mode::lazy);
+            if (!resp_result.has_value())
+            {
+                send_result rr;
+                rr.error = resp_result.error();
+                co_return rr;
+            }
+            auto resp = std::move(resp_result).value();
+
+            auto status = resp.result();
+
+            if ((status == status::moved_permanently || status == status::found || status == status::see_other
+                 || status == status::temporary_redirect || status == status::permanent_redirect)
+                && redir < cfg.max_redirects)
+            {
+                auto rt = http_header_util::parse_redirect(resp.headers());
+                if (rt.has_value())
+                {
+                    // Drain the redirect body before the handle returns to the
+                    // pool; otherwise the leftover bytes corrupt the next
+                    // request that reuses this connection. A failed drain means
+                    // the connection is unusable, so close it explicitly.
+                    if (auto drain_ec = co_await resp.read_body(); drain_ec)
+                    {
+                        handle->close();
+                    }
+
+                    if (!rt->host.empty())
+                    {
+                        // CL-02: 仅当 Location 为绝对 URL 且 origin 变化时移除敏感头，避免凭据泄露；
+                        // 同 origin 重定向保留原头。
+                        if (rt->host != h || rt->port != p || rt->transport() != s)
+                        {
+                            redirect::strip_origin_bound_headers(req_headers);
+                        }
+                        h = rt->host;
+                        p = rt->port == 0 ? p : rt->port;
+                        s = rt->transport();
+                        t = rt->path.empty() ? "/" : rt->path;
+                    }
+                    else
+                    {
+                        // Relative reference: resolve against the current target so
+                        // Location values like "final" or "../a/b" work correctly.
+                        t = url::resolve(t, rt->path);
+                    }
+                    continue;
+                }
+            }
+
+            send_result rr;
+            rr.handle = std::move(handle);
+            rr.response = std::move(resp);
+            // 必须深拷贝：headers() 返回 rr.response 的借用视图，rr 随协程帧销毁后
+            // 调用方拿到的就是悬垂指针。
+            rr.headers.merge(rr.response.headers());
+            rr.status = status;
+            rr.final_ui = url::url_info { std::string(url::to_string(s)), h, p, t, {}, {} };
+            record_final_ui(rr.final_ui);
             co_return rr;
         }
-        auto rr = co_await sender_->send(ui, m, req_headers, cancelled_, per_connection_rate_);
-        if (rr.handle)
-        {
-            record_final_ui(rr.final_ui);
-        }
+
+        send_result rr;
+        rr.error = boost::system::errc::make_error_code(boost::system::errc::protocol_error);
         co_return rr;
     }
 
@@ -264,21 +369,14 @@ namespace httplib::client
         // then return operation_aborted so the body below still runs its cleanup
         // (disk_.close(), state updates) before returning. The cancellation state
         // is shared by every coroutine in this run's thread of execution, so the
-        // helper coroutines (send_request, co_download_*) inherit it too.
+        // helper coroutines (send_request, download_single) inherit it too.
         co_await net::this_coro::reset_cancellation_state(net::enable_total_cancellation());
         co_await net::this_coro::throw_if_cancelled(false);
 
         downloader::config const cfg = config_.load();
-        per_connection_rate_ = cfg.max_speed_bytes_per_sec;
         httplib::headers const custom_headers = headers;
         std::string const auth_scope = cache_manager::auth_scope(custom_headers);
 
-        request_sender::config sender_cfg;
-        sender_cfg.acquire_timeout = cfg.acquire_timeout;
-        sender_cfg.timeout = cfg.timeout;
-        sender_cfg.verify_ssl = cfg.verify_ssl;
-        sender_cfg.max_redirects = cfg.max_redirects;
-        sender_ = std::make_unique<request_sender>(pool_, custom_headers, sender_cfg);
         {
             std::lock_guard lk(resource_mutex_);
             resource_headers_.clear();
@@ -297,17 +395,6 @@ namespace httplib::client
 
         std::string const state_url = cache_manager::make_key(ui, auth_scope);
 
-        strategy_ = std::make_unique<download_strategy>(
-            disk_,
-            progress_,
-            cancelled_,
-            cfg,
-            [this](url::url_info const& u, httplib::method m, httplib::headers const& h)
-                -> net::awaitable<request_sender::result> { co_return co_await send_request(u, m, h); },
-            [this](httplib::headers const& h) { store_suggested_filename(h); },
-            [this](httplib::headers const& h) { record_resource_headers(h); },
-            state_url);
-
         progress_.set_state(downloader::state::connecting, {});
 
         // set_state() above runs user/owner callbacks synchronously, which is
@@ -323,9 +410,9 @@ namespace httplib::client
         boost::system::error_code ec;
         try
         {
-            if (cache_manager_ && cache_manager_->enabled())
+            if (cache_manager_.enabled())
             {
-                auto entry = cache_manager_->get(state_url);
+                auto entry = cache_manager_.get(state_url);
                 if (entry.has_value())
                 {
                     auto meta = cache_manager::parse_meta(entry->metadata);
@@ -344,14 +431,14 @@ namespace httplib::client
                         }
                         else
                         {
-                            usable = co_await check_remote_cache(ui, *meta);
+                            usable = co_await check_remote_cache(ui, *meta, custom_headers);
                         }
                         if (usable)
                         {
                             // Re-fetch immediately before copying so a concurrent
                             // cleanup cannot evict the entry between validation
                             // and use (narrowing the TOCTOU window).
-                            auto fresh = cache_manager_->get(state_url);
+                            auto fresh = cache_manager_.get(state_url);
                             if (fresh.has_value())
                             {
                                 std::error_code copy_ec;
@@ -371,37 +458,15 @@ namespace httplib::client
                 }
             }
 
-            auto probe = co_await probe_content_length(ui);
-            auto content_length = probe.content_length;
+            auto probe = co_await probe_content_length(ui, custom_headers);
 
             store_suggested_filename(probe.headers);
 
             progress_.set_state(downloader::state::downloading, {});
 
-            if (content_length > 0 && cfg.segments > 1)
-            {
-                // Spread the configured cap over the concurrent segment
-                // connections so the aggregate stays near the requested rate.
-                if (per_connection_rate_ > 0)
-                {
-                    auto segs = static_cast<std::uint64_t>(std::clamp(cfg.segments, 2, 32));
-                    per_connection_rate_ = std::max<std::uint64_t>(1, per_connection_rate_ / segs);
-                }
-                ec = co_await strategy_->download_multi(ui, save_path, content_length, probe.headers);
-                if (ec == boost::system::errc::make_error_code(boost::system::errc::operation_not_supported))
-                {
-                    // Server does not honor Range requests; fall back to a plain
-                    // single-stream download.
-                    per_connection_rate_ = cfg.max_speed_bytes_per_sec;
-                    ec = co_await strategy_->download_single(ui, save_path);
-                }
-            }
-            else
-            {
-                ec = co_await strategy_->download_single(ui, save_path);
-            }
+            ec = co_await download_single(ui, save_path, cfg, custom_headers);
 
-            if (!ec && cache_manager_ && cache_manager_->enabled() && !save_path.empty())
+            if (!ec && cache_manager_.enabled() && !save_path.empty())
             {
                 httplib::headers response_headers;
                 url::url_info final_ui;
@@ -423,7 +488,7 @@ namespace httplib::client
                     // Retention is governed by the cache's max_age (so stale
                     // entries stay available for revalidation); HTTP freshness
                     // travels inside the opaque metadata blob.
-                    cache_manager_->put(state_url, save_path, meta);
+                    cache_manager_.put(state_url, save_path, meta);
                 }
             }
         }
@@ -450,6 +515,180 @@ namespace httplib::client
         }
         progress_.set_state(downloader::state::completed, {});
         co_return boost::system::error_code {};
+    }
+
+    // =========================================================================
+    // single-stream download
+    // =========================================================================
+
+    net::awaitable<boost::system::error_code>
+    downloader::impl::download_single(url::url_info const& ui,
+                                      fs::path const& save_path,
+                                      downloader::config const& cfg,
+                                      httplib::headers const& base_headers)
+    {
+        for (int attempt = 0; attempt <= cfg.max_retries; ++attempt)
+        {
+            if (cancelled_.load(std::memory_order_relaxed))
+            {
+                co_return boost::asio::error::operation_aborted;
+            }
+
+            auto pause_ec = co_await progress_.wait_if_paused(cancelled_);
+            if (pause_ec)
+            {
+                co_return pause_ec;
+            }
+
+            std::uint64_t existing_size = 0;
+            httplib::headers req_headers = base_headers;
+
+            if (cfg.resume && attempt == 0)
+            {
+                std::error_code ec;
+                if (fs::exists(save_path, ec) && !ec)
+                {
+                    existing_size = fs::file_size(save_path, ec);
+                    if (ec)
+                    {
+                        existing_size = 0;
+                    }
+                }
+            }
+
+            if (existing_size > 0)
+            {
+                req_headers.set(field::range, std::format("bytes={}-", existing_size));
+            }
+
+            auto result = co_await send_request(ui, method::get, std::move(req_headers));
+            if (!result.handle)
+            {
+                if (attempt == cfg.max_retries)
+                {
+                    co_return result.error ? result.error
+                                           : boost::system::errc::make_error_code(boost::system::errc::timed_out);
+                }
+                co_await httplib::util::sleep(cfg.retry_backoff * (attempt + 1));
+                continue;
+            }
+
+            auto status = result.status;
+            if (status != status::ok && status != status::partial_content)
+            {
+                if (attempt == cfg.max_retries)
+                {
+                    co_return boost::system::errc::make_error_code(boost::system::errc::protocol_error);
+                }
+                if (!cfg.resume)
+                {
+                    std::error_code ec;
+                    fs::remove(save_path, ec);
+                }
+                co_await httplib::util::sleep(cfg.retry_backoff * (attempt + 1));
+                continue;
+            }
+
+            auto content_length = result.response.content_length().value_or(0);
+            auto content_range_total = http_header_util::parse_content_range_total(result.headers);
+            if (status == status::ok && existing_size > 0)
+            {
+                existing_size = 0;
+            }
+            else if (status == status::partial_content)
+            {
+                // Guard against a server that returns 206 with an unexpected
+                // starting offset, which would corrupt the appended data.
+                if (auto start = http_header_util::parse_content_range_start(result.headers);
+                    start.has_value() && *start != existing_size)
+                {
+                    if (attempt == cfg.max_retries)
+                    {
+                        co_return boost::system::errc::make_error_code(boost::system::errc::protocol_error);
+                    }
+                    std::error_code ec;
+                    fs::remove(save_path, ec);
+                    existing_size = 0;
+                    co_await httplib::util::sleep(cfg.retry_backoff * (attempt + 1));
+                    continue;
+                }
+            }
+            auto file_total = content_range_total > 0 ? content_range_total : (content_length + existing_size);
+
+            progress_.start(file_total);
+            progress_.set_downloaded(existing_size);
+
+            if (auto open_ec = co_await disk_.open(save_path, existing_size == 0, existing_size); open_ec)
+            {
+                co_return open_ec;
+            }
+
+            auto& resp = result.response;
+            std::vector<char> buf(kReadBufSize);
+            std::uint64_t session_bytes = 0;
+
+            while (!resp.is_body_done())
+            {
+                if (cancelled_.load(std::memory_order_relaxed))
+                {
+                    co_await disk_.close();
+                    co_return boost::asio::error::operation_aborted;
+                }
+
+                auto inner_pause_ec = co_await progress_.wait_if_paused(cancelled_);
+                if (inner_pause_ec)
+                {
+                    co_await disk_.close();
+                    co_return inner_pause_ec;
+                }
+                boost::system::error_code ec;
+                auto n = co_await resp.read_some_decompressed(net::buffer(buf), ec);
+                if (ec)
+                {
+                    co_await disk_.close();
+                    co_return ec;
+                }
+                if (n == 0)
+                {
+                    break;
+                }
+
+                if (auto write_ec = co_await disk_.write(std::span<char const>(buf.data(), n)); write_ec)
+                {
+                    co_await disk_.close();
+                    co_return write_ec;
+                }
+
+                session_bytes += n;
+                progress_.update(n);
+            }
+
+            co_await disk_.close();
+
+            // A response that stops short of its declared size must not be
+            // reported as a successful download: the file would be silently
+            // truncated. Retry (resuming from what we kept), and only fail once
+            // the retry budget is exhausted.
+            bool const validate_size = !http_header_util::response_is_encoded(result.headers);
+            if (validate_size && file_total > existing_size && session_bytes != file_total - existing_size)
+            {
+                if (attempt == cfg.max_retries)
+                {
+                    co_return boost::system::errc::make_error_code(boost::system::errc::message_size);
+                }
+                co_await httplib::util::sleep(cfg.retry_backoff * (attempt + 1));
+                continue;
+            }
+
+            store_suggested_filename(result.headers);
+            record_resource_headers(result.headers);
+
+            progress_.finish();
+
+            co_return boost::system::error_code {};
+        }
+
+        co_return boost::system::errc::make_error_code(boost::system::errc::timed_out);
     }
 
     // =========================================================================

@@ -24,8 +24,6 @@ namespace httplib::client
             std::uint64_t downloaded_bytes = 0;
             std::uint64_t speed_bytes_per_sec = 0;
             std::chrono::seconds eta { 0 };
-            int active_segments = 0;
-            int total_segments = 0;
         };
 
         using progress_callback = std::function<void(progress_info const&)>;
@@ -36,7 +34,6 @@ namespace httplib::client
             connecting,
             downloading,
             paused,
-            merging,
             completed,
             failed,
             cancelled
@@ -46,7 +43,6 @@ namespace httplib::client
 
         struct config
         {
-            int segments = 4;
             int max_retries = 3;
             std::chrono::steady_clock::duration timeout = std::chrono::seconds(60);
             std::chrono::milliseconds acquire_timeout = std::chrono::seconds(30);
@@ -54,7 +50,6 @@ namespace httplib::client
             bool resume = true;
             bool verify_ssl = true;
             std::uint64_t max_speed_bytes_per_sec = 0;
-            bool save_state = true;
             /// Delay before a retry attempt after a transient failure. Scaled by
             /// the attempt number so repeated failures back off instead of
             /// hammering the server. `0` disables the backoff.

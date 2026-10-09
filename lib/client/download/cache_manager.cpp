@@ -8,41 +8,44 @@ namespace httplib::client
 {
     using boost::algorithm::trim;
 
-    cache_manager::cache_manager(std::shared_ptr<cache> c)
-        : cache_(std::move(c))
+    void
+    cache_manager::set_cache(std::shared_ptr<cache> c)
     {
+        cache_.store(std::move(c), std::memory_order_release);
     }
 
     bool
     cache_manager::enabled() const
     {
-        return cache_ != nullptr;
+        return cache_.load(std::memory_order_acquire) != nullptr;
     }
 
     std::shared_ptr<cache>
     cache_manager::raw_cache() const
     {
-        return cache_;
+        return cache_.load(std::memory_order_acquire);
     }
 
     std::optional<cache::entry>
     cache_manager::get(std::string_view key) const
     {
-        if (!cache_)
+        auto c = cache_.load(std::memory_order_acquire);
+        if (!c)
         {
             return std::nullopt;
         }
-        return cache_->get(key);
+        return c->get(key);
     }
 
     void
     cache_manager::put(std::string_view key, fs::path const& body, http_meta const& meta) const
     {
-        if (!cache_)
+        auto c = cache_.load(std::memory_order_acquire);
+        if (!c)
         {
             return;
         }
-        cache_->put(key, body, serialize_meta(meta), std::nullopt);
+        c->put(key, body, serialize_meta(meta), std::nullopt);
     }
 
     std::string
