@@ -92,7 +92,11 @@ namespace httplib::client
     void
     progress_tracker::set_state(downloader::state st, boost::system::error_code ec)
     {
-        state_.store(st);
+        // 状态未变化时不再回调：状态回调会驱动 owner/调度器逻辑，重复通知没有意义。
+        if (state_.exchange(st) == st)
+        {
+            return;
+        }
         auto cb = state_cb_.load();
         if (cb && *cb)
         {
