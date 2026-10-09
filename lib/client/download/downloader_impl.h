@@ -1,84 +1,35 @@
 #pragma once
+#include "cache_manager.hpp"
 #include "disk_writer.h"
+#include "download_strategy.hpp"
 #include "httplib/client/cache.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/downloader.hpp"
 #include "httplib/url/url.hpp"
-#include "httplib/util/async_event.hpp"
+#include "request_sender.hpp"
 #include <atomic>
+#include <boost/asio/cancellation_signal.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/use_future.hpp>
 #include <boost/system/error_code.hpp>
-#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <string>
 #include <string_view>
-#include <vector>
-#include "beast_alias.hpp"
-#include <boost/asio/cancellation_signal.hpp>
 
 namespace httplib::client
 {
 
-    class downloader::impl
+    class progress_tracker;
+
+    class downloader::impl : public std::enable_shared_from_this<downloader::impl>
     {
       public:
-        struct segment_task
-        {
-            std::uint64_t start_byte;
-            std::uint64_t end_byte;
-            int index;
-        };
-
-        struct download_state
-        {
-            std::string url;
-            std::uint64_t content_length = 0;
-            int segments = 0;
-            /// Bytes persisted per segment (indexed by segment). Empty or short
-            /// vectors are treated as "no progress".
-            std::vector<std::uint64_t> seg_downloaded;
-        };
-
         struct probe_result
         {
             std::uint64_t content_length = 0;
             httplib::headers headers;
-        };
-
-        struct request_result
-        {
-            http_client_pool::client_handle handle;
-            client::response response;
-            httplib::headers headers;
-            httplib::status status = status::unknown;
-            /// Set when no usable response was obtained (connection/acquire/
-            /// send failure, cancellation, redirect exhaustion). Callers
-            /// propagate this instead of collapsing every failure into a
-            /// generic timeout.
-            boost::system::error_code error;
-            /// Origin/target actually reached after following redirects. Used as
-            /// the cache identity so a URL that redirects elsewhere cannot serve
-            /// stale cached content.
-            url::url_info final_ui;
-        };
-
-        /// HTTP-specific cache bookkeeping. The downloader serializes this into
-        /// the cache's opaque metadata blob; the cache itself never interprets
-        /// it.
-        struct http_meta
-        {
-            std::string final_url;
-            std::string etag;
-            std::string last_modified;
-            std::string content_type;
-            std::string content_disposition;
-            /// Time until which the response is fresh (Cache-Control max-age).
-            /// Within this window the cached body may be served without network.
-            std::optional<std::chrono::system_clock::time_point> fresh_until;
-            /// Cache-Control: no-cache -> must revalidate even if fresh.
-            bool must_revalidate = false;
         };
 
       public:
@@ -99,6 +50,17 @@ namespace httplib::client
         net::awaitable<boost::system::error_code> async_download(std::string_view url,
                                                                  fs::path const& save_path,
                                                                  httplib::headers const& headers = {});
+
+        std::future<boost::system::error_code>
+        download(std::string_view url, fs::path const& save_path, httplib::headers const& headers = {})
+        {
+            return net::co_spawn(
+                executor_,
+                [this, self = shared_from_this(), url = std::string(url), save_path, headers]()
+                    -> net::awaitable<boost::system::error_code>
+                { co_return co_await async_download(url, save_path, headers); },
+                net::use_future);
+        }
         void cancel();
         void pause();
         void resume();
@@ -106,84 +68,31 @@ namespace httplib::client
 
         std::string suggested_filename() const;
 
-      public:
-        net::any_io_executor executor_;
-
       private:
-        std::string make_cache_key(url::url_info const& ui) const;
-        static std::string cache_auth_scope(httplib::headers const& headers);
-        static bool response_is_cacheable(httplib::headers const& headers);
-        static http_meta make_http_meta(httplib::headers const& response,
-                                        httplib::headers const& probe,
-                                        url::url_info const& final_ui,
-                                        bool has_final_ui);
-        static std::string serialize_http_meta(http_meta const& meta);
-        static std::optional<http_meta> parse_http_meta(std::string_view blob);
-        static std::uint64_t parse_content_range_total(httplib::headers const& headers);
-        static std::optional<std::uint64_t> parse_content_range_start(httplib::headers const& headers);
-        static std::string parse_content_disposition_filename(httplib::headers const& headers);
-        static std::optional<url::url_info> parse_redirect(httplib::headers const& headers);
-
-        void set_state(downloader::state st, boost::system::error_code ec);
-        void update_progress(std::uint64_t delta_bytes);
         void store_suggested_filename(httplib::headers const& headers);
         void record_final_ui(url::url_info const& ui);
         void record_resource_headers(httplib::headers const& headers);
 
-        void save_state(fs::path const& save_path);
-        download_state load_state(fs::path const& save_path) const;
-        void del_state(fs::path const& save_path) const;
-        static fs::path state_path(fs::path const& save_path);
-
         /// Body of a single run. Spawned by async_download() so its I/O is bound
         /// to that run's cancellation signal. Owns its URL by value.
-        net::awaitable<boost::system::error_code> run_download(std::string url,
+        net::awaitable<boost::system::error_code> run_download(std::string_view url,
                                                                fs::path const& save_path,
                                                                httplib::headers const& headers);
 
-        net::awaitable<bool> check_remote_cache(url::url_info const& ui, http_meta const& meta);
+        net::awaitable<bool> check_remote_cache(url::url_info const& ui, cache_manager::http_meta const& meta);
         net::awaitable<probe_result> probe_content_length(url::url_info const& ui);
 
-        net::awaitable<request_result> send_request(url::url_info const& ui,
-                                                    httplib::method m,
-                                                    httplib::headers const& req_headers = {});
-
-        net::awaitable<boost::system::error_code> co_wait_if_paused();
-
-        net::awaitable<boost::system::error_code> co_download_single(url::url_info const& ui, fs::path const& save_path);
-
-        net::awaitable<boost::system::error_code> co_download_segment(url::url_info const& ui,
-                                                                      std::uint64_t start,
-                                                                      std::uint64_t end,
-                                                                      int index);
-
-        net::awaitable<boost::system::error_code> co_download_multi_segment(url::url_info const& ui,
-                                                                            fs::path const& save_path,
-                                                                            std::uint64_t content_length,
-                                                                            httplib::headers const& probe_headers);
+        net::awaitable<request_sender::result> send_request(url::url_info const& ui,
+                                                            httplib::method m,
+                                                            httplib::headers const& req_headers = {});
 
       private:
+        net::any_io_executor executor_;
         /// Serializes all of this downloader's payload writes on one strand.
         disk_writer disk_;
         std::atomic<downloader::config> config_ { downloader::config {} };
-        /// Snapshot of `config_` captured when a download starts. Only touched by
-        /// the download coroutine, so it needs no locking once the run begins.
-        downloader::config active_config_;
-        /// Canonical URL of the current run, persisted in the sidecar state file
-        /// so a stale state from another URL is never reused.
-        std::string state_url_;
 
-        std::atomic<std::shared_ptr<downloader::progress_callback>> progress_cb_ { nullptr };
-        std::atomic<std::shared_ptr<downloader::state_callback>> state_cb_ { nullptr };
-
-        std::atomic<downloader::state> state_ { downloader::state::idle };
-
-        mutable std::mutex progress_mutex_;
-        std::uint64_t total_bytes_ = 0;
-        std::uint64_t downloaded_bytes_ = 0;
-        int active_segments_ = 0;
-        int total_segments_ = 1;
-        std::chrono::steady_clock::time_point progress_start_;
+        progress_tracker progress_;
 
         /// Per-connection throughput cap for the current run (bytes/sec, 0 =
         /// unlimited). For multi-segment downloads this is the configured cap
@@ -191,8 +100,6 @@ namespace httplib::client
         std::uint64_t per_connection_rate_ = 0;
 
         std::atomic<bool> cancelled_ { false };
-        std::atomic<bool> paused_ { false };
-        util::async_event pause_event_;
 
         /// Per-run cancellation source. async_download() installs a fresh signal
         /// for each run and binds it to the run's coroutine, so cancel() aborts
@@ -201,17 +108,10 @@ namespace httplib::client
         /// cannot leak into the next run.
         std::atomic<std::shared_ptr<net::cancellation_signal>> cancel_signal_ { nullptr };
 
-        std::vector<segment_task> segments_;
-        /// Bytes already persisted for each segment of the current single-file
-        /// run, indexed by segment. Guarded by progress_mutex_.
-        std::vector<std::uint64_t> seg_downloaded_;
-
-        std::shared_ptr<cache> cache_;
+        std::unique_ptr<cache_manager> cache_manager_;
+        std::unique_ptr<request_sender> sender_;
+        std::unique_ptr<download_strategy> strategy_;
         std::shared_ptr<http_client_pool> pool_;
-        httplib::headers custom_headers_;
-        /// Hash of credential-bearing request headers folded into the cache key
-        /// so two callers with different credentials never share an entry.
-        std::string auth_scope_;
 
         /// Captured from the concurrent segment/GET coroutines so the completed
         /// transfer's real response headers (and final origin after redirects)

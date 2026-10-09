@@ -99,7 +99,7 @@ namespace httplib::client
 
       private:
         class impl;
-        std::unique_ptr<impl> impl_;
+        std::shared_ptr<impl> impl_;
     };
 
 } // namespace httplib::client

@@ -1,0 +1,215 @@
+#include "cache_manager.hpp"
+#include "http_header_util.hpp"
+#include <algorithm>
+#include <boost/algorithm/string/trim.hpp>
+#include <format>
+
+namespace httplib::client
+{
+    using boost::algorithm::trim;
+
+    cache_manager::cache_manager(std::shared_ptr<cache> c)
+        : cache_(std::move(c))
+    {
+    }
+
+    bool
+    cache_manager::enabled() const
+    {
+        return cache_ != nullptr;
+    }
+
+    std::shared_ptr<cache>
+    cache_manager::raw_cache() const
+    {
+        return cache_;
+    }
+
+    std::optional<cache::entry>
+    cache_manager::get(std::string_view key) const
+    {
+        if (!cache_)
+        {
+            return std::nullopt;
+        }
+        return cache_->get(key);
+    }
+
+    void
+    cache_manager::put(std::string_view key, fs::path const& body, http_meta const& meta) const
+    {
+        if (!cache_)
+        {
+            return;
+        }
+        cache_->put(key, body, serialize_meta(meta), std::nullopt);
+    }
+
+    std::string
+    cache_manager::make_key(url::url_info const& ui, std::string const& auth_scope)
+    {
+        auto key = ui.to_url();
+        if (!auth_scope.empty())
+        {
+            key.append("|auth=");
+            key.append(auth_scope);
+        }
+        return key;
+    }
+
+    std::string
+    cache_manager::auth_scope(httplib::headers const& headers)
+    {
+        return http_header_util::cache_auth_scope(headers);
+    }
+
+    cache_manager::http_meta
+    cache_manager::make_meta(httplib::headers const& response,
+                             httplib::headers const& probe,
+                             url::url_info const& final_ui,
+                             bool has_final_ui)
+    {
+        // Explicit whitelist of HTTP bookkeeping the downloader needs; the rest
+        // (hop-by-hop headers, partial-response framing) is discarded.
+        http_meta meta;
+        auto take = [&](field f) -> std::string
+        {
+            auto v = response[f];
+            if (v.empty())
+            {
+                v = probe[f];
+            }
+            return std::string(v);
+        };
+        meta.content_type = take(field::content_type);
+        meta.content_disposition = take(field::content_disposition);
+        meta.etag = take(field::etag);
+        meta.last_modified = take(field::last_modified);
+        if (has_final_ui)
+        {
+            meta.final_url = final_ui.to_url();
+        }
+
+        std::string cache_control = take(field::cache_control);
+        meta.must_revalidate = http_header_util::header_has_token(cache_control, "no-cache");
+
+        if (auto max_age = http_header_util::header_directive_int(cache_control, "max-age"); max_age && *max_age >= 0)
+        {
+            std::int64_t age = 0;
+            if (auto age_header = response[field::age]; !age_header.empty())
+            {
+                try
+                {
+                    age = std::stoll(std::string(age_header));
+                }
+                catch (...)
+                {
+                    age = 0;
+                }
+            }
+            auto lifetime = std::chrono::seconds(std::max<std::int64_t>(0, *max_age - age));
+            meta.fresh_until = std::chrono::system_clock::now() + lifetime;
+        }
+        return meta;
+    }
+
+    std::string
+    cache_manager::serialize_meta(http_meta const& meta)
+    {
+        std::string out;
+        auto put = [&](std::string_view key, std::string const& value)
+        {
+            if (!value.empty())
+            {
+                out.append(key);
+                out.push_back('=');
+                out.append(value);
+                out.push_back('\n');
+            }
+        };
+        put("final_url", meta.final_url);
+        put("etag", meta.etag);
+        put("last_modified", meta.last_modified);
+        put("content_type", meta.content_type);
+        put("content_disposition", meta.content_disposition);
+        if (meta.fresh_until.has_value())
+        {
+            auto secs = std::chrono::duration_cast<std::chrono::seconds>(meta.fresh_until->time_since_epoch());
+            out.append("fresh_until=");
+            out.append(std::to_string(secs.count()));
+            out.push_back('\n');
+        }
+        if (meta.must_revalidate)
+        {
+            out.append("must_revalidate=1\n");
+        }
+        return out;
+    }
+
+    std::optional<cache_manager::http_meta>
+    cache_manager::parse_meta(std::string_view blob)
+    {
+        if (blob.empty())
+        {
+            return std::nullopt;
+        }
+        http_meta meta;
+        std::size_t pos = 0;
+        while (pos < blob.size())
+        {
+            auto nl = blob.find('\n', pos);
+            auto end = (nl == std::string_view::npos) ? blob.size() : nl;
+            std::string line(blob.substr(pos, end - pos));
+            pos = (nl == std::string_view::npos) ? blob.size() : nl + 1;
+
+            trim(line);
+            if (line.empty())
+            {
+                continue;
+            }
+            auto eq = line.find('=');
+            if (eq == std::string::npos)
+            {
+                continue;
+            }
+            auto key = line.substr(0, eq);
+            auto val = line.substr(eq + 1);
+            if (key == "final_url")
+            {
+                meta.final_url = val;
+            }
+            else if (key == "etag")
+            {
+                meta.etag = val;
+            }
+            else if (key == "last_modified")
+            {
+                meta.last_modified = val;
+            }
+            else if (key == "content_type")
+            {
+                meta.content_type = val;
+            }
+            else if (key == "content_disposition")
+            {
+                meta.content_disposition = val;
+            }
+            else if (key == "fresh_until")
+            {
+                try
+                {
+                    meta.fresh_until = std::chrono::system_clock::time_point(std::chrono::seconds(std::stoll(val)));
+                }
+                catch (...)
+                {
+                }
+            }
+            else if (key == "must_revalidate")
+            {
+                meta.must_revalidate = (val == "1");
+            }
+        }
+        return meta;
+    }
+
+} // namespace httplib::client
