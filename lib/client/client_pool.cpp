@@ -86,7 +86,10 @@ namespace httplib::client
         }
 
         net::awaitable<client_handle>
-        async_acquire(std::string_view host, uint16_t port, url::scheme s, std::chrono::steady_clock::duration wait_timeout)
+        async_acquire(std::string_view host,
+                      uint16_t port,
+                      url::scheme s,
+                      std::chrono::steady_clock::duration wait_timeout)
         {
             // 池状态只在自身 strand 上访问：把调用协程切到 strand 后再操作，
             // 后续 await（校验/等待唤醒）都会在 strand 上恢复，因此无需再加锁。
@@ -133,23 +136,20 @@ namespace httplib::client
                         }
 
                         // 被唤醒的等待者保留在队首；只有它自己能绕过“已有等待者”的公平性检查。
-                        client_handle handle;
-                        try
+                        client_handle handle = co_await acquire_or_create(url, serving);
+
+                        if (handle)
                         {
-                            handle = co_await acquire_or_create(url, serving);
-                        }
-                        catch (...)
-                        {
-                            // 建连/配置路径抛异常时，必须先把当前 waiter 的回合交还队列，
-                            // 否则后续 waiter 可能因队首失效而迟迟不被唤醒。
                             if (in_queue)
                             {
                                 remove_waiter(url, node);
                             }
-                            throw;
+                            co_return std::move(handle);
                         }
 
-                        if (handle)
+                        // 硬错误（建连失败）直接返回；只有“暂无容量”的哨兵值
+                        // (not_connected) 才落到等待/排队路径。
+                        if (handle.error() != boost::system::errc::make_error_code(boost::system::errc::not_connected))
                         {
                             if (in_queue)
                             {
@@ -613,7 +613,8 @@ namespace httplib::client
                     dec_active(st);
                     track_destroyed();
                     wake_one_waiter(url);
-                    throw;
+                    // 建连/配置路径的异常一律回落到错误 handle，借出接口不抛异常。
+                    co_return client_handle(boost::system::errc::make_error_code(boost::system::errc::io_error));
                 }
             }
 

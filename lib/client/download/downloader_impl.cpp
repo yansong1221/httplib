@@ -414,57 +414,46 @@ namespace httplib::client
         }
 
         boost::system::error_code ec;
-        try
+        if (co_await try_serve_from_cache(ui, state_url, save_path, headers))
         {
-            if (co_await try_serve_from_cache(ui, state_url, save_path, headers))
-            {
-                co_return boost::system::error_code {};
-            }
-
-            // HEAD probe: grab the origin's headers ahead of the GET so its
-            // Content-Disposition can name the file and its cache directives can
-            // gate whether the fetched body is worth storing.
-            httplib::headers probe_headers;
-            if (auto head = co_await send_request(ui, method::head, headers);
-                head.has_value() && head->response.result() == status::ok)
-            {
-                // headers() 是 borrow 视图：必须 merge 出副本，否则协程帧销毁后悬垂。
-                probe_headers.merge(head->response.headers());
-            }
-
-            store_suggested_filename(probe_headers);
-
-            progress_.set_state(downloader::state::downloading, {});
-
-            auto dl = co_await download_single(ui, save_path, cfg, headers);
-            if (!dl.has_value())
-            {
-                ec = dl.error();
-            }
-            else if (cache_manager_.enabled() && !save_path.empty())
-            {
-                bool cacheable = http_header_util::response_is_cacheable(probe_headers);
-                if (!dl->headers.empty())
-                {
-                    cacheable = cacheable && http_header_util::response_is_cacheable(dl->headers);
-                }
-                if (cacheable)
-                {
-                    auto meta = cache_manager::make_meta(dl->headers, probe_headers, dl->final_ui, true);
-                    // Retention is governed by the cache's max_age (so stale
-                    // entries stay available for revalidation); HTTP freshness
-                    // travels inside the opaque metadata blob.
-                    cache_manager_.put(state_url, save_path, meta);
-                }
-            }
+            co_return boost::system::error_code {};
         }
-        catch (std::exception const&)
+
+        // HEAD probe: grab the origin's headers ahead of the GET so its
+        // Content-Disposition can name the file and its cache directives can
+        // gate whether the fetched body is worth storing.
+        httplib::headers probe_headers;
+        if (auto head = co_await send_request(ui, method::head, headers);
+            head.has_value() && head->response.result() == status::ok)
         {
-            ec = boost::system::errc::make_error_code(boost::system::errc::io_error);
+            // headers() 是 borrow 视图：必须 merge 出副本，否则协程帧销毁后悬垂。
+            probe_headers.merge(head->response.headers());
         }
-        catch (...)
+
+        store_suggested_filename(probe_headers);
+
+        progress_.set_state(downloader::state::downloading, {});
+
+        auto dl = co_await download_single(ui, save_path, cfg, headers);
+        if (!dl.has_value())
         {
-            ec = boost::system::errc::make_error_code(boost::system::errc::io_error);
+            ec = dl.error();
+        }
+        else if (cache_manager_.enabled() && !save_path.empty())
+        {
+            bool cacheable = http_header_util::response_is_cacheable(probe_headers);
+            if (!dl->headers.empty())
+            {
+                cacheable = cacheable && http_header_util::response_is_cacheable(dl->headers);
+            }
+            if (cacheable)
+            {
+                auto meta = cache_manager::make_meta(dl->headers, probe_headers, dl->final_ui, true);
+                // Retention is governed by the cache's max_age (so stale
+                // entries stay available for revalidation); HTTP freshness
+                // travels inside the opaque metadata blob.
+                cache_manager_.put(state_url, save_path, meta);
+            }
         }
 
         if (ec)
