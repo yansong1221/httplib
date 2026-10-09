@@ -757,9 +757,22 @@ TEST_CASE("Download scheduler: progress callback carries id and url", "[download
     fs::remove(dl_path);
 }
 
-TEST_CASE("Download scheduler: empty run exits immediately", "[download_scheduler]")
+TEST_CASE("Download scheduler: run is persistent until shutdown", "[download_scheduler]")
 {
+    auto server_path = fs::temp_directory_path() / "sched_run_srv.txt";
+    {
+        std::ofstream f(server_path, std::ios::binary);
+        f << "persist\n";
+    }
+    auto dl_path = fs::temp_directory_path() / "sched_run_out.bin";
+
     dl_sched_scaffold ts;
+    ts.router().set_http_handler<httplib::method::get>("/run",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  { resp.set_file_content(server_path); });
+    ts.router().set_http_handler<httplib::method::head>("/run",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   { resp.set_file_content(server_path); });
     ts.start();
 
     auto sched = std::make_shared<httplib::client::download_scheduler>(ts.ioc_.get_executor(), ts.pool);
@@ -775,7 +788,21 @@ TEST_CASE("Download scheduler: empty run exits immediately", "[download_schedule
         },
         net::detached);
 
+    // No tasks yet: a persistent run must keep waiting, not exit.
+    REQUIRE(f.wait_for(std::chrono::milliseconds(300)) == std::future_status::timeout);
+
+    // A task submitted after startup (with none present at launch) is served.
+    auto id = sched->add(ts.url_for_path("/run"), dl_path);
+    REQUIRE(wait_until([&] { return is_terminal(sched->get_status(id).state); }));
+    REQUIRE(sched->get_status(id).state == httplib::client::downloader::state::completed);
+    REQUIRE(read_file(dl_path) == "persist\n");
+    REQUIRE(f.wait_for(std::chrono::milliseconds(100)) == std::future_status::timeout);
+
+    shutdown_scheduler(ts.ioc_, sched);
     REQUIRE(f.wait_for(std::chrono::seconds(5)) == std::future_status::ready);
+
+    remove_eventually(server_path);
+    fs::remove(dl_path);
 }
 
 TEST_CASE("Download scheduler: pending pause blocks dispatch until resume", "[download_scheduler]")
@@ -1477,10 +1504,7 @@ TEST_CASE("Download scheduler: concurrent API calls from many threads", "[downlo
         ts.pool,
         httplib::client::download_scheduler::scheduler_config { .max_concurrent = 4 });
 
-    // Seed a task first so async_run never observes an empty task set and
-    // exits before the worker threads start submitting.
-    auto seed_out = fs::temp_directory_path() / "sched_mt_seed.bin";
-    sched->add(ts.url_for_path("/m"), seed_out);
+    // Run is persistent, so it may be started before any task is submitted.
     start_scheduler(ts.ioc_, sched);
 
     constexpr int kThreads = 4;
@@ -1545,8 +1569,6 @@ TEST_CASE("Download scheduler: concurrent API calls from many threads", "[downlo
     REQUIRE(sched->pending_count() == 0);
 
     remove_eventually(server_path);
-    std::error_code ec;
-    fs::remove(seed_out, ec);
     for (int t = 0; t < kThreads; ++t)
     {
         for (int i = 0; i < kIterations; ++i)

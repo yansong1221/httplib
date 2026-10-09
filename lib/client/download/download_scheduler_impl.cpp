@@ -567,11 +567,10 @@ namespace httplib::client
                         std::lock_guard<std::mutex> lk(mtx_);
                         dispatch_pending_locked();
 
-                        // All pending queued and running tasks drained.
-                        if (pending_queue_.empty() && running_count_ == 0)
-                        {
-                            done = tasks_.empty() || shutdown_requested_;
-                        }
+                        // Persistent driver: keep serving add() calls until an
+                        // explicit shutdown once everything has drained. An empty
+                        // task set does NOT terminate the loop.
+                        done = shutdown_requested_ && pending_queue_.empty() && running_count_ == 0;
                     }
                     if (done)
                     {

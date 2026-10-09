@@ -109,9 +109,10 @@ namespace httplib::client
 
         // -- awaitable --
 
-        /// Drive all tasks until every submitted task reaches a terminal state
-        /// (completed / failed / cancelled).  New tasks may be added while
-        /// this coroutine is running.
+        /// Persistent driver: dispatch tasks until async_shutdown() is called
+        /// and the queue drains. New tasks may be added at any time — including
+        /// before any task exists — and will be served. Does not return merely
+        /// because all currently submitted tasks have reached a terminal state.
         net::awaitable<void> async_run();
 
         /// Wait for the next task to reach a terminal state.
