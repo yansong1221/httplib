@@ -482,15 +482,13 @@ namespace httplib::client
     void
     downloader::impl::set_progress_callback(downloader::progress_callback cb)
     {
-        std::lock_guard lk(callback_mutex_);
-        progress_cb_ = std::move(cb);
+        progress_cb_.store(std::make_shared<downloader::progress_callback>(std::move(cb)));
     }
 
     void
     downloader::impl::set_state_callback(downloader::state_callback cb)
     {
-        std::lock_guard lk(callback_mutex_);
-        state_cb_ = std::move(cb);
+        state_cb_.store(std::make_shared<downloader::state_callback>(std::move(cb)));
     }
 
     void
@@ -520,8 +518,7 @@ namespace httplib::client
     downloader::state
     downloader::impl::current_state() const
     {
-        std::lock_guard lk(state_mutex_);
-        return state_;
+        return state_.load();
     }
 
     void
@@ -693,18 +690,11 @@ namespace httplib::client
     void
     downloader::impl::set_state(downloader::state st, boost::system::error_code ec)
     {
-        downloader::state_callback cb;
+        state_.store(st);
+        auto cb = state_cb_.load();
+        if (cb && *cb)
         {
-            std::lock_guard lk(state_mutex_);
-            state_ = st;
-        }
-        {
-            std::lock_guard lk(callback_mutex_);
-            cb = state_cb_;
-        }
-        if (cb)
-        {
-            cb(st, ec);
+            (*cb)(st, ec);
         }
     }
 
@@ -727,12 +717,8 @@ namespace httplib::client
     void
     downloader::impl::update_progress(std::uint64_t delta_bytes)
     {
-        downloader::progress_callback cb;
-        {
-            std::lock_guard lk(callback_mutex_);
-            cb = progress_cb_;
-        }
-        if (!cb || delta_bytes == 0)
+        auto cb = progress_cb_.load();
+        if (!cb || !*cb || delta_bytes == 0)
         {
             return;
         }
@@ -758,7 +744,7 @@ namespace httplib::client
                 }
             }
         }
-        cb(info);
+        (*cb)(info);
     }
 
     void
@@ -1132,15 +1118,11 @@ namespace httplib::client
             record_resource_headers(result.headers);
 
             {
-                downloader::progress_callback cb;
-                {
-                    std::lock_guard lk(callback_mutex_);
-                    cb = progress_cb_;
-                }
-                if (cb)
+                auto cb = progress_cb_.load();
+                if (cb && *cb)
                 {
                     auto final_sz = file_total > 0 ? file_total : existing_size;
-                    cb(downloader::progress_info { final_sz, final_sz, 0, std::chrono::seconds(0), 0, 1 });
+                    (*cb)(downloader::progress_info { final_sz, final_sz, 0, std::chrono::seconds(0), 0, 1 });
                 }
             }
 
@@ -1417,19 +1399,15 @@ namespace httplib::client
         save_state(save_path);
 
         {
-            downloader::progress_callback cb;
+            auto cb = progress_cb_.load();
+            if (cb && *cb)
             {
-                std::lock_guard lk(callback_mutex_);
-                cb = progress_cb_;
-            }
-            if (cb)
-            {
-                cb(downloader::progress_info { content_length,
-                                               already_downloaded,
-                                               0,
-                                               std::chrono::seconds(0),
-                                               seg_count,
-                                               seg_count });
+                (*cb)(downloader::progress_info { content_length,
+                                                  already_downloaded,
+                                                  0,
+                                                  std::chrono::seconds(0),
+                                                  seg_count,
+                                                  seg_count });
             }
         }
 
@@ -1632,15 +1610,11 @@ namespace httplib::client
                                     // Mirror the normal path: report a final
                                     // 100% progress tick before completing so
                                     // observers see a consistent terminal update.
-                                    downloader::progress_callback cb;
-                                    {
-                                        std::lock_guard lk(callback_mutex_);
-                                        cb = progress_cb_;
-                                    }
-                                    if (cb)
+                                    auto cb = progress_cb_.load();
+                                    if (cb && *cb)
                                     {
                                         auto sz = fresh->body_size;
-                                        cb(downloader::progress_info { sz, sz, 0, std::chrono::seconds(0), 0, 1 });
+                                        (*cb)(downloader::progress_info { sz, sz, 0, std::chrono::seconds(0), 0, 1 });
                                     }
                                     set_state(downloader::state::completed, {});
                                     co_return boost::system::error_code {};

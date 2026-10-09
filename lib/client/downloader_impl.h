@@ -9,6 +9,7 @@
 #include <boost/system/error_code.hpp>
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -172,12 +173,10 @@ namespace httplib::client
         /// so a stale state from another URL is never reused.
         std::string state_url_;
 
-        mutable std::mutex callback_mutex_;
-        downloader::progress_callback progress_cb_;
-        downloader::state_callback state_cb_;
+        std::atomic<std::shared_ptr<downloader::progress_callback>> progress_cb_ { nullptr };
+        std::atomic<std::shared_ptr<downloader::state_callback>> state_cb_ { nullptr };
 
-        mutable std::mutex state_mutex_;
-        downloader::state state_ = downloader::state::idle;
+        std::atomic<downloader::state> state_ { downloader::state::idle };
 
         mutable std::mutex progress_mutex_;
         std::uint64_t total_bytes_ = 0;
