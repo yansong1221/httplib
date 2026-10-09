@@ -284,15 +284,13 @@ namespace httplib::client
     void
     download_scheduler::impl::set_progress_callback(progress_callback cb)
     {
-        std::lock_guard<std::mutex> lk(mtx_);
-        progress_cb_ = std::move(cb);
+        progress_cb_.store(std::make_shared<progress_callback>(std::move(cb)));
     }
 
     void
     download_scheduler::impl::set_state_callback(state_callback cb)
     {
-        std::lock_guard<std::mutex> lk(mtx_);
-        state_cb_ = std::move(cb);
+        state_cb_.store(std::make_shared<state_callback>(std::move(cb)));
     }
 
     void
@@ -472,7 +470,7 @@ namespace httplib::client
     void
     download_scheduler::impl::on_progress(task_id id, downloader::progress_info const& info)
     {
-        progress_callback cb;
+
         task_status ts;
         {
             std::lock_guard<std::mutex> lk(mtx_);
@@ -481,17 +479,16 @@ namespace httplib::client
             {
                 return;
             }
-            cb = progress_cb_;
             ts = entry->status;
             ts.total_bytes = info.total_bytes;
             ts.downloaded_bytes = info.downloaded_bytes;
             ts.speed_bytes_per_sec = info.speed_bytes_per_sec;
         }
-        if (cb)
+        if (auto cb = progress_cb_.load(); cb && *cb)
         {
             try
             {
-                cb(ts);
+                (*cb)(ts);
             }
             catch (...)
             {
@@ -502,7 +499,7 @@ namespace httplib::client
     void
     download_scheduler::impl::on_state(task_id id, downloader::state st, boost::system::error_code ec)
     {
-        state_callback cb;
+
         task_status ts;
         {
             std::lock_guard<std::mutex> lk(mtx_);
@@ -511,15 +508,14 @@ namespace httplib::client
             {
                 return;
             }
-            cb = state_cb_;
             entry->status.state = st;
             ts = entry->status;
         }
-        if (cb)
+        if (auto cb = state_cb_.load(); cb && *cb)
         {
             try
             {
-                cb(ts, ec);
+                (*cb)(ts, ec);
             }
             catch (...)
             {

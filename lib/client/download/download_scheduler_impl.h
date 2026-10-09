@@ -98,8 +98,8 @@ namespace httplib::client
         util::async_event scheduler_event_;
         util::async_event completed_event_;
 
-        progress_callback progress_cb_;
-        state_callback state_cb_;
+        std::atomic<std::shared_ptr<progress_callback>> progress_cb_ { nullptr };
+        std::atomic<std::shared_ptr<state_callback>> state_cb_ { nullptr };
 
         bool shutdown_requested_ = false;
     };
