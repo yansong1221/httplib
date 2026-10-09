@@ -11,6 +11,7 @@
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/use_future.hpp>
 #include <boost/system/error_code.hpp>
+#include <boost/system/result.hpp>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -23,23 +24,23 @@ namespace httplib::client
     class downloader::impl : public std::enable_shared_from_this<downloader::impl>
     {
       public:
-        struct probe_result
-        {
-            std::uint64_t content_length = 0;
-            httplib::headers headers;
-        };
-
-        /// Terminal response of a logical request after following redirects.
+        /// Terminal response of a logical request after following redirects: the
+        /// pooled connection that owns its (lazy) body, the response itself, and
+        /// the origin actually reached. Absence in the enclosing
+        /// `boost::system::result` means no usable response was obtained
+        /// (connection/acquire/send failure, cancellation, redirect exhaustion).
         struct send_result
         {
             http_client_pool::client_handle handle;
             client::response response;
+            url::url_info final_ui;
+        };
+
+        /// Success payload of a single-stream download: the terminal origin and
+        /// response headers needed for caching.
+        struct download_payload
+        {
             httplib::headers headers;
-            httplib::status status = status::unknown;
-            /// Set when no usable response was obtained (connection/acquire/send
-            /// failure, cancellation, redirect exhaustion).
-            boost::system::error_code error;
-            /// Origin/target actually reached after following redirects.
             url::url_info final_ui;
         };
 
@@ -81,8 +82,6 @@ namespace httplib::client
 
       private:
         void store_suggested_filename(httplib::headers const& headers);
-        void record_final_ui(url::url_info const& ui);
-        void record_resource_headers(httplib::headers const& headers);
 
         /// Body of a single run. Spawned by async_download() so its I/O is bound
         /// to that run's cancellation signal. Owns its URL by value.
@@ -93,21 +92,28 @@ namespace httplib::client
         net::awaitable<bool> check_remote_cache(url::url_info const& ui,
                                                 cache_manager::http_meta const& meta,
                                                 httplib::headers const& base_headers);
-        net::awaitable<probe_result> probe_content_length(url::url_info const& ui, httplib::headers const& base_headers);
+        /// Tries to complete the run from the response cache without any network
+        /// round-trip, copying the cached body to `save_path`. Returns true when
+        /// the cache satisfied the request.
+        net::awaitable<bool> try_serve_from_cache(url::url_info const& ui,
+                                                  std::string const& state_url,
+                                                  fs::path const& save_path,
+                                                  httplib::headers const& headers);
 
         /// Sends one logical request over a pooled connection and follows
         /// redirects, returning the terminal response. `req_headers` must already
         /// contain the fully merged per-request headers.
-        net::awaitable<send_result> send_request(url::url_info const& ui,
-                                                 httplib::method m,
-                                                 httplib::headers req_headers);
+        net::awaitable<boost::system::result<send_result>> send_request(url::url_info const& ui,
+                                                                        httplib::method m,
+                                                                        httplib::headers req_headers);
 
         /// Single-stream download with resume-on-interruption. Streams the body
         /// straight to disk and retries within `cfg.max_retries`.
-        net::awaitable<boost::system::error_code> download_single(url::url_info const& ui,
-                                                                  fs::path const& save_path,
-                                                                  downloader::config const& cfg,
-                                                                  httplib::headers const& base_headers);
+        net::awaitable<boost::system::result<download_payload>>
+        download_single(url::url_info const& ui,
+                        fs::path const& save_path,
+                        downloader::config const& cfg,
+                        httplib::headers const& base_headers);
 
       private:
         net::any_io_executor executor_;
@@ -128,14 +134,6 @@ namespace httplib::client
 
         cache_manager cache_manager_;
         std::shared_ptr<http_client_pool> pool_;
-
-        /// Captured from the download coroutine so the completed transfer's real
-        /// response headers (and final origin after redirects) can be written to
-        /// the cache.
-        mutable std::mutex resource_mutex_;
-        httplib::headers resource_headers_;
-        url::url_info final_ui_;
-        bool has_final_ui_ = false;
 
         mutable std::mutex filename_mutex_;
         std::string suggested_filename_;
