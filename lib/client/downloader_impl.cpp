@@ -476,8 +476,7 @@ namespace httplib::client
     void
     downloader::impl::set_config(downloader::config const& cfg)
     {
-        std::lock_guard lk(config_mutex_);
-        config_ = cfg;
+        config_.store(cfg);
     }
 
     void
@@ -515,8 +514,7 @@ namespace httplib::client
     downloader::config
     downloader::impl::get_config() const
     {
-        std::lock_guard lk(config_mutex_);
-        return config_;
+        return config_.load();
     }
 
     downloader::state
@@ -1558,10 +1556,7 @@ namespace httplib::client
         co_await net::this_coro::reset_cancellation_state(net::enable_total_cancellation());
         co_await net::this_coro::throw_if_cancelled(false);
 
-        {
-            std::lock_guard lk(config_mutex_);
-            active_config_ = config_;
-        }
+        active_config_ = config_.load();
         per_connection_rate_ = active_config_.max_speed_bytes_per_sec;
         custom_headers_ = headers;
         auth_scope_ = cache_auth_scope(custom_headers_);

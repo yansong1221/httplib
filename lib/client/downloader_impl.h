@@ -164,8 +164,7 @@ namespace httplib::client
       private:
         /// Serializes all of this downloader's payload writes on one strand.
         disk_writer disk_;
-        downloader::config config_;
-        mutable std::mutex config_mutex_;
+        std::atomic<downloader::config> config_ { downloader::config {} };
         /// Snapshot of `config_` captured when a download starts. Only touched by
         /// the download coroutine, so it needs no locking once the run begins.
         downloader::config active_config_;
