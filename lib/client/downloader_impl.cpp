@@ -12,7 +12,12 @@
 #include <algorithm>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string/trim.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/cancellation_state.hpp>
+#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/use_future.hpp>
 #include <format>
 #include <fstream>
@@ -525,6 +530,14 @@ namespace httplib::client
     downloader::impl::cancel()
     {
         cancelled_.store(true, std::memory_order_relaxed);
+
+        // Emit the current run's signal (if any) so blocked I/O aborts
+        // immediately. With no active run this is a no-op.
+        std::shared_ptr<net::cancellation_signal> signal = cancel_signal_.load();
+        if (signal)
+        {
+            signal->emit(net::cancellation_type::all);
+        }
         pause_event_.notify_all();
     }
 
@@ -1510,10 +1523,40 @@ namespace httplib::client
     net::awaitable<boost::system::error_code>
     downloader::impl::async_download(std::string_view url, fs::path const& save_path, httplib::headers const& headers)
     {
+        // Install this run's own cancellation source before spawning the body,
+        // so cancel() reaches it from the first moment the run is underway.
+        auto signal = std::make_shared<net::cancellation_signal>();
+        cancel_signal_.store(signal);
+
         // A prior cancel()/permanent failure only terminates the run it
         // interrupted. A fresh run starts from a clean slate so callers do not
-        // have to "clear" the downloader with a throwaway call first.
+        // have to "clear" the downloader with a throwaway call first. A cancel
+        // that races with this start is re-applied by the owner once the run
+        // reports its first state (see download_scheduler::impl::on_state).
         cancelled_.store(false, std::memory_order_relaxed);
+
+        auto result = co_await net::co_spawn(
+            executor_,
+            [this, url = std::string(url), save_path, headers]() -> net::awaitable<boost::system::error_code>
+            { co_return co_await run_download(url, save_path, headers); },
+            net::bind_cancellation_slot(signal->slot(), net::use_awaitable));
+
+        std::shared_ptr<net::cancellation_signal> expected = signal;
+        cancel_signal_.compare_exchange_strong(expected, nullptr);
+        co_return result;
+    }
+
+    net::awaitable<boost::system::error_code>
+    downloader::impl::run_download(std::string url, fs::path const& save_path, httplib::headers const& headers)
+    {
+        // Make this run's I/O cancellable with a *total* (graceful) request, and
+        // stop the coroutine from throwing on cancellation. In-flight operations
+        // then return operation_aborted so the body below still runs its cleanup
+        // (disk_.close(), state updates) before returning. The cancellation state
+        // is shared by every coroutine in this run's thread of execution, so the
+        // helper coroutines (send_request, co_download_*) inherit it too.
+        co_await net::this_coro::reset_cancellation_state(net::enable_total_cancellation());
+        co_await net::this_coro::throw_if_cancelled(false);
 
         {
             std::lock_guard lk(config_mutex_);
@@ -1541,6 +1584,16 @@ namespace httplib::client
         state_url_ = make_cache_key(ui);
 
         set_state(downloader::state::connecting, {});
+
+        // set_state() above runs user/owner callbacks synchronously, which is
+        // where a cancellation that raced past the reset is re-applied. Honour
+        // it before doing any work (including serving from cache).
+        if (cancelled_.load(std::memory_order_relaxed))
+        {
+            auto aborted = boost::asio::error::operation_aborted;
+            set_state(downloader::state::cancelled, aborted);
+            co_return aborted;
+        }
 
         boost::system::error_code ec;
         try

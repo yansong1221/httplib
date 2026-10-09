@@ -15,6 +15,7 @@
 #include <string_view>
 #include <vector>
 #include "beast_alias.hpp"
+#include <boost/asio/cancellation_signal.hpp>
 
 namespace httplib::client
 {
@@ -133,6 +134,12 @@ namespace httplib::client
         void del_state(fs::path const& save_path) const;
         static fs::path state_path(fs::path const& save_path);
 
+        /// Body of a single run. Spawned by async_download() so its I/O is bound
+        /// to that run's cancellation signal. Owns its URL by value.
+        net::awaitable<boost::system::error_code> run_download(std::string url,
+                                                               fs::path const& save_path,
+                                                               httplib::headers const& headers);
+
         net::awaitable<bool> check_remote_cache(url::url_info const& ui, http_meta const& meta);
         net::awaitable<probe_result> probe_content_length(url::url_info const& ui);
 
@@ -188,6 +195,13 @@ namespace httplib::client
         std::atomic<bool> cancelled_ { false };
         std::atomic<bool> paused_ { false };
         util::async_event pause_event_;
+
+        /// Per-run cancellation source. async_download() installs a fresh signal
+        /// for each run and binds it to the run's coroutine, so cancel() aborts
+        /// in-flight I/O immediately instead of waiting for a timeout. A cancel()
+        /// issued while no run is active finds no signal and is a no-op, so it
+        /// cannot leak into the next run.
+        std::atomic<std::shared_ptr<net::cancellation_signal>> cancel_signal_ { nullptr };
 
         std::vector<segment_task> segments_;
         /// Bytes already persisted for each segment of the current single-file

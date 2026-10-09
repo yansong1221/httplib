@@ -650,6 +650,74 @@ TEST_CASE("Downloader: download after cancel starts cleanly", "[downloader]")
     fs::remove(dl_path);
 }
 
+TEST_CASE("Downloader: cancel at connect aborts a would-be cache hit", "[downloader]")
+{
+    // Regression: a fresh run resets its cancellation state while starting, so a
+    // cancel that lands right as the run begins used to be lost -- a fresh cache
+    // hit would still copy the body and report success after the caller had
+    // cancelled. Triggering the cancel from the "connecting" state callback pins
+    // that start-of-run window deterministically.
+    auto server_path = fs::temp_directory_path() / "httplib_dl_startcancel_srv.txt";
+    {
+        std::ofstream f(server_path, std::ios::binary);
+        f << "start-cancel content\n";
+    }
+
+    auto dl_path1 = fs::temp_directory_path() / "httplib_dl_startcancel_out1.bin";
+    auto dl_path2 = fs::temp_directory_path() / "httplib_dl_startcancel_out2.bin";
+    auto cache_dir = fs::temp_directory_path() / "httplib_dl_startcancel_cache";
+    fs::remove_all(cache_dir);
+
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<httplib::method::get>("/startcancel",
+                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  {
+                                                      resp.set(httplib::field::etag, "\"sc1\"");
+                                                      resp.set(httplib::field::cache_control, "max-age=3600");
+                                                      resp.set_file_content(server_path);
+                                                  });
+    ts.router().set_http_handler<httplib::method::head>("/startcancel",
+                                                   [&](httplib::server::request&, httplib::server::response& resp)
+                                                   {
+                                                       resp.set(httplib::field::content_length, "21");
+                                                       resp.set(httplib::field::accept_ranges, "bytes");
+                                                   });
+    ts.start();
+
+    auto cache = std::make_shared<httplib::client::disk_cache>(cache_dir);
+
+    // Prime the cache with a fresh entry so the next run can be served without I/O.
+    {
+        httplib::client::downloader dl(ts.ioc_, ts.pool);
+        dl.set_cache(cache);
+        auto ec = dl.download(ts.url_for_path("/startcancel"), dl_path1).get();
+        REQUIRE_FALSE(ec);
+        REQUIRE(read_file(dl_path1) == "start-cancel content\n");
+    }
+    REQUIRE(cache->entry_count() >= 1);
+
+    {
+        httplib::client::downloader dl(ts.ioc_, ts.pool);
+        dl.set_cache(cache);
+        dl.set_state_callback(
+            [&](httplib::client::downloader::state st, boost::system::error_code)
+            {
+                if (st == httplib::client::downloader::state::connecting)
+                {
+                    dl.cancel();
+                }
+            });
+        auto ec = dl.download(ts.url_for_path("/startcancel"), dl_path2).get();
+        REQUIRE(ec);
+        REQUIRE(dl.current_state() == httplib::client::downloader::state::cancelled);
+    }
+    REQUIRE_FALSE(fs::exists(dl_path2));
+
+    fs::remove(server_path);
+    fs::remove(dl_path1);
+    fs::remove_all(cache_dir);
+}
+
 TEST_CASE("Downloader: multiple retries succeed eventually", "[downloader]")
 {
     auto server_path = fs::temp_directory_path() / "httplib_dl_retry_srv.bin";
