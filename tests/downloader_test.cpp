@@ -1485,7 +1485,7 @@ TEST_CASE("Downloader: invalid URL maps to a failed error, not a throw", "[downl
     fs::remove(dl_path);
 }
 
-TEST_CASE("Downloader: multi-segment resume reuses existing part files", "[downloader]")
+TEST_CASE("Downloader: multi-segment resume reuses existing bytes", "[downloader]")
 {
     auto server_path = fs::temp_directory_path() / "httplib_dl_msresume_srv.bin";
     constexpr std::uint64_t kSize = 400 * 1024; // divisible by 4
@@ -1529,19 +1529,27 @@ TEST_CASE("Downloader: multi-segment resume reuses existing part files", "[downl
                                                    { resp.set_file_content(server_path); });
     ts.start();
 
-    // Seed partial part files (first half of every segment) plus a matching
-    // sidecar state so the downloader can pick up where it left off.
+    // Seed the single output file with the first half of every segment (each at
+    // its real byte offset) plus a matching sidecar recording per-segment
+    // progress, so the downloader can pick up where it left off.
     std::uint64_t const half = kSegSize / 2;
-    for (int i = 0; i < kSegments; ++i)
     {
-        std::ofstream pf(fs::path(dl_path.string() + ".part" + std::to_string(i)), std::ios::binary);
-        pf.write(data.data() + i * kSegSize, static_cast<std::streamsize>(half));
+        std::ofstream out(dl_path, std::ios::binary | std::ios::trunc);
+        for (int i = 0; i < kSegments; ++i)
+        {
+            out.seekp(static_cast<std::streamoff>(static_cast<std::uint64_t>(i) * kSegSize));
+            out.write(data.data() + i * kSegSize, static_cast<std::streamsize>(half));
+        }
     }
     {
         std::ofstream sf(fs::path(dl_path.string() + ".dlstate"), std::ios::trunc);
         sf << "url=" << ts.url_for_path("/resume-multi") << '\n';
         sf << "content_length=" << kSize << '\n';
         sf << "segments=" << kSegments << '\n';
+        for (int i = 0; i < kSegments; ++i)
+        {
+            sf << "seg" << i << "_downloaded=" << half << '\n';
+        }
     }
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
@@ -1840,7 +1848,7 @@ TEST_CASE("Downloader: redirect response body does not corrupt connection reuse"
     fs::remove(dl_path, rm_ec);
 }
 
-TEST_CASE("Downloader: oversized part file fails the merge instead of succeeding", "[downloader]")
+TEST_CASE("Downloader: corrupt resume state is discarded, not trusted", "[downloader]")
 {
     auto server_path = fs::temp_directory_path() / "httplib_dl_mergebad_srv.bin";
     constexpr std::uint64_t kSize = 100 * 1024; // divisible by 4
@@ -1856,10 +1864,6 @@ TEST_CASE("Downloader: oversized part file fails the merge instead of succeeding
     auto dl_path = fs::temp_directory_path() / "httplib_dl_mergebad_out.bin";
     std::error_code rm_ec;
     fs::remove(dl_path, rm_ec);
-    for (int i = 0; i < kSegments; ++i)
-    {
-        fs::remove(fs::path(dl_path.string() + ".part" + std::to_string(i)), rm_ec);
-    }
     fs::remove(fs::path(dl_path.string() + ".dlstate"), rm_ec);
 
     dl_test_scaffold ts;
@@ -1871,37 +1875,36 @@ TEST_CASE("Downloader: oversized part file fails the merge instead of succeeding
                                                    { resp.set_file_content(server_path); });
     ts.start();
 
-    // Seed every part as "already complete" (so no network fetch happens), but
-    // make part 0 larger than its segment. The parts no longer add up to the
-    // content length, so merging must fail rather than emit a corrupt file.
-    for (int i = 0; i < kSegments; ++i)
+    // Seed the output with junk and a state whose per-segment counter exceeds
+    // its segment length. The downloader must reject the state and re-download
+    // from scratch rather than skip bytes and emit a corrupt file.
     {
-        auto part = fs::path(dl_path.string() + ".part" + std::to_string(i));
-        std::ofstream pf(part, std::ios::binary);
-        std::uint64_t sz = kSegSize + (i == 0 ? 50 : 0);
-        std::string chunk(static_cast<std::size_t>(sz), static_cast<char>('a' + i));
-        pf.write(chunk.data(), static_cast<std::streamsize>(chunk.size()));
+        std::ofstream out(dl_path, std::ios::binary | std::ios::trunc);
+        std::string junk(static_cast<std::size_t>(kSize), 'Z');
+        out.write(junk.data(), static_cast<std::streamsize>(junk.size()));
     }
     {
         std::ofstream sf(fs::path(dl_path.string() + ".dlstate"), std::ios::trunc);
         sf << "url=" << ts.url_for_path("/mergebad") << '\n';
         sf << "content_length=" << kSize << '\n';
         sf << "segments=" << kSegments << '\n';
+        for (int i = 0; i < kSegments; ++i)
+        {
+            std::uint64_t v = (i == 0) ? kSegSize + 50 : 0;
+            sf << "seg" << i << "_downloaded=" << v << '\n';
+        }
     }
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
     dl.set_config({ .segments = kSegments, .resume = true });
     auto ec = dl.download(ts.url_for_path("/mergebad"), dl_path).get();
-    REQUIRE(ec);
-    REQUIRE(dl.current_state() == httplib::client::downloader::state::failed);
-    REQUIRE_FALSE(fs::exists(dl_path, rm_ec));
+    REQUIRE_FALSE(ec);
+    REQUIRE(dl.current_state() == httplib::client::downloader::state::completed);
+    REQUIRE(read_file(dl_path) == data);
+    REQUIRE_FALSE(fs::exists(fs::path(dl_path.string() + ".dlstate"), rm_ec));
 
     fs::remove(server_path, rm_ec);
     fs::remove(dl_path, rm_ec);
-    for (int i = 0; i < kSegments; ++i)
-    {
-        fs::remove(fs::path(dl_path.string() + ".part" + std::to_string(i)), rm_ec);
-    }
     fs::remove(fs::path(dl_path.string() + ".dlstate"), rm_ec);
 }
 

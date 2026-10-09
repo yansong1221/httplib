@@ -16,6 +16,7 @@
 #include <boost/asio/use_future.hpp>
 #include <format>
 #include <fstream>
+#include <span>
 #include <stdexcept>
 
 namespace httplib::client
@@ -455,6 +456,7 @@ namespace httplib::client
 
     downloader::impl::impl(net::any_io_executor ex, std::shared_ptr<http_client_pool> pool)
         : executor_(ex)
+        , disk_(ex)
         , pause_event_(ex)
         , pool_(std::move(pool))
     {
@@ -569,28 +571,22 @@ namespace httplib::client
         {
             return;
         }
-        auto sp = state_path(save_path);
-        std::ofstream f(sp, std::ios::trunc);
+        std::vector<std::uint64_t> counts;
+        {
+            std::lock_guard lk(progress_mutex_);
+            counts = seg_downloaded_;
+        }
+        std::ofstream f(state_path(save_path), std::ios::trunc);
         if (!f.is_open())
         {
             return;
         }
         f << "url=" << state_url_ << '\n';
         f << "content_length=" << total_bytes_ << '\n';
-        f << "segments=" << segments_.size() << '\n';
-        for (auto const& seg : segments_)
+        f << "segments=" << counts.size() << '\n';
+        for (std::size_t i = 0; i < counts.size(); ++i)
         {
-            std::error_code ec;
-            std::uint64_t downloaded = 0;
-            if (fs::exists(seg.part_path, ec) && !ec)
-            {
-                downloaded = fs::file_size(seg.part_path, ec);
-                if (ec)
-                {
-                    downloaded = 0;
-                }
-            }
-            f << "seg" << seg.index << "_downloaded=" << downloaded << '\n';
+            f << "seg" << i << "_downloaded=" << counts[i] << '\n';
         }
     }
 
@@ -598,13 +594,7 @@ namespace httplib::client
     downloader::impl::load_state(fs::path const& save_path) const
     {
         download_state st;
-        auto sp = state_path(save_path);
-        std::error_code ec;
-        if (!fs::exists(sp, ec) || ec)
-        {
-            return st;
-        }
-        std::ifstream f(sp);
+        std::ifstream f(state_path(save_path));
         if (!f.is_open())
         {
             return st;
@@ -652,10 +642,23 @@ namespace httplib::client
             }
             else if (key.starts_with("seg") && key.ends_with("_downloaded"))
             {
+                // Key shape: "seg<index>_downloaded". Keep per-segment progress
+                // indexed so a gap in the file is never mistaken for progress.
+                constexpr std::string_view suffix = "_downloaded";
+                auto idx_str = key.substr(3, key.size() - 3 - suffix.size());
                 try
                 {
+                    int idx = std::stoi(idx_str);
                     auto v = std::stoull(val);
-                    st.seg_downloaded.push_back(v);
+                    if (idx >= 0)
+                    {
+                        auto uidx = static_cast<std::size_t>(idx);
+                        if (uidx >= st.seg_downloaded.size())
+                        {
+                            st.seg_downloaded.resize(uidx + 1, 0);
+                        }
+                        st.seg_downloaded[uidx] = v;
+                    }
                 }
                 catch (...)
                 {
@@ -668,9 +671,8 @@ namespace httplib::client
     void
     downloader::impl::del_state(fs::path const& save_path) const
     {
-        auto sp = state_path(save_path);
         std::error_code ec;
-        fs::remove(sp, ec);
+        fs::remove(state_path(save_path), ec);
     }
 
     // =========================================================================
@@ -1053,20 +1055,9 @@ namespace httplib::client
                 active_segments_ = 1;
             }
 
-            auto open_mode = std::ios::out | std::ios::binary;
-            if (existing_size > 0)
+            if (auto open_ec = co_await disk_.open(save_path, existing_size == 0, 0, existing_size); open_ec)
             {
-                open_mode |= std::ios::app;
-            }
-            else
-            {
-                open_mode |= std::ios::trunc;
-            }
-
-            std::ofstream out(save_path, open_mode);
-            if (!out.is_open())
-            {
-                co_return boost::system::errc::make_error_code(boost::system::errc::permission_denied);
+                co_return open_ec;
             }
 
             auto& resp = result.response;
@@ -1077,18 +1068,21 @@ namespace httplib::client
             {
                 if (cancelled_.load(std::memory_order_relaxed))
                 {
+                    co_await disk_.close();
                     co_return boost::asio::error::operation_aborted;
                 }
 
                 auto pause_ec = co_await co_wait_if_paused();
                 if (pause_ec)
                 {
+                    co_await disk_.close();
                     co_return pause_ec;
                 }
                 boost::system::error_code ec;
                 auto n = co_await resp.read_some_decompressed(net::buffer(buf), ec);
                 if (ec)
                 {
+                    co_await disk_.close();
                     co_return ec;
                 }
                 if (n == 0)
@@ -1096,17 +1090,17 @@ namespace httplib::client
                     break;
                 }
 
-                out.write(buf.data(), n);
-                if (!out)
+                if (auto write_ec = co_await disk_.write(std::span<char const>(buf.data(), n)); write_ec)
                 {
-                    co_return boost::system::errc::make_error_code(boost::system::errc::no_space_on_device);
+                    co_await disk_.close();
+                    co_return write_ec;
                 }
 
                 session_bytes += n;
                 update_progress(n);
             }
 
-            out.close();
+            co_await disk_.close();
 
             // A response that stops short of its declared size must not be
             // reported as a successful download: the file would be silently
@@ -1150,11 +1144,10 @@ namespace httplib::client
     // =========================================================================
 
     net::awaitable<boost::system::error_code>
-    downloader::impl::co_download_segment(url::url_info const& ui,
-                                          std::uint64_t start,
-                                          std::uint64_t end,
-                                          fs::path const& part_path)
+    downloader::impl::co_download_segment(url::url_info const& ui, std::uint64_t start, std::uint64_t end, int index)
     {
+        auto const seg_len = end - start + 1;
+
         for (int attempt = 0; attempt <= active_config_.max_retries; ++attempt)
         {
             if (cancelled_.load(std::memory_order_relaxed))
@@ -1168,37 +1161,18 @@ namespace httplib::client
                 co_return pause_ec;
             }
 
-            std::uint64_t resume_at = start;
-            std::ios_base::openmode open_mode = std::ios::out | std::ios::binary;
-
-            if (active_config_.resume)
+            std::uint64_t have = 0;
             {
-                std::error_code ec;
-                if (fs::exists(part_path, ec) && !ec)
-                {
-                    auto sz = fs::file_size(part_path, ec);
-                    if (!ec && sz > 0)
-                    {
-                        auto seg_len = end - start + 1;
-                        if (sz >= seg_len)
-                        {
-                            // Already fully downloaded in a previous run.
-                            co_return boost::system::error_code {};
-                        }
-                        resume_at = start + sz;
-                    }
-                }
+                std::lock_guard lk(progress_mutex_);
+                have = index < static_cast<int>(seg_downloaded_.size()) ? seg_downloaded_[index] : 0;
+            }
+            if (have >= seg_len)
+            {
+                // Already fully persisted (previous attempt or run).
+                co_return boost::system::error_code {};
             }
 
-            if (resume_at == start)
-            {
-                open_mode |= std::ios::trunc;
-            }
-            else
-            {
-                open_mode |= std::ios::app;
-            }
-
+            std::uint64_t const resume_at = start + have;
             httplib::headers req_headers;
             req_headers.set(field::range, std::format("bytes={}-{}", resume_at, end));
 
@@ -1232,7 +1206,7 @@ namespace httplib::client
             }
 
             // Guard against a server returning a range that does not start where
-            // we asked; appending it would silently corrupt the merged output.
+            // we asked; writing it at our own offset would corrupt the file.
             if (auto range_start = parse_content_range_start(result.headers);
                 range_start.has_value() && *range_start != resume_at)
             {
@@ -1240,20 +1214,18 @@ namespace httplib::client
                 {
                     co_return boost::system::errc::make_error_code(boost::system::errc::protocol_error);
                 }
-                std::error_code rm_ec;
-                fs::remove(part_path, rm_ec);
+                // The remote layout disagrees with ours: restart this segment
+                // from its beginning, overwriting whatever it had.
+                {
+                    std::lock_guard lk(progress_mutex_);
+                    seg_downloaded_[index] = 0;
+                }
                 co_await httplib::util::sleep(active_config_.retry_backoff * (attempt + 1));
                 continue;
             }
 
             store_suggested_filename(result.headers);
             record_resource_headers(result.headers);
-
-            std::ofstream out(part_path, open_mode);
-            if (!out.is_open())
-            {
-                co_return boost::system::errc::make_error_code(boost::system::errc::permission_denied);
-            }
 
             auto& resp = result.response;
             std::vector<char> buf(kReadBufSize);
@@ -1266,10 +1238,10 @@ namespace httplib::client
                     co_return boost::asio::error::operation_aborted;
                 }
 
-                auto pause_ec = co_await co_wait_if_paused();
-                if (pause_ec)
+                auto inner_pause_ec = co_await co_wait_if_paused();
+                if (inner_pause_ec)
                 {
-                    co_return pause_ec;
+                    co_return inner_pause_ec;
                 }
                 boost::system::error_code ec;
                 auto n = co_await resp.read_some_decompressed(net::buffer(buf), ec);
@@ -1282,20 +1254,24 @@ namespace httplib::client
                     break;
                 }
 
-                out.write(buf.data(), n);
-                if (!out)
+                if (auto write_ec
+                    = co_await disk_.write_at(resume_at + session_bytes, std::span<char const>(buf.data(), n));
+                    write_ec)
                 {
-                    co_return boost::system::errc::make_error_code(boost::system::errc::no_space_on_device);
+                    co_return write_ec;
                 }
 
                 session_bytes += n;
+                {
+                    std::lock_guard lk(progress_mutex_);
+                    seg_downloaded_[index] += n;
+                }
                 update_progress(n);
             }
-            out.close();
 
             // The segment must have received exactly the bytes it asked for.
             // A short read (server closed early or lied about the range) would
-            // otherwise be appended and merged as if complete.
+            // otherwise be counted as complete.
             auto expected = end - resume_at + 1;
             if (!response_is_encoded(result.headers) && session_bytes != expected)
             {
@@ -1344,7 +1320,7 @@ namespace httplib::client
         }
 
         segments_.clear();
-        segments_.reserve(seg_count);
+        segments_.reserve(static_cast<std::size_t>(seg_count));
 
         std::uint64_t offset = 0;
         for (int i = 0; i < seg_count; ++i)
@@ -1354,74 +1330,64 @@ namespace httplib::client
             std::uint64_t end_byte = offset + sz - 1;
             offset += sz;
 
-            auto part_path = fs::path(save_path.string() + ".part" + std::to_string(i));
-            segments_.push_back({ start_byte, end_byte, i, part_path });
+            segments_.push_back({ start_byte, end_byte, i });
         }
 
-        // Decide whether previously written part files can be reused. A sidecar
-        // state file pins down the layout (url + content length + segment count)
-        // so a stale state from an unrelated download is never resumed.
+        // A sidecar state file pins down the layout (url + content length +
+        // segment count) and the per-segment progress, so stale or inconsistent
+        // state from another download is never resumed.
         bool can_resume = false;
+        download_state prev;
         if (active_config_.resume && active_config_.save_state)
         {
-            auto prev = load_state(save_path);
+            prev = load_state(save_path);
             if (prev.content_length == content_length && prev.segments == seg_count && prev.url == state_url_)
             {
                 can_resume = true;
+                for (int i = 0; i < seg_count; ++i)
+                {
+                    auto uidx = static_cast<std::size_t>(i);
+                    auto seg_len = segments_[uidx].end_byte - segments_[uidx].start_byte + 1;
+                    auto have = uidx < prev.seg_downloaded.size() ? prev.seg_downloaded[uidx] : 0;
+                    // A counter past its segment means the state is corrupt;
+                    // abandon the resume rather than skip bytes we may not have.
+                    if (have > seg_len)
+                    {
+                        can_resume = false;
+                        break;
+                    }
+                }
             }
         }
 
-        // Drop part files that belong to an incompatible or unknown layout.
         {
-            auto stem = save_path.filename().string();
-            std::error_code ec;
-            for (auto const& de : fs::directory_iterator(save_path.parent_path(), ec))
+            std::lock_guard lk(progress_mutex_);
+            seg_downloaded_.assign(static_cast<std::size_t>(seg_count), 0);
+            if (can_resume)
             {
-                if (ec)
+                for (int i = 0; i < seg_count; ++i)
                 {
-                    break;
-                }
-                auto name = de.path().filename().string();
-                if (!name.starts_with(stem + ".part"))
-                {
-                    continue;
-                }
-                auto idx_str = name.substr(stem.size() + 5); // skip "<stem>.part"
-                int idx = -1;
-                try
-                {
-                    idx = std::stoi(idx_str);
-                }
-                catch (...)
-                {
-                    idx = -1;
-                }
-                if (!can_resume || idx < 0 || idx >= seg_count)
-                {
-                    std::error_code rm_ec;
-                    fs::remove(de.path(), rm_ec);
+                    auto uidx = static_cast<std::size_t>(i);
+                    seg_downloaded_[uidx] = uidx < prev.seg_downloaded.size() ? prev.seg_downloaded[uidx] : 0;
                 }
             }
         }
-        if (!can_resume)
-        {
-            del_state(save_path);
-        }
 
-        // Progress must be seeded from the bytes actually present on disk, not
-        // from the state file, otherwise resumed segments are double-counted.
         std::uint64_t already_downloaded = 0;
-        if (can_resume)
         {
-            for (auto const& seg : segments_)
+            std::lock_guard lk(progress_mutex_);
+            for (auto v : seg_downloaded_)
             {
-                std::error_code ec;
-                auto sz = fs::file_size(seg.part_path, ec);
-                if (!ec && sz > 0)
-                {
-                    already_downloaded += std::min<std::uint64_t>(sz, seg.end_byte - seg.start_byte + 1);
-                }
+                already_downloaded += v;
             }
+        }
+
+        // Open the single output file all segments write into. A resumed run
+        // keeps existing bytes; a fresh run truncates and preallocates so that
+        // out-of-order segment writes never zero-fill a gap.
+        if (auto open_ec = co_await disk_.open(save_path, !can_resume, content_length, 0); open_ec)
+        {
+            co_return open_ec;
         }
 
         {
@@ -1457,21 +1423,12 @@ namespace httplib::client
         }
 
         std::vector<net::awaitable<boost::system::error_code>> ops;
-        ops.reserve(seg_count);
+        ops.reserve(static_cast<std::size_t>(seg_count));
 
         for (auto& seg : segments_)
         {
-            ops.emplace_back(co_download_segment(ui, seg.start_byte, seg.end_byte, seg.part_path));
+            ops.emplace_back(co_download_segment(ui, seg.start_byte, seg.end_byte, seg.index));
         }
-
-        auto remove_all_parts = [&]
-        {
-            for (auto& s : segments_)
-            {
-                std::error_code fs_ec;
-                fs::remove(s.part_path, fs_ec);
-            }
-        };
 
         boost::system::error_code first_error;
         boost::system::error_code aborted_error;
@@ -1512,114 +1469,38 @@ namespace httplib::client
             first_error = boost::system::errc::make_error_code(boost::system::errc::io_error);
         }
 
+        co_await disk_.close();
+
         if (first_error)
         {
+            // The single output file is unusable; drop it and the state so the
+            // next run starts over instead of failing forever.
+            std::error_code rm_ec;
+            fs::remove(save_path, rm_ec);
             del_state(save_path);
-            remove_all_parts();
             co_return first_error;
         }
 
         if (ranges_unsupported)
         {
-            // Byte ranges are unavailable; leave no partial artifacts behind and
-            // let the caller retry as a single stream.
+            // Byte ranges are unavailable; leave nothing behind and let the
+            // caller retry as a single stream.
+            std::error_code rm_ec;
+            fs::remove(save_path, rm_ec);
             del_state(save_path);
-            remove_all_parts();
             co_return boost::system::errc::make_error_code(boost::system::errc::operation_not_supported);
         }
 
         if (aborted_error)
         {
-            // Keep parts + state so a later run can resume where it stopped.
+            // Keep the output + per-segment progress so a later run can resume.
             save_state(save_path);
             co_return aborted_error;
-        }
-
-        set_state(downloader::state::merging, {});
-        auto merge_ec = merge_parts_sync(save_path, seg_count, content_length);
-        if (merge_ec)
-        {
-            // A failed merge means the parts are missing/corrupt; drop them and
-            // the state so the next run starts over instead of failing forever.
-            remove_all_parts();
-            del_state(save_path);
-            co_return merge_ec;
         }
 
         del_state(save_path);
 
         co_return boost::system::error_code {};
-    }
-
-    // =========================================================================
-    // merge
-    // =========================================================================
-
-    boost::system::error_code
-    downloader::impl::merge_parts_sync(fs::path const& save_path, int total_segments, std::uint64_t expected_total)
-    {
-        std::ofstream out(save_path, std::ios::binary | std::ios::trunc);
-        if (!out.is_open())
-        {
-            return boost::system::errc::make_error_code(boost::system::errc::permission_denied);
-        }
-
-        constexpr std::size_t kBufSize = 1024 * 1024;
-        auto buf = std::make_unique<char[]>(kBufSize);
-        std::uint64_t written_total = 0;
-
-        for (int i = 0; i < total_segments; ++i)
-        {
-            auto part_path = fs::path(save_path.string() + ".part" + std::to_string(i));
-            std::ifstream in(part_path, std::ios::binary);
-            if (!in.is_open())
-            {
-                out.close();
-                std::error_code rm_ec;
-                fs::remove(save_path, rm_ec);
-                return boost::system::errc::make_error_code(boost::system::errc::no_such_file_or_directory);
-            }
-
-            while (in)
-            {
-                in.read(buf.get(), kBufSize);
-                auto n = static_cast<std::size_t>(in.gcount());
-                if (n == 0)
-                {
-                    break;
-                }
-                out.write(buf.get(), n);
-                if (!out)
-                {
-                    out.close();
-                    std::error_code rm_ec;
-                    fs::remove(save_path, rm_ec);
-                    return boost::system::errc::make_error_code(boost::system::errc::no_space_on_device);
-                }
-                written_total += n;
-            }
-            in.close();
-        }
-        out.close();
-
-        // If the parts do not add up to the expected total, the merged file is
-        // incomplete/corrupt; discard it rather than leave a bad artifact that
-        // looks like a successful download.
-        if (expected_total > 0 && written_total != expected_total)
-        {
-            std::error_code rm_ec;
-            fs::remove(save_path, rm_ec);
-            return boost::system::errc::make_error_code(boost::system::errc::message_size);
-        }
-
-        for (int i = 0; i < total_segments; ++i)
-        {
-            auto part_path = fs::path(save_path.string() + ".part" + std::to_string(i));
-            std::error_code ec;
-            fs::remove(part_path, ec);
-        }
-
-        return {};
     }
 
     // =========================================================================

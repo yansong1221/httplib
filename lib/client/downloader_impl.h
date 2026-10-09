@@ -1,4 +1,5 @@
 #pragma once
+#include "disk_writer.h"
 #include "httplib/client/cache.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/downloader.hpp"
@@ -26,7 +27,6 @@ namespace httplib::client
             std::uint64_t start_byte;
             std::uint64_t end_byte;
             int index;
-            fs::path part_path;
         };
 
         struct download_state
@@ -34,6 +34,8 @@ namespace httplib::client
             std::string url;
             std::uint64_t content_length = 0;
             int segments = 0;
+            /// Bytes persisted per segment (indexed by segment). Empty or short
+            /// vectors are treated as "no progress".
             std::vector<std::uint64_t> seg_downloaded;
         };
 
@@ -145,18 +147,16 @@ namespace httplib::client
         net::awaitable<boost::system::error_code> co_download_segment(url::url_info const& ui,
                                                                       std::uint64_t start,
                                                                       std::uint64_t end,
-                                                                      fs::path const& part_path);
+                                                                      int index);
 
         net::awaitable<boost::system::error_code> co_download_multi_segment(url::url_info const& ui,
                                                                             fs::path const& save_path,
                                                                             std::uint64_t content_length,
                                                                             httplib::headers const& probe_headers);
 
-        boost::system::error_code merge_parts_sync(fs::path const& save_path,
-                                                   int total_segments,
-                                                   std::uint64_t expected_total);
-
       private:
+        /// Serializes all of this downloader's payload writes on one strand.
+        disk_writer disk_;
         downloader::config config_;
         mutable std::mutex config_mutex_;
         /// Snapshot of `config_` captured when a download starts. Only touched by
@@ -190,6 +190,9 @@ namespace httplib::client
         util::async_event pause_event_;
 
         std::vector<segment_task> segments_;
+        /// Bytes already persisted for each segment of the current single-file
+        /// run, indexed by segment. Guarded by progress_mutex_.
+        std::vector<std::uint64_t> seg_downloaded_;
 
         std::shared_ptr<cache> cache_;
         std::shared_ptr<http_client_pool> pool_;
