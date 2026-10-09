@@ -258,11 +258,12 @@ namespace httplib::client
                                                        fs::path const& save_path,
                                                        httplib::headers const& headers = httplib::headers());
 
+        class impl;
+
       private:
         http_client(http_client const&) = delete;
         http_client& operator=(http_client const&) = delete;
 
-        class impl;
         std::shared_ptr<impl> impl_;
 
         friend class ::httplib::client::response::impl;
