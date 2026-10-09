@@ -364,6 +364,7 @@ namespace httplib::client
         // that races with this start is re-applied by the owner once the run
         // reports its first state (see download_scheduler::impl::on_state).
         cancelled_.store(false, std::memory_order_relaxed);
+        progress_.reset_state();
 
         auto result = co_await net::co_spawn(
             executor_,

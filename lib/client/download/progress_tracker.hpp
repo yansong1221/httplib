@@ -27,6 +27,7 @@ namespace httplib::client
         net::awaitable<boost::system::error_code> wait_if_paused(std::atomic<bool> const& cancelled);
 
         void set_state(downloader::state st, boost::system::error_code ec);
+        void reset_state();
         downloader::state state() const;
 
         void pause();
@@ -44,7 +45,7 @@ namespace httplib::client
 
         std::atomic<std::shared_ptr<downloader::progress_callback>> progress_cb_;
         std::atomic<std::shared_ptr<downloader::state_callback>> state_cb_;
-        std::atomic<downloader::state> state_;
+        std::atomic<downloader::state> state_ { downloader::state::idle };
 
         mutable std::mutex mutex_;
         std::uint64_t total_bytes_;

@@ -8,7 +8,6 @@ namespace httplib::client
         , pause_event_(ex)
         , progress_cb_(nullptr)
         , state_cb_(nullptr)
-        , state_(downloader::state::idle)
         , total_bytes_(0)
         , downloaded_bytes_(0)
         , paused_(false)
@@ -99,6 +98,13 @@ namespace httplib::client
         {
             (*cb)(st, ec);
         }
+    }
+
+    void
+    progress_tracker::reset_state()
+    {
+        // 静默重置：供 downloader 复用时把上一轮遗留的终态清回 idle，不触发回调。
+        state_.store(downloader::state::idle);
     }
 
     downloader::state
