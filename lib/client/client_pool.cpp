@@ -406,6 +406,10 @@ namespace httplib::client
             c.set_verify_ssl(cfg_.verify_ssl);
             // 复用连接必须清掉上一个 borrower 可能设置的 CA cert；空字符串表示回退系统默认。
             c.set_ca_cert(cfg_.ca_cert);
+            // 清掉上一个 borrower 设置的限速（例如下载器按连接分摊的速率），
+            // 否则下一位借用者会继承不属于它的限速。0 表示不限速。
+            c.set_download_rate_limit(0);
+            c.set_upload_rate_limit(0);
             c.set_logger(get_logger());
         }
 
