@@ -62,7 +62,7 @@ namespace httplib::client
     }
 
     cache_manager::http_meta
-    cache_manager::make_meta(httplib::headers const& response, url::url_info const& final_ui, bool has_final_ui)
+    cache_manager::make_meta(httplib::headers const& response)
     {
         // Explicit whitelist of HTTP bookkeeping the downloader needs; the rest
         // (hop-by-hop headers, partial-response framing) is discarded.
@@ -72,10 +72,6 @@ namespace httplib::client
         meta.content_disposition = take(field::content_disposition);
         meta.etag = take(field::etag);
         meta.last_modified = take(field::last_modified);
-        if (has_final_ui)
-        {
-            meta.final_url = final_ui.to_url();
-        }
 
         std::string cache_control = take(field::cache_control);
         meta.must_revalidate = http_header_util::header_has_token(cache_control, "no-cache");
@@ -114,7 +110,6 @@ namespace httplib::client
                 out.push_back('\n');
             }
         };
-        put("final_url", meta.final_url);
         put("etag", meta.etag);
         put("last_modified", meta.last_modified);
         put("content_type", meta.content_type);
@@ -161,11 +156,7 @@ namespace httplib::client
             }
             auto key = line.substr(0, eq);
             auto val = line.substr(eq + 1);
-            if (key == "final_url")
-            {
-                meta.final_url = val;
-            }
-            else if (key == "etag")
+            if (key == "etag")
             {
                 meta.etag = val;
             }

@@ -1,7 +1,6 @@
 #pragma once
 #include "cache_manager.hpp"
 #include "disk_writer.h"
-#include "httplib/client/cache.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/downloader.hpp"
 #include "httplib/url/url.hpp"
@@ -25,24 +24,22 @@ namespace httplib::client
     {
       public:
         /// Terminal response of a logical request after following redirects: the
-        /// pooled connection that owns its (lazy) body, the response itself, and
-        /// the origin actually reached. Absence in the enclosing
-        /// `boost::system::result` means no usable response was obtained
-        /// (connection/acquire/send failure, cancellation, redirect exhaustion).
+        /// pooled connection that owns its (lazy) body and the response itself.
+        /// Absence in the enclosing `boost::system::result` means no usable
+        /// response was obtained (connection/acquire/send failure, cancellation,
+        /// redirect exhaustion).
         struct send_result
         {
             http_client_pool::client_handle handle;
             client::response response;
-            url::url_info final_ui;
         };
 
-        /// Success payload of a single-stream download: the terminal origin and
-        /// response headers needed for caching. `from_cache` marks a 304 that was
-        /// served by copying the cached body — the run must not re-put the cache.
+        /// Success payload of a single-stream download: the response headers
+        /// needed for caching. `from_cache` marks a 304 that was served by
+        /// copying the cached body — the run must not re-put the cache.
         struct download_payload
         {
             httplib::headers headers;
-            url::url_info final_ui;
             bool from_cache = false;
         };
 
@@ -98,7 +95,6 @@ namespace httplib::client
         /// fetched by the caller. Returns true when the cache satisfied the
         /// request.
         net::awaitable<bool> try_serve_from_cache(std::optional<cache::entry> const& entry,
-                                                  std::string const& state_url,
                                                   fs::path const& save_path);
 
         /// Sends one logical request over a pooled connection and follows

@@ -35,7 +35,6 @@ namespace httplib::client
         bool is_paused() const;
         void notify_all();
 
-        std::uint64_t total_bytes() const;
         void finish();
         void finish_with_bytes(std::uint64_t sz);
 

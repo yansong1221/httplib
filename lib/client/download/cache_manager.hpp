@@ -24,7 +24,6 @@ namespace httplib::client
         /// metadata blob.
         struct http_meta
         {
-            std::string final_url;
             std::string etag;
             std::string last_modified;
             std::string content_type;
@@ -46,9 +45,7 @@ namespace httplib::client
         void put(std::string_view key, fs::path const& body, http_meta const& meta) const;
 
         static std::string make_key(url::url_info const& ui, httplib::headers const& headers);
-        static http_meta make_meta(httplib::headers const& response,
-                                   url::url_info const& final_ui,
-                                   bool has_final_ui);
+        static http_meta make_meta(httplib::headers const& response);
         static std::string serialize_meta(http_meta const& meta);
         static std::optional<http_meta> parse_meta(std::string_view blob);
 

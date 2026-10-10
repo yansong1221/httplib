@@ -92,7 +92,7 @@ namespace httplib::client
     void
     progress_tracker::set_state(downloader::state st, boost::system::error_code ec)
     {
-        // 状态未变化时不再回调：状态回调会驱动 owner/调度器逻辑，重复通知没有意义。
+        // 状态未变化时不再回调：状态回调会驱动调用方逻辑，重复通知没有意义。
         if (state_.exchange(st) == st)
         {
             return;
@@ -140,13 +140,6 @@ namespace httplib::client
     progress_tracker::notify_all()
     {
         pause_event_.notify_all();
-    }
-
-    std::uint64_t
-    progress_tracker::total_bytes() const
-    {
-        std::lock_guard lk(mutex_);
-        return total_bytes_;
     }
 
     void

@@ -1,5 +1,4 @@
 #include "downloader_impl.h"
-#include "beast_alias.hpp"
 #include "client/redirect_util.hpp"
 #include "http_header_util.hpp"
 #include "httplib/client/client.hpp"
@@ -150,7 +149,6 @@ namespace httplib::client
 
     net::awaitable<bool>
     downloader::impl::try_serve_from_cache(std::optional<cache::entry> const& entry,
-                                           std::string const& state_url,
                                            fs::path const& save_path)
     {
         if (!entry)
@@ -274,11 +272,7 @@ namespace httplib::client
                 }
             }
 
-            co_return send_result {
-                std::move(handle),
-                std::move(resp),
-                url::url_info { std::string(url::to_string(s)), h, p, t, {}, {} }
-            };
+            co_return send_result { std::move(handle), std::move(resp) };
         }
 
         co_return boost::system::errc::make_error_code(boost::system::errc::protocol_error);
@@ -299,7 +293,7 @@ namespace httplib::client
         // A prior cancel()/permanent failure only terminates the run it
         // interrupted. A fresh run starts from a clean slate so callers do not
         // have to "clear" the downloader with a throwaway call first. A cancel
-        // that races with this start is re-applied by the owner once the run
+        // that races with this start is re-applied by the caller once the run
         // reports its first state.
         cancelled_.store(false, std::memory_order_relaxed);
         progress_.reset_state();
@@ -341,7 +335,7 @@ namespace httplib::client
 
         progress_.set_state(downloader::state::connecting, {});
 
-        // set_state() above runs user/owner callbacks synchronously, which is
+        // set_state() above runs user callbacks synchronously, which is
         // where a cancellation that raced past the reset is re-applied. Honour
         // it before doing any work (including serving from cache).
         if (cancelled_.load(std::memory_order_relaxed))
@@ -353,7 +347,7 @@ namespace httplib::client
 
         boost::system::error_code ec;
         auto entry = cache_manager_.get(state_url);
-        if (co_await try_serve_from_cache(entry, state_url, save_path))
+        if (co_await try_serve_from_cache(entry, save_path))
         {
             co_return boost::system::error_code {};
         }
@@ -388,7 +382,7 @@ namespace httplib::client
         {
             if (http_header_util::response_is_cacheable(dl->headers))
             {
-                auto meta = cache_manager::make_meta(dl->headers, dl->final_ui, true);
+                auto meta = cache_manager::make_meta(dl->headers);
                 // Retention is governed by the cache's max_age (so stale
                 // entries stay available for revalidation); HTTP freshness
                 // travels inside the opaque metadata blob.
@@ -603,7 +597,6 @@ namespace httplib::client
             // headers() 是 borrow 视图：merge 出副本后再随 payload 离开协程帧。
             download_payload payload;
             payload.headers.merge(result->response.headers());
-            payload.final_ui = result->final_ui;
             co_return payload;
         }
 
