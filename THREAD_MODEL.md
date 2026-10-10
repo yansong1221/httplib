@@ -173,13 +173,7 @@ lazy 响应），且不得与 `close()` 并发：
 
 ---
 
-## 6. 下载调度器 `download_scheduler`
-
-用 `std::mutex` + pending 队列 + 并发度上限，不走 strand：`dispatch_pending_locked()` 在
-调用方持 `mtx_` 时按额度派发（`lib/client/download_scheduler_impl.cpp:351`）。未派发的条目
-保持 pending，等下次或收尾时处理。
-
-### 6.1 downloader 落盘 `disk_writer`
+## 6. downloader 落盘 `disk_writer`
 
 `downloader` 的载荷落盘集中在 `disk_writer`（`lib/client/download/disk_writer.h`），它持有
 **每个 downloader 一个**的 strand，并独占一次下载的**唯一**输出文件（`open()` 打开一次，
@@ -199,7 +193,6 @@ lazy 响应），且不得与 `close()` 并发：
 | `client::impl` | `strand_` | `stream_mutex_`（仅 lazy 配对） | 超时/limits/SSL/`stream_` | 单飞行为硬约束 |
 | `client_pool` | 池 strand | — | 计数 | 不碰 socket |
 | `ws_client::impl` | `strand_` | — | `stream_` | 收发同 strand |
-| `download_scheduler` | — | `std::mutex` | — | 并发度上限 |
 | `disk_writer` | `strand_`（每 downloader 一个） | — | — | 载荷写入在 strand 上串行；单一输出文件 |
 | `server::router` | **无** | **无** | — | 仅配置期可写 |
 

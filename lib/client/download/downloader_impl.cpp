@@ -362,7 +362,7 @@ namespace httplib::client
         // interrupted. A fresh run starts from a clean slate so callers do not
         // have to "clear" the downloader with a throwaway call first. A cancel
         // that races with this start is re-applied by the owner once the run
-        // reports its first state (see download_scheduler::impl::on_state).
+        // reports its first state.
         cancelled_.store(false, std::memory_order_relaxed);
         progress_.reset_state();
 

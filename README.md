@@ -26,7 +26,7 @@
 - **全局中间件** - `router::use()` 对所有路由生效；`set_post_routing_handler()` 在每个处理器之后运行
 - **自定义中间件** - 每路由的 `before`/`after` aspect，支持同步（`bool`）或协程（`awaitable<bool>`）返回
 - **反向代理** - 静态或动态上游、加权 / 最少连接负载均衡、Cookie/Referer 改写、`X-Forwarded-*` 头、请求/响应拦截器
-- **客户端下载栈** - `downloader`（断点续传、进度）、`download_scheduler`（并发上限）、`disk_cache`（按大小 / TTL 淘汰）
+- **客户端下载栈** - `downloader`（断点续传、进度）、`disk_cache`（按大小 / TTL 淘汰）
 - **数据库** - 后端无关的 `session`，支持参数绑定、预编译语句、事务与连接池；SQLite / MySQL / ODBC 后端（可选，`-DHTTPLIB_ENABLED_DATABASE=ON`）
 - **URL 工具** - 解析、解析相对路径、百分号编码、Host/URL 拼装
 - **日志** - 集成 spdlog，各组件日志器可配置
@@ -752,17 +752,6 @@ dl.set_progress_callback([](client::downloader::progress_info const& p) { /* ...
 co_await dl.async_download("https://example.com/big.iso", "big.iso");
 ```
 
-### Download Scheduler
-
-```cpp
-#include <httplib/client/download_scheduler.hpp>
-
-client::download_scheduler sched(ex, pool, { .max_concurrent = 8 });
-auto id = sched.add("https://example.com/a.bin", "a.bin");
-auto st = co_await sched.async_wait_one(id);
-co_await sched.async_run();   // 驱动所有任务直至完成
-```
-
 ### Disk Cache
 
 ```cpp
@@ -881,7 +870,7 @@ auto decoded  = url::url_decode("a%20b%2Fc");
 当 `HTTPLIB_ENABLED_EXAMPLES=ON`（根项目默认开启）时，所有示例都会被构建：
 
 - `examples/demo` - 服务端 + 客户端 + WebSocket 演示，覆盖路由、中间件、流式、SSE/NDJSON 与连接池
-- `examples/download_demo` - downloader / download scheduler 演示
+- `examples/download_demo` - downloader 演示
 - `examples/stress_test` - 类 wrk 压测工具（`--url`、`-c`、`-d`、`-X`、`--body`）
 
 ## 许可

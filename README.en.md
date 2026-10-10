@@ -26,7 +26,7 @@ Version: see `httplib::version()` (`<httplib/version.hpp>`).
 - **Global middleware** - `router::use()` applies middleware to all routes; `set_post_routing_handler()` runs after every handler
 - **Custom middleware** - per-route `before`/`after` aspects, sync (`bool`) or coroutine (`awaitable<bool>`) returns
 - **Reverse proxy** - static or dynamic upstreams, weighted/least-connections load balancing, cookie/referer rewriting, `X-Forwarded-*` headers, request/response interceptors
-- **Client download stack** - `downloader` (resume, progress), `download_scheduler` (bounded concurrency), `disk_cache` (size/TTL eviction)
+- **Client download stack** - `downloader` (resume, progress), `disk_cache` (size/TTL eviction)
 - **Database** - backend-agnostic `session` with parameter binding, prepared statements, transactions and pooling; SQLite / MySQL / ODBC backends (optional, `-DHTTPLIB_ENABLED_DATABASE=ON`)
 - **URL utilities** - parsing, resolution, percent encoding, Host/URL assembly
 - **Logging** - integrated spdlog, configurable per-component loggers
@@ -739,17 +739,6 @@ dl.set_progress_callback([](client::downloader::progress_info const& p) { /* ...
 co_await dl.async_download("https://example.com/big.iso", "big.iso");
 ```
 
-### Download Scheduler
-
-```cpp
-#include <httplib/client/download_scheduler.hpp>
-
-client::download_scheduler sched(ex, pool, { .max_concurrent = 8 });
-auto id = sched.add("https://example.com/a.bin", "a.bin");
-auto st = co_await sched.async_wait_one(id);
-co_await sched.async_run();   // drive all tasks to completion
-```
-
 ### Disk Cache
 
 ```cpp
@@ -868,7 +857,7 @@ auto decoded  = url::url_decode("a%20b%2Fc");
 All examples are built when `HTTPLIB_ENABLED_EXAMPLES=ON` (default for root builds):
 
 - `examples/demo` - server + client + WebSocket demo covering routing, middleware, streaming, SSE/NDJSON and the connection pool
-- `examples/download_demo` - downloader / download scheduler demo
+- `examples/download_demo` - downloader demo
 - `examples/stress_test` - wrk-like benchmark (`--url`, `-c`, `-d`, `-X`, `--body`)
 
 ## License
