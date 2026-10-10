@@ -167,9 +167,7 @@ namespace httplib::client
 
         progress_.set_state(downloader::state::downloading, {});
 
-        std::error_code copy_ec;
-        fs::copy_file(cached->entry.body_path, save_path, fs::copy_options::overwrite_existing, copy_ec);
-        if (copy_ec)
+        if (auto copy_ec = co_await disk_writer::copy_atomic(cached->entry.body_path, save_path); copy_ec)
         {
             co_return false;
         }
@@ -456,15 +454,8 @@ namespace httplib::client
 
             if (cfg.resume && attempt == 0)
             {
-                std::error_code ec;
-                if (fs::exists(save_path, ec) && !ec)
-                {
-                    existing_size = fs::file_size(save_path, ec);
-                    if (ec)
-                    {
-                        existing_size = 0;
-                    }
-                }
+                // Resume from the part file, never a completed download.
+                existing_size = disk_writer::partial_size(save_path);
             }
 
             if (existing_size > 0)
@@ -472,7 +463,7 @@ namespace httplib::client
                 req_headers.set(field::range, std::format("bytes={}-", existing_size));
             }
 
-            auto result = co_await send_request(ui, method::get, std::move(req_headers));
+            auto result = co_await send_request(ui, method::get, req_headers);
             if (!result.has_value())
             {
                 if (attempt == cfg.max_retries)
@@ -492,9 +483,8 @@ namespace httplib::client
                 // current, so copy it out instead of re-downloading.
                 if (result->cache_entry && !save_path.empty())
                 {
-                    std::error_code ec;
-                    fs::copy_file(result->cache_entry->body_path, save_path, fs::copy_options::overwrite_existing, ec);
-                    if (!ec)
+                    if (auto copy_ec = co_await disk_writer::copy_atomic(result->cache_entry->body_path, save_path);
+                        !copy_ec)
                     {
                         progress_.finish_with_bytes(result->cache_entry->body_size);
                         download_payload payload;
@@ -502,9 +492,25 @@ namespace httplib::client
                         co_return payload;
                     }
                 }
-                // 304 but the cached body is gone (evicted mid-run): fail rather
-                // than falling through to a stale-file copy.
-                co_return boost::system::errc::make_error_code(boost::system::errc::io_error);
+
+                // The cached body is unusable (evicted or unreadable): drop the
+                // stale entry and fetch the body unconditionally instead of
+                // failing the run.
+                cache_manager_.remove(result->final_ui, base_headers);
+                auto retry = co_await send_request(ui, method::get, req_headers);
+                if (!retry.has_value())
+                {
+                    co_return retry.error() ? retry.error()
+                                            : boost::system::errc::make_error_code(boost::system::errc::timed_out);
+                }
+                result = std::move(retry);
+                status = result->response.result();
+                if (status == status::not_modified)
+                {
+                    // The server keeps answering 304 for a body we cannot
+                    // produce, so the download cannot be completed.
+                    co_return boost::system::errc::make_error_code(boost::system::errc::io_error);
+                }
             }
             if (status != status::ok && status != status::partial_content)
             {
@@ -514,8 +520,7 @@ namespace httplib::client
                 }
                 if (!cfg.resume)
                 {
-                    std::error_code ec;
-                    fs::remove(save_path, ec);
+                    disk_writer::discard(save_path);
                 }
                 co_await httplib::util::sleep(cfg.retry_backoff * (attempt + 1));
                 continue;
@@ -538,8 +543,7 @@ namespace httplib::client
                     {
                         co_return boost::system::errc::make_error_code(boost::system::errc::protocol_error);
                     }
-                    std::error_code ec;
-                    fs::remove(save_path, ec);
+                    disk_writer::discard(save_path);
                     existing_size = 0;
                     co_await httplib::util::sleep(cfg.retry_backoff * (attempt + 1));
                     continue;
@@ -595,8 +599,6 @@ namespace httplib::client
                 progress_.update(n);
             }
 
-            co_await disk_.close();
-
             // A response that stops short of its declared size must not be
             // reported as a successful download: the file would be silently
             // truncated. Retry (resuming from what we kept), and only fail once
@@ -604,12 +606,19 @@ namespace httplib::client
             bool const validate_size = !http_header_util::response_is_encoded(result->response.headers());
             if (validate_size && file_total > existing_size && session_bytes != file_total - existing_size)
             {
+                co_await disk_.close();
                 if (attempt == cfg.max_retries)
                 {
                     co_return boost::system::errc::make_error_code(boost::system::errc::message_size);
                 }
                 co_await httplib::util::sleep(cfg.retry_backoff * (attempt + 1));
                 continue;
+            }
+
+            // Complete: publish the part file as the final save path.
+            if (auto commit_ec = co_await disk_.commit(); commit_ec)
+            {
+                co_return commit_ec;
             }
 
             store_suggested_filename(result->response.headers());

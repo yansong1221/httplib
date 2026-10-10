@@ -181,4 +181,15 @@ namespace httplib::client
                std::nullopt);
     }
 
+    void
+    cache_manager::remove(url::url_info const& ui, httplib::headers const& request_headers) const
+    {
+        auto c = cache_.load(std::memory_order_acquire);
+        if (!c)
+        {
+            return;
+        }
+        c->remove(detail::make_key(ui, request_headers));
+    }
+
 } // namespace httplib::client

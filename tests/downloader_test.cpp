@@ -1,4 +1,5 @@
 #include "common.hpp"
+#include "httplib/client/cache.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/disk_cache.hpp"
 #include "httplib/client/downloader.hpp"
@@ -7,6 +8,7 @@
 #include <atomic>
 #include <boost/asio/error.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/write.hpp>
 #include <boost/system/errc.hpp>
 #include <chrono>
 #include <condition_variable>
@@ -82,6 +84,44 @@ namespace
         std::ifstream f(path, std::ios::binary);
         return { std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>() };
     }
+
+    fs::path
+    part_of(fs::path const& save_path)
+    {
+        fs::path p = save_path;
+        p += ".part";
+        return p;
+    }
+
+    // A minimal cache that resolves to an entry whose body file does not exist,
+    // so materializing a 304 from the cache fails and the downloader must fall
+    // back to a full download.
+    struct missing_body_cache : httplib::client::cache
+    {
+        fs::path missing_body = fs::temp_directory_path() / "httplib_dl_missing_body.bin";
+        int remove_calls = 0;
+        bool removed = false;
+
+        std::optional<entry> get(std::string_view) override
+        {
+            if (removed)
+            {
+                return std::nullopt;
+            }
+            entry e;
+            e.body_path = missing_body;
+            e.body_size = 5;
+            e.metadata = R"({"etag":"\"fb1\""})";
+            return e;
+        }
+        void put(std::string_view, fs::path const&, std::string_view, std::optional<time_point>) override {}
+        bool update_metadata(std::string_view, std::string_view, std::optional<time_point>) override { return false; }
+        void remove(std::string_view) override
+        {
+            removed = true;
+            ++remove_calls;
+        }
+    };
 } // namespace
 
 TEST_CASE("Downloader: basic download to file", "[downloader]")
@@ -302,7 +342,7 @@ TEST_CASE("Downloader: resume partial download", "[downloader]")
         }
     }
     {
-        std::ofstream f(dl_path, std::ios::binary);
+        std::ofstream f(part_of(dl_path), std::ios::binary);
         for (std::size_t i = 0; i < 100; ++i)
         {
             f.put(static_cast<char>(i % 256));
@@ -334,6 +374,69 @@ TEST_CASE("Downloader: resume partial download", "[downloader]")
     }
 
     fs::remove(server_path);
+    fs::remove(dl_path);
+    fs::remove(part_of(dl_path));
+}
+
+TEST_CASE("Downloader: failed download leaves a .part file, not the final path", "[downloader]")
+{
+    auto dl_path = fs::temp_directory_path() / "httplib_dl_trunc_out.bin";
+    fs::remove(dl_path);
+    fs::remove(part_of(dl_path));
+
+    // A raw server that promises 100 bytes but sends only five then closes, so
+    // the transfer cannot complete and the body must not be published.
+    net::io_context raw_ioc;
+    httplib::tcp::acceptor acc(raw_ioc, httplib::tcp::endpoint(net::ip::make_address("127.0.0.1"), 0));
+    auto const port = acc.local_endpoint().port();
+
+    std::thread raw_server(
+        [&]()
+        {
+            boost::system::error_code ec;
+            httplib::tcp::socket sock(raw_ioc);
+            acc.accept(sock, ec);
+            if (ec)
+            {
+                return;
+            }
+            // Drain the request first: closing with unread inbound data makes
+            // the OS send RST and would drop the truncated body before the
+            // client can observe it.
+            char reqbuf[2048];
+            std::string req;
+            for (;;)
+            {
+                auto const n = sock.read_some(net::buffer(reqbuf), ec);
+                if (ec)
+                {
+                    break;
+                }
+                req.append(reqbuf, n);
+                if (req.find("\r\n\r\n") != std::string::npos)
+                {
+                    break;
+                }
+            }
+            constexpr std::string_view resp
+                = "HTTP/1.1 200 OK\r\nContent-Length: 100\r\nConnection: close\r\n\r\nshort";
+            net::write(sock, net::buffer(resp), ec);
+        });
+
+    dl_test_scaffold ts;
+    ts.start();
+
+    httplib::client::downloader dl(ts.ioc_, ts.pool);
+    dl.set_config({ .max_retries = 0 });
+    auto ec = dl.download(std::format("http://127.0.0.1:{}/trunc", port), dl_path).get();
+    raw_server.join();
+
+    REQUIRE(ec);
+    REQUIRE_FALSE(fs::exists(dl_path));
+    REQUIRE(fs::exists(part_of(dl_path)));
+    REQUIRE(read_file(part_of(dl_path)) == "short");
+
+    fs::remove(part_of(dl_path));
     fs::remove(dl_path);
 }
 
@@ -555,6 +658,7 @@ TEST_CASE("Downloader: cancel stops download", "[downloader]")
     std::error_code rm_ec;
     fs::remove(server_path, rm_ec);
     fs::remove(dl_path, rm_ec);
+    fs::remove(part_of(dl_path), rm_ec);
 }
 
 TEST_CASE("Downloader: download after cancel starts cleanly", "[downloader]")
@@ -1320,6 +1424,7 @@ TEST_CASE("Downloader: cancel while paused aborts immediately", "[downloader]")
     std::error_code rm_ec;
     fs::remove(server_path, rm_ec);
     fs::remove(dl_path, rm_ec);
+    fs::remove(part_of(dl_path), rm_ec);
 }
 
 TEST_CASE("Downloader: persistent server 500 ends failed", "[downloader]")
@@ -1605,7 +1710,60 @@ TEST_CASE("Downloader: cache hit emits a final progress tick", "[downloader]")
     fs::remove(server_path, rm_ec);
     fs::remove(dl_path1, rm_ec);
     fs::remove(dl_path2, rm_ec);
+    fs::remove(part_of(dl_path2), rm_ec);
     fs::remove_all(cache_dir, rm_ec);
+}
+
+TEST_CASE("Downloader: 304 with missing cached body falls back to full download", "[downloader]")
+{
+    auto server_path = fs::temp_directory_path() / "httplib_dl_304fb_srv.txt";
+    std::string const payload = "304-fallback\n";
+    {
+        std::ofstream f(server_path, std::ios::binary);
+        f << payload;
+    }
+
+    auto dl_path = fs::temp_directory_path() / "httplib_dl_304fb_out.bin";
+    fs::remove(dl_path);
+    fs::remove(part_of(dl_path));
+
+    std::atomic<int> get_hits { 0 };
+    std::atomic<bool> saw_conditional { false };
+
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<httplib::method::get>("/304fb",
+                                                       [&](httplib::server::request& req, httplib::server::response& resp)
+                                                       {
+                                                           get_hits.fetch_add(1);
+                                                           if (req[httplib::field::if_none_match] == "\"fb1\"")
+                                                           {
+                                                               saw_conditional.store(true);
+                                                               resp.set_empty_content(httplib::status::not_modified);
+                                                               return;
+                                                           }
+                                                           resp.set(httplib::field::etag, "\"fb1\"");
+                                                           resp.set(httplib::field::cache_control, "max-age=3600");
+                                                           resp.set_string_content(payload, "text/plain");
+                                                       });
+    ts.start();
+
+    auto missing_cache = std::make_shared<missing_body_cache>();
+
+    httplib::client::downloader dl(ts.ioc_, ts.pool);
+    dl.set_cache(missing_cache);
+    auto ec = dl.download(ts.url_for_path("/304fb"), dl_path).get();
+
+    REQUIRE_FALSE(ec);
+    REQUIRE(read_file(dl_path) == payload);
+    // The 304 could not be served from the cache (its body is gone), so the
+    // downloader evicted the entry and fetched the body unconditionally.
+    REQUIRE(saw_conditional.load());
+    REQUIRE(get_hits.load() == 2);
+    REQUIRE(missing_cache->remove_calls == 1);
+
+    fs::remove(server_path);
+    fs::remove(dl_path);
+    fs::remove(part_of(dl_path));
 }
 
 TEST_CASE("Downloader: cache entry revalidates through a redirect", "[downloader]")

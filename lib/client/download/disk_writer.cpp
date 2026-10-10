@@ -6,10 +6,62 @@
 
 namespace httplib::client
 {
-
-    disk_writer::disk_writer(net::any_io_executor ex)
-        : strand_(net::make_strand(std::move(ex)))
+    namespace
     {
+        // Everything is written to a sibling part file and renamed in place on
+        // success, so a failed run never leaves a complete-looking `save_path`.
+        fs::path
+        part_path_of(fs::path const& save_path)
+        {
+            fs::path p = save_path;
+            p += ".part";
+            return p;
+        }
+
+        // rename() does not overwrite on Windows, so drop the destination first.
+        boost::system::error_code
+        publish(fs::path const& part_path, fs::path const& save_path)
+        {
+            std::error_code ec;
+            fs::remove(save_path, ec);
+            ec.clear();
+            fs::rename(part_path, save_path, ec);
+            if (ec)
+            {
+                return boost::system::errc::make_error_code(boost::system::errc::io_error);
+            }
+            return {};
+        }
+    } // namespace
+
+    disk_writer::disk_writer(net::any_io_executor ex) : strand_(net::make_strand(std::move(ex))) {}
+
+    std::uint64_t
+    disk_writer::partial_size(fs::path const& save_path)
+    {
+        std::error_code ec;
+        auto const sz = fs::file_size(part_path_of(save_path), ec);
+        return ec ? 0 : static_cast<std::uint64_t>(sz);
+    }
+
+    void
+    disk_writer::discard(fs::path const& save_path)
+    {
+        std::error_code ec;
+        fs::remove(part_path_of(save_path), ec);
+    }
+
+    net::awaitable<boost::system::error_code>
+    disk_writer::copy_atomic(fs::path const& src, fs::path const& save_path)
+    {
+        fs::path const part_path = part_path_of(save_path);
+        std::error_code ec;
+        fs::copy_file(src, part_path, fs::copy_options::overwrite_existing, ec);
+        if (ec)
+        {
+            co_return boost::system::errc::make_error_code(boost::system::errc::io_error);
+        }
+        co_return publish(part_path, save_path);
     }
 
     net::awaitable<boost::system::error_code>
@@ -21,13 +73,14 @@ namespace httplib::client
         {
             out_.close();
         }
+        path_ = path;
 
         auto mode = std::ios::out | std::ios::binary;
         if (truncate)
         {
             mode |= std::ios::trunc;
         }
-        out_.open(path, mode);
+        out_.open(part_path_of(path), mode);
         if (!out_.is_open())
         {
             co_return boost::system::errc::make_error_code(boost::system::errc::permission_denied);
@@ -75,6 +128,22 @@ namespace httplib::client
             out_.close();
         }
         co_return boost::system::error_code {};
+    }
+
+    net::awaitable<boost::system::error_code>
+    disk_writer::commit()
+    {
+        co_await net::dispatch(strand_, net::use_awaitable);
+
+        if (out_.is_open())
+        {
+            out_.close();
+        }
+        if (path_.empty())
+        {
+            co_return boost::system::error_code {};
+        }
+        co_return publish(part_path_of(path_), path_);
     }
 
 } // namespace httplib::client

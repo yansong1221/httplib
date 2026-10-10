@@ -59,6 +59,10 @@ namespace httplib::client
                  httplib::headers const& response_headers,
                  fs::path const& body) const;
 
+        /// Evicts the entry for `ui` under `request_headers`'s credential scope.
+        /// Used when a cached body turns out to be unusable (e.g. evicted).
+        void remove(url::url_info const& ui, httplib::headers const& request_headers) const;
+
       private:
         /// Atomic so set_cache() (public API, any thread) can race safely with
         /// the read paths (get/put/enabled/raw_cache) running on the executor.

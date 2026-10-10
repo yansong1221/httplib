@@ -76,10 +76,15 @@ namespace httplib::client
 
         config get_config() const;
 
+        /// Downloads \p url into `save_path`. The body is written to
+        /// `<save_path>.part` and renamed to `save_path` on success; a failed or
+        /// cancelled run leaves the `.part` file behind so a later call can
+        /// resume from it.
         net::awaitable<boost::system::error_code> async_download(std::string_view url,
                                                                  fs::path const& save_path,
                                                                  httplib::headers const& headers = {});
 
+        /// \copydoc async_download(std::string_view, fs::path const&, httplib::headers const&)
         std::future<boost::system::error_code> download(std::string_view url,
                                                         fs::path const& save_path,
                                                         httplib::headers const& headers = {});
