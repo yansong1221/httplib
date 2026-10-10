@@ -34,6 +34,14 @@ namespace httplib::client
             bool must_revalidate = false;
         };
 
+        /// A cache hit resolved into the stored entry plus its parsed HTTP
+        /// metadata.
+        struct cached_entry
+        {
+            cache::entry entry;
+            http_meta meta;
+        };
+
         cache_manager() = default;
 
         /// Enables caching with `c`; a null `c` disables it.
@@ -41,13 +49,15 @@ namespace httplib::client
 
         bool enabled() const;
         std::shared_ptr<cache> raw_cache() const;
-        std::optional<cache::entry> get(std::string_view key) const;
-        void put(std::string_view key, fs::path const& body, http_meta const& meta) const;
-
-        static std::string make_key(url::url_info const& ui, httplib::headers const& headers);
-        static http_meta make_meta(httplib::headers const& response);
-        static std::string serialize_meta(http_meta const& meta);
-        static std::optional<http_meta> parse_meta(std::string_view blob);
+        /// Fetches the cached entry for `ui`, scoped by `request_headers`
+        /// credentials, with its metadata already parsed.
+        std::optional<cached_entry> get(url::url_info const& ui, httplib::headers const& request_headers) const;
+        /// Stores `body` under the key derived from `ui` + `request_headers`,
+        /// with the cacheable metadata extracted from `response_headers`.
+        void put(url::url_info const& ui,
+                 httplib::headers const& request_headers,
+                 httplib::headers const& response_headers,
+                 fs::path const& body) const;
 
       private:
         /// Atomic so set_cache() (public API, any thread) can race safely with

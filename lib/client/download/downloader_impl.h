@@ -97,10 +97,10 @@ namespace httplib::client
         /// Tries to complete the run from the response cache without any network
         /// round-trip, copying the cached body to `save_path`. Only fresh entries
         /// (unexpired, non-no-cache) qualify; stale entries fall through to a
-        /// conditional GET in download_single(). `entry` is the cached entry
+        /// conditional GET in download_single(). `cached` is the resolved entry
         /// fetched by the caller. Returns true when the cache satisfied the
         /// request.
-        net::awaitable<bool> try_serve_from_cache(std::optional<cache::entry> const& entry,
+        net::awaitable<bool> try_serve_from_cache(std::optional<cache_manager::cached_entry> const& cached,
                                                   fs::path const& save_path);
 
         /// Sends one logical request over a pooled connection and follows
@@ -118,11 +118,10 @@ namespace httplib::client
         /// conditional GET returns 304, the cached body for the final URL is
         /// copied to `save_path` and the payload is returned with
         /// `from_cache = true`.
-        net::awaitable<boost::system::result<download_payload>>
-        download_single(url::url_info const& ui,
-                        fs::path const& save_path,
-                        downloader::config const& cfg,
-                        httplib::headers const& base_headers);
+        net::awaitable<boost::system::result<download_payload>> download_single(url::url_info const& ui,
+                                                                                fs::path const& save_path,
+                                                                                downloader::config const& cfg,
+                                                                                httplib::headers const& base_headers);
 
       private:
         net::any_io_executor executor_;

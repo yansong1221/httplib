@@ -148,15 +148,10 @@ namespace httplib::client
     // =========================================================================
 
     net::awaitable<bool>
-    downloader::impl::try_serve_from_cache(std::optional<cache::entry> const& entry,
+    downloader::impl::try_serve_from_cache(std::optional<cache_manager::cached_entry> const& cached,
                                            fs::path const& save_path)
     {
-        if (!entry)
-        {
-            co_return false;
-        }
-        auto meta = cache_manager::parse_meta(entry->metadata);
-        if (!meta.has_value())
+        if (!cached)
         {
             co_return false;
         }
@@ -164,8 +159,8 @@ namespace httplib::client
         // Only a fresh entry (unexpired, non-no-cache) can be served without a
         // network round-trip. Stale entries fall through to the conditional GET
         // in download_single().
-        if (meta->must_revalidate || !meta->fresh_until.has_value()
-            || std::chrono::system_clock::now() >= *meta->fresh_until)
+        if (cached->meta.must_revalidate || !cached->meta.fresh_until.has_value()
+            || std::chrono::system_clock::now() >= *cached->meta.fresh_until)
         {
             co_return false;
         }
@@ -173,12 +168,12 @@ namespace httplib::client
         progress_.set_state(downloader::state::downloading, {});
 
         std::error_code copy_ec;
-        fs::copy_file(entry->body_path, save_path, fs::copy_options::overwrite_existing, copy_ec);
+        fs::copy_file(cached->entry.body_path, save_path, fs::copy_options::overwrite_existing, copy_ec);
         if (copy_ec)
         {
             co_return false;
         }
-        progress_.finish_with_bytes(entry->body_size);
+        progress_.finish_with_bytes(cached->entry.body_size);
         progress_.set_state(downloader::state::completed, {});
         co_return true;
     }
@@ -250,20 +245,17 @@ namespace httplib::client
             req_headers.erase(field::if_none_match);
             req_headers.erase(field::if_modified_since);
             std::optional<cache::entry> hop_entry;
-            if (auto cached = cache_manager_.get(cache_manager::make_key(hop_ui, key_headers)); cached)
+            if (auto cached = cache_manager_.get(hop_ui, key_headers); cached)
             {
-                if (auto meta = cache_manager::parse_meta(cached->metadata); meta)
+                if (!cached->meta.etag.empty())
                 {
-                    if (!meta->etag.empty())
-                    {
-                        req_headers.set(field::if_none_match, meta->etag);
-                    }
-                    if (!meta->last_modified.empty())
-                    {
-                        req_headers.set(field::if_modified_since, meta->last_modified);
-                    }
-                    hop_entry = std::move(cached);
+                    req_headers.set(field::if_none_match, cached->meta.etag);
                 }
+                if (!cached->meta.last_modified.empty())
+                {
+                    req_headers.set(field::if_modified_since, cached->meta.last_modified);
+                }
+                hop_entry = std::move(cached->entry);
             }
 
             auto req = httplib::client::request(m, t, req_headers);
@@ -392,8 +384,8 @@ namespace httplib::client
         // no network round-trip. Redirecting URLs are never cached (only final
         // 2xx bodies are, under their own URL), so a redirect always falls
         // through to the network and is revalidated per hop in send_request.
-        auto entry = cache_manager_.get(cache_manager::make_key(ui, headers));
-        if (co_await try_serve_from_cache(entry, save_path))
+        auto cached = cache_manager_.get(ui, headers);
+        if (co_await try_serve_from_cache(cached, save_path))
         {
             co_return boost::system::error_code {};
         }
@@ -412,12 +404,11 @@ namespace httplib::client
         {
             if (http_header_util::response_is_cacheable(dl->headers))
             {
-                auto meta = cache_manager::make_meta(dl->headers);
                 // Store under the URL that actually served the body: retention
                 // is governed by the cache's max_age (so stale entries stay
                 // available for revalidation); HTTP freshness travels inside the
                 // opaque metadata blob. A redirecting URL is never a key here.
-                cache_manager_.put(cache_manager::make_key(dl->final_ui, headers), save_path, meta);
+                cache_manager_.put(dl->final_ui, headers, dl->headers, save_path);
             }
         }
 
