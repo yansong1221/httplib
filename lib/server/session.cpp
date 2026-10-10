@@ -1,4 +1,5 @@
 #include "session.hpp"
+#include "beast_alias.hpp"
 #include "body/source.hpp"
 #include "compress/compressor.hpp"
 #include "html/accept_content.hpp"
@@ -20,13 +21,22 @@
 #include <boost/beast/http/read.hpp>
 #include <boost/beast/http/serializer.hpp>
 #include <boost/beast/websocket/rfc6455.hpp>
-#include "beast_alias.hpp"
 
 namespace httplib::server
 {
 
     namespace detail
     {
+
+        /// Range 响应不得压缩：206 的 body 就是原始文件的字节区间，Content-Range 描述的
+        /// 正是这些原始字节；压缩会改写传输字节，使二者不再对应（Express/nginx/Apache
+        /// 同此处理）。判据取状态码 206，再补一条 Content-Range 头存在性，以覆盖状态被写成
+        /// 200 却仍带区间的脏响应。
+        inline bool
+        is_range_response(response const& resp)
+        {
+            return resp.result() == status::partial_content || !resp[field::content_range].empty();
+        }
 
         template <typename S1, typename S2>
         net::awaitable<void>
@@ -419,17 +429,21 @@ namespace httplib::server
         }
 
         // 内容协商：命中可压缩类型时设置 Content-Encoding，body_writer 写 body 时自动压缩。
-        if (auto accept_encoding = req[field::accept_encoding]; !accept_encoding.empty())
+        // Range 响应（见 detail::is_range_response）必须跳过，否则传输字节与 Content-Range 不再对应。
+        if (!detail::is_range_response(resp))
         {
-            html::accept_encoding_content encoding_content;
-            if (encoding_content.parse(accept_encoding))
+            if (auto accept_encoding = req[field::accept_encoding]; !accept_encoding.empty())
             {
-                if (auto encoding = encoding_content.server_apply_encoding(); !encoding.empty())
+                html::accept_encoding_content encoding_content;
+                if (encoding_content.parse(accept_encoding))
                 {
-                    if (auto content_type = resp[field::content_type];
-                        (*server_impl_).should_compress_content_type(content_type))
+                    if (auto encoding = encoding_content.server_apply_encoding(); !encoding.empty())
                     {
-                        resp.set(field::content_encoding, encoding);
+                        if (auto content_type = resp[field::content_type];
+                            (*server_impl_).should_compress_content_type(content_type))
+                        {
+                            resp.set(field::content_encoding, encoding);
+                        }
                     }
                 }
             }

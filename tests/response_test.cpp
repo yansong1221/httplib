@@ -102,7 +102,9 @@ TEST_CASE("Response: set_chunked_write_handler with multiple chunks", "[response
                     auto cw = resp.create_stream_writer();
                     httplib::headers headers;
                     headers.set(httplib::field::content_type, "text/plain");
-                    co_await cw->write_header(httplib::status::ok, headers, httplib::server::stream_writer::mode::chunked);
+                    co_await cw->write_header(httplib::status::ok,
+                                              headers,
+                                              httplib::server::stream_writer::mode::chunked);
                     constexpr std::string_view chunks[] = { "A", "B", "C" };
                     for (int i = 0; i < 3; ++i)
                     {
@@ -114,7 +116,10 @@ TEST_CASE("Response: set_chunked_write_handler with multiple chunks", "[response
         {
             auto writer = client.create_lazy_request();
             std::string streamed;
-            co_await writer->write_header(httplib::method::get, "/stream", {}, httplib::client::lazy_request::mode::relay);
+            co_await writer->write_header(httplib::method::get,
+                                          "/stream",
+                                          {},
+                                          httplib::client::lazy_request::mode::relay);
             co_await writer->write_body(net::buffer("", 0), false);
 
             auto resp = UNWRAP(co_await writer->read_response_lazy());
@@ -150,7 +155,9 @@ TEST_CASE("Response: stream_writer gzip compression", "[response][compression]")
                     httplib::headers headers;
                     headers.set(httplib::field::content_type, "text/plain");
                     headers.set(httplib::field::content_encoding, "gzip");
-                    co_await cw->write_header(httplib::status::ok, headers, httplib::server::stream_writer::mode::chunked);
+                    co_await cw->write_header(httplib::status::ok,
+                                              headers,
+                                              httplib::server::stream_writer::mode::chunked);
                     constexpr std::string_view chunks[] = { "A", "B", "C" };
                     for (int i = 0; i < 3; ++i)
                     {
@@ -411,9 +418,8 @@ TEST_CASE("Response: malformed Range returns 416 without crashing", "[response]"
     // 全部会产生空段（空 sub_range）或畸形段数（>2）。
     // 注意 "bytes=,1" 不在此列：util::split 会丢弃首尾分隔符，前导逗号不产生空元素，
     // 它被宽松地解析成合法区间 1..end，不属于崩溃触发点。
-    std::vector<std::string> const bad { "bytes=,",  "bytes=,,",    "bytes=1,,",
-                                         "bytes=5-10-20", "bytes=0-1,,", "bytes=,,,",
-                                         "bytes=1-2-3-4" };
+    std::vector<std::string> const bad { "bytes=,",     "bytes=,,",  "bytes=1,,",    "bytes=5-10-20",
+                                         "bytes=0-1,,", "bytes=,,,", "bytes=1-2-3-4" };
 
     {
         run(
@@ -1277,8 +1283,8 @@ TEST_CASE("response: empty encoded body writes no bytes past Content-Length: 0",
         [](httplib::server::request&, httplib::server::response& resp)
         { resp.set(httplib::field::content_type, "text/plain"); });
     auto nobody = test_common::raw_request(sc.endpoint,
-                                          "GET /no-body-encoded HTTP/1.1\r\nHost: x\r\n"
-                                          "Connection: close\r\nAccept-Encoding: gzip\r\n\r\n");
+                                           "GET /no-body-encoded HTTP/1.1\r\nHost: x\r\n"
+                                           "Connection: close\r\nAccept-Encoding: gzip\r\n\r\n");
     REQUIRE(test_common::raw_header(nobody, "Content-Length") == "0");
     REQUIRE(nobody.find("\r\n\r\n") + 4 == nobody.size());
 }
@@ -1291,15 +1297,13 @@ TEST_CASE("response: compressed HTTP/1.0 response is not chunked", "[response][c
 {
     SKIP_WITHOUT_COMPRESS();
     test_common::test_scaffold sc;
-    auto handler = [](httplib::server::request&, httplib::server::response& resp) {
-        resp.set_string_content(std::string(2000, 'a'), "text/plain"sv);
-    };
+    auto handler = [](httplib::server::request&, httplib::server::response& resp)
+    { resp.set_string_content(std::string(2000, 'a'), "text/plain"sv); };
     sc.server.router().set_http_handler<httplib::method::get>("/text", handler);
     sc.start();
 
     // HTTP/1.0 + gzip：不得出现 chunked；压缩后长度未知，只能靠关连接定界。
-    auto resp10 = test_common::raw_request(
-        sc.endpoint, "GET /text HTTP/1.0\r\nAccept-Encoding: gzip\r\n\r\n");
+    auto resp10 = test_common::raw_request(sc.endpoint, "GET /text HTTP/1.0\r\nAccept-Encoding: gzip\r\n\r\n");
     REQUIRE(test_common::raw_version(resp10) == 10);
     REQUIRE(test_common::raw_header(resp10, "Content-Encoding") == "gzip");
     REQUIRE(test_common::raw_header(resp10, "Transfer-Encoding").empty());
@@ -1328,6 +1332,61 @@ TEST_CASE("response: compressed HTTP/1.0 response is not chunked", "[response][c
     REQUIRE(plain10_body == std::string(2000, 'a'));
 }
 
+// 回归：Range 响应不得压缩。206 的 body 就是原始文件的字节区间，Content-Range 描述的
+// 正是这些原始字节；一旦按 Accept-Encoding 压缩，传输字节与 Content-Range 不再对应，
+// 客户端按区间缓存/拼接会拿到损坏数据。
+TEST_CASE("response: range response is not compressed", "[response][compression]")
+{
+    SKIP_WITHOUT_COMPRESS();
+    auto tmp_path = std::filesystem::temp_directory_path() / "httplib_test_range_gzip.txt";
+    {
+        std::ofstream f(tmp_path, std::ios::binary);
+        f << "abcdefghij";
+    }
+
+    test_common::test_scaffold sc;
+    sc.server.router().set_http_handler<httplib::method::get>(
+        "/range-gzip",
+        [&](httplib::server::request& req, httplib::server::response& resp)
+        { resp.set_file_content(tmp_path, req.base()); });
+    sc.start();
+
+    auto raw = test_common::raw_request(sc.endpoint,
+                                        "GET /range-gzip HTTP/1.1\r\nHost: x\r\nConnection: close\r\n"
+                                        "Range: bytes=2-5\r\nAccept-Encoding: gzip\r\n\r\n");
+    REQUIRE(raw.compare(9, 3, "206") == 0);
+    REQUIRE_FALSE(test_common::raw_header(raw, "Content-Range").empty());
+    // 关键断言：有 Content-Range 的响应不得带 Content-Encoding。
+    REQUIRE(test_common::raw_header(raw, "Content-Encoding").empty());
+    // 且 body 必须是未压缩的原始区间字节。
+    auto body = raw.substr(raw.find("\r\n\r\n") + 4);
+    REQUIRE(body == "cdef");
+
+    // 完整响应（无 Range）仍要正常压缩，别被这个修复顺带改掉。
+    auto full = test_common::raw_request(sc.endpoint,
+                                         "GET /range-gzip HTTP/1.1\r\nHost: x\r\nConnection: close\r\n"
+                                         "Accept-Encoding: gzip\r\n\r\n");
+    REQUIRE(full.compare(9, 3, "200") == 0);
+    REQUIRE(test_common::raw_header(full, "Content-Encoding") == "gzip");
+
+    // 脏响应：状态写成 200 却仍带 Content-Range，也要按 Range 响应处理（不压缩）。
+    sc.server.router().set_http_handler<httplib::method::get>(
+        "/dirty-range",
+        [](httplib::server::request&, httplib::server::response& resp)
+        {
+            resp.set(httplib::field::content_range, "bytes 0-3/100");
+            resp.set_string_content(std::string(2000, 'a'), "text/plain");
+        });
+    auto dirty = test_common::raw_request(sc.endpoint,
+                                          "GET /dirty-range HTTP/1.1\r\nHost: x\r\nConnection: close\r\n"
+                                          "Accept-Encoding: gzip\r\n\r\n");
+    REQUIRE(dirty.compare(9, 3, "200") == 0);
+    REQUIRE_FALSE(test_common::raw_header(dirty, "Content-Range").empty());
+    REQUIRE(test_common::raw_header(dirty, "Content-Encoding").empty());
+
+    std::filesystem::remove(tmp_path);
+}
+
 // 回归：HEAD 的头必须与同一 URL 的 GET 逐字相同，且头之后不得有任何 body 字节。
 //
 // 旧实现把 HEAD 当作"先 discard_body() 再走整消息写"，于是分帧被算了两遍：
@@ -1342,9 +1401,8 @@ TEST_CASE("response: compressed HTTP/1.0 response is not chunked", "[response][c
 TEST_CASE("response: HEAD headers match GET exactly, with no body", "[response]")
 {
     test_common::test_scaffold sc;
-    auto handler = [](httplib::server::request&, httplib::server::response& resp) {
-        resp.set_string_content(std::string(1234, 'a'), "text/plain"sv);
-    };
+    auto handler = [](httplib::server::request&, httplib::server::response& resp)
+    { resp.set_string_content(std::string(1234, 'a'), "text/plain"sv); };
     sc.server.router().set_http_handler<httplib::method::get>("/gzip-head", handler);
     sc.server.router().set_http_handler<httplib::method::head>("/gzip-head", handler);
     sc.start();
@@ -1371,8 +1429,8 @@ TEST_CASE("response: HEAD headers match GET exactly, with no body", "[response]"
     // HTTP/1.0 没有 chunked 可退，GET 靠关连接定界、不带 Content-Length，
     // HEAD 就该同样不带。
     auto h10 = test_common::raw_request(sc.endpoint,
-                                         "HEAD /gzip-head HTTP/1.0\r\nHost: x\r\n"
-                                         "Accept-Encoding: gzip\r\n\r\n");
+                                        "HEAD /gzip-head HTTP/1.0\r\nHost: x\r\n"
+                                        "Accept-Encoding: gzip\r\n\r\n");
     REQUIRE(test_common::raw_header(h10, "Content-Length").empty());
     REQUIRE(h10.size() == h10.find("\r\n\r\n") + 4);
 }
@@ -1391,9 +1449,8 @@ TEST_CASE("response: HEAD headers match GET when the body length is unknown", "[
     }
 
     test_common::test_scaffold sc;
-    auto handler = [&](httplib::server::request& req, httplib::server::response& resp) {
-        resp.set_file_content(tmp_path, req.base());
-    };
+    auto handler = [&](httplib::server::request& req, httplib::server::response& resp)
+    { resp.set_file_content(tmp_path, req.base()); };
     sc.server.router().set_http_handler<httplib::method::get>("/head-mr", handler);
     sc.server.router().set_http_handler<httplib::method::head>("/head-mr", handler);
     sc.start();
@@ -1425,17 +1482,15 @@ TEST_CASE("response: HEAD headers match GET when the body length is unknown", "[
 TEST_CASE("response: HEAD echoes the Content-Length GET would send", "[response]")
 {
     test_common::test_scaffold sc;
-    auto handler = [](httplib::server::request&, httplib::server::response& resp) {
-        resp.set_string_content(std::string(1234, 'a'), "application/octet-stream"sv);
-    };
+    auto handler = [](httplib::server::request&, httplib::server::response& resp)
+    { resp.set_string_content(std::string(1234, 'a'), "application/octet-stream"sv); };
     sc.server.router().set_http_handler<httplib::method::get>("/echo-len", handler);
     sc.server.router().set_http_handler<httplib::method::head>("/echo-len", handler);
     sc.start();
 
-    auto get = test_common::raw_request(
-        sc.endpoint, "GET /echo-len HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
-    auto head = test_common::raw_request(
-        sc.endpoint, "HEAD /echo-len HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    auto get = test_common::raw_request(sc.endpoint, "GET /echo-len HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
+    auto head
+        = test_common::raw_request(sc.endpoint, "HEAD /echo-len HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n");
 
     REQUIRE(test_common::raw_header(get, "Content-Length") == "1234");
     // 关键断言：HEAD 与 GET 的 Content-Length 必须一致（旧实现是 "0"）。
@@ -1453,19 +1508,19 @@ TEST_CASE("response: HEAD echoes the Content-Length GET would send", "[response]
 TEST_CASE("response: bodyless response accessors return empty instead of throwing", "[response][bodyless]")
 {
     run(
-        [](auto& server) {
-            auto handler = [](httplib::server::request&, httplib::server::response& resp) {
-                resp.set_string_content(std::string(8, 'a'), "application/octet-stream"sv);
-            };
+        [](auto& server)
+        {
+            auto handler = [](httplib::server::request&, httplib::server::response& resp)
+            { resp.set_string_content(std::string(8, 'a'), "application/octet-stream"sv); };
             server.router().template set_http_handler<httplib::method::get>("/bodyless", handler);
             server.router().template set_http_handler<httplib::method::head>("/bodyless", handler);
             server.router().template set_http_handler<httplib::method::get>(
                 "/no-content",
-                [](httplib::server::request&, httplib::server::response& resp) {
-                    resp.set_empty_content(httplib::status::no_content);
-                });
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_empty_content(httplib::status::no_content); });
         },
-        [](auto& client) -> net::awaitable<void> {
+        [](auto& client) -> net::awaitable<void>
+        {
             // HEAD：无 body。
             auto head = UNWRAP(co_await client.async_head("/bodyless"));
             REQUIRE(head.type() == httplib::body_type::empty);
@@ -1485,16 +1540,19 @@ TEST_CASE("response: bodyless response accessors return empty instead of throwin
 TEST_CASE("request: as_string on a bodyless request returns empty instead of throwing", "[request][bodyless]")
 {
     run(
-        [](auto& server) {
+        [](auto& server)
+        {
             server.router().template set_http_handler<httplib::method::get>(
                 "/no-body",
-                [](httplib::server::request& req, httplib::server::response& resp) {
+                [](httplib::server::request& req, httplib::server::response& resp)
+                {
                     // 不抛才算走到这里；抛出的话整个请求会 500，下面的断言自然失败。
                     resp.set_string_content(std::string_view(req.as_string().empty() ? "empty" : "nonempty"),
                                             "application/octet-stream"sv);
                 });
         },
-        [](auto& client) -> net::awaitable<void> {
+        [](auto& client) -> net::awaitable<void>
+        {
             auto resp = UNWRAP(co_await client.async_get("/no-body"));
             REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(resp.as_string() == "empty");
