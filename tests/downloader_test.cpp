@@ -1195,32 +1195,25 @@ TEST_CASE("Downloader: stale entry is revalidated with 304 and keeps its body", 
     fs::remove_all(cache_dir);
 
     std::atomic<int> get_hits { 0 };
-    std::atomic<int> head_hits { 0 };
+    std::atomic<int> body_gets { 0 };
 
     std::string const payload = "revalidated payload\n";
 
     dl_test_scaffold ts;
     ts.router().set_http_handler<httplib::method::get>("/reval",
-                                                  [&](httplib::server::request&, httplib::server::response& resp)
+                                                  [&](httplib::server::request& req, httplib::server::response& resp)
                                                   {
                                                       get_hits.fetch_add(1);
+                                                      if (req[httplib::field::if_none_match] == "\"r1\"")
+                                                      {
+                                                          resp.set_empty_content(httplib::status::not_modified);
+                                                          return;
+                                                      }
+                                                      body_gets.fetch_add(1);
                                                       resp.set(httplib::field::etag, "\"r1\"");
                                                       resp.set(httplib::field::cache_control, "no-cache");
                                                       resp.set_string_content(payload, "text/plain");
                                                   });
-    ts.router().set_http_handler<httplib::method::head>("/reval",
-                                                   [&](httplib::server::request& req, httplib::server::response& resp)
-                                                   {
-                                                       head_hits.fetch_add(1);
-                                                       if (req[httplib::field::if_none_match] == "\"r1\"")
-                                                       {
-                                                           resp.set_empty_content(httplib::status::not_modified);
-                                                           return;
-                                                       }
-                                                       resp.set(httplib::field::etag, "\"r1\"");
-                                                       resp.set(httplib::field::cache_control, "no-cache");
-                                                       resp.set_string_content(payload, "text/plain");
-                                                   });
     ts.start();
 
     auto cache = std::make_shared<httplib::client::disk_cache>(cache_dir);
@@ -1234,7 +1227,9 @@ TEST_CASE("Downloader: stale entry is revalidated with 304 and keeps its body", 
     }
 
     auto gets_after_first = get_hits.load();
+    auto bodies_after_first = body_gets.load();
     REQUIRE(gets_after_first == 1);
+    REQUIRE(bodies_after_first == 1);
 
     {
         httplib::client::downloader dl(ts.ioc_, ts.pool);
@@ -1244,10 +1239,10 @@ TEST_CASE("Downloader: stale entry is revalidated with 304 and keeps its body", 
         REQUIRE(read_file(dl_path2) == "revalidated payload\n");
     }
 
-    // no-cache forces a conditional HEAD; the 304 must reuse the cached body
-    // without a second GET.
-    REQUIRE(get_hits.load() == gets_after_first);
-    REQUIRE(head_hits.load() >= 2);
+    // no-cache forces a conditional GET; the 304 must reuse the cached body
+    // without a second body-bearing GET.
+    REQUIRE(get_hits.load() == gets_after_first + 1);
+    REQUIRE(body_gets.load() == bodies_after_first);
 
     std::error_code rm_ec;
     fs::remove(dl_path1, rm_ec);

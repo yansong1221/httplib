@@ -49,41 +49,25 @@ namespace httplib::client
     }
 
     std::string
-    cache_manager::make_key(url::url_info const& ui, std::string const& auth_scope)
+    cache_manager::make_key(url::url_info const& ui, httplib::headers const& headers)
     {
         auto key = ui.to_url();
-        if (!auth_scope.empty())
+        auto scope = http_header_util::cache_auth_scope(headers);
+        if (!scope.empty())
         {
             key.append("|auth=");
-            key.append(auth_scope);
+            key.append(scope);
         }
         return key;
     }
 
-    std::string
-    cache_manager::auth_scope(httplib::headers const& headers)
-    {
-        return http_header_util::cache_auth_scope(headers);
-    }
-
     cache_manager::http_meta
-    cache_manager::make_meta(httplib::headers const& response,
-                             httplib::headers const& probe,
-                             url::url_info const& final_ui,
-                             bool has_final_ui)
+    cache_manager::make_meta(httplib::headers const& response, url::url_info const& final_ui, bool has_final_ui)
     {
         // Explicit whitelist of HTTP bookkeeping the downloader needs; the rest
         // (hop-by-hop headers, partial-response framing) is discarded.
         http_meta meta;
-        auto take = [&](field f) -> std::string
-        {
-            auto v = response[f];
-            if (v.empty())
-            {
-                v = probe[f];
-            }
-            return std::string(v);
-        };
+        auto take = [&](field f) -> std::string { return std::string(response[f]); };
         meta.content_type = take(field::content_type);
         meta.content_disposition = take(field::content_disposition);
         meta.etag = take(field::etag);

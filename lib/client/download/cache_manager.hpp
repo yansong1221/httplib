@@ -45,10 +45,8 @@ namespace httplib::client
         std::optional<cache::entry> get(std::string_view key) const;
         void put(std::string_view key, fs::path const& body, http_meta const& meta) const;
 
-        static std::string make_key(url::url_info const& ui, std::string const& auth_scope);
-        static std::string auth_scope(httplib::headers const& headers);
+        static std::string make_key(url::url_info const& ui, httplib::headers const& headers);
         static http_meta make_meta(httplib::headers const& response,
-                                   httplib::headers const& probe,
                                    url::url_info const& final_ui,
                                    bool has_final_ui);
         static std::string serialize_meta(http_meta const& meta);

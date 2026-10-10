@@ -37,11 +37,13 @@ namespace httplib::client
         };
 
         /// Success payload of a single-stream download: the terminal origin and
-        /// response headers needed for caching.
+        /// response headers needed for caching. `from_cache` marks a 304 that was
+        /// served by copying the cached body — the run must not re-put the cache.
         struct download_payload
         {
             httplib::headers headers;
             url::url_info final_ui;
+            bool from_cache = false;
         };
 
       public:
@@ -89,16 +91,15 @@ namespace httplib::client
                                                                fs::path const& save_path,
                                                                httplib::headers const& headers);
 
-        net::awaitable<bool> check_remote_cache(url::url_info const& ui,
-                                                cache_manager::http_meta const& meta,
-                                                httplib::headers const& base_headers);
         /// Tries to complete the run from the response cache without any network
-        /// round-trip, copying the cached body to `save_path`. Returns true when
-        /// the cache satisfied the request.
-        net::awaitable<bool> try_serve_from_cache(url::url_info const& ui,
+        /// round-trip, copying the cached body to `save_path`. Only fresh entries
+        /// (unexpired, non-no-cache) qualify; stale entries fall through to a
+        /// conditional GET in download_single(). `entry` is the cached entry
+        /// fetched by the caller. Returns true when the cache satisfied the
+        /// request.
+        net::awaitable<bool> try_serve_from_cache(std::optional<cache::entry> const& entry,
                                                   std::string const& state_url,
-                                                  fs::path const& save_path,
-                                                  httplib::headers const& headers);
+                                                  fs::path const& save_path);
 
         /// Sends one logical request over a pooled connection and follows
         /// redirects, returning the terminal response. `req_headers` must already
@@ -108,12 +109,16 @@ namespace httplib::client
                                                                         httplib::headers req_headers);
 
         /// Single-stream download with resume-on-interruption. Streams the body
-        /// straight to disk and retries within `cfg.max_retries`.
+        /// straight to disk and retries within `cfg.max_retries`. When `entry`
+        /// holds a cached entry and the conditional GET returns 304, the cached
+        /// body is copied to `save_path` and the payload is returned with
+        /// `from_cache = true`.
         net::awaitable<boost::system::result<download_payload>>
         download_single(url::url_info const& ui,
                         fs::path const& save_path,
                         downloader::config const& cfg,
-                        httplib::headers const& base_headers);
+                        httplib::headers const& base_headers,
+                        std::optional<cache::entry> const& entry);
 
       private:
         net::any_io_executor executor_;

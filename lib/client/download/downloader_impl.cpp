@@ -145,63 +145,15 @@ namespace httplib::client
     }
 
     // =========================================================================
-    // cache helpers
-    // =========================================================================
-
-    net::awaitable<bool>
-    downloader::impl::check_remote_cache(url::url_info const& ui,
-                                         cache_manager::http_meta const& meta,
-                                         httplib::headers const& base_headers)
-    {
-        if (!cache_manager_.enabled())
-        {
-            co_return false;
-        }
-        if (meta.etag.empty() && meta.last_modified.empty())
-        {
-            // No validator: there is no way to prove the cached body is still
-            // current, so never serve it.
-            co_return false;
-        }
-        httplib::headers req_headers = base_headers;
-        if (!meta.etag.empty())
-        {
-            req_headers.set(field::if_none_match, meta.etag);
-        }
-        if (!meta.last_modified.empty())
-        {
-            req_headers.set(field::if_modified_since, meta.last_modified);
-        }
-        auto result = co_await send_request(ui, method::head, std::move(req_headers));
-        if (!result.has_value() || result->response.result() != status::not_modified)
-        {
-            co_return false;
-        }
-        // Revalidate the final origin too: a URL that now redirects elsewhere
-        // must not be served from an entry recorded against the old target.
-        if (!meta.final_url.empty() && result->final_ui.to_url() != meta.final_url)
-        {
-            co_return false;
-        }
-        co_return true;
-    }
-
-    // =========================================================================
     // serve from cache
     // =========================================================================
 
     net::awaitable<bool>
-    downloader::impl::try_serve_from_cache(url::url_info const& ui,
+    downloader::impl::try_serve_from_cache(std::optional<cache::entry> const& entry,
                                            std::string const& state_url,
-                                           fs::path const& save_path,
-                                           httplib::headers const& headers)
+                                           fs::path const& save_path)
     {
-        if (!cache_manager_.enabled())
-        {
-            co_return false;
-        }
-        auto entry = cache_manager_.get(state_url);
-        if (!entry.has_value())
+        if (!entry)
         {
             co_return false;
         }
@@ -211,38 +163,24 @@ namespace httplib::client
             co_return false;
         }
 
+        // Only a fresh entry (unexpired, non-no-cache) can be served without a
+        // network round-trip. Stale entries fall through to the conditional GET
+        // in download_single().
+        if (meta->must_revalidate || !meta->fresh_until.has_value()
+            || std::chrono::system_clock::now() >= *meta->fresh_until)
+        {
+            co_return false;
+        }
+
         progress_.set_state(downloader::state::downloading, {});
 
-        bool usable = false;
-        if (!meta->must_revalidate && meta->fresh_until.has_value()
-            && std::chrono::system_clock::now() < *meta->fresh_until)
-        {
-            // Still fresh: serve the cached body without any network round-trip.
-            usable = true;
-        }
-        else
-        {
-            usable = co_await check_remote_cache(ui, *meta, headers);
-        }
-        if (!usable)
-        {
-            co_return false;
-        }
-
-        // Re-fetch immediately before copying so a concurrent cleanup cannot
-        // evict the entry between validation and use (narrowing the TOCTOU window).
-        auto fresh = cache_manager_.get(state_url);
-        if (!fresh.has_value())
-        {
-            co_return false;
-        }
         std::error_code copy_ec;
-        fs::copy_file(fresh->body_path, save_path, fs::copy_options::overwrite_existing, copy_ec);
+        fs::copy_file(entry->body_path, save_path, fs::copy_options::overwrite_existing, copy_ec);
         if (copy_ec)
         {
             co_return false;
         }
-        progress_.finish_with_bytes(fresh->body_size);
+        progress_.finish_with_bytes(entry->body_size);
         progress_.set_state(downloader::state::completed, {});
         co_return true;
     }
@@ -389,7 +327,6 @@ namespace httplib::client
         co_await net::this_coro::throw_if_cancelled(false);
 
         downloader::config const cfg = config_.load();
-        std::string const auth_scope = cache_manager::auth_scope(headers);
 
         auto r = url::parse_url(url);
         if (!r)
@@ -400,7 +337,7 @@ namespace httplib::client
         }
         auto ui = *r;
 
-        std::string const state_url = cache_manager::make_key(ui, auth_scope);
+        std::string const state_url = cache_manager::make_key(ui, headers);
 
         progress_.set_state(downloader::state::connecting, {});
 
@@ -415,41 +352,43 @@ namespace httplib::client
         }
 
         boost::system::error_code ec;
-        if (co_await try_serve_from_cache(ui, state_url, save_path, headers))
+        auto entry = cache_manager_.get(state_url);
+        if (co_await try_serve_from_cache(entry, state_url, save_path))
         {
             co_return boost::system::error_code {};
         }
 
-        // HEAD probe: grab the origin's headers ahead of the GET so its
-        // Content-Disposition can name the file and its cache directives can
-        // gate whether the fetched body is worth storing.
-        httplib::headers probe_headers;
-        if (auto head = co_await send_request(ui, method::head, headers);
-            head.has_value() && head->response.result() == status::ok)
+        // One-step revalidation: attach the cached validators so the GET itself
+        // asks the server whether the body is still current (304 → reuse cache,
+        // 200 → download fresh). Without a validator there is nothing to send.
+        httplib::headers req_headers = headers;
+        if (entry)
         {
-            // headers() 是 borrow 视图：必须 merge 出副本，否则协程帧销毁后悬垂。
-            probe_headers.merge(head->response.headers());
+            if (auto meta = cache_manager::parse_meta(entry->metadata))
+            {
+                if (!meta->etag.empty())
+                {
+                    req_headers.set(field::if_none_match, meta->etag);
+                }
+                if (!meta->last_modified.empty())
+                {
+                    req_headers.set(field::if_modified_since, meta->last_modified);
+                }
+            }
         }
-
-        store_suggested_filename(probe_headers);
 
         progress_.set_state(downloader::state::downloading, {});
 
-        auto dl = co_await download_single(ui, save_path, cfg, headers);
+        auto dl = co_await download_single(ui, save_path, cfg, req_headers, entry);
         if (!dl.has_value())
         {
             ec = dl.error();
         }
-        else if (cache_manager_.enabled() && !save_path.empty())
+        else if (!dl->from_cache && !save_path.empty())
         {
-            bool cacheable = http_header_util::response_is_cacheable(probe_headers);
-            if (!dl->headers.empty())
+            if (http_header_util::response_is_cacheable(dl->headers))
             {
-                cacheable = cacheable && http_header_util::response_is_cacheable(dl->headers);
-            }
-            if (cacheable)
-            {
-                auto meta = cache_manager::make_meta(dl->headers, probe_headers, dl->final_ui, true);
+                auto meta = cache_manager::make_meta(dl->headers, dl->final_ui, true);
                 // Retention is governed by the cache's max_age (so stale
                 // entries stay available for revalidation); HTTP freshness
                 // travels inside the opaque metadata blob.
@@ -481,7 +420,8 @@ namespace httplib::client
     downloader::impl::download_single(url::url_info const& ui,
                                       fs::path const& save_path,
                                       downloader::config const& cfg,
-                                      httplib::headers const& base_headers)
+                                      httplib::headers const& base_headers,
+                                      std::optional<cache::entry> const& entry)
     {
         for (int attempt = 0; attempt <= cfg.max_retries; ++attempt)
         {
@@ -530,6 +470,26 @@ namespace httplib::client
             }
 
             auto status = result->response.result();
+            if (status == status::not_modified)
+            {
+                // One-step revalidation: the conditional GET confirmed the cached
+                // body is still current, so copy it out instead of re-downloading.
+                if (entry && !save_path.empty())
+                {
+                    std::error_code ec;
+                    fs::copy_file(entry->body_path, save_path, fs::copy_options::overwrite_existing, ec);
+                    if (!ec)
+                    {
+                        progress_.finish_with_bytes(entry->body_size);
+                        download_payload payload;
+                        payload.from_cache = true;
+                        co_return payload;
+                    }
+                }
+                // 304 but the cached body is gone (evicted mid-run): fail rather
+                // than falling through to a stale-file copy.
+                co_return boost::system::errc::make_error_code(boost::system::errc::io_error);
+            }
             if (status != status::ok && status != status::partial_content)
             {
                 if (attempt == cfg.max_retries)
