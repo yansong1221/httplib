@@ -195,6 +195,10 @@ namespace httplib::client
         // 下载场景保存原始字节（断点续传依赖），不接受内容编码压缩。
         req_headers.set(field::accept_encoding, "identity");
 
+        // Cache-key 的 auth scope 取调用方原始头（重定向剥头之前），保证各 hop
+        // 的查询与最终 put 用同一 key。
+        httplib::headers const key_headers = req_headers;
+
         auto h = ui.host;
         auto p = ui.effective_port();
         auto s = ui.transport();
@@ -221,6 +225,46 @@ namespace httplib::client
             handle->set_max_redirects(0);
             handle->set_verify_ssl(cfg.verify_ssl);
             handle->set_download_rate_limit(cfg.max_speed_bytes_per_sec);
+
+            // 每个 hop 按其实际请求 URL 查响应缓存并附加该 URL 的 validator；
+            // 重定向源（3xx 从不入缓存）自然得不到别的 origin 的条件头。
+            url::url_info hop_ui = ui;
+            if (redir != 0)
+            {
+                std::string hop_path = t;
+                std::string hop_query;
+                if (auto qpos = t.find('?'); qpos != std::string::npos)
+                {
+                    hop_path = t.substr(0, qpos);
+                    hop_query = t.substr(qpos + 1);
+                }
+                url::url_info redirected;
+                redirected.scheme = std::string(url::to_string(s));
+                redirected.host = h;
+                redirected.port = p;
+                redirected.path = std::move(hop_path);
+                redirected.query = std::move(hop_query);
+                hop_ui = std::move(redirected);
+            }
+
+            req_headers.erase(field::if_none_match);
+            req_headers.erase(field::if_modified_since);
+            std::optional<cache::entry> hop_entry;
+            if (auto cached = cache_manager_.get(cache_manager::make_key(hop_ui, key_headers)); cached)
+            {
+                if (auto meta = cache_manager::parse_meta(cached->metadata); meta)
+                {
+                    if (!meta->etag.empty())
+                    {
+                        req_headers.set(field::if_none_match, meta->etag);
+                    }
+                    if (!meta->last_modified.empty())
+                    {
+                        req_headers.set(field::if_modified_since, meta->last_modified);
+                    }
+                    hop_entry = std::move(cached);
+                }
+            }
 
             auto req = httplib::client::request(m, t, req_headers);
 
@@ -272,7 +316,7 @@ namespace httplib::client
                 }
             }
 
-            co_return send_result { std::move(handle), std::move(resp) };
+            co_return send_result { std::move(handle), std::move(resp), std::move(hop_ui), std::move(hop_entry) };
         }
 
         co_return boost::system::errc::make_error_code(boost::system::errc::protocol_error);
@@ -331,8 +375,6 @@ namespace httplib::client
         }
         auto ui = *r;
 
-        std::string const state_url = cache_manager::make_key(ui, headers);
-
         progress_.set_state(downloader::state::connecting, {});
 
         // set_state() above runs user callbacks synchronously, which is
@@ -346,34 +388,22 @@ namespace httplib::client
         }
 
         boost::system::error_code ec;
-        auto entry = cache_manager_.get(state_url);
+        // A still-fresh entry keyed by the requested URL can satisfy the run with
+        // no network round-trip. Redirecting URLs are never cached (only final
+        // 2xx bodies are, under their own URL), so a redirect always falls
+        // through to the network and is revalidated per hop in send_request.
+        auto entry = cache_manager_.get(cache_manager::make_key(ui, headers));
         if (co_await try_serve_from_cache(entry, save_path))
         {
             co_return boost::system::error_code {};
         }
 
-        // One-step revalidation: attach the cached validators so the GET itself
-        // asks the server whether the body is still current (304 → reuse cache,
-        // 200 → download fresh). Without a validator there is nothing to send.
+        // Per-hop cache lookup (validators attached at each hop) handles
+        // conditional revalidation. No pre-attachment here; send_request will
+        // consult the cache for each hop's URL.
         httplib::headers req_headers = headers;
-        if (entry)
-        {
-            if (auto meta = cache_manager::parse_meta(entry->metadata))
-            {
-                if (!meta->etag.empty())
-                {
-                    req_headers.set(field::if_none_match, meta->etag);
-                }
-                if (!meta->last_modified.empty())
-                {
-                    req_headers.set(field::if_modified_since, meta->last_modified);
-                }
-            }
-        }
-
         progress_.set_state(downloader::state::downloading, {});
-
-        auto dl = co_await download_single(ui, save_path, cfg, req_headers, entry);
+        auto dl = co_await download_single(ui, save_path, cfg, req_headers);
         if (!dl.has_value())
         {
             ec = dl.error();
@@ -383,10 +413,11 @@ namespace httplib::client
             if (http_header_util::response_is_cacheable(dl->headers))
             {
                 auto meta = cache_manager::make_meta(dl->headers);
-                // Retention is governed by the cache's max_age (so stale
-                // entries stay available for revalidation); HTTP freshness
-                // travels inside the opaque metadata blob.
-                cache_manager_.put(state_url, save_path, meta);
+                // Store under the URL that actually served the body: retention
+                // is governed by the cache's max_age (so stale entries stay
+                // available for revalidation); HTTP freshness travels inside the
+                // opaque metadata blob. A redirecting URL is never a key here.
+                cache_manager_.put(cache_manager::make_key(dl->final_ui, headers), save_path, meta);
             }
         }
 
@@ -414,8 +445,7 @@ namespace httplib::client
     downloader::impl::download_single(url::url_info const& ui,
                                       fs::path const& save_path,
                                       downloader::config const& cfg,
-                                      httplib::headers const& base_headers,
-                                      std::optional<cache::entry> const& entry)
+                                      httplib::headers const& base_headers)
     {
         for (int attempt = 0; attempt <= cfg.max_retries; ++attempt)
         {
@@ -466,15 +496,16 @@ namespace httplib::client
             auto status = result->response.result();
             if (status == status::not_modified)
             {
-                // One-step revalidation: the conditional GET confirmed the cached
-                // body is still current, so copy it out instead of re-downloading.
-                if (entry && !save_path.empty())
+                // One-step revalidation: the conditional GET (sent with the final
+                // URL's own cached validators) confirmed the cached body is still
+                // current, so copy it out instead of re-downloading.
+                if (result->cache_entry && !save_path.empty())
                 {
                     std::error_code ec;
-                    fs::copy_file(entry->body_path, save_path, fs::copy_options::overwrite_existing, ec);
+                    fs::copy_file(result->cache_entry->body_path, save_path, fs::copy_options::overwrite_existing, ec);
                     if (!ec)
                     {
-                        progress_.finish_with_bytes(entry->body_size);
+                        progress_.finish_with_bytes(result->cache_entry->body_size);
                         download_payload payload;
                         payload.from_cache = true;
                         co_return payload;
@@ -597,6 +628,7 @@ namespace httplib::client
             // headers() 是 borrow 视图：merge 出副本后再随 payload 离开协程帧。
             download_payload payload;
             payload.headers.merge(result->response.headers());
+            payload.final_ui = result->final_ui;
             co_return payload;
         }
 

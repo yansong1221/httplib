@@ -1607,3 +1607,188 @@ TEST_CASE("Downloader: cache hit emits a final progress tick", "[downloader]")
     fs::remove(dl_path2, rm_ec);
     fs::remove_all(cache_dir, rm_ec);
 }
+
+TEST_CASE("Downloader: cache entry revalidates through a redirect", "[downloader]")
+{
+    auto server_path = fs::temp_directory_path() / "httplib_dl_redircache_srv.txt";
+    std::string const payload = "redirect cache payload\n";
+    {
+        std::ofstream f(server_path, std::ios::binary);
+        f << payload;
+    }
+
+    auto dl_path1 = fs::temp_directory_path() / "httplib_dl_redircache_out1.bin";
+    auto dl_path2 = fs::temp_directory_path() / "httplib_dl_redircache_out2.bin";
+    auto cache_dir = fs::temp_directory_path() / "httplib_dl_redircache_dir";
+    fs::remove_all(cache_dir);
+
+    std::atomic<int> start_gets { 0 };
+    std::atomic<int> final_gets { 0 };
+    std::atomic<int> final_bodies { 0 };
+    std::atomic<bool> final_saw_conditional { false };
+
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<httplib::method::get>("/start",
+                                                      [&](httplib::server::request&, httplib::server::response& resp)
+                                                      {
+                                                          start_gets.fetch_add(1);
+                                                          resp.set_redirect("/final", httplib::status::found);
+                                                      });
+    ts.router().set_http_handler<httplib::method::get>("/final",
+                                                      [&](httplib::server::request& req,
+                                                          httplib::server::response& resp)
+                                                      {
+                                                          final_gets.fetch_add(1);
+                                                          if (req[httplib::field::if_none_match] == "\"rc1\"")
+                                                          {
+                                                              final_saw_conditional.store(true);
+                                                              resp.set_empty_content(httplib::status::not_modified);
+                                                              return;
+                                                          }
+                                                          final_bodies.fetch_add(1);
+                                                          resp.set(httplib::field::etag, "\"rc1\"");
+                                                          resp.set(httplib::field::cache_control, "no-cache");
+                                                          resp.set_string_content(payload, "text/plain");
+                                                      });
+    ts.start();
+
+    auto cache = std::make_shared<httplib::client::disk_cache>(cache_dir);
+
+    {
+        httplib::client::downloader dl(ts.ioc_, ts.pool);
+        dl.set_cache(cache);
+        dl.set_config({ .max_redirects = 5 });
+        auto ec = dl.download(ts.url_for_path("/start"), dl_path1).get();
+        REQUIRE_FALSE(ec);
+        REQUIRE(read_file(dl_path1) == payload);
+    }
+
+    REQUIRE(start_gets.load() == 1);
+    REQUIRE(final_gets.load() == 1);
+    REQUIRE(final_bodies.load() == 1);
+
+    {
+        httplib::client::downloader dl(ts.ioc_, ts.pool);
+        dl.set_cache(cache);
+        dl.set_config({ .max_redirects = 5 });
+        auto ec = dl.download(ts.url_for_path("/start"), dl_path2).get();
+        REQUIRE_FALSE(ec);
+        REQUIRE(read_file(dl_path2) == payload);
+    }
+
+    // no-cache on the final response forces revalidation on the second run: the
+    // conditional request must be re-sent through the redirect chain, answered
+    // by a 304 at the final URL, and served from the cached body.
+    REQUIRE(start_gets.load() == 2);
+    REQUIRE(final_gets.load() == 2);
+    REQUIRE(final_saw_conditional.load());
+    REQUIRE(final_bodies.load() == 1);
+
+    std::error_code rm_ec;
+    fs::remove(server_path, rm_ec);
+    fs::remove(dl_path1, rm_ec);
+    fs::remove(dl_path2, rm_ec);
+    fs::remove_all(cache_dir, rm_ec);
+}
+
+TEST_CASE("Downloader: revalidation must not leak validators to the redirect origin", "[downloader]")
+{
+    auto srv_path = fs::temp_directory_path() / "httplib_dl_crosscache_srv.txt";
+    std::string const payload = "cross cache payload\n";
+    {
+        std::ofstream f(srv_path, std::ios::binary);
+        f << payload;
+    }
+
+    auto dl_path1 = fs::temp_directory_path() / "httplib_dl_crosscache_out1.bin";
+    auto dl_path2 = fs::temp_directory_path() / "httplib_dl_crosscache_out2.bin";
+    auto cache_dir = fs::temp_directory_path() / "httplib_dl_crosscache_dir";
+    fs::remove_all(cache_dir);
+
+    net::io_context ioc;
+    httplib::server::http_server target { ioc };
+    httplib::server::http_server origin { ioc };
+    std::thread worker;
+    auto null_sink = std::make_shared<spdlog::sinks::null_sink_mt>();
+    target.set_logger(std::make_shared<spdlog::logger>("t", null_sink));
+    origin.set_logger(std::make_shared<spdlog::logger>("o", null_sink));
+
+    std::atomic<int> origin_sees_conditional { 0 };
+    std::atomic<int> target_bodies { 0 };
+
+    target.router().set_http_handler<httplib::method::get>(
+        "/target",
+        [&](httplib::server::request& req, httplib::server::response& resp)
+        {
+            if (req[httplib::field::if_none_match] == "\"x1\"")
+            {
+                resp.set_empty_content(httplib::status::not_modified);
+                return;
+            }
+            target_bodies.fetch_add(1);
+            resp.set(httplib::field::etag, "\"x1\"");
+            resp.set(httplib::field::cache_control, "no-cache");
+            resp.set_string_content(payload, "text/plain");
+        });
+    target.listen("127.0.0.1", 0);
+    auto target_port = target.local_endpoint().port();
+
+    origin.router().set_http_handler<httplib::method::get>(
+        "/start",
+        [&](httplib::server::request& req, httplib::server::response& resp)
+        {
+            if (req.has(httplib::field::if_none_match) || req.has(httplib::field::if_modified_since))
+            {
+                origin_sees_conditional.fetch_add(1);
+            }
+            resp.set_redirect(std::format("http://127.0.0.1:{}/target", target_port), httplib::status::found);
+        });
+    origin.listen("127.0.0.1", 0);
+
+    auto pool = std::make_shared<httplib::client::http_client_pool>(ioc.get_executor(),
+                                                                    httplib::client::pool_params { .max_size = 8 });
+    target.run();
+    origin.run();
+    worker = std::thread([&] { ioc.run(); });
+
+    auto cache = std::make_shared<httplib::client::disk_cache>(cache_dir);
+    auto origin_url = std::format("http://127.0.0.1:{}/start", origin.local_endpoint().port());
+
+    {
+        httplib::client::downloader dl(ioc, pool);
+        dl.set_cache(cache);
+        dl.set_config({ .max_redirects = 5 });
+        auto ec = dl.download(origin_url, dl_path1).get();
+        REQUIRE_FALSE(ec);
+        REQUIRE(read_file(dl_path1) == payload);
+    }
+
+    {
+        httplib::client::downloader dl(ioc, pool);
+        dl.set_cache(cache);
+        dl.set_config({ .max_redirects = 5 });
+        auto ec = dl.download(origin_url, dl_path2).get();
+        REQUIRE_FALSE(ec);
+        REQUIRE(read_file(dl_path2) == payload);
+    }
+
+    // The cached body came from the target's response, so its ETag/Last-Modified
+    // belong to that origin. Revalidating re-follows the redirect, but the
+    // validators are only ever attached to the hop whose cache they came from:
+    // the redirecting origin sees none, and the target answers 304 so the body
+    // is reused without a second download.
+    REQUIRE(origin_sees_conditional.load() == 0);
+    REQUIRE(target_bodies.load() == 1);
+
+    pool->stop();
+    origin.stop();
+    target.stop();
+    ioc.stop();
+    worker.join();
+
+    std::error_code rm_ec;
+    fs::remove(srv_path, rm_ec);
+    fs::remove(dl_path1, rm_ec);
+    fs::remove(dl_path2, rm_ec);
+    fs::remove_all(cache_dir, rm_ec);
+}

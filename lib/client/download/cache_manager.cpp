@@ -1,14 +1,12 @@
 #include "cache_manager.hpp"
 #include "http_header_util.hpp"
 #include <algorithm>
-#include <boost/algorithm/string/trim.hpp>
-#include <format>
+#include <boost/json/object.hpp>
+#include <boost/json/parse.hpp>
+#include <boost/json/serialize.hpp>
 
 namespace httplib::client
-{
-    using boost::algorithm::trim;
-
-    void
+{    void
     cache_manager::set_cache(std::shared_ptr<cache> c)
     {
         cache_.store(std::move(c), std::memory_order_release);
@@ -99,15 +97,12 @@ namespace httplib::client
     std::string
     cache_manager::serialize_meta(http_meta const& meta)
     {
-        std::string out;
-        auto put = [&](std::string_view key, std::string const& value)
+        boost::json::object obj;
+        auto put = [&](char const* key, std::string const& value)
         {
             if (!value.empty())
             {
-                out.append(key);
-                out.push_back('=');
-                out.append(value);
-                out.push_back('\n');
+                obj[key] = value;
             }
         };
         put("etag", meta.etag);
@@ -117,15 +112,13 @@ namespace httplib::client
         if (meta.fresh_until.has_value())
         {
             auto secs = std::chrono::duration_cast<std::chrono::seconds>(meta.fresh_until->time_since_epoch());
-            out.append("fresh_until=");
-            out.append(std::to_string(secs.count()));
-            out.push_back('\n');
+            obj["fresh_until"] = secs.count();
         }
         if (meta.must_revalidate)
         {
-            out.append("must_revalidate=1\n");
+            obj["must_revalidate"] = true;
         }
-        return out;
+        return boost::json::serialize(obj);
     }
 
     std::optional<cache_manager::http_meta>
@@ -135,57 +128,32 @@ namespace httplib::client
         {
             return std::nullopt;
         }
-        http_meta meta;
-        std::size_t pos = 0;
-        while (pos < blob.size())
+        boost::system::error_code ec;
+        auto value = boost::json::parse(blob, ec);
+        if (ec || !value.is_object())
         {
-            auto nl = blob.find('\n', pos);
-            auto end = (nl == std::string_view::npos) ? blob.size() : nl;
-            std::string line(blob.substr(pos, end - pos));
-            pos = (nl == std::string_view::npos) ? blob.size() : nl + 1;
+            return std::nullopt;
+        }
+        auto const& obj = value.as_object();
 
-            trim(line);
-            if (line.empty())
-            {
-                continue;
-            }
-            auto eq = line.find('=');
-            if (eq == std::string::npos)
-            {
-                continue;
-            }
-            auto key = line.substr(0, eq);
-            auto val = line.substr(eq + 1);
-            if (key == "etag")
-            {
-                meta.etag = val;
-            }
-            else if (key == "last_modified")
-            {
-                meta.last_modified = val;
-            }
-            else if (key == "content_type")
-            {
-                meta.content_type = val;
-            }
-            else if (key == "content_disposition")
-            {
-                meta.content_disposition = val;
-            }
-            else if (key == "fresh_until")
-            {
-                try
-                {
-                    meta.fresh_until = std::chrono::system_clock::time_point(std::chrono::seconds(std::stoll(val)));
-                }
-                catch (...)
-                {
-                }
-            }
-            else if (key == "must_revalidate")
-            {
-                meta.must_revalidate = (val == "1");
-            }
+        http_meta meta;
+        auto take = [&](char const* key) -> std::string
+        {
+            auto v = obj.try_at(key);
+            return v.has_value() && v->is_string() ? std::string(v->as_string()) : std::string {};
+        };
+        meta.etag = take("etag");
+        meta.last_modified = take("last_modified");
+        meta.content_type = take("content_type");
+        meta.content_disposition = take("content_disposition");
+
+        if (auto v = obj.try_at("fresh_until"); v.has_value() && v->is_int64())
+        {
+            meta.fresh_until = std::chrono::system_clock::time_point(std::chrono::seconds(v->as_int64()));
+        }
+        if (auto v = obj.try_at("must_revalidate"); v.has_value() && v->is_bool())
+        {
+            meta.must_revalidate = v->as_bool();
         }
         return meta;
     }

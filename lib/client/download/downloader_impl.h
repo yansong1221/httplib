@@ -24,22 +24,28 @@ namespace httplib::client
     {
       public:
         /// Terminal response of a logical request after following redirects: the
-        /// pooled connection that owns its (lazy) body and the response itself.
-        /// Absence in the enclosing `boost::system::result` means no usable
-        /// response was obtained (connection/acquire/send failure, cancellation,
-        /// redirect exhaustion).
+        /// pooled connection that owns its (lazy) body, the response itself, the
+        /// URL that actually served the body, and the cache entry whose
+        /// validators were attached to the final request (empty when the final
+        /// URL has no cache entry). Absence in the enclosing
+        /// `boost::system::result` means no usable response was obtained
+        /// (connection/acquire/send failure, cancellation, redirect exhaustion).
         struct send_result
         {
             http_client_pool::client_handle handle;
             client::response response;
+            url::url_info final_ui;
+            std::optional<cache::entry> cache_entry;
         };
 
         /// Success payload of a single-stream download: the response headers
-        /// needed for caching. `from_cache` marks a 304 that was served by
-        /// copying the cached body — the run must not re-put the cache.
+        /// needed for caching and the URL that served them (the response-cache
+        /// key). `from_cache` marks a 304 that was served by copying the cached
+        /// body — the run must not re-put the cache.
         struct download_payload
         {
             httplib::headers headers;
+            url::url_info final_ui;
             bool from_cache = false;
         };
 
@@ -98,23 +104,25 @@ namespace httplib::client
                                                   fs::path const& save_path);
 
         /// Sends one logical request over a pooled connection and follows
-        /// redirects, returning the terminal response. `req_headers` must already
-        /// contain the fully merged per-request headers.
+        /// redirects, returning the terminal response. Before each hop the
+        /// response cache is consulted for that hop's URL and the cached
+        /// validators are attached — so a redirecting origin never receives a
+        /// different origin's If-None-Match / If-Modified-Since. `req_headers`
+        /// must already contain the fully merged per-request headers.
         net::awaitable<boost::system::result<send_result>> send_request(url::url_info const& ui,
                                                                         httplib::method m,
                                                                         httplib::headers req_headers);
 
         /// Single-stream download with resume-on-interruption. Streams the body
-        /// straight to disk and retries within `cfg.max_retries`. When `entry`
-        /// holds a cached entry and the conditional GET returns 304, the cached
-        /// body is copied to `save_path` and the payload is returned with
+        /// straight to disk and retries within `cfg.max_retries`. When the
+        /// conditional GET returns 304, the cached body for the final URL is
+        /// copied to `save_path` and the payload is returned with
         /// `from_cache = true`.
         net::awaitable<boost::system::result<download_payload>>
         download_single(url::url_info const& ui,
                         fs::path const& save_path,
                         downloader::config const& cfg,
-                        httplib::headers const& base_headers,
-                        std::optional<cache::entry> const& entry);
+                        httplib::headers const& base_headers);
 
       private:
         net::any_io_executor executor_;
