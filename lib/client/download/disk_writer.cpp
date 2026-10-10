@@ -52,13 +52,13 @@ namespace httplib::client
     }
 
     net::awaitable<boost::system::error_code>
-    disk_writer::copy_atomic(fs::path const& src, fs::path const& save_path)
+    disk_writer::copy_atomic(cache::entry const& src, fs::path const& save_path)
     {
         fs::path const part_path = part_path_of(save_path);
-        std::error_code ec;
-        fs::copy_file(src, part_path, fs::copy_options::overwrite_existing, ec);
-        if (ec)
+        if (auto ec = src.copy_to_file(part_path); ec)
         {
+            std::error_code rm_ec;
+            fs::remove(part_path, rm_ec);
             co_return boost::system::errc::make_error_code(boost::system::errc::io_error);
         }
         co_return publish(part_path, save_path);

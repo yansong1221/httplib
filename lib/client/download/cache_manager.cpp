@@ -156,12 +156,12 @@ namespace httplib::client
         {
             return std::nullopt;
         }
-        auto meta = detail::parse_meta(raw->metadata);
+        auto meta = detail::parse_meta(raw->metadata());
         if (!meta)
         {
             return std::nullopt;
         }
-        return cached_entry { std::move(*raw), std::move(*meta) };
+        return cached_entry { std::move(raw), std::move(*meta) };
     }
 
     void

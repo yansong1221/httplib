@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iterator>
+#include <mutex>
 #include <sstream>
 #include <vector>
 
@@ -168,6 +169,138 @@ namespace httplib::client
             }
             return to_unix_seconds(*a) == to_unix_seconds(*b);
         }
+
+        /// The disk backend's `cache::entry`. The body file is opened eagerly
+        /// and held for the whole lifetime of the entry, so the bytes stay
+        /// readable even when the entry is evicted or replaced concurrently:
+        /// on Windows the open handle blocks the delete, on POSIX the open
+        /// descriptor follows the unlinked inode. All reads go through the held
+        /// handle, never through the path, so they serve the exact bytes
+        /// observed at get() no matter what happens to the directory.
+        /// `mutex_` makes one entry safe for concurrent readers (the stream
+        /// cursor is shared state).
+        ///
+        /// Windows note: while an entry is alive, eviction of its directory can
+        /// only delete the metadata around the held body file, and a put for
+        /// the same key fails instead of replacing it. Both are transient —
+        /// the leftover directory carries no version file and is swept as a
+        /// miss by the next get()/cleanup.
+        class disk_entry final : public cache::entry
+        {
+          public:
+            disk_entry(fs::path path,
+                       std::uint64_t size,
+                       std::string metadata,
+                       std::optional<cache::time_point> expires_at)
+                : size_(size)
+                , metadata_(std::move(metadata))
+                , expires_at_(expires_at)
+                , f_(std::move(path), std::ios::binary)
+            {
+            }
+
+            /// False when the body could not be opened at construction; get()
+            /// turns that into a miss instead of a dead entry.
+            bool
+            is_open() const
+            {
+                return f_.is_open();
+            }
+
+            std::string_view
+            metadata() const override
+            {
+                return metadata_;
+            }
+
+            std::optional<cache::time_point>
+            expires_at() const override
+            {
+                return expires_at_;
+            }
+
+            std::uint64_t
+            size() const override
+            {
+                return size_;
+            }
+
+            std::optional<std::string>
+            read_all() const override
+            {
+                std::lock_guard lk(mutex_);
+                if (!is_open())
+                {
+                    return std::nullopt;
+                }
+                if (size_ == 0)
+                {
+                    return std::string {};
+                }
+                if (!reset_locked())
+                {
+                    return std::nullopt;
+                }
+                std::string out(size_, '\0');
+                f_.read(out.data(), static_cast<std::streamsize>(size_));
+                if (f_.gcount() != static_cast<std::streamsize>(size_))
+                {
+                    return std::nullopt;
+                }
+                return out;
+            }
+
+            std::error_code
+            copy_to_file(fs::path const& dst) const override
+            {
+                std::lock_guard lk(mutex_);
+                if (!is_open() || !reset_locked())
+                {
+                    return std::make_error_code(std::errc::no_such_file_or_directory);
+                }
+                std::ofstream out(dst, std::ios::binary | std::ios::trunc);
+                if (!out.is_open())
+                {
+                    return std::make_error_code(std::errc::io_error);
+                }
+                std::vector<char> buf(256 * 1024);
+                std::uint64_t remaining = size_;
+                while (remaining > 0)
+                {
+                    auto want = static_cast<std::streamsize>(std::min<std::uint64_t>(buf.size(), remaining));
+                    f_.read(buf.data(), want);
+                    auto got = f_.gcount();
+                    if (got <= 0)
+                    {
+                        return std::make_error_code(std::errc::io_error);
+                    }
+                    out.write(buf.data(), got);
+                    if (!out)
+                    {
+                        return std::make_error_code(std::errc::io_error);
+                    }
+                    remaining -= static_cast<std::uint64_t>(got);
+                }
+                return {};
+            }
+
+          private:
+            /// Seeks back to the start for a fresh full-body read. The caller
+            /// holds `mutex_`.
+            bool
+            reset_locked() const
+            {
+                f_.clear();
+                f_.seekg(0, std::ios::beg);
+                return static_cast<bool>(f_);
+            }
+
+            std::uint64_t size_;
+            std::string metadata_;
+            std::optional<cache::time_point> expires_at_;
+            mutable std::mutex mutex_;
+            mutable std::ifstream f_;
+        };
     } // namespace
 
     // =========================================================================
@@ -476,7 +609,7 @@ namespace httplib::client
         }
     }
 
-    std::optional<disk_cache::entry>
+    std::unique_ptr<disk_cache::entry>
     disk_cache::impl::get(std::string_view key)
     {
         std::lock_guard lk(mutex_);
@@ -499,7 +632,7 @@ namespace httplib::client
         std::error_code ec;
         if (!fs::exists(body_path, ec) || ec)
         {
-            return std::nullopt;
+            return nullptr;
         }
 
         if (read_version(edir) != k_format_version)
@@ -507,13 +640,13 @@ namespace httplib::client
             // Entry written by an incompatible layout version: evict and miss.
             std::error_code rm_ec;
             fs::remove_all(edir, rm_ec);
-            return std::nullopt;
+            return nullptr;
         }
 
         auto sz = fs::file_size(body_path, ec);
         if (ec)
         {
-            return std::nullopt;
+            return nullptr;
         }
 
         auto exp = read_expires(edir);
@@ -523,7 +656,7 @@ namespace httplib::client
             // remove() here would self-deadlock on a non-recursive mutex.
             std::error_code rm_ec;
             fs::remove_all(edir, rm_ec);
-            return std::nullopt;
+            return nullptr;
         }
 
         if (!exp && max_age_.count() > 0)
@@ -537,16 +670,20 @@ namespace httplib::client
                 {
                     std::error_code rm_ec;
                     fs::remove_all(edir, rm_ec);
-                    return std::nullopt;
+                    return nullptr;
                 }
             }
         }
 
-        disk_cache::entry e;
-        e.body_path = body_path;
-        e.body_size = static_cast<std::uint64_t>(sz);
-        e.metadata = read_file_string(edir / k_meta_file);
-        e.expires_at = exp;
+        auto e = std::make_unique<disk_entry>(body_path,
+                                              static_cast<std::uint64_t>(sz),
+                                              read_file_string(edir / k_meta_file),
+                                              exp);
+        if (!e->is_open())
+        {
+            // The body vanished between the stat above and the open: miss.
+            return nullptr;
+        }
 
         // touch mtime for LRU ordering
         std::error_code touch_ec;
@@ -788,7 +925,7 @@ namespace httplib::client
 
     disk_cache::~disk_cache() {}
 
-    std::optional<disk_cache::entry>
+    std::unique_ptr<disk_cache::entry>
     disk_cache::get(std::string_view key)
     {
         return impl_->get(key);

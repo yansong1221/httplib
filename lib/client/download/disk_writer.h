@@ -1,4 +1,5 @@
 #pragma once
+#include "httplib/client/cache.hpp"
 #include "httplib/config.hpp"
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
@@ -32,9 +33,11 @@ namespace httplib::client
         /// Deletes the in-progress `<save_path>.part` file, if any.
         static void discard(fs::path const& save_path);
 
-        /// Copies `src` to `save_path` through the part file, so the destination
-        /// only appears once it is fully written.
-        static net::awaitable<boost::system::error_code> copy_atomic(fs::path const& src, fs::path const& save_path);
+        /// Copies the cached `src` entry's body to `save_path` through the part
+        /// file, so the destination only appears once it is fully written.
+        /// Fails cleanly when the body has become unreadable.
+        static net::awaitable<boost::system::error_code> copy_atomic(cache::entry const& src,
+                                                                     fs::path const& save_path);
 
         /// Opens `<path>.part` for writing. When `truncate` is true the part file
         /// is (re)created; otherwise it is kept and the cursor starts at

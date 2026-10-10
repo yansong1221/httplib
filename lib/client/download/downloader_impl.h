@@ -35,7 +35,10 @@ namespace httplib::client
             http_client_pool::client_handle handle;
             client::response response;
             url::url_info final_ui;
-            std::optional<cache::entry> cache_entry;
+            /// Cache entry whose validators were attached to the final
+            /// request, held as a live body handle (null when the final URL
+            /// has no cache entry).
+            std::unique_ptr<cache::entry> cache_entry;
         };
 
         /// Success payload of a single-stream download: the response headers

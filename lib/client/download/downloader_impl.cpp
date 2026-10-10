@@ -165,13 +165,19 @@ namespace httplib::client
             co_return false;
         }
 
-        progress_.set_state(downloader::state::downloading, {});
-
-        if (auto copy_ec = co_await disk_writer::copy_atomic(cached->entry.body_path, save_path); copy_ec)
+        // Defensive: get() never yields an entry without a live body handle.
+        if (!cached->entry)
         {
             co_return false;
         }
-        progress_.finish_with_bytes(cached->entry.body_size);
+
+        progress_.set_state(downloader::state::downloading, {});
+
+        if (auto copy_ec = co_await disk_writer::copy_atomic(*cached->entry, save_path); copy_ec)
+        {
+            co_return false;
+        }
+        progress_.finish_with_bytes(cached->entry->size());
         progress_.set_state(downloader::state::completed, {});
         co_return true;
     }
@@ -242,7 +248,7 @@ namespace httplib::client
 
             req_headers.erase(field::if_none_match);
             req_headers.erase(field::if_modified_since);
-            std::optional<cache::entry> hop_entry;
+            std::unique_ptr<cache::entry> hop_entry;
             if (auto cached = cache_manager_.get(hop_ui, key_headers); cached)
             {
                 if (!cached->meta.etag.empty())
@@ -483,10 +489,9 @@ namespace httplib::client
                 // current, so copy it out instead of re-downloading.
                 if (result->cache_entry && !save_path.empty())
                 {
-                    if (auto copy_ec = co_await disk_writer::copy_atomic(result->cache_entry->body_path, save_path);
-                        !copy_ec)
+                    if (auto copy_ec = co_await disk_writer::copy_atomic(*result->cache_entry, save_path); !copy_ec)
                     {
-                        progress_.finish_with_bytes(result->cache_entry->body_size);
+                        progress_.finish_with_bytes(result->cache_entry->size());
                         download_payload payload;
                         payload.from_cache = true;
                         co_return payload;

@@ -40,7 +40,7 @@ namespace httplib::client
         explicit impl(fs::path cache_dir);
         ~impl();
 
-        std::optional<disk_cache::entry> get(std::string_view key);
+        std::unique_ptr<disk_cache::entry> get(std::string_view key);
         void put(std::string_view key,
                  fs::path const& src_body,
                  std::string_view metadata,

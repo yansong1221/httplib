@@ -34,11 +34,11 @@ namespace httplib::client
             bool must_revalidate = false;
         };
 
-        /// A cache hit resolved into the stored entry plus its parsed HTTP
-        /// metadata.
+        /// A cache hit resolved into the stored entry (a live handle) plus its
+        /// parsed HTTP metadata.
         struct cached_entry
         {
-            cache::entry entry;
+            std::unique_ptr<cache::entry> entry;
             http_meta meta;
         };
 

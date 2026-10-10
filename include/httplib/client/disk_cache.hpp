@@ -21,7 +21,7 @@ namespace httplib::client
         disk_cache(disk_cache&&) noexcept;
         disk_cache& operator=(disk_cache&&) noexcept;
 
-        std::optional<entry> get(std::string_view key) override;
+        std::unique_ptr<entry> get(std::string_view key) override;
         void put(std::string_view key,
                  fs::path const& src_body,
                  std::string_view metadata = {},
