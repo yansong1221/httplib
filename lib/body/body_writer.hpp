@@ -76,6 +76,19 @@ namespace httplib::detail
             }
         }
 
+        void
+        replace_fields(httplib::headers const& headers)
+        {
+            for (auto const& h : headers.fields())
+            {
+                msg_.erase(h.name_string());
+            }
+            for (auto const& h : headers.fields())
+            {
+                msg_.insert(h.name_string(), h.value());
+            }
+        }
+
         /// 发送前绑定连接写入端（client 的 request 在 send 时才拿到 http_client::impl）。
         /// 同时用连接 executor 立即构造写锁：锁必须在任何并发写之前就绪，避免惰性初始化的竞态。
         void

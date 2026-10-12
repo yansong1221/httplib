@@ -1,11 +1,11 @@
 #pragma once
+#include "beast_alias.hpp"
+#include "enum_conv.hpp"
 #include "httplib/server/stream_writer.hpp"
 #include "response_impl.hpp"
 #include <boost/beast/http/field.hpp>
 #include <boost/system/error_code.hpp>
 #include <string>
-#include "beast_alias.hpp"
-#include "enum_conv.hpp"
 
 namespace httplib::server
 {
@@ -31,20 +31,14 @@ namespace httplib::server
                      mode m,
                      boost::system::error_code& ec) override
         {
-            for (auto const& f : headers.fields())
-            {
-                resp_.base().erase(f.name_string());
-            }
             resp_.base().result(enum_conv::to_status(status));
-            for (auto const& f : headers.fields())
-            {
-                resp_.base().insert(f.name_string(), f.value());
-            }
+            resp_.replace_fields(headers);
 
             mode_ = m;
             // chunked 自带分帧；relay 保留上游原有分帧（Content-Length / Transfer-Encoding）。
             if (m == mode::chunked)
             {
+                resp_.keep_alive(true);
                 resp_.chunked(true);
             }
             ec = co_await resp_.writer().begin_stream();
