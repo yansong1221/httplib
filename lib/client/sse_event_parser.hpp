@@ -16,22 +16,26 @@ namespace httplib::client::detail
         {
             buf_.append(data);
 
+            auto pos = scan_;
             for (;;)
             {
-                auto lf = buf_.find('\n');
+                auto lf = buf_.find('\n', pos);
                 if (lf == std::string::npos)
                 {
+                    scan_ = buf_.size();
                     break;
                 }
 
-                auto line_len = lf;
-                if (line_len > 0 && buf_[line_len - 1] == '\r')
+                auto line_len = lf - start_;
+                if (line_len > 0 && buf_[lf - 1] == '\r')
                 {
                     --line_len;
                 }
 
-                auto line = buf_.substr(0, line_len);
-                buf_.erase(0, lf + 1);
+                auto line = std::string_view(buf_).substr(start_, line_len);
+                start_ = lf + 1;
+                scan_ = start_;
+                pos = start_;
 
                 if (line_len == 0)
                 {
@@ -89,6 +93,13 @@ namespace httplib::client::detail
                     }
                 }
             }
+
+            if (start_ >= compact_threshold_)
+            {
+                buf_.erase(0, start_);
+                scan_ -= start_;
+                start_ = 0;
+            }
         }
 
         bool
@@ -129,6 +140,9 @@ namespace httplib::client::detail
         }
 
         std::string buf_;
+        std::size_t start_ = 0;
+        std::size_t scan_ = 0;
+        static constexpr std::size_t compact_threshold_ = 4096;
         std::deque<sse_reader::sse_event> events_;
 
         std::string id_;

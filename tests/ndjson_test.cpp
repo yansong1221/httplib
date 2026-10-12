@@ -581,3 +581,40 @@ TEST_CASE("NDJSON: reader decodes large gzip stream without truncation", "[ndjso
         });
 }
 #endif
+
+// 一条超长记录（无内部换行、跨很多个 4096 读块）：read() 必须用扫描游标从"上次扫到的
+// 位置"继续找 \n，而不是每轮都对整个 buf_ 从头扫——否则单条越大越慢，是 O(n²)，长 JSON
+// 会直接卡住。这里 1MB 的单条记录就是回归。
+TEST_CASE("NDJSON: very long single record is delivered", "[ndjson]")
+{
+    constexpr std::size_t kValueLen = 1024 * 1024;
+
+    std::string line = "{\"data\":\"";
+    line.reserve(kValueLen + 32);
+    line.append(kValueLen, 'A');
+    line += "\"}";
+    std::string body = line + "\n";
+
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/ndjson-long-line",
+                [&](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content(body, "application/x-ndjson"); });
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            httplib::client::request req(httplib::method::get, "/ndjson-long-line");
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
+            REQUIRE(resp.result() == httplib::status::ok);
+            auto ndjson = resp.create_ndjson_reader();
+
+            auto first = co_await ndjson->read();
+            REQUIRE(first.has_value());
+            REQUIRE(first->at("data").as_string() == std::string(kValueLen, 'A'));
+            REQUIRE(ndjson->is_done());
+
+            co_return;
+        });
+}

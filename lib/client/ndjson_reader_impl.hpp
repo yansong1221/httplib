@@ -19,41 +19,41 @@ namespace httplib::client
         {
             boost::system::error_code ec;
 
-            for (;;)
+            for (std::size_t offset = 0;;)
             {
-                auto lf = buf_.find('\n');
-                if (lf == std::string::npos)
+                auto lf = buf_.find('\n', offset);
+                if (lf != std::string::npos)
                 {
-                    if (!impl_->is_body_done())
+                    auto line = std::string_view(buf_).substr(0, lf);
+                    if (!line.empty() && line.back() == '\r')
                     {
-                        auto bytes = co_await impl_->read_some_decompressed(net::buffer(read_buf_), ec);
-                        if (ec)
-                        {
-                            co_return ec;
-                        }
-                        if (bytes != 0)
-                        {
-                            buf_.append(read_buf_.data(), bytes);
-                        }
+                        line.remove_suffix(1);
+                    }
+                    if (line.empty())
+                    {
+                        offset = 0;
+                        buf_.erase(0, lf + 1);
                         continue;
                     }
-
-                    co_return finish_tail();
+                    auto result = parse_line(line);
+                    buf_.erase(0, lf + 1);
+                    co_return result;
                 }
-
-                auto line = buf_.substr(0, lf);
-                if (!line.empty() && line.back() == '\r')
+                offset = buf_.size();
+                if (!impl_->is_body_done())
                 {
-                    line.pop_back();
-                }
-                buf_.erase(0, lf + 1);
-
-                if (line.empty())
-                {
+                    auto bytes = co_await impl_->read_some_decompressed(net::buffer(read_buf_), ec);
+                    if (ec)
+                    {
+                        co_return ec;
+                    }
+                    if (bytes != 0)
+                    {
+                        buf_.append(read_buf_.data(), bytes);
+                    }
                     continue;
                 }
-
-                co_return parse_line(line);
+                co_return finish_tail();
             }
         }
 
