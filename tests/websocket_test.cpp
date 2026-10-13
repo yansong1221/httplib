@@ -138,6 +138,62 @@ TEST_CASE("websocket: echo server and client", "[websocket]")
 }
 
 // ===========================================================================
+// Plain (non-coroutine) handler
+// ===========================================================================
+
+TEST_CASE("websocket: plain sync handler receives payload", "[websocket]")
+{
+    run_ws(
+        [](auto& server)
+        {
+            server.router().set_ws_handler(
+                "/ws-sync",
+                [](httplib::server::websocket_conn::weak_ptr) {},
+                [](httplib::server::websocket_conn::weak_ptr conn, httplib::websocket_message msg)
+                {
+                    if (auto c = conn.lock())
+                    {
+                        c->send(std::move(msg));
+                    }
+                },
+                [](httplib::server::websocket_conn::weak_ptr) {});
+        },
+        [](auto& pool, auto& ep) -> net::awaitable<void>
+        {
+            std::vector<std::string> client_received;
+            ws_done done;
+
+            httplib::client::ws_client ws(pool.get_executor(), ep.address().to_string(), ep.port());
+
+            ws.run(
+                "/ws-sync",
+                [&](boost::system::error_code ec) -> net::awaitable<void>
+                {
+                    REQUIRE(!ec);
+                    ws.send(httplib::websocket_message("sync hello", false));
+                    co_return;
+                },
+                [&](httplib::websocket_message msg) -> net::awaitable<void>
+                {
+                    client_received.emplace_back(msg.data());
+                    ws.close();
+                    co_return;
+                },
+                [&]() -> net::awaitable<void>
+                {
+                    done.notify();
+                    co_return;
+                });
+
+            done.wait();
+
+            REQUIRE(client_received.size() == 1);
+            REQUIRE(client_received[0] == "sync hello");
+            co_return;
+        });
+}
+
+// ===========================================================================
 // Binary message
 // ===========================================================================
 
