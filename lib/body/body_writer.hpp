@@ -6,6 +6,7 @@
 #include "html/html.h"
 #include "httplib/config.hpp"
 #include "httplib/form_data.hpp"
+#include "httplib/headers.hpp"
 #include "httplib/query_params.hpp"
 #include "httplib/util/async_mutex.hpp"
 #include <boost/asio/awaitable.hpp>
