@@ -422,8 +422,7 @@ namespace httplib::server
     net::awaitable<bool>
     session::http_task::async_write(request const& req, response& resp)
     {
-        auto& writer = get_impl(resp).writer();
-        if (writer.header_done())
+        if (get_impl(resp).header_sent())
         {
             co_return true;
         }
@@ -440,7 +439,7 @@ namespace httplib::server
                     if (auto encoding = encoding_content.server_apply_encoding(); !encoding.empty())
                     {
                         if (auto content_type = resp[field::content_type];
-                            (*server_impl_).should_compress_content_type(content_type))
+                            server_impl_->should_compress_content_type(content_type))
                         {
                             resp.set(field::content_encoding, encoding);
                         }
@@ -448,6 +447,7 @@ namespace httplib::server
                 }
             }
         }
+        auto& writer = get_impl(resp).writer();
 
         // 压缩会改写长度：prepare_payload 会据此自动退化为 chunked。
         writer.prepare_payload();

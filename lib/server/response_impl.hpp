@@ -193,7 +193,7 @@ namespace httplib::server
         }
 
         bool
-        stream_header_sent() const
+        header_sent() const
         {
             return this->header_done();
         }
