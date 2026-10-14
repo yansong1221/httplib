@@ -62,8 +62,9 @@ TEST_CASE("Chunked: Content-Length hits chunked handler", "[chunked]")
         {
             server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/chunked-only",
-                [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+                [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
+                    co_await req.read_string();
                     resp.set_string_content("chunked-handled"sv, "text/plain");
                     co_return;
                 });
@@ -203,6 +204,7 @@ TEST_CASE("Chunked: handler with path param", "[chunked]")
                 "/chunked/user/:id",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
+                    co_await req.read_string();
                     auto id = req.path_param("id");
                     resp.set_string_content("chunked-" + std::string(id), "text/plain");
                     co_return;
@@ -237,6 +239,7 @@ TEST_CASE("Chunked: handler with wildcard path", "[chunked]")
                 "/chunked/ws/*",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
+                    co_await req.read_string();
                     auto wild = req.path_param("*");
                     resp.set_string_content("chunked-" + std::string(wild), "text/plain");
                     co_return;
@@ -313,8 +316,9 @@ TEST_CASE("Chunked: regular PUT coexists with chunked POST", "[chunked]")
 
             server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/chunked/mixed",
-                [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+                [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
+                    co_await req.read_string();
                     resp.set_string_content("chunked-post"sv, "text/plain");
                     co_return;
                 });

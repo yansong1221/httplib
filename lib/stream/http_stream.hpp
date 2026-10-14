@@ -126,10 +126,18 @@ namespace httplib
         {
             socket().shutdown(what, ec);
         }
+        /**
+         * \brief 立即释放底层 socket。
+         * \details 先 shutdown(SD_SEND) 把已入队的数据连同 FIN 发出去，再 close()。
+         * 这里刻意 **不** 调用 shutdown(SD_RECEIVE)：接收方向一旦被 shutdown，
+         * 对端随后再发来的数据（例如 lazy handler 没有消费的请求体）在 Windows 上
+         * 会直接触发 RST，把还没被对端读走的响应一起冲掉，客户端表现为
+         * WSAECONNRESET / 10054。
+         */
         void
         close(boost::system::error_code& ec)
         {
-            socket().shutdown(net::socket_base::shutdown_type::shutdown_both, ec);
+            socket().shutdown(net::socket_base::shutdown_type::shutdown_send, ec);
             socket().close(ec);
         }
 
@@ -142,7 +150,7 @@ namespace httplib
          * \param timeout close_notify 握手的最长等待时间。
          */
         net::awaitable<void>
-        async_graceful_close(net::steady_timer::duration timeout = std::chrono::milliseconds(500))
+        async_close(net::steady_timer::duration timeout = std::chrono::milliseconds(500))
         {
             boost::system::error_code ec;
             co_await std::visit(

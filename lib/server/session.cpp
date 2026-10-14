@@ -405,7 +405,7 @@ namespace httplib::server
 
             if (!get_impl(resp).keep_alive())
             {
-                co_await stream_.async_graceful_close();
+                co_await stream_.async_close();
                 co_return nullptr;
             }
         }
