@@ -34,7 +34,7 @@ namespace httplib::detail
             / set_empty / reset；
           - 分帧：prepare_payload / chunked；
           - 整消息写：write_message()（source_ 驱动序列化器）；
-          - 流式写：begin_stream() + write_compressed(data, more) / write_raw(data, more)。
+          - 流式写：begin_stream() + write_encoded(data, more) / write_raw(data, more)。
 
         业务数据由各 source 自持（见 body/source.hpp），本对象只持有 @ref source_ 产出字节。
         HTTP message 由本对象以成员 @ref msg_ 自持；对外只暴露 @ref base()（start-line +
@@ -42,7 +42,7 @@ namespace httplib::detail
 
         所有 body 字节最终收口于两个写原语：
           - @ref write_raw_locked：无条件原样发送明文块；
-          - @ref write_compressed_locked：按 message 配置的 Content-Encoding 自动压缩后再由
+          - @ref write_encoded_locked：按 message 配置的 Content-Encoding 自动压缩后再由
             raw 落地，无转换编码时退化为 raw。
         配置了转换编码时字节长度在压缩后才确定，@ref prepare_payload 自动改用 chunked 分帧。
         分帧与 raw/压缩路线的选择属调用方业务，本对象不感知 relay / chunked 等语义。
@@ -359,7 +359,7 @@ namespace httplib::detail
         /// 流式写一块 body，驱动到该块全部写完才返回：按 Content-Encoding 自动压缩
         /// （无转换编码时退化为 raw）。
         net::awaitable<boost::system::error_code>
-        write_compressed(net::const_buffer const& data, bool more)
+        write_encoded(net::const_buffer const& data, bool more)
         {
             auto lock = co_await lock_write();
             if (!lock)
@@ -370,7 +370,7 @@ namespace httplib::detail
             {
                 co_return invalid_argument();
             }
-            co_return co_await write_compressed_locked(data, more);
+            co_return co_await write_encoded_locked(data, more);
         }
 
         /// 流式写一块 body：无条件原样透传（relay 等调用方指定的直通场景）。
@@ -434,7 +434,7 @@ namespace httplib::detail
             // body 为空时，prepare_payload() 记的是 CL:0 + chunked(false)，线上不该有任何 body
             // 字节。但仍要把序列化器驱动到 done（客户端复用请求对象靠这个判定，见
             // prepare_for_send()），所以照常写一个空 body——只是必须走 write_raw_locked，绝不能走
-            // write_compressed_locked：后者会冲刷编码器，产出一个 20 字节的空载荷 gzip 流
+            // write_encoded_locked：后者会冲刷编码器，产出一个 20 字节的空载荷 gzip 流
             // （RFC 1952）并写下去，与 CL:0 矛盾。对端按 CL:0 读 0 字节，剩下的流字节被当成下一个
             // 响应的开头（实测 beast.http:14 "bad version"），这条 keep-alive 连接就废了。
             //
@@ -471,7 +471,7 @@ namespace httplib::detail
 
                 if (chunk)
                 {
-                    ec = co_await write_compressed_locked(chunk->first, chunk->second);
+                    ec = co_await write_encoded_locked(chunk->first, chunk->second);
                     if (ec)
                     {
                         co_return ec;
@@ -483,7 +483,7 @@ namespace httplib::detail
                     continue;
                 }
 
-                co_return co_await write_compressed_locked(net::const_buffer {}, false);
+                co_return co_await write_encoded_locked(net::const_buffer {}, false);
             }
         }
 
@@ -527,7 +527,7 @@ namespace httplib::detail
             msg_.body().more = more;
 
             boost::system::error_code ec;
-            // 统一经 serializer() 取序列化器：所有调用方（write_raw / write_compressed /
+            // 统一经 serializer() 取序列化器：所有调用方（write_raw / write_encoded /
             // write_message_locked）都已写过 header，sr_ 必非空，这里只是不依赖调用顺序。
             co_await task_->write(serializer(), ec);
             if (ec == http::error::need_buffer)
@@ -545,7 +545,7 @@ namespace httplib::detail
         /// @ref write_raw_locked。data 明文喂入编码器，产物经 raw 落地；`more == false`
         /// 表示明文结束，冲刷编码器。编码器按需懒初始化。
         net::awaitable<boost::system::error_code>
-        write_compressed_locked(net::const_buffer data, bool more)
+        write_encoded_locked(net::const_buffer data, bool more)
         {
             if (!transforms_encoding())
             {
