@@ -356,7 +356,7 @@ TEST_CASE("SSE: reader decodes gzip-compressed event stream", "[sse]")
         });
 }
 
-// 回归：大体积 gzip 流必须完整解出。此前 read_some_decompressed_locked 在最后一块
+// 回归：大体积 gzip 流必须完整解出。此前 read_some_decoded_locked 在最后一块
 // 原始数据读到且 parser 恰好完成时不会 flush 解压器，而 is_body_done() 会先返回 true，
 // 导致 SSE reader 提前结束、丢掉 flush 才吐出的尾部数据。
 TEST_CASE("SSE: reader decodes large gzip event stream without truncation", "[sse]")

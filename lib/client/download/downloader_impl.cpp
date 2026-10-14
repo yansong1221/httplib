@@ -583,7 +583,7 @@ namespace httplib::client
                     co_return inner_pause_ec;
                 }
                 boost::system::error_code ec;
-                auto n = co_await resp.read_some_decompressed(net::buffer(buf), ec);
+                auto n = co_await resp.read_some_decoded(net::buffer(buf), ec);
                 if (ec)
                 {
                     co_await disk_.close();

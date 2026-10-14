@@ -92,9 +92,8 @@ namespace httplib::server
         net::awaitable<std::size_t> read_some_raw(net::mutable_buffer const& buffer);
 
         // 低层流式读：返回解压后的（content-encoding 已解码）body 字节
-        net::awaitable<std::size_t> read_some_decompressed(net::mutable_buffer const& buffer,
-                                                           boost::system::error_code& ec);
-        net::awaitable<std::size_t> read_some_decompressed(net::mutable_buffer const& buffer);
+        net::awaitable<std::size_t> read_some_decoded(net::mutable_buffer const& buffer, boost::system::error_code& ec);
+        net::awaitable<std::size_t> read_some_decoded(net::mutable_buffer const& buffer);
 
         bool is_body_done() const;
 

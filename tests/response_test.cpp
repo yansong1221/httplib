@@ -954,7 +954,7 @@ namespace
 } // namespace
 
 #ifdef HTTPLIB_ENABLED_COMPRESS
-TEST_CASE("Response: read_some_decompressed decodes gzip body", "[response]")
+TEST_CASE("Response: read_some_decoded decodes gzip body", "[response]")
 {
     run(
         [](auto& server)
@@ -977,7 +977,7 @@ TEST_CASE("Response: read_some_decompressed decodes gzip body", "[response]")
             boost::system::error_code ec;
             while (true)
             {
-                auto result = co_await resp.read_some_decompressed(net::buffer(buf), ec);
+                auto result = co_await resp.read_some_decoded(net::buffer(buf), ec);
                 if (ec || result == 0)
                 {
                     break;
@@ -989,7 +989,7 @@ TEST_CASE("Response: read_some_decompressed decodes gzip body", "[response]")
         });
 }
 
-TEST_CASE("Response: read_some_decompressed with single large buffer", "[response]")
+TEST_CASE("Response: read_some_decoded with single large buffer", "[response]")
 {
     run(
         [](auto& server)
@@ -1008,12 +1008,12 @@ TEST_CASE("Response: read_some_decompressed with single large buffer", "[respons
 
             std::array<char, 4096> buf;
             boost::system::error_code ec1;
-            auto r1 = co_await resp.read_some_decompressed(net::buffer(buf), ec1);
+            auto r1 = co_await resp.read_some_decoded(net::buffer(buf), ec1);
             REQUIRE_FALSE(ec1);
             REQUIRE(r1 == kGzipPayload.size());
             std::string decoded(buf.data(), r1);
             boost::system::error_code ec2;
-            auto r2 = co_await resp.read_some_decompressed(net::buffer(buf), ec2);
+            auto r2 = co_await resp.read_some_decoded(net::buffer(buf), ec2);
             REQUIRE_FALSE(ec2);
             REQUIRE(r2 == 0);
             REQUIRE(decoded == kGzipPayload);
@@ -1022,7 +1022,7 @@ TEST_CASE("Response: read_some_decompressed with single large buffer", "[respons
 }
 #endif
 
-TEST_CASE("Response: read_some_decompressed passes through identity body", "[response]")
+TEST_CASE("Response: read_some_decoded passes through identity body", "[response]")
 {
     run(
         [](auto& server)
@@ -1045,7 +1045,7 @@ TEST_CASE("Response: read_some_decompressed passes through identity body", "[res
             boost::system::error_code ec;
             while (true)
             {
-                auto result = co_await resp.read_some_decompressed(net::buffer(buf), ec);
+                auto result = co_await resp.read_some_decoded(net::buffer(buf), ec);
                 if (ec || result == 0)
                 {
                     break;
@@ -1110,7 +1110,7 @@ TEST_CASE("Response: is_body_done reflects decompressed pending overflow", "[res
             boost::system::error_code ec;
             for (;;)
             {
-                auto r = co_await resp.read_some_decompressed(net::buffer(buf), ec);
+                auto r = co_await resp.read_some_decoded(net::buffer(buf), ec);
                 if (ec || r == 0)
                 {
                     break;

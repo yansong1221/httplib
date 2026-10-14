@@ -33,7 +33,7 @@ namespace httplib::detail
         写入 @ref body_state，是读方向的唯一入口。
 
         所有读取任务都收在这里：
-          - 流式读取：`read_some_raw` / `read_some_decompressed`；
+          - 流式读取：`read_some_raw` / `read_some_decoded`；
           - 物化：`read_body()`（按 Content-Type 自动分发 sink）或 `read_body(sink)`（强制类型）；
           - 类型化读取：`read_string` / `read_json` / `read_query_params` / `read_form_data`
             / `read_to_file`。
@@ -139,7 +139,7 @@ namespace httplib::detail
 
         /// 流式读取解压后的 body。
         net::awaitable<std::size_t>
-        read_some_decompressed(net::mutable_buffer const& buf, boost::system::error_code& ec)
+        read_some_decoded(net::mutable_buffer const& buf, boost::system::error_code& ec)
         {
             auto lock = co_await read_mutex_.lock();
             if (!lock)
@@ -147,7 +147,7 @@ namespace httplib::detail
                 ec = aborted();
                 co_return 0;
             }
-            co_return co_await read_some_decompressed_locked(buf, ec);
+            co_return co_await read_some_decoded_locked(buf, ec);
         }
 
         /// 读剩余 body，按 Content-Type 自动分发 sink（无 body 时记为 empty）。
@@ -317,7 +317,7 @@ namespace httplib::detail
             std::array<char, staging_size> out_buf {};
             for (;;)
             {
-                auto const n = co_await read_some_decompressed_locked(net::buffer(out_buf), ec);
+                auto const n = co_await read_some_decoded_locked(net::buffer(out_buf), ec);
                 if (ec)
                 {
                     co_return ec;
@@ -356,7 +356,7 @@ namespace httplib::detail
             // 零长缓冲没有任何字节可交给 parser，parser 只会一直 need_buffer，而下面 consumed
             // 恒为 0 —— 于是每轮都从 source 再拉一次，把整个 body 堆进 parser 内部缓冲，直到
             // body 收完才返回 0。调用方传空缓冲（本函数经公开的 read_some_raw 可达）时应当
-            // 立刻交白卷，和 read_some_decompressed_locked 的处理一致。
+            // 立刻交白卷，和 read_some_decoded_locked 的处理一致。
             if (buf.size() == 0)
             {
                 ec = {};
@@ -397,7 +397,7 @@ namespace httplib::detail
         /// feed 同步消费掉后再 drain 把解压结果写回同一 buf —— 解压多少就取走多少，
         /// 每轮解压量受调用方缓冲大小约束；内部缓冲只兜住单个 buf 装不下的产出。
         net::awaitable<std::size_t>
-        read_some_decompressed_locked(net::mutable_buffer const& buf, boost::system::error_code& ec)
+        read_some_decoded_locked(net::mutable_buffer const& buf, boost::system::error_code& ec)
         {
             if (buf.size() == 0)
             {

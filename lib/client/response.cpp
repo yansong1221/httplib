@@ -218,21 +218,21 @@ namespace httplib::client
     }
 
     net::awaitable<std::size_t>
-    response::read_some_decompressed(net::mutable_buffer const& buffer, boost::system::error_code& ec)
+    response::read_some_decoded(net::mutable_buffer const& buffer, boost::system::error_code& ec)
     {
         if (!impl_)
         {
             ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
             co_return 0;
         }
-        co_return co_await impl_->read_some_decompressed(buffer, ec);
+        co_return co_await impl_->read_some_decoded(buffer, ec);
     }
 
     net::awaitable<std::size_t>
-    response::read_some_decompressed(net::mutable_buffer const& buffer)
+    response::read_some_decoded(net::mutable_buffer const& buffer)
     {
         boost::system::error_code ec;
-        auto bytes = co_await read_some_decompressed(buffer, ec);
+        auto bytes = co_await read_some_decoded(buffer, ec);
         if (ec)
         {
             throw boost::system::system_error(ec);

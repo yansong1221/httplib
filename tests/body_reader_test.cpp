@@ -217,7 +217,7 @@ TEST_CASE("body_reader: stream raw body via fake source", "[body-reader]")
 // consumed 恒为 0，于是 for 循环每轮都从 source 再拉一次。整个 body 会被堆进 parser 的
 // 内部缓冲，直到 body 收完才返回 0 —— 一次本该立即返回的调用变成了"把整个 body 读进内存"。
 // 公开的 read_some_raw 直接把调用方的 buffer 传进来，所以外部传空缓冲即可触发。
-// 解压路径 read_some_decompressed_locked 早有同样的防护，这里一并锁住公开契约。
+// 解压路径 read_some_decoded_locked 早有同样的防护，这里一并锁住公开契约。
 TEST_CASE("body_reader: zero-length buffer returns 0 without touching the source", "[body-reader]")
 {
     net::io_context ioc;
@@ -245,7 +245,7 @@ TEST_CASE("body_reader: zero-length buffer returns 0 without touching the source
         {
             auto raw_n = co_await reader.read_some_raw(net::mutable_buffer {}, raw_ec);
             REQUIRE(raw_n == 0);
-            auto dec_n = co_await reader.read_some_decompressed(net::mutable_buffer {}, dec_ec);
+            auto dec_n = co_await reader.read_some_decoded(net::mutable_buffer {}, dec_ec);
             REQUIRE(dec_n == 0);
             // 在后续正常读之前取样：交白卷时不该碰过 source。
             calls_after_blank = source->read_calls();
@@ -299,7 +299,7 @@ TEST_CASE("body_reader: stream decompressed body via fake source", "[body-reader
             std::array<char, 256> buf {};
             for (;;)
             {
-                auto n = co_await reader.read_some_decompressed(net::buffer(buf), read_ec);
+                auto n = co_await reader.read_some_decoded(net::buffer(buf), read_ec);
                 if (read_ec || n == 0)
                 {
                     break;
@@ -343,7 +343,7 @@ TEST_CASE("body_reader: typed read after streaming returns error instead of thro
             std::array<char, 64> buf {};
             for (;;)
             {
-                auto n = co_await reader.read_some_decompressed(net::buffer(buf), read_ec);
+                auto n = co_await reader.read_some_decoded(net::buffer(buf), read_ec);
                 if (read_ec || n == 0)
                 {
                     break;
@@ -517,7 +517,7 @@ TEST_CASE("body_reader: is_body_done() does not preempt decoder flush", "[body-r
             std::array<char, 1 << 16> buf {};
             while (!reader.is_body_done())
             {
-                auto n = co_await reader.read_some_decompressed(net::buffer(buf), read_ec);
+                auto n = co_await reader.read_some_decoded(net::buffer(buf), read_ec);
                 if (read_ec || n == 0)
                 {
                     break;

@@ -17,7 +17,7 @@ namespace httplib::client
             while (!parser_.has_event() && !impl_->is_body_done())
             {
 
-                auto bytes = co_await impl_->read_some_decompressed(net::buffer(read_buf_), ec);
+                auto bytes = co_await impl_->read_some_decoded(net::buffer(read_buf_), ec);
                 if (ec)
                 {
                     co_return ec;

@@ -300,7 +300,7 @@ For lazy handlers (body not read yet), read it explicitly:
 auto body = co_await req.read_string();       // also read_json / read_form_data / read_query_params
 // or stream raw / decompressed bytes:
 std::size_t n = co_await req.read_some_raw(buffer, ec);
-std::size_t m = co_await req.read_some_decompressed(buffer, ec);
+std::size_t m = co_await req.read_some_decoded(buffer, ec);
 co_await req.read_body();                      // materialize according to content-type
 ```
 

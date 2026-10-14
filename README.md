@@ -300,7 +300,7 @@ httplib::query_params const&  qp   = req.as_query_params();
 auto body = co_await req.read_string();       // 也可 read_json / read_form_data / read_query_params
 // 或流式读取原始 / 已解压字节：
 std::size_t n = co_await req.read_some_raw(buffer, ec);
-std::size_t m = co_await req.read_some_decompressed(buffer, ec);
+std::size_t m = co_await req.read_some_decoded(buffer, ec);
 co_await req.read_body();                      // 按 content-type 物化
 ```
 

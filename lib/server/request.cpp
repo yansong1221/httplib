@@ -250,15 +250,15 @@ namespace httplib::server
     }
 
     net::awaitable<std::size_t>
-    request::read_some_decompressed(net::mutable_buffer const& buffer, boost::system::error_code& ec)
+    request::read_some_decoded(net::mutable_buffer const& buffer, boost::system::error_code& ec)
     {
-        co_return co_await impl_->read_some_decompressed(buffer, ec);
+        co_return co_await impl_->read_some_decoded(buffer, ec);
     }
     net::awaitable<std::size_t>
-    request::read_some_decompressed(net::mutable_buffer const& buffer)
+    request::read_some_decoded(net::mutable_buffer const& buffer)
     {
         boost::system::error_code ec;
-        auto bytes = co_await read_some_decompressed(buffer, ec);
+        auto bytes = co_await read_some_decoded(buffer, ec);
         if (ec)
         {
             throw boost::system::system_error(ec);
