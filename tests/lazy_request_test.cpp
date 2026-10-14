@@ -214,7 +214,7 @@ TEST_CASE("server lazy: body not consumed forces connection close", "[server-laz
         });
 }
 
-TEST_CASE("server lazy: regular handler takes precedence", "[server-lazy]")
+TEST_CASE("server lazy: re-registering the same route replaces the handler", "[server-lazy]")
 {
     run(
         [](auto& server)
@@ -224,13 +224,14 @@ TEST_CASE("server lazy: regular handler takes precedence", "[server-lazy]")
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
                     REQUIRE(req.is_body_done());
-                    resp.set_string_content(std::string("regular"), "text/plain");
+                    resp.set_string_content(std::string("first-handler"), "text/plain");
                 });
             server.router().template set_lazy_http_handler<httplib::method::post>(
                 "/both",
                 [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    resp.set_string_content(std::string("lazy"), "text/plain");
+                    auto body = co_await req.read_string();
+                    resp.set_string_content(std::string("second-handler:") + body, "text/plain");
                     co_return;
                 });
         },
@@ -238,7 +239,8 @@ TEST_CASE("server lazy: regular handler takes precedence", "[server-lazy]")
         {
             auto resp = UNWRAP(co_await client.async_post("/both", std::string_view("body"), "text/plain"sv));
             REQUIRE(resp.result() == httplib::status::ok);
-            REQUIRE(resp.as_string() == "regular");
+            // 同一 (path, method) 只保留一个 handler：后注册的 lazy handler 覆盖先注册的 regular handler
+            REQUIRE(resp.as_string() == "second-handler:body");
         });
 }
 

@@ -127,7 +127,7 @@ namespace httplib::server
     {
         auto segments = detail::split_segments(key);
         auto node = insert(root_.get(), segments, 0);
-        node->handlers[m] = wrap_global(std::move(handler));
+        node->handlers[m] = http_handler_entry { wrap_global(std::move(handler)), false };
     }
 
     router::router::coro_http_handler_type
@@ -270,21 +270,10 @@ namespace httplib::server
 
         get_impl(req).set_path_param(util::string_map<std::string>(match.params));
 
-        if (match.lazy)
+        auto iter = match.node->handlers.find(req.method());
+        if (iter != match.node->handlers.end())
         {
-            auto iter = match.node->lazy_handlers.find(req.method());
-            if (iter != match.node->lazy_handlers.end())
-            {
-                co_await iter->second(req, resp);
-            }
-        }
-        else
-        {
-            auto iter = match.node->handlers.find(req.method());
-            if (iter != match.node->handlers.end())
-            {
-                co_await iter->second(req, resp);
-            }
+            co_await iter->second.handler(req, resp);
         }
     }
 
@@ -350,18 +339,35 @@ namespace httplib::server
                                   result.params,
                                   [&](Node const* node)
                                   {
-                                      collect_allows(result.allows, node);
-                                      if (node->handlers.find(req.method()) != node->handlers.end())
+                                      auto iter = node->handlers.find(req.method());
+
+                                      if (iter != node->handlers.end())
                                       {
-                                          return true;
-                                      }
-                                      if (node->lazy_handlers.find(req.method()) != node->lazy_handlers.end())
-                                      {
-                                          result.lazy = true;
+                                          result.lazy = iter->second.lazy;
                                           return true;
                                       }
                                       return false;
                                   });
+        if (!result.node)
+        {
+            match_nodes(root_.get(),
+                        segments,
+                        0,
+                        result.params,
+                        [&](Node const* node)
+                        {
+                            for (auto const& v : node->handlers)
+                            {
+                                result.allows.insert(to_string(enum_conv::to_verb(v.first)));
+                            }
+                            if (node->ws_handler)
+                            {
+                                result.allows.insert(to_string(http::verb::get));
+                            }
+                            return false;
+                        });
+        }
+
         co_return result;
     }
 
@@ -493,25 +499,7 @@ namespace httplib::server
     {
         auto segments = detail::split_segments(key);
         auto node = insert(root_.get(), segments, 0);
-        node->lazy_handlers[m] = wrap_global(std::move(handler));
-    }
-
-    void
-    router_impl::collect_allows(std::set<std::string>& allows, Node const* node)
-    {
-        // 键是公共的 httplib::method，要拿线上写法得先转回 beast 的 verb。
-        for (auto const& v : node->handlers)
-        {
-            allows.insert(to_string(enum_conv::to_verb(v.first)));
-        }
-        for (auto const& v : node->lazy_handlers)
-        {
-            allows.insert(to_string(enum_conv::to_verb(v.first)));
-        }
-        if (node->ws_handler)
-        {
-            allows.insert(to_string(http::verb::get));
-        }
+        node->handlers[m] = http_handler_entry { wrap_global(std::move(handler)), true };
     }
 
 } // namespace httplib::server

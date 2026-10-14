@@ -77,32 +77,34 @@ TEST_CASE("Chunked: Content-Length hits chunked handler", "[chunked]")
         });
 }
 
-TEST_CASE("Chunked: regular POST takes precedence over chunked", "[chunked]")
+TEST_CASE("Chunked: re-registering the same route replaces the handler", "[chunked]")
 {
     run(
         [](auto& server)
         {
             server.router().template set_http_handler<httplib::method::post>(
-                "/chunked/precedence",
+                "/chunked/replace",
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
                     auto const& body = req.as_string();
-                    resp.set_string_content("regular-" + body, "text/plain");
+                    resp.set_string_content("first-" + body, "text/plain");
                 });
 
             server.router().template set_lazy_http_handler<httplib::method::post>(
-                "/chunked/precedence",
-                [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+                "/chunked/replace",
+                [](httplib::server::request& req, httplib::server::response& resp) -> net::awaitable<void>
                 {
-                    resp.set_string_content("should-not-run"sv, "text/plain");
+                    auto body = co_await req.read_string();
+                    resp.set_string_content("second-" + body, "text/plain");
                     co_return;
                 });
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto resp = UNWRAP(co_await client.async_post("/chunked/precedence", "data"sv, "text/plain"sv));
+            auto resp = UNWRAP(co_await client.async_post("/chunked/replace", "data"sv, "text/plain"sv));
             REQUIRE(resp.result() == httplib::status::ok);
-            REQUIRE(as_string(resp) == "regular-data");
+            // 同一 (path, method) 只保留一个 handler：后注册的 lazy handler 覆盖先注册的 regular handler
+            REQUIRE(as_string(resp) == "second-data");
             co_return;
         });
 }

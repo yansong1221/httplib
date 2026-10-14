@@ -31,13 +31,16 @@ namespace httplib::server
             util::string_map<std::string> params;
         };
 
-        net::awaitable<void> process_routing(route_match const& match, request& req, response& resp) const;
-
         struct ws_handler_entry
         {
             websocket_conn::coro_open_handler_type open_handler;
             websocket_conn::coro_close_handler_type close_handler;
             websocket_conn::coro_message_handler_type message_handler;
+        };
+        struct http_handler_entry
+        {
+            coro_http_handler_type handler;
+            bool lazy = false;
         };
 
         struct Node
@@ -46,8 +49,7 @@ namespace httplib::server
             std::string param_name;
             std::regex regex;
 
-            std::unordered_map<method, coro_http_handler_type> handlers;
-            std::unordered_map<method, coro_http_handler_type> lazy_handlers;
+            std::unordered_map<method, http_handler_entry> handlers;
             std::optional<ws_handler_entry> ws_handler;
 
             util::string_map<std::unique_ptr<Node>> static_children;
@@ -59,6 +61,7 @@ namespace httplib::server
         std::optional<ws_handler_entry> query_ws_handler(request& req) const;
 
         net::awaitable<route_match> pre_routing(request& req) const;
+        net::awaitable<void> process_routing(route_match const& match, request& req, response& resp) const;
         net::awaitable<void> post_routing(request& req, response& resp) const;
 
         void reset();
@@ -71,14 +74,10 @@ namespace httplib::server
                                  websocket_conn::coro_message_handler_type&& message_handler,
                                  websocket_conn::coro_close_handler_type&& close_handler) override;
         void set_post_routing_handler_impl(coro_http_handler_type&& handler) override;
-        void set_lazy_http_handler_impl(method m,
-                                        std::string_view key,
-                                        coro_http_handler_type&& handler) override;
+        void set_lazy_http_handler_impl(method m, std::string_view key, coro_http_handler_type&& handler) override;
         void use_impl(coro_mw_handler_type&& before, coro_mw_handler_type&& after) override;
 
       private:
-        static void collect_allows(std::set<std::string>& allows, Node const* node);
-
         std::unique_ptr<Node> root_;
 
         // 这里刻意不加锁：路由表只在配置阶段（run 之前）写入，stop 时框架会在
