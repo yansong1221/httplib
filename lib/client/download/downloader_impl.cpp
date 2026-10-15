@@ -25,6 +25,17 @@ namespace httplib::client
     namespace
     {
         constexpr std::size_t kReadBufSize = 64 * 1024;
+
+        // A non-success status worth retrying: 408/429 and 5xx are transient
+        // (server overload, rate limit, temporary failure). Every other
+        // non-success status -- in particular 4xx such as 404/403/410 -- means
+        // the request itself is wrong, so repeating it cannot change the answer.
+        bool
+        is_transient_status(httplib::status s)
+        {
+            return s == httplib::status::request_timeout || s == httplib::status::too_many_requests
+                   || static_cast<unsigned>(s) >= 500;
+        }
     } // namespace
 
     // =========================================================================
@@ -91,6 +102,12 @@ namespace httplib::client
     downloader::impl::current_state() const
     {
         return progress_.state();
+    }
+
+    httplib::status
+    downloader::impl::http_status() const
+    {
+        return http_status_.load(std::memory_order_relaxed);
     }
 
     void
@@ -273,9 +290,10 @@ namespace httplib::client
 
             auto status = resp.result();
 
-            if ((status == status::moved_permanently || status == status::found || status == status::see_other
-                 || status == status::temporary_redirect || status == status::permanent_redirect)
-                && redir < cfg.max_redirects)
+            bool const is_redirect = status == status::moved_permanently || status == status::found
+                                     || status == status::see_other || status == status::temporary_redirect
+                                     || status == status::permanent_redirect;
+            if (is_redirect)
             {
                 auto rt = http_header_util::parse_redirect(resp.headers());
                 if (rt.has_value())
@@ -287,6 +305,13 @@ namespace httplib::client
                     if (auto drain_ec = co_await resp.read_body(); drain_ec)
                     {
                         handle->close();
+                    }
+
+                    // Location still points elsewhere after the whole budget:
+                    // giving up is its own failure, not the 3xx response.
+                    if (redir == cfg.max_redirects)
+                    {
+                        co_return make_error_code(error::too_many_redirects);
                     }
 
                     if (!rt->host.empty())
@@ -315,7 +340,7 @@ namespace httplib::client
             co_return send_result { std::move(handle), std::move(resp), std::move(hop_ui), std::move(hop_entry) };
         }
 
-        co_return boost::system::errc::make_error_code(boost::system::errc::protocol_error);
+        co_return make_error_code(error::too_many_redirects);
     }
 
     // =========================================================================
@@ -336,6 +361,7 @@ namespace httplib::client
         // that races with this start is re-applied by the caller once the run
         // reports its first state.
         cancelled_.store(false, std::memory_order_relaxed);
+        http_status_.store(httplib::status::unknown, std::memory_order_relaxed);
         progress_.reset_state();
 
         auto result = co_await net::co_spawn(
@@ -393,6 +419,10 @@ namespace httplib::client
         {
             co_return boost::system::error_code {};
         }
+        // The fresh-lookup handle is done with; close it now so it does not keep
+        // the body file open. A later eviction (a 404/410 dropping the entry)
+        // cannot delete an open file on Windows.
+        cached.reset();
 
         // Per-hop cache lookup (validators attached at each hop) handles
         // conditional revalidation. No pre-attachment here; send_request will
@@ -482,6 +512,7 @@ namespace httplib::client
             }
 
             auto status = result->response.result();
+            http_status_.store(status, std::memory_order_relaxed);
             if (status == status::not_modified)
             {
                 // One-step revalidation: the conditional GET (sent with the final
@@ -510,6 +541,7 @@ namespace httplib::client
                 }
                 result = std::move(retry);
                 status = result->response.result();
+                http_status_.store(status, std::memory_order_relaxed);
                 if (status == status::not_modified)
                 {
                     // The server keeps answering 304 for a body we cannot
@@ -519,14 +551,39 @@ namespace httplib::client
             }
             if (status != status::ok && status != status::partial_content)
             {
-                if (attempt == cfg.max_retries)
+                // Non-success status: drain and discard the body so the pooled
+                // connection is clean and reusable; a failed drain means the
+                // connection is unusable, so close it explicitly.
+                if (auto drain_ec = co_await result->response.read_body(); drain_ec)
                 {
-                    co_return boost::system::errc::make_error_code(boost::system::errc::protocol_error);
+                    result->handle->close();
+                }
+
+                // 404/410 mean the resource is gone: a stale cache entry would
+                // keep matching and re-sending dead validators on every later
+                // download, so drop it. Release the live body handle first --
+                // Windows refuses to delete a file that is still open.
+                if (status == status::not_found || status == status::gone)
+                {
+                    result->cache_entry.reset();
+                    cache_manager_.remove(result->final_ui, base_headers);
+                }
+
+                // Permanent statuses fail at once, and a transient one that has
+                // exhausted the retry budget fails too. The status code travels
+                // in the error; http_status() exposes it as httplib::status too.
+                if (!is_transient_status(status) || attempt == cfg.max_retries)
+                {
+                    co_return make_error_code(error::http_status);
                 }
                 if (!cfg.resume)
                 {
                     disk_writer::discard(save_path);
                 }
+
+                // Give the pooled connection back before the backoff sleep so
+                // this run does not hold it for the whole delay.
+                result.emplace();
                 co_await httplib::util::sleep(cfg.retry_backoff * (attempt + 1));
                 continue;
             }
@@ -546,7 +603,7 @@ namespace httplib::client
                 {
                     if (attempt == cfg.max_retries)
                     {
-                        co_return boost::system::errc::make_error_code(boost::system::errc::protocol_error);
+                        co_return make_error_code(error::protocol_violation);
                     }
                     disk_writer::discard(save_path);
                     existing_size = 0;
@@ -748,6 +805,12 @@ namespace httplib::client
     downloader::current_state() const
     {
         return impl_->current_state();
+    }
+
+    httplib::status
+    downloader::http_status() const
+    {
+        return impl_->http_status();
     }
 
 } // namespace httplib::client

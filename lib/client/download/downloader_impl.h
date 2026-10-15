@@ -66,6 +66,7 @@ namespace httplib::client
 
         downloader::config get_config() const;
         downloader::state current_state() const;
+        httplib::status http_status() const;
 
         net::awaitable<boost::system::error_code> async_download(std::string_view url,
                                                                  fs::path const& save_path,
@@ -135,6 +136,11 @@ namespace httplib::client
         progress_tracker progress_;
 
         std::atomic<bool> cancelled_ { false };
+
+        /// Terminal HTTP status of the current/most recent run, exposed through
+        /// the public http_status() accessor. `status::unknown` until a response
+        /// is parsed.
+        std::atomic<httplib::status> http_status_ { httplib::status::unknown };
 
         /// Per-run cancellation source. async_download() installs a fresh signal
         /// for each run and binds it to the run's coroutine, so cancel() aborts

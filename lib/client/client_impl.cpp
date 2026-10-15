@@ -2,6 +2,7 @@
 #include "beast_alias.hpp"
 #include "compress/compressor.hpp"
 #include "headers_impl.hpp"
+#include "httplib/client/error.hpp"
 #include "httplib/url/url.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
@@ -276,7 +277,7 @@ namespace httplib::client
             co_return result;
         }
 
-        co_return boost::system::errc::make_error_code(boost::system::errc::too_many_symbolic_link_levels);
+        co_return make_error_code(error::too_many_redirects);
     }
 
     void

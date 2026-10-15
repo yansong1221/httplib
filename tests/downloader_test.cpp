@@ -1559,20 +1559,155 @@ TEST_CASE("Downloader: persistent server 500 ends failed", "[downloader]")
 {
     auto dl_path = fs::temp_directory_path() / "httplib_dl_500_out.bin";
 
+    std::atomic<int> hits { 0 };
+
     dl_test_scaffold ts;
-    ts.router().set_http_handler<httplib::method::get>(
-        "/500",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_empty_content(httplib::status::internal_server_error); });
+    ts.router().set_http_handler<httplib::method::get>("/500",
+                                                       [&](httplib::server::request&, httplib::server::response& resp)
+                                                       {
+                                                           hits.fetch_add(1);
+                                                           resp.set_empty_content(
+                                                               httplib::status::internal_server_error);
+                                                       });
     ts.start();
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);
-    dl.set_config({ .max_retries = 1 });
+    dl.set_config({ .max_retries = 1, .retry_backoff = std::chrono::milliseconds(0) });
 
     auto ec = dl.download(ts.url_for_path("/500"), dl_path).get();
     REQUIRE(ec);
+    // 5xx is transient, so the status code is surfaced after the retry budget.
+    REQUIRE(ec == httplib::client::make_error_code(httplib::client::error::http_status));
+    REQUIRE(dl.http_status() == httplib::status::internal_server_error);
     REQUIRE(dl.current_state() == httplib::client::downloader::state::failed);
     REQUIRE_FALSE(fs::exists(dl_path));
+    REQUIRE(hits.load() == 2);
+
+    std::error_code rm_ec;
+    fs::remove(dl_path, rm_ec);
+}
+
+TEST_CASE("Downloader: 404 fails immediately with the status code", "[downloader]")
+{
+    auto dl_path = fs::temp_directory_path() / "httplib_dl_404_out.bin";
+
+    std::atomic<int> hits { 0 };
+
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<httplib::method::get>(
+        "/missing",
+        [&](httplib::server::request&, httplib::server::response& resp)
+        {
+            hits.fetch_add(1);
+            resp.set_string_content(std::string("no such resource"), "text/plain", httplib::status::not_found);
+        });
+    ts.start();
+
+    httplib::client::downloader dl(ts.ioc_, ts.pool);
+    dl.set_config({ .max_retries = 3, .retry_backoff = std::chrono::milliseconds(0) });
+
+    auto ec = dl.download(ts.url_for_path("/missing"), dl_path).get();
+    REQUIRE(ec);
+    // The server's status code travels in the error (and via the getter).
+    REQUIRE(ec == httplib::client::make_error_code(httplib::client::error::http_status));
+    REQUIRE(dl.http_status() == httplib::status::not_found);
+    REQUIRE(dl.current_state() == httplib::client::downloader::state::failed);
+    // A permanent status must not be retried.
+    REQUIRE(hits.load() == 1);
+    REQUIRE_FALSE(fs::exists(dl_path));
+    REQUIRE_FALSE(fs::exists(part_of(dl_path)));
+
+    std::error_code rm_ec;
+    fs::remove(dl_path, rm_ec);
+    fs::remove(part_of(dl_path), rm_ec);
+}
+
+TEST_CASE("Downloader: 404 evicts the cached entry for the URL", "[downloader]")
+{
+    auto dl_path1 = fs::temp_directory_path() / "httplib_dl_404cache_out1.bin";
+    auto dl_path2 = fs::temp_directory_path() / "httplib_dl_404cache_out2.bin";
+    auto cache_dir = fs::temp_directory_path() / "httplib_dl_404cache_dir";
+    fs::remove_all(cache_dir);
+
+    std::atomic<bool> gone { false };
+
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<httplib::method::get>(
+        "/gone",
+        [&](httplib::server::request&, httplib::server::response& resp)
+        {
+            if (gone.load())
+            {
+                resp.set_string_content(std::string("gone"), "text/plain", httplib::status::not_found);
+                return;
+            }
+            resp.set(httplib::field::etag, "\"g1\"");
+            // no-cache keeps the entry but forces a conditional GET, so the
+            // second run actually reaches the origin.
+            resp.set(httplib::field::cache_control, "no-cache");
+            resp.set_string_content(std::string("present\n"), "text/plain");
+        });
+    ts.start();
+
+    auto cache = std::make_shared<httplib::client::disk_cache>(cache_dir);
+
+    {
+        httplib::client::downloader dl(ts.ioc_, ts.pool);
+        dl.set_cache(cache);
+        auto ec = dl.download(ts.url_for_path("/gone"), dl_path1).get();
+        REQUIRE_FALSE(ec);
+        REQUIRE(read_file(dl_path1) == "present\n");
+    }
+    REQUIRE(cache->entry_count() >= 1);
+
+    gone.store(true);
+
+    {
+        httplib::client::downloader dl(ts.ioc_, ts.pool);
+        dl.set_cache(cache);
+        dl.set_config({ .max_retries = 2, .retry_backoff = std::chrono::milliseconds(0) });
+        auto ec = dl.download(ts.url_for_path("/gone"), dl_path2).get();
+        REQUIRE(ec);
+        REQUIRE(ec == httplib::client::make_error_code(httplib::client::error::http_status));
+        REQUIRE(dl.http_status() == httplib::status::not_found);
+        REQUIRE(dl.current_state() == httplib::client::downloader::state::failed);
+    }
+
+    // A vanished resource must drop its stale cache entry instead of keeping it
+    // around for every later download to revalidate against.
+    REQUIRE(cache->entry_count() == 0);
+
+    std::error_code rm_ec;
+    fs::remove(dl_path1, rm_ec);
+    fs::remove(dl_path2, rm_ec);
+    fs::remove_all(cache_dir, rm_ec);
+}
+
+TEST_CASE("Downloader: redirect exhaustion reports too_many_redirects", "[downloader]")
+{
+    auto dl_path = fs::temp_directory_path() / "httplib_dl_loop_out.bin";
+
+    std::atomic<int> hits { 0 };
+
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<httplib::method::get>("/loop",
+                                                       [&](httplib::server::request&, httplib::server::response& resp)
+                                                       {
+                                                           hits.fetch_add(1);
+                                                           resp.set_redirect("/loop", httplib::status::found);
+                                                       });
+    ts.start();
+
+    httplib::client::downloader dl(ts.ioc_, ts.pool);
+    dl.set_config({ .max_retries = 0, .max_redirects = 2, .retry_backoff = std::chrono::milliseconds(0) });
+
+    auto ec = dl.download(ts.url_for_path("/loop"), dl_path).get();
+    // A redirect loop is not a protocol violation, and it is not the 3xx status
+    // either: it is its own failure, reported through the client error category.
+    REQUIRE(ec == httplib::client::make_error_code(httplib::client::error::too_many_redirects));
+    REQUIRE(dl.current_state() == httplib::client::downloader::state::failed);
+    // max_redirects + 1 requests reach the origin before giving up.
+    REQUIRE(hits.load() == 3);
 
     std::error_code rm_ec;
     fs::remove(dl_path, rm_ec);

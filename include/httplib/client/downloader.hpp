@@ -1,5 +1,7 @@
 #pragma once
 #include "httplib/client/client_fwd.hpp"
+#include "httplib/client/error.hpp"
+#include "httplib/enums.hpp"
 #include "httplib/headers.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <boost/system/error_code.hpp>
@@ -80,6 +82,11 @@ namespace httplib::client
         /// `<save_path>.part` and renamed to `save_path` on success; a failed or
         /// cancelled run leaves the `.part` file behind so a later call can
         /// resume from it.
+        ///
+        /// Permanent statuses (4xx other than 408/429) fail immediately without
+        /// retrying; 408/429 and 5xx are retried up to `config::max_retries`
+        /// times. When the run fails on such a status, http_status() reports
+        /// which one.
         net::awaitable<boost::system::error_code> async_download(std::string_view url,
                                                                  fs::path const& save_path,
                                                                  httplib::headers const& headers = {});
@@ -96,6 +103,12 @@ namespace httplib::client
 
         std::string suggested_filename() const;
         state current_state() const;
+
+        /// The terminal HTTP status of the most recent run: `ok`/`partial_content`
+        /// for a body-bearing success, the server's status otherwise (e.g.
+        /// `not_found`). `status::unknown` when no response was received at all
+        /// (transport failure, cancellation). Reset at the start of every run.
+        httplib::status http_status() const;
 
       private:
         class impl;
