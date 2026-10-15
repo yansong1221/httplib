@@ -1,5 +1,6 @@
 #include "proxy_client_impl.h"
 #include "beast_alias.hpp"
+#include "httplib/client/error.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "stream/http_stream.hpp"
@@ -195,7 +196,7 @@ namespace httplib::client
             ec = {};
             return s;
         }
-        ec = boost::system::errc::make_error_code(boost::system::errc::not_connected);
+        ec = make_error_code(error::not_initialized);
         return nullptr;
     }
 

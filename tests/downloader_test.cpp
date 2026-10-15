@@ -1065,7 +1065,7 @@ TEST_CASE("http_client_pool: acquire timeout", "[downloader]")
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0);
 
     REQUIRE(h2.has_error());
-    REQUIRE(h2.error() == boost::system::errc::timed_out);
+    REQUIRE(h2.error() == httplib::client::make_error_code(httplib::client::error::acquire_timeout));
     REQUIRE(elapsed >= std::chrono::milliseconds(100));
 }
 

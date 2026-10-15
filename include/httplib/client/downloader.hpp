@@ -28,7 +28,7 @@ namespace httplib::client
      * 输出文件的写出流、进度计数、\ref state / \ref http_status / \ref
      * suggested_filename，以及取消源。若在同一实例上并发调用 \ref async_download 或
      * \ref download，这些状态会互相覆盖，典型后果是数据被写进另一个文件、
-     * `bad_file_descriptor`，以及 \ref cancel / \ref pause / \ref resume 作用到错误的
+     * `not_initialized`，以及 \ref cancel / \ref pause / \ref resume 作用到错误的
      * 运行上。该约束未做运行时防护。
      *
      * \par 并发下载

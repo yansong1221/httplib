@@ -260,27 +260,27 @@ TEST_CASE("client_pool: wait_timeout zero fails fast", "[client_pool]")
             auto h1 = co_await p.async_acquire("127.0.0.1", 80, httplib::url::scheme::plain);
             REQUIRE(h1);
 
-            // Pool is at capacity: wait_timeout == 0 must return timed_out
+            // Pool is at capacity: wait_timeout == 0 must return acquire_timeout
             // immediately instead of waiting.
             auto t0 = std::chrono::steady_clock::now();
             auto h2 = co_await p.async_acquire("127.0.0.1", 80, httplib::url::scheme::plain, std::chrono::steady_clock::duration::zero());
             auto elapsed = std::chrono::steady_clock::now() - t0;
 
             REQUIRE(h2.has_error());
-            CHECK(h2.error() == boost::system::errc::make_error_code(boost::system::errc::timed_out));
+            CHECK(h2.error() == httplib::client::make_error_code(httplib::client::error::acquire_timeout));
             CHECK(elapsed < std::chrono::milliseconds(50));
 
             p.stop();
         });
 }
 
-TEST_CASE("client_pool: default handle carries pool_exhausted", "[client_pool]")
+TEST_CASE("client_pool: default handle carries invalid_handle", "[client_pool]")
 {
     // An empty/expired handle is a pool-lifecycle state, not a socket state:
-    // it must not masquerade as errc::not_connected.
+    // it must not masquerade as errc::not_connected or as a pool-capacity error.
     httplib::client::http_client_pool::client_handle h;
     REQUIRE(h.has_error());
-    REQUIRE(h.error() == httplib::client::make_error_code(httplib::client::error::pool_exhausted));
+    REQUIRE(h.error() == httplib::client::make_error_code(httplib::client::error::invalid_handle));
 }
 
 TEST_CASE("client_pool: waiter wakes up on release", "[client_pool]")

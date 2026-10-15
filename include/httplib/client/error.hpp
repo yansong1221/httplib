@@ -1,6 +1,7 @@
 #pragma once
 #include "httplib/config.hpp"
 #include <boost/system/error_code.hpp>
+#include <type_traits>
 
 namespace httplib::client
 {
@@ -20,14 +21,25 @@ namespace httplib::client
         truncated_body,
         /// 服务器反复以 304 应答，但对应的缓存体不可用，下载无法完成。
         cache_unavailable,
-        /// 连接池没有可用连接，或借出的句柄已失效（过期/已被移走）。
-        pool_exhausted,
+        /// 在 wait_timeout 内没有从连接池借到可用连接（含 fail-fast）。
+        acquire_timeout,
+        /// 句柄不持有连接（默认构造、被移动、或已 release）。
+        invalid_handle,
         /// 对象尚未绑定底层流（如空的 response，或已脱离父 client 的 lazy_request）。
         not_initialized,
-        /// 连接池在创建/配置连接时失败。
-        connection_failed,
     };
 
     HTTPLIB_API boost::system::error_code make_error_code(error e);
 
 } // namespace httplib::client
+
+namespace boost::system
+{
+    /// 让 `error` 可直接隐式转换为 `boost::system::error_code`
+    /// （如 `boost::system::error_code ec = httplib::client::error::http_status;`），
+    /// 与 httplib::compress::error 的注册方式保持一致。
+    template <>
+    struct is_error_code_enum<httplib::client::error> : std::true_type
+    {
+    };
+} // namespace boost::system

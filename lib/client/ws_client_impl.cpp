@@ -1,4 +1,5 @@
 #include "ws_client_impl.h"
+#include "httplib/client/error.hpp"
 #include "httplib/url/url.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
@@ -486,7 +487,7 @@ namespace httplib::client
             ec = {};
             return s;
         }
-        ec = boost::system::errc::make_error_code(boost::system::errc::not_connected);
+        ec = make_error_code(error::not_initialized);
         return nullptr;
     }
 

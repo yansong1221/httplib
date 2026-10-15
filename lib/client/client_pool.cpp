@@ -52,6 +52,15 @@ namespace httplib::client
             explicit waiter_node(net::any_io_executor const& ex) : event(ex) {}
         };
 
+        /// acquire_or_create 的内部结果：把「暂无容量，请去排队」这个控制信号
+        /// 从错误码词汇里彻底剥离。`wait == true` 表示暂无容量、调用方应走等待
+        /// 路径，此时 `handle` 无意义；否则 `handle` 是一次成功借出。
+        struct acquire_step
+        {
+            http_client_pool::client_handle handle;
+            bool wait = false;
+        };
+
     } // namespace
 
     class http_client_pool::impl
@@ -106,9 +115,10 @@ namespace httplib::client
 
                     auto url = url::make_url_value(host, port, s);
 
-                    // wait_timeout <= 0 means "fail fast": try once and return timed_out
-                    // immediately if no connection is available without waiting. The deadline
-                    // is only consulted on the waiting path (wait_timeout > 0).
+                    // wait_timeout <= 0 means "fail fast": try once and return an
+                    // acquire_timeout immediately if no connection is available
+                    // without waiting. The deadline is only consulted on the
+                    // waiting path (wait_timeout > 0).
                     auto deadline = std::chrono::steady_clock::now() + wait_timeout;
 
                     std::shared_ptr<waiter_node> node;
@@ -132,31 +142,20 @@ namespace httplib::client
                         {
                             remove_waiter(url, node);
                             get_logger()->debug("client pool: acquire timed out for {}", url);
-                            co_return client_handle(
-                                boost::system::errc::make_error_code(boost::system::errc::timed_out));
+                            co_return client_handle(make_error_code(error::acquire_timeout));
                         }
 
                         // 被唤醒的等待者保留在队首；只有它自己能绕过“已有等待者”的公平性检查。
-                        client_handle handle = co_await acquire_or_create(url, serving);
+                        auto step = co_await acquire_or_create(url, host, port, s, serving);
 
-                        if (handle)
+                        // 借到连接就直接返回；否则（wait == true，暂无容量）落到等待/排队路径。
+                        if (step.handle || !step.wait)
                         {
                             if (in_queue)
                             {
                                 remove_waiter(url, node);
                             }
-                            co_return std::move(handle);
-                        }
-
-                        // 硬错误（建连失败）直接返回；只有“暂无容量”的哨兵值
-                        // (pool_exhausted) 才落到等待/排队路径。
-                        if (handle.error() != make_error_code(error::pool_exhausted))
-                        {
-                            if (in_queue)
-                            {
-                                remove_waiter(url, node);
-                            }
-                            co_return std::move(handle);
+                            co_return std::move(step.handle);
                         }
 
                         serving = false;
@@ -168,8 +167,7 @@ namespace httplib::client
                                 remove_waiter(url, node);
                             }
                             get_logger()->debug("client pool: no available connection for {} (fail fast)", url);
-                            co_return client_handle(
-                                boost::system::errc::make_error_code(boost::system::errc::timed_out));
+                            co_return client_handle(make_error_code(error::acquire_timeout));
                         }
 
                         auto& waiters = waiters_[url];
@@ -518,13 +516,44 @@ namespace httplib::client
             }
         }
 
-        net::awaitable<client_handle>
-        acquire_or_create(std::string const& url, bool serving)
+        /// 用当前池对象构造一个成功借出的 handle。
+        client_handle
+        make_borrowed_handle(std::unique_ptr<http_client> conn)
+        {
+            return client_handle(std::static_pointer_cast<http_client_pool::impl>(shared_from_this()), std::move(conn));
+        }
+
+        /// 新建一条连接并借出。容量检查由调用方负责；本函数必然成功返回一个 handle。
+        client_handle
+        create_connection(std::string const& url, std::string_view host, uint16_t port, url::scheme s)
+        {
+            auto& st = pools_[url];
+            inc_active(st);
+            track_created();
+            // 用 host/port/scheme 直接构造。不要传字符串 URL：那个构造函数会再
+            // parse 一遍，而 host 来自调用方、未必是合法的 URL 片段（可能含空格等
+            // 未转义字符），二次 parse 失败会抛异常，把本就该延迟到 connect 才暴露的
+            // 问题提前变成建连失败。
+            // 传底层 executor（非池 strand）：client 各自 make_strand，连接之间互不串行。
+            auto cli = std::make_unique<http_client>(executor_, host, port, s);
+            apply_client_settings(*cli);
+            get_logger()->debug("client pool: created connection for {} (total={})",
+                                url,
+                                total_connections_.load(std::memory_order_relaxed));
+            return make_borrowed_handle(std::move(cli));
+        }
+
+        net::awaitable<acquire_step>
+        acquire_or_create(std::string const& url,
+                          std::string_view host,
+                          uint16_t port,
+                          url::scheme s,
+                          bool serving)
         {
             // 未被唤醒的新请求不得越过已有等待者取连接/建连。
             if (!serving && has_live_waiter(url))
             {
-                co_return client_handle {};
+                co_return acquire_step { {}, true };
             }
 
             while (true)
@@ -557,13 +586,13 @@ namespace httplib::client
                     // stop() 后不能再把旧连接塞回池，也不能改池计数。
                     if (!is_running())
                     {
-                        co_return client_handle {};
+                        co_return acquire_step { {}, true };
                     }
 
                     it = pools_.find(url);
                     if (it == pools_.end())
                     {
-                        co_return client_handle {};
+                        co_return acquire_step { {}, true };
                     }
 
                     auto& validated_st = it->second;
@@ -581,45 +610,21 @@ namespace httplib::client
                     }
 
                     inc_active(validated_st);
-                    co_return client_handle(std::static_pointer_cast<http_client_pool::impl>(shared_from_this()),
-                                            std::move(conn));
+                    co_return acquire_step { make_borrowed_handle(std::move(conn)), false };
                 }
 
                 inc_active(st);
-                co_return client_handle(std::static_pointer_cast<http_client_pool::impl>(shared_from_this()),
-                                        std::move(conn));
+                co_return acquire_step { make_borrowed_handle(std::move(conn)), false };
             }
 
-            // Only touch pools_ when actually creating a connection, so a failed
-            // acquire does not leave an empty pool_state entry behind.
+            // 没有可复用的空闲连接：有容量就新建，否则交回等待路径。
+            // 只有真去新建时才触碰 pools_，避免一次空转的借用留下空的 pool_state 条目。
             if (has_capacity(url))
             {
-                auto& st = pools_[url];
-                inc_active(st);
-                track_created();
-                try
-                {
-                    // 用 host/port/ssl 构造，避免 URL 二次 parse 失败把异常抛进 acquire 路径。
-                    // 传底层 executor（非池 strand）：client 各自 make_strand，连接之间互不串行。
-                    auto cli = std::make_unique<http_client>(executor_, url);
-                    apply_client_settings(*cli);
-                    get_logger()->debug("client pool: created connection for {} (total={})",
-                                        url,
-                                        total_connections_.load(std::memory_order_relaxed));
-                    co_return client_handle(std::static_pointer_cast<http_client_pool::impl>(shared_from_this()),
-                                            std::move(cli));
-                }
-                catch (...)
-                {
-                    dec_active(st);
-                    track_destroyed();
-                    wake_one_waiter(url);
-                    // 建连/配置路径的异常一律回落到错误 handle，借出接口不抛异常。
-                    co_return client_handle(make_error_code(error::connection_failed));
-                }
+                co_return acquire_step { create_connection(url, host, port, s), false };
             }
 
-            co_return client_handle {};
+            co_return acquire_step { {}, true };
         }
 
         net::awaitable<bool>
@@ -684,7 +689,7 @@ namespace httplib::client
     // ---- client_handle ----
 
     http_client_pool::client_handle::client_handle()
-        : client_handle(make_error_code(error::pool_exhausted))
+        : client_handle(make_error_code(error::invalid_handle))
     {
     }
 
@@ -704,7 +709,7 @@ namespace httplib::client
         // 成功 handle 被 move 后源对象变为 expired；失败 handle 保留原错误码。
         if (!other.error_ && other.conn_ == nullptr)
         {
-            other.error_ = make_error_code(error::pool_exhausted);
+            other.error_ = make_error_code(error::invalid_handle);
         }
     }
 
@@ -720,7 +725,7 @@ namespace httplib::client
             error_ = other.error_;
             if (other_was_live && !other.error_)
             {
-                other.error_ = make_error_code(error::pool_exhausted);
+                other.error_ = make_error_code(error::invalid_handle);
             }
         }
         return *this;
@@ -737,7 +742,7 @@ namespace httplib::client
             pool->release(std::move(conn_));
             if (!error_)
             {
-                error_ = make_error_code(error::pool_exhausted);
+                error_ = make_error_code(error::invalid_handle);
             }
         }
     }
@@ -836,7 +841,9 @@ namespace httplib::client
         auto r = url::parse_url(url);
         if (!r)
         {
-            co_return client_handle(r.error());
+            // 与 downloader 保持一致：URL 解析失败统一映射为模块错误码，
+            // 而不是把 url 模块的原始错误码漏给调用方。
+            co_return client_handle(make_error_code(error::invalid_url));
         }
         auto const& u = *r;
         co_return co_await impl_->async_acquire(u.host, u.effective_port(), u.transport(), wait_timeout);

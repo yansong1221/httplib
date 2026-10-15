@@ -99,8 +99,8 @@ namespace httplib::client
 
         // wait_timeout controls how long async_acquire() waits for a connection when
         // the pool is at capacity. A value of zero (or negative) makes the call fail
-        // fast: it returns a handle carrying `timed_out` immediately if no
-        // connection is available without waiting.
+        // fast: it returns a handle carrying `error::acquire_timeout` immediately if
+        // no connection is available without waiting.
         static constexpr auto default_timeout = std::chrono::seconds(3);
 
         net::awaitable<client_handle> async_acquire(std::string_view host,

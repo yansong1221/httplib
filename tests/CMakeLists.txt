@@ -72,6 +72,7 @@ add_httplib_test(httplib_test_http http
 )
 
 add_httplib_test(httplib_test_client client
+    client_error_test.cpp
     client_pool_test.cpp
     client_test.cpp
     downloader_test.cpp
