@@ -1,4 +1,5 @@
 #include "disk_cache_impl.h"
+#include <boost/system/errc.hpp>
 #include <algorithm>
 #include <cctype>
 #include <cstring>
@@ -250,18 +251,18 @@ namespace httplib::client
                 return out;
             }
 
-            std::error_code
+            boost::system::error_code
             copy_to_file(fs::path const& dst) const override
             {
                 std::lock_guard lk(mutex_);
                 if (!is_open() || !reset_locked())
                 {
-                    return std::make_error_code(std::errc::no_such_file_or_directory);
+                    return boost::system::errc::make_error_code(boost::system::errc::no_such_file_or_directory);
                 }
                 std::ofstream out(dst, std::ios::binary | std::ios::trunc);
                 if (!out.is_open())
                 {
-                    return std::make_error_code(std::errc::io_error);
+                    return boost::system::errc::make_error_code(boost::system::errc::io_error);
                 }
                 std::vector<char> buf(256 * 1024);
                 std::uint64_t remaining = size_;
@@ -272,12 +273,12 @@ namespace httplib::client
                     auto got = f_.gcount();
                     if (got <= 0)
                     {
-                        return std::make_error_code(std::errc::io_error);
+                        return boost::system::errc::make_error_code(boost::system::errc::io_error);
                     }
                     out.write(buf.data(), got);
                     if (!out)
                     {
-                        return std::make_error_code(std::errc::io_error);
+                        return boost::system::errc::make_error_code(boost::system::errc::io_error);
                     }
                     remaining -= static_cast<std::uint64_t>(got);
                 }

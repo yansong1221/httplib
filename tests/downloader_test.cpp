@@ -146,10 +146,10 @@ namespace
             {
                 return std::nullopt;
             }
-            std::error_code
+            boost::system::error_code
             copy_to_file(fs::path const&) const override
             {
-                return std::make_error_code(std::errc::no_such_file_or_directory);
+                return boost::system::errc::make_error_code(boost::system::errc::no_such_file_or_directory);
             }
         };
 

@@ -60,7 +60,7 @@ namespace httplib::client
         {
             std::error_code rm_ec;
             fs::remove(part_path, rm_ec);
-            co_return boost::system::errc::make_error_code(boost::system::errc::io_error);
+            co_return ec;
         }
         co_return publish(part_path, save_path);
     }

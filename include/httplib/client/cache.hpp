@@ -1,5 +1,6 @@
 #pragma once
 #include "httplib/client/client_fwd.hpp"
+#include <boost/system/error_code.hpp>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -7,7 +8,6 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <system_error>
 
 namespace httplib::client
 {
@@ -66,7 +66,7 @@ namespace httplib::client
             /// buffering the whole body in memory. Non-atomic: callers that
             /// need atomic publication write to a temporary and rename it
             /// themselves. Returns an error when the body is unreadable.
-            virtual std::error_code copy_to_file(fs::path const& dst) const = 0;
+            virtual boost::system::error_code copy_to_file(fs::path const& dst) const = 0;
 
           protected:
             entry() = default;
