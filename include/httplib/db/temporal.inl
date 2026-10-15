@@ -1,4 +1,5 @@
 #pragma once
+#include "error.hpp"
 #include "exception.hpp"
 #include <charconv>
 #include <cstdio>
@@ -42,7 +43,7 @@ namespace httplib::db
     {
         if (!is_valid())
         {
-            throw db_exception(boost::system::error_code {}, "db: invalid date value");
+            throw db_exception(make_error_code(error::type_mismatch), "db: invalid date value");
         }
         return std::chrono::sys_days { std::chrono::year { static_cast<int>(year) } / std::chrono::month { month }
                                        / std::chrono::day { day } };
@@ -298,7 +299,7 @@ namespace httplib::db
     {
         if (!is_valid())
         {
-            throw db_exception(boost::system::error_code {}, "db: invalid datetime value");
+            throw db_exception(make_error_code(error::type_mismatch), "db: invalid datetime value");
         }
         return date::to_sys_days() + std::chrono::hours { hour } + std::chrono::minutes { minute }
                + std::chrono::seconds { second } + std::chrono::microseconds { microsecond };
@@ -319,7 +320,7 @@ namespace httplib::db
     {
         if (!is_valid())
         {
-            throw db_exception(boost::system::error_code {}, "db: invalid datetime value");
+            throw db_exception(make_error_code(error::type_mismatch), "db: invalid datetime value");
         }
         using std::chrono::current_zone;
         using std::chrono::local_days;

@@ -1,5 +1,6 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 #include "mysql_backend.hpp"
+#include "httplib/db/error.hpp"
 #include "httplib/db/exception.hpp"
 #include "registry.hpp"
 #include <boost/asio/redirect_error.hpp>
@@ -182,7 +183,7 @@ namespace httplib::db::detail
                     {
                         return d;
                     }
-                    throw db_exception(boost::system::error_code {},
+                    throw db_exception(make_error_code(error::type_mismatch),
                                        "db: cannot parse DECIMAL value: " + std::string(sv));
                 }
                 return text(sv, anchor);

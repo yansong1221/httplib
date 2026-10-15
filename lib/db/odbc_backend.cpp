@@ -1,5 +1,6 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 #include "odbc_backend.hpp"
+#include "httplib/db/error.hpp"
 #include "httplib/db/exception.hpp"
 #include "registry.hpp"
 #include <sql.h>
@@ -566,7 +567,7 @@ namespace httplib::db::detail
             {
                 return d;
             }
-            throw db_exception(boost::system::error_code {}, "db: cannot parse DECIMAL value: " + sv);
+            throw db_exception(make_error_code(error::type_mismatch), "db: cannot parse DECIMAL value: " + sv);
         }
 
         // 读单个字段。
@@ -1056,7 +1057,7 @@ namespace httplib::db::detail
     {
         if (!dbc_)
         {
-            throw db_exception(boost::system::error_code {}, "db: odbc not connected");
+            throw db_exception(make_error_code(error::not_initialized), "db: odbc not connected");
         }
         auto s = new_stmt();
         std::string sql_str(sql);
@@ -1195,7 +1196,7 @@ namespace httplib::db::detail
     {
         if (!dbc_)
         {
-            throw db_exception(boost::system::error_code {}, "db: odbc not connected");
+            throw db_exception(make_error_code(error::not_initialized), "db: odbc not connected");
         }
         auto s = new_stmt();
         std::string sql_str(sql);
@@ -1229,7 +1230,7 @@ namespace httplib::db::detail
         auto* s = static_cast<odbc_stmt*>(h.state.get());
         if (!s || !s->stmt)
         {
-            throw db_exception(boost::system::error_code {}, "db: odbc statement not prepared");
+            throw db_exception(make_error_code(error::not_initialized), "db: odbc statement not prepared");
         }
 
         // 复用语句：关闭游标并清除上一轮绑定。

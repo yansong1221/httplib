@@ -4,6 +4,7 @@
 #include "db/render.hpp"
 #include "httplib/db/binder.hpp"
 #include "httplib/db/connection_pool.hpp"
+#include "httplib/db/error.hpp"
 #include "httplib/db/exception.hpp"
 #include "httplib/db/extractor.hpp"
 #include "httplib/db/options.hpp"
@@ -478,7 +479,7 @@ TEST_CASE("db: pool wakes waiter when health check discards a connection", "[db]
         });
 }
 
-// ---- 增强：acquire 失败按 db_exception::code 分类（timed_out）----
+// ---- 增强：acquire 失败按 db_exception::code 分类（acquire_timeout / operation_canceled）----
 
 TEST_CASE("db: pool acquire errors are typed db_exceptions", "[db][regression]")
 {
@@ -498,7 +499,7 @@ TEST_CASE("db: pool acquire errors are typed db_exceptions", "[db][regression]")
 
             db::connection_pool pool = db::make_pool(ex, backend_name, "", cfg);
 
-            // 池满 + 等待超时 → timed_out。
+            // 池满 + 等待超时 → acquire_timeout。
             {
                 auto h1 = co_await pool.async_acquire();
                 try
@@ -509,12 +510,12 @@ TEST_CASE("db: pool acquire errors are typed db_exceptions", "[db][regression]")
                 }
                 catch (db::db_exception const& e)
                 {
-                    CHECK(e.code() == boost::system::errc::make_error_code(boost::system::errc::timed_out));
+                    CHECK(e.code() == db::make_error_code(db::error::acquire_timeout));
                 }
                 h1.release();
             }
 
-            // fail fast（wait_timeout=0）→ 同样 timed_out。
+            // fail fast（wait_timeout=0）→ 同样 acquire_timeout。
             {
                 auto h2 = co_await pool.async_acquire();
                 try
@@ -525,7 +526,7 @@ TEST_CASE("db: pool acquire errors are typed db_exceptions", "[db][regression]")
                 }
                 catch (db::db_exception const& e)
                 {
-                    CHECK(e.code() == boost::system::errc::make_error_code(boost::system::errc::timed_out));
+                    CHECK(e.code() == db::make_error_code(db::error::acquire_timeout));
                 }
                 h2.release();
             }

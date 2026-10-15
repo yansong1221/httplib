@@ -95,6 +95,7 @@ endif()
 if(HTTPLIB_ENABLED_DATABASE)
     add_httplib_test(httplib_test_db db
         db_bug_test.cpp
+        db_error_test.cpp
         db_regression_test.cpp
         mysql_test.cpp
         odbc_test.cpp

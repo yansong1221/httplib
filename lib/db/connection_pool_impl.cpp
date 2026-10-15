@@ -1,5 +1,6 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 #include "connection_pool_impl.h"
+#include "httplib/db/error.hpp"
 #include "httplib/db/exception.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include "registry.hpp"
@@ -24,12 +25,12 @@ namespace httplib::db
                                 "connection_pool: pool is shut down");
         }
 
-        /// 借出等待超时（含 fail-fast 未等到连接）。与 client::http_client_pool 的 timed_out 一致。
+        /// 借出等待超时（含 fail-fast 未等到连接）。用模块错误码，与 client 侧
+        /// 的 acquire_timeout 对齐；池已停止仍用系统层的 operation_canceled。
         db_exception
         pool_timeout_error()
         {
-            return db_exception(boost::system::errc::make_error_code(boost::system::errc::timed_out),
-                                "connection_pool: acquire timeout");
+            return db_exception(make_error_code(error::acquire_timeout), "connection_pool: acquire timeout");
         }
     } // namespace
 
@@ -840,7 +841,7 @@ namespace httplib::db
         detail::register_backends();
         if (!detail::find_backend(backend_name))
         {
-            throw db_exception(boost::system::error_code {},
+            throw db_exception(make_error_code(error::unknown_backend),
                                "db: unknown backend '" + std::string(backend_name)
                                    + "' (registered: " + detail::registered_backend_names() + ")");
         }

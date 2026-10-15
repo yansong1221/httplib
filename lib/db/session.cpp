@@ -1,5 +1,6 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 #include "httplib/db/session.hpp"
+#include "httplib/db/error.hpp"
 #include "httplib/db/exception.hpp"
 #include "httplib/util/string_hash.hpp"
 #include "registry.hpp"
@@ -176,7 +177,7 @@ namespace httplib::db
         auto const* factory = detail::find_backend(backend_name);
         if (!factory)
         {
-            throw db_exception(boost::system::error_code {},
+            throw db_exception(make_error_code(error::unknown_backend),
                                "db: unknown backend '" + std::string(backend_name)
                                    + "' (registered: " + detail::registered_backend_names() + ")");
         }
@@ -251,7 +252,7 @@ namespace httplib::db
         // 会静默截断。统一在入口拒绝，避免后端行为不一致（此前仅 SQLite 后端检测）。
         if (!params.empty() && detail::split_statements(sql).size() > 1)
         {
-            throw db_exception(boost::system::error_code {},
+            throw db_exception(make_error_code(error::invalid_parameters),
                                "db: parameterized multi-statement SQL is not supported; "
                                "split the statements");
         }

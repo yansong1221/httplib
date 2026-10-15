@@ -1,5 +1,6 @@
 #ifdef HTTPLIB_ENABLED_DATABASE
 #include "sqlite_backend.hpp"
+#include "httplib/db/error.hpp"
 #include "httplib/db/exception.hpp"
 #include "registry.hpp"
 #include <boost/algorithm/string/predicate.hpp>
@@ -424,7 +425,7 @@ namespace httplib::db::detail
     {
         if (!db_)
         {
-            throw db_exception(boost::system::error_code {}, "db: sqlite not connected");
+            throw db_exception(make_error_code(error::not_initialized), "db: sqlite not connected");
         }
         return exec_all(std::string(sql));
     }
@@ -480,7 +481,7 @@ namespace httplib::db::detail
     {
         if (!db_)
         {
-            throw db_exception(boost::system::error_code {}, "db: sqlite not connected");
+            throw db_exception(make_error_code(error::not_initialized), "db: sqlite not connected");
         }
         std::string sql_str(sql);
         sqlite3_stmt* stmt = nullptr;
@@ -498,7 +499,7 @@ namespace httplib::db::detail
         auto* stmt = static_cast<sqlite3_stmt*>(h.state.get());
         if (!stmt)
         {
-            throw db_exception(boost::system::error_code {}, "db: sqlite statement not prepared");
+            throw db_exception(make_error_code(error::not_initialized), "db: sqlite statement not prepared");
         }
 
         // 复用语句：先 reset 再清残留绑定（上一次参数多于本次时会残留 NULL 以外的值）。

@@ -1,4 +1,5 @@
 #pragma once
+#include "error.hpp"
 #include "exception.hpp"
 #include <limits>
 #include <stdexcept>
@@ -22,7 +23,7 @@ namespace httplib::db
             if (*v < static_cast<int64_t>(std::numeric_limits<T>::min())
                 || *v > static_cast<int64_t>(std::numeric_limits<T>::max()))
             {
-                throw db_exception(boost::system::error_code {}, "db: value out of range for integer type");
+                throw db_exception(make_error_code(error::type_mismatch), "db: value out of range for integer type");
             }
             return static_cast<T>(*v);
         }
@@ -37,7 +38,7 @@ namespace httplib::db
             }
             if (*v > static_cast<uint64_t>(std::numeric_limits<T>::max()))
             {
-                throw db_exception(boost::system::error_code {}, "db: value out of range for integer type");
+                throw db_exception(make_error_code(error::type_mismatch), "db: value out of range for integer type");
             }
             return static_cast<T>(*v);
         }

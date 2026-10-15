@@ -1,4 +1,5 @@
 #include "httplib/db/result.hpp"
+#include "httplib/db/error.hpp"
 #include "httplib/db/exception.hpp"
 #include <stdexcept>
 
@@ -92,7 +93,7 @@ namespace httplib::db
                 return i;
             }
         }
-        throw db_exception(boost::system::error_code {}, "db: column not found: " + std::string(name));
+        throw db_exception(make_error_code(error::column_not_found), "db: column not found: " + std::string(name));
     }
 
     std::string const&

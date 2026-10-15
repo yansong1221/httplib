@@ -2,6 +2,7 @@
 
 #include "backend.hpp"
 #include "httplib/db/binder.hpp"
+#include "httplib/db/error.hpp"
 #include "httplib/db/exception.hpp"
 #include "httplib/util/string_hash.hpp"
 #include <cctype>
@@ -238,19 +239,19 @@ namespace httplib::db::detail
             auto it = named.find(name);
             if (it == named.end())
             {
-                throw db_exception(boost::system::error_code {}, "db: unbound named parameter ':" + name + "'");
+                throw db_exception(make_error_code(error::invalid_parameters), "db: unbound named parameter ':" + name + "'");
             }
             return it->second;
         }
         if (pos.empty())
         {
             // 没有位置绑定但 SQL 存在占位符 → 未绑定（与命名未绑定语义一致）。
-            throw db_exception(boost::system::error_code {}, "db: unbound named parameter ':" + name + "'");
+            throw db_exception(make_error_code(error::invalid_parameters), "db: unbound named parameter ':" + name + "'");
         }
         if (pos_idx >= pos.size())
         {
             // 参数数量少于占位符：与后端 prepare 的 arity 检查一致，视为数据库层错误。
-            throw db_exception(boost::system::error_code {}, "db: too few parameters for placeholders");
+            throw db_exception(make_error_code(error::invalid_parameters), "db: too few parameters for placeholders");
         }
         return pos[pos_idx++];
     }
@@ -343,7 +344,7 @@ namespace httplib::db::detail
         binder_index idx = build_binder_index(binders);
         if (idx.has_named && idx.has_pos)
         {
-            throw db_exception(boost::system::error_code {}, "db: cannot mix positional and named parameters");
+            throw db_exception(make_error_code(error::invalid_parameters), "db: cannot mix positional and named parameters");
         }
 
         std::string out;
@@ -398,7 +399,7 @@ namespace httplib::db::detail
         if (!idx.has_named && pos_idx != idx.pos.size())
         {
             // 位置参数多于占位符：与后端 prepare 的 arity 检查一致，视为数据库层错误。
-            throw db_exception(boost::system::error_code {}, "db: too many parameters for placeholders");
+            throw db_exception(make_error_code(error::invalid_parameters), "db: too many parameters for placeholders");
         }
         return { std::move(out), std::move(params) };
     }
