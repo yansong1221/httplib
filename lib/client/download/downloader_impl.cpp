@@ -238,6 +238,9 @@ namespace httplib::client
                 co_return handle.error();
             }
             handle->set_timeout(cfg.timeout);
+            // 按“单个 I/O 步骤”计时，而不是整次请求的总时限：否则 config::timeout
+            // 会把「连接 + 整个响应体」卡在一个总预算里，大文件/慢链路必然超时。
+            handle->set_timeout_policy(http_client::timeout_policy::step);
             handle->set_max_redirects(0);
             handle->set_verify_ssl(cfg.verify_ssl);
             handle->set_download_rate_limit(cfg.max_speed_bytes_per_sec);

@@ -46,6 +46,8 @@ namespace httplib::client
         struct config
         {
             int max_retries = 3;
+            /// 单个 I/O 步骤（建连、发送、一次读）的超时，兼作「多久没数据就放弃」
+            /// 的停顿时限。整体下载时长不受它限制，大文件不会被总时限掐断。
             std::chrono::steady_clock::duration timeout = std::chrono::seconds(60);
             std::chrono::milliseconds acquire_timeout = std::chrono::seconds(30);
             int max_redirects = 5;

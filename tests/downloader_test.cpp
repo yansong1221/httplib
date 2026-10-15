@@ -498,6 +498,72 @@ TEST_CASE("Downloader: failed download leaves a .part file, not the final path",
     fs::remove(dl_path);
 }
 
+TEST_CASE("Downloader: slow drip beyond config::timeout still completes", "[downloader]")
+{
+    auto dl_path = fs::temp_directory_path() / "httplib_dl_drip_out.bin";
+    fs::remove(dl_path);
+    fs::remove(part_of(dl_path));
+
+    // A raw server that dribbles the body in tiny chunks. The transfer as a
+    // whole outlives config::timeout, but each gap stays well under it, so a
+    // per-step timeout must let it finish (an overall deadline would abort it).
+    net::io_context raw_ioc;
+    httplib::tcp::acceptor acc(raw_ioc, httplib::tcp::endpoint(net::ip::make_address("127.0.0.1"), 0));
+    auto const port = acc.local_endpoint().port();
+
+    constexpr int kChunks = 5;
+    constexpr auto kGap = std::chrono::milliseconds(400);
+
+    std::thread raw_server(
+        [&]()
+        {
+            boost::system::error_code ec;
+            httplib::tcp::socket sock(raw_ioc);
+            acc.accept(sock, ec);
+            if (ec)
+            {
+                return;
+            }
+            char reqbuf[2048];
+            std::string req;
+            for (;;)
+            {
+                auto const n = sock.read_some(net::buffer(reqbuf), ec);
+                if (ec)
+                {
+                    return;
+                }
+                req.append(reqbuf, n);
+                if (req.find("\r\n\r\n") != std::string::npos)
+                {
+                    break;
+                }
+            }
+            constexpr std::string_view head = "HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\n";
+            net::write(sock, net::buffer(head), ec);
+            for (int i = 0; i < kChunks && !ec; ++i)
+            {
+                std::this_thread::sleep_for(kGap);
+                net::write(sock, net::buffer(std::string_view("x")), ec);
+            }
+        });
+
+    dl_test_scaffold ts;
+    ts.start();
+
+    httplib::client::downloader dl(ts.ioc_, ts.pool);
+    dl.set_config(
+        { .max_retries = 0, .timeout = std::chrono::seconds(1), .retry_backoff = std::chrono::milliseconds(0) });
+
+    auto ec = dl.download(std::format("http://127.0.0.1:{}/drip", port), dl_path).get();
+    raw_server.join();
+
+    REQUIRE_FALSE(ec);
+    REQUIRE(read_file(dl_path) == "xxxxx");
+
+    fs::remove(dl_path);
+}
+
 TEST_CASE("Downloader: suggested filename from Content-Disposition", "[downloader]")
 {
     auto server_path = fs::temp_directory_path() / "httplib_dl_cd_srv.bin";
