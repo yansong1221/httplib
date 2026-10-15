@@ -17,6 +17,35 @@
 namespace httplib::client
 {
 
+    /**
+     * \brief 下载器：把一个 URL 下载到本地文件。
+     * \details 响应体先写入 `<save_path>.part`，成功后原子改名为 `save_path`；失败或
+     * 取消则保留 `.part`，供后续调用断点续传（见 \ref config 的 `resume`）。重定向、
+     * 条件请求（ETag / Last-Modified）与响应缓存均由本类内部处理。
+     *
+     * \par 单次运行约束
+     * 一个 downloader 实例同一时刻只驱动 **一个** 传输。它内部只保留一份运行期状态：
+     * 输出文件的写出流、进度计数、\ref state / \ref http_status / \ref
+     * suggested_filename，以及取消源。若在同一实例上并发调用 \ref async_download 或
+     * \ref download，这些状态会互相覆盖，典型后果是数据被写进另一个文件、
+     * `bad_file_descriptor`，以及 \ref cancel / \ref pause / \ref resume 作用到错误的
+     * 运行上。该约束未做运行时防护。
+     *
+     * \par 并发下载
+     * 需要并发时，请 **为每个传输各建一个 downloader**，并让它们共享同一个
+     * \ref http_client_pool（连接池本就设计为多方共用）：
+     * \code
+     * auto pool = std::make_shared<httplib::client::http_client_pool>(
+     *     ioc.get_executor(), httplib::client::pool_params {});
+     * // 每个并发任务：
+     * httplib::client::downloader dl(ioc, pool);
+     * dl.set_config(cfg);
+     * auto ec = co_await dl.async_download(url, save_path);
+     * \endcode
+     *
+     * \par 生命周期
+     * 不可拷贝、可移动；析构会 \ref cancel 尚未完成的运行。
+     */
     class HTTPLIB_API downloader
     {
       public:
@@ -89,6 +118,10 @@ namespace httplib::client
         /// retrying; 408/429 and 5xx are retried up to `config::max_retries`
         /// times. When the run fails on such a status, http_status() reports
         /// which one.
+        ///
+        /// At most one run may be in flight per downloader. To download
+        /// concurrently, use one downloader per run and share the pool; see the
+        /// class documentation.
         net::awaitable<boost::system::error_code> async_download(std::string_view url,
                                                                  fs::path const& save_path,
                                                                  httplib::headers const& headers = {});
