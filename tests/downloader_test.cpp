@@ -1790,7 +1790,7 @@ TEST_CASE("Downloader: invalid URL maps to a failed error, not a throw", "[downl
 
     auto ec = dl.download("not a url at all", dl_path).get();
     REQUIRE(ec);
-    REQUIRE(ec == boost::system::errc::make_error_code(boost::system::errc::invalid_argument));
+    REQUIRE(ec == httplib::client::make_error_code(httplib::client::error::invalid_url));
     REQUIRE(dl.current_state() == httplib::client::downloader::state::failed);
     REQUIRE_FALSE(fs::exists(dl_path));
 

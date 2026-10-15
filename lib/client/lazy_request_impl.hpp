@@ -2,6 +2,7 @@
 
 #include "body/body_writer.hpp"
 #include "client_impl.h"
+#include "httplib/client/error.hpp"
 #include "httplib/client/lazy_request.hpp"
 #include "response_impl.h"
 #include <boost/beast/http/buffer_body.hpp>
@@ -47,7 +48,7 @@ namespace httplib::client
         {
             if (!parent_)
             {
-                ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+                ec = make_error_code(error::not_initialized);
                 co_return;
             }
 
@@ -88,7 +89,7 @@ namespace httplib::client
         {
             if (!parent_)
             {
-                ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+                ec = make_error_code(error::not_initialized);
                 co_return;
             }
             // relay 直通原始字节；chunked 由 body_writer 按 Content-Encoding 自动压缩。
@@ -105,7 +106,7 @@ namespace httplib::client
         {
             if (!parent_)
             {
-                co_return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+                co_return make_error_code(error::not_initialized);
             }
             co_return co_await parent_->read_response_lazy(this->base().method());
         }
@@ -115,7 +116,7 @@ namespace httplib::client
         {
             if (!parent_)
             {
-                co_return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+                co_return make_error_code(error::not_initialized);
             }
             auto result = co_await read_response_lazy();
             if (result.has_error())

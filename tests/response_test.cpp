@@ -1,13 +1,16 @@
 #include "common.hpp"
 #include "compress/compressor.hpp"
+#include "httplib/client/error.hpp"
 #include "httplib/client/lazy_request.hpp"
 #include "httplib/server/mount_point_entry.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/server/stream_writer.hpp"
 #include <array>
+#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/use_awaitable.hpp>
+#include <boost/asio/use_future.hpp>
 #include <boost/asio/write.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -1557,4 +1560,27 @@ TEST_CASE("request: as_string on a bodyless request returns empty instead of thr
             REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(resp.as_string() == "empty");
         });
+}
+
+// 回归：空的（未绑定底层流的）response 读取时必须返回模块错误码，
+// 而不是借用 errc::bad_file_descriptor —— 后者描述的是坏文件描述符，语义不符。
+TEST_CASE("response: empty response reports not_initialized", "[response]")
+{
+    httplib::client::response resp; // impl_ 为空：没有任何底层流
+    boost::system::error_code ec;
+    std::array<char, 8> buf {};
+
+    net::io_context ioc;
+    auto fut = net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            auto n = co_await resp.read_some_raw(net::buffer(buf), ec);
+            REQUIRE(n == 0);
+        },
+        net::use_future);
+    ioc.run();
+    fut.get();
+
+    REQUIRE(ec == httplib::client::make_error_code(httplib::client::error::not_initialized));
 }

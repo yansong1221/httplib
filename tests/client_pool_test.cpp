@@ -1,5 +1,6 @@
 #include "common.hpp"
 #include "httplib/client/client_pool.hpp"
+#include "httplib/client/error.hpp"
 #include "httplib/client/lazy_request.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
@@ -271,6 +272,15 @@ TEST_CASE("client_pool: wait_timeout zero fails fast", "[client_pool]")
 
             p.stop();
         });
+}
+
+TEST_CASE("client_pool: default handle carries pool_exhausted", "[client_pool]")
+{
+    // An empty/expired handle is a pool-lifecycle state, not a socket state:
+    // it must not masquerade as errc::not_connected.
+    httplib::client::http_client_pool::client_handle h;
+    REQUIRE(h.has_error());
+    REQUIRE(h.error() == httplib::client::make_error_code(httplib::client::error::pool_exhausted));
 }
 
 TEST_CASE("client_pool: waiter wakes up on release", "[client_pool]")

@@ -1,4 +1,5 @@
 #include "disk_writer.h"
+#include "httplib/client/error.hpp"
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/system/errc.hpp>
@@ -108,7 +109,7 @@ namespace httplib::client
 
         if (!out_.is_open())
         {
-            co_return boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+            co_return make_error_code(error::not_initialized);
         }
         out_.write(data.data(), static_cast<std::streamsize>(data.size()));
         if (!out_)

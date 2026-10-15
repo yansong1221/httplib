@@ -1,5 +1,6 @@
 #include "httplib/client/response.hpp"
 #include "headers_impl.hpp"
+#include "httplib/client/error.hpp"
 #include "ndjson_reader_impl.hpp"
 #include "response_impl.h"
 #include "sse_reader_impl.hpp"
@@ -200,7 +201,7 @@ namespace httplib::client
     {
         if (!impl_)
         {
-            ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+            ec = make_error_code(error::not_initialized);
             co_return 0;
         }
         co_return co_await impl_->read_some_raw(buffer, ec);
@@ -222,7 +223,7 @@ namespace httplib::client
     {
         if (!impl_)
         {
-            ec = boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor);
+            ec = make_error_code(error::not_initialized);
             co_return 0;
         }
         co_return co_await impl_->read_some_decoded(buffer, ec);

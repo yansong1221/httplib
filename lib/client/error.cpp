@@ -23,6 +23,18 @@ namespace httplib::client
                         return "too many redirects";
                     case error::protocol_violation:
                         return "protocol violation";
+                    case error::invalid_url:
+                        return "invalid URL";
+                    case error::truncated_body:
+                        return "response body is shorter than declared";
+                    case error::cache_unavailable:
+                        return "cached body is unavailable for revalidation";
+                    case error::pool_exhausted:
+                        return "no connection available";
+                    case error::not_initialized:
+                        return "object is not bound to a stream";
+                    case error::connection_failed:
+                        return "failed to create connection";
                 }
                 return "unknown error";
             }

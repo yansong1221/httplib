@@ -1,5 +1,6 @@
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/client.hpp"
+#include "httplib/client/error.hpp"
 #include "httplib/util/async_event.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/string_hash.hpp"
@@ -148,8 +149,8 @@ namespace httplib::client
                         }
 
                         // 硬错误（建连失败）直接返回；只有“暂无容量”的哨兵值
-                        // (not_connected) 才落到等待/排队路径。
-                        if (handle.error() != boost::system::errc::make_error_code(boost::system::errc::not_connected))
+                        // (pool_exhausted) 才落到等待/排队路径。
+                        if (handle.error() != make_error_code(error::pool_exhausted))
                         {
                             if (in_queue)
                             {
@@ -614,7 +615,7 @@ namespace httplib::client
                     track_destroyed();
                     wake_one_waiter(url);
                     // 建连/配置路径的异常一律回落到错误 handle，借出接口不抛异常。
-                    co_return client_handle(boost::system::errc::make_error_code(boost::system::errc::io_error));
+                    co_return client_handle(make_error_code(error::connection_failed));
                 }
             }
 
@@ -683,7 +684,7 @@ namespace httplib::client
     // ---- client_handle ----
 
     http_client_pool::client_handle::client_handle()
-        : client_handle(boost::system::errc::make_error_code(boost::system::errc::not_connected))
+        : client_handle(make_error_code(error::pool_exhausted))
     {
     }
 
@@ -703,7 +704,7 @@ namespace httplib::client
         // 成功 handle 被 move 后源对象变为 expired；失败 handle 保留原错误码。
         if (!other.error_ && other.conn_ == nullptr)
         {
-            other.error_ = boost::system::errc::make_error_code(boost::system::errc::not_connected);
+            other.error_ = make_error_code(error::pool_exhausted);
         }
     }
 
@@ -719,7 +720,7 @@ namespace httplib::client
             error_ = other.error_;
             if (other_was_live && !other.error_)
             {
-                other.error_ = boost::system::errc::make_error_code(boost::system::errc::not_connected);
+                other.error_ = make_error_code(error::pool_exhausted);
             }
         }
         return *this;
@@ -736,7 +737,7 @@ namespace httplib::client
             pool->release(std::move(conn_));
             if (!error_)
             {
-                error_ = boost::system::errc::make_error_code(boost::system::errc::not_connected);
+                error_ = make_error_code(error::pool_exhausted);
             }
         }
     }

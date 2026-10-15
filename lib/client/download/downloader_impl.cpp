@@ -394,7 +394,7 @@ namespace httplib::client
         auto r = url::parse_url(url);
         if (!r)
         {
-            auto ec = boost::system::errc::make_error_code(boost::system::errc::invalid_argument);
+            auto ec = make_error_code(error::invalid_url);
             progress_.set_state(downloader::state::failed, ec);
             co_return ec;
         }
@@ -549,7 +549,7 @@ namespace httplib::client
                 {
                     // The server keeps answering 304 for a body we cannot
                     // produce, so the download cannot be completed.
-                    co_return boost::system::errc::make_error_code(boost::system::errc::io_error);
+                    co_return make_error_code(error::cache_unavailable);
                 }
             }
             if (status != status::ok && status != status::partial_content)
@@ -674,7 +674,7 @@ namespace httplib::client
                 co_await disk_.close();
                 if (attempt == cfg.max_retries)
                 {
-                    co_return boost::system::errc::make_error_code(boost::system::errc::message_size);
+                    co_return make_error_code(error::truncated_body);
                 }
                 co_await httplib::util::sleep(cfg.retry_backoff * (attempt + 1));
                 continue;
