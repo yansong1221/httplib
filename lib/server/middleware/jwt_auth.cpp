@@ -8,18 +8,20 @@
 namespace httplib::server::middleware
 {
 
+    /// \brief 配置期状态：jwt::verifier 在构造期随算法一次性配好。
+    ///
+    /// jwt-cpp 的 verifier::verify() 是 const 且全程只读（无共享可变状态），
+    /// 因此同一个 verifier 可以跨并发请求复用；每个请求只剩一次 token 解析拷贝。
     struct jwt_auth_middleware::impl
     {
-        std::shared_ptr<jwt::algorithm const> alg;
-        std::string issuer;
-        std::string audience;
+        jwt::verifier verifier;
         std::string scheme = "Bearer";
         std::string header_name;
     };
 
     jwt_auth_middleware::jwt_auth_middleware(jwt::algorithm const& alg) : impl_(std::make_unique<impl>())
     {
-        impl_->alg = alg.clone();
+        impl_->verifier.allow_algorithm(alg);
     }
     jwt_auth_middleware::jwt_auth_middleware(jwt_auth_middleware const& other)
         : impl_(std::make_unique<impl>(*other.impl_))
@@ -41,14 +43,14 @@ namespace httplib::server::middleware
     jwt_auth_middleware&
     jwt_auth_middleware::with_issuer(std::string_view iss)
     {
-        impl_->issuer = iss;
+        impl_->verifier.with_issuer(iss);
         return *this;
     }
 
     jwt_auth_middleware&
     jwt_auth_middleware::with_audience(std::string_view aud)
     {
-        impl_->audience = aud;
+        impl_->verifier.with_audience(aud);
         return *this;
     }
 
@@ -91,33 +93,23 @@ namespace httplib::server::middleware
             }
             token = auth.substr(prefix.size());
         }
+
         auto result = jwt::decode(token);
         if (result.has_error())
         {
             resp.set_error_content(status::unauthorized);
             return false;
         }
-        auto& decoded = result.value();
-
-        auto verifier = jwt::verify(*p.alg);
-        if (!p.issuer.empty())
-        {
-            verifier.with_issuer(p.issuer);
-        }
-        if (!p.audience.empty())
-        {
-            verifier.with_audience(p.audience);
-        }
 
         boost::system::error_code ec;
-        verifier.verify(decoded, ec);
+        p.verifier.verify(result.value(), ec);
         if (ec)
         {
             resp.set_error_content(status::unauthorized);
             return false;
         }
 
-        req.data().store(std::move(decoded));
+        req.data().store(std::move(result.value()));
         return true;
     }
 

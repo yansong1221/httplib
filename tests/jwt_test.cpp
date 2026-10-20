@@ -20,6 +20,13 @@ namespace
 
 } // namespace
 
+TEST_CASE("JWT: error implicitly converts to boost::system::error_code", "[jwt]")
+{
+    // is_error_code_enum 注册后可像 client::error 一样直接隐式转换
+    boost::system::error_code ec = httplib::jwt::error::not_initialized;
+    REQUIRE(ec == make_error_code(httplib::jwt::error::not_initialized));
+}
+
 TEST_CASE("JWT: build and sign with HS256", "[jwt]")
 {
     auto token
@@ -72,7 +79,7 @@ TEST_CASE("JWT: verifier with claims", "[jwt]")
     REQUIRE_FALSE(ec);
 
     httplib::jwt::verify(httplib::jwt::hs256("secret")).with_issuer("wrong").verify(decoded, ec);
-    REQUIRE(ec == make_error_code(httplib::jwt::error::issuer_mismatch));
+    REQUIRE(ec == make_error_code(httplib::jwt::error::claim_mismatch));
 }
 
 TEST_CASE("JWT: cross-validate with jwt-cpp", "[jwt]")
@@ -192,7 +199,7 @@ TEST_CASE("JWT: verifier with_audience and with_claim", "[jwt]")
     REQUIRE_FALSE(ec);
 
     httplib::jwt::verify(httplib::jwt::hs256("secret")).with_audience("wrong").verify(decoded, ec);
-    REQUIRE(ec == make_error_code(httplib::jwt::error::audience_mismatch));
+    REQUIRE(ec == make_error_code(httplib::jwt::error::claim_mismatch));
 
     httplib::jwt::verify(httplib::jwt::hs256("secret"))
         .with_claim("role", [](boost::json::value const& v) { return v == "admin"; })
@@ -200,7 +207,9 @@ TEST_CASE("JWT: verifier with_audience and with_claim", "[jwt]")
     REQUIRE_FALSE(ec);
 }
 
-TEST_CASE("JWT: error_code for each mismatch type", "[jwt]")
+// 回归：claim 失配错误码已收敛为泛型 claim_mismatch（与 jwt-cpp 同粒度，
+// 具名方法 with_issuer/with_subject/with_audience/with_id 直接委托 jwt-cpp）。
+TEST_CASE("JWT: claim mismatch reported as generic claim_mismatch", "[jwt]")
 {
     auto token = httplib::jwt::create().set_subject("alice").set_id("jti-x").sign(httplib::jwt::hs256("secret"));
 
@@ -209,10 +218,16 @@ TEST_CASE("JWT: error_code for each mismatch type", "[jwt]")
     boost::system::error_code ec;
 
     httplib::jwt::verify(httplib::jwt::hs256("secret")).with_subject("bob").verify(decoded, ec);
-    REQUIRE(ec == make_error_code(httplib::jwt::error::subject_mismatch));
+    REQUIRE(ec == make_error_code(httplib::jwt::error::claim_mismatch));
 
     httplib::jwt::verify(httplib::jwt::hs256("secret")).with_id("wrong-id").verify(decoded, ec);
-    REQUIRE(ec == make_error_code(httplib::jwt::error::id_mismatch));
+    REQUIRE(ec == make_error_code(httplib::jwt::error::claim_mismatch));
+
+    // 自定义谓词与具名检查同粒度
+    httplib::jwt::verify(httplib::jwt::hs256("secret"))
+        .with_claim("sub", [](boost::json::value const& v) { return v != "alice"; })
+        .verify(decoded, ec);
+    REQUIRE(ec == make_error_code(httplib::jwt::error::claim_mismatch));
 }
 
 TEST_CASE("JWT: decoded_jwt accessors", "[jwt]")

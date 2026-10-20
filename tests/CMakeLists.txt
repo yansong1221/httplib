@@ -83,14 +83,13 @@ add_httplib_test(httplib_test_proxy proxy
     proxy_test.cpp
 )
 
-if(HTTPLIB_ENABLED_SSL)
-    add_httplib_test(httplib_test_jwt jwt
-        jwt_test.cpp
-    )
-    target_link_libraries(httplib_test_jwt PRIVATE jwt-cpp::jwt-cpp)
-else()
-    message(STATUS "HTTPLIB: skipping httplib_test_jwt (HTTPLIB_ENABLED_SSL=OFF)")
-endif()
+# jwt 模块委托 jwt-cpp 完成 HMAC/base64，OpenSSL 已是库的无条件依赖，
+# 测试目标不再需要 HTTPLIB_ENABLED_SSL 门控（库的 SSL 开关只影响 HTTPS/WSS 通道）。
+add_httplib_test(httplib_test_jwt jwt
+    jwt_test.cpp
+    jwt_p0_test.cpp
+)
+target_link_libraries(httplib_test_jwt PRIVATE jwt-cpp::jwt-cpp)
 
 if(HTTPLIB_ENABLED_DATABASE)
     add_httplib_test(httplib_test_db db

@@ -16,6 +16,11 @@ source_group(TREE ${HTTPLIB_LIB_DIR} PREFIX "lib" FILES ${HTTPLIB_SOURCE_FILES})
 find_package(Boost REQUIRED COMPONENTS asio beast json url CONFIG)
 find_package(spdlog CONFIG REQUIRED)
 find_package(fmt CONFIG REQUIRED)
+# jwt 模块委托 jwt-cpp（做 HMAC/base64），jwt-cpp 恒依赖 OpenSSL —— 两者都是
+# 库的无条件依赖，不再受 HTTPLIB_ENABLED_SSL 门控（jwt-cpp-config 里自带
+# find_dependency(OpenSSL)）。HTTPLIB_ENABLED_SSL 只控制 HTTPS/WSS 通道。
+find_package(OpenSSL REQUIRED)
+find_package(jwt-cpp CONFIG REQUIRED)
 
 if(HTTPLIB_SHARED_LIBRARY)
     add_library(${MODULE} SHARED ${HTTPLIB_HEADER_FILES} ${HTTPLIB_SOURCE_FILES})
@@ -38,6 +43,7 @@ target_link_libraries(${MODULE}
 PUBLIC  Boost::json Boost::asio
 PUBLIC  spdlog::spdlog fmt::fmt
 PRIVATE Boost::beast Boost::url
+PRIVATE OpenSSL::SSL OpenSSL::Crypto jwt-cpp::jwt-cpp
 )
 
 target_include_directories(${MODULE} 
@@ -53,9 +59,7 @@ if (MSVC)
 endif()
 
 if(HTTPLIB_ENABLED_SSL)
-    find_package(OpenSSL REQUIRED)
     target_compile_definitions(${MODULE} PUBLIC HTTPLIB_ENABLED_SSL)
-    target_link_libraries(${MODULE} PRIVATE OpenSSL::SSL OpenSSL::Crypto)
 endif()
 if(HTTPLIB_ENABLED_COMPRESS)
     find_package(Boost REQUIRED COMPONENTS iostreams CONFIG)
