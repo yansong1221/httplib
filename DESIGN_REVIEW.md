@@ -97,6 +97,11 @@ builder& builder::set_key_id(std::string_view kid)
 
 ### 1.3 WebSocket 升级请求路由不命中时不回任何 HTTP 响应【高】
 
+> **✅ 已修复（2026-10）**：路由判定前移到 session 分叉点——命中 WS 路由才劫持
+> 转 `websocket_task`（`ws_handler_entry` 随构造移交，`run()` 不再二次查询）；
+> 未命中的升级请求按普通 HTTP 请求路由，404/405 与中间件语义照常生效。
+> 回归测试：`tests/p0_review_test.cpp` P0-3。
+
 **证据**：`lib/server/session.cpp:277-283`、`lib/server/websocket_conn_impl.cpp:216-222`
 
 ```cpp
@@ -117,6 +122,13 @@ if (!entry) { co_return; }          // TCP 关闭，无响应
 
 ### 1.4 流式响应中途失败不标脏连接 → keep-alive 协议 desync【高】
 
+> **✅ 已修复（2026-10，handler 抛异常路径）**：`body_writer` 引入 header 上线事实
+> 闩锁 `header_on_wire`（write_header 成功置位、永不回落），`header_sent()` 判据
+> 换底；`response_impl` 全部 body 写入入口在头上线后拒绝改写。中途失败 ⇒ catch
+> 里 `keep_alive(false)` 标脏关闭（既有路径），`async_write` 经闩锁跳过，500 不会再
+> 叠加进悬空 chunked body。
+> 回归测试：`tests/p0_review_test.cpp` P0-4。
+
 **证据链**：
 
 | 位置 | 现象 |
@@ -135,6 +147,12 @@ SSE/NDJSON、用户 stream_writer 所有流式路径共同缺口。
 「流式响应未自然收尾 ⇒ 强关连接」检查（如 `writer().streaming() && !writer().done()`）。
 
 ### 1.5 cors_middleware 多 origin 配置静默失效【中】
+
+> **✅ 已修复（2026-10）**：静态 `origin_header()` 改为按请求 Origin 解析：白名单
+> 命中回显该 Origin + Vary: Origin（按 comma token 判重追加）；凭据开启时通配
+> 改回显请求 Origin，`"*"` 与 `ACAC:true` 不再同屏；未命中不回 ACAO。无 Origin
+> 的请求保持既有行为（通配/单值按配置原样回应）。
+> 回归测试：`tests/p0_review_test.cpp` P0-5。
 
 **证据**：`lib/server/middleware/cors.cpp:34-55`
 
