@@ -326,9 +326,9 @@ namespace httplib::detail
         /// 写出后 body 未完，序列化器可能被 discard_body() 重置——"是否已上线"必须
         /// 以已发生的事实为准，重写响应、keep-alive 协议失步判定均以此为准。
         bool
-        header_on_wire() const
+        header_sent() const
         {
-            return header_on_wire_;
+            return header_sent_;
         }
 
         // ---- 整消息写 ----
@@ -431,7 +431,7 @@ namespace httplib::detail
                 msg_.keep_alive(false);
                 co_return ec;
             }
-            header_on_wire_ = true;
+            header_sent_ = true;
 
             // HEAD：头已写完就收工。body 留在 source_ 里不消费，序列化器停在 header_done——
             // 服务端不依赖 is_done()（只有客户端复用请求对象时才依赖，见 prepare_for_send()），
@@ -517,7 +517,7 @@ namespace httplib::detail
                 msg_.keep_alive(false);
                 co_return ec;
             }
-            header_on_wire_ = true;
+            header_sent_ = true;
             co_return ec;
         }
 
@@ -622,8 +622,8 @@ namespace httplib::detail
 
         body::source_ptr source_;
 
-        /// header 写出成功事实闩锁，见 @ref header_on_wire。
-        bool header_on_wire_ = false;
+        /// header 写出成功事实闩锁，见 @ref header_sent。
+        bool header_sent_ = false;
 
         std::unique_ptr<serializer_t> sr_;
         /// Content-Encoding 编码器，按需懒初始化（仅在需要压缩时存在）。

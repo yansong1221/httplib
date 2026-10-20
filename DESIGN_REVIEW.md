@@ -123,7 +123,7 @@ if (!entry) { co_return; }          // TCP 关闭，无响应
 ### 1.4 流式响应中途失败不标脏连接 → keep-alive 协议 desync【高】
 
 > **✅ 已修复（2026-10，handler 抛异常路径）**：`body_writer` 引入 header 上线事实
-> 闩锁 `header_on_wire`（write_header 成功置位、永不回落），`header_sent()` 判据
+> 闩锁 `header_sent`（write_header 成功置位、永不回落），session/response 的判据
 > 换底；`response_impl` 全部 body 写入入口在头上线后拒绝改写。中途失败 ⇒ catch
 > 里 `keep_alive(false)` 标脏关闭（既有路径），`async_write` 经闩锁跳过，500 不会再
 > 叠加进悬空 chunked body。

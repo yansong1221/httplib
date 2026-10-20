@@ -212,12 +212,6 @@ namespace httplib::server
             return *this;
         }
 
-        bool
-        header_sent() const
-        {
-            return this->header_on_wire();
-        }
-
         static response
         create(unsigned int version, bool keep_alive, std::shared_ptr<session::http_task> task)
         {
