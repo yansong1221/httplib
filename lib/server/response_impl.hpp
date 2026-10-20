@@ -55,6 +55,10 @@ namespace httplib::server
         void
         set_empty_content(http::status status)
         {
+            if (header_sent())
+            {
+                return;
+            }
             this->set_empty();
             this->base().result(status);
             this->content_length(0);
@@ -86,6 +90,10 @@ namespace httplib::server
         void
         set_string_content(std::string&& data, std::string_view content_type, http::status status = http::status::ok)
         {
+            if (header_sent())
+            {
+                return;
+            }
             this->set_string(std::move(data), content_type);
             this->base().result(status);
         }
@@ -98,6 +106,10 @@ namespace httplib::server
         void
         set_json_content(boost::json::value&& data, http::status status = http::status::ok)
         {
+            if (header_sent())
+            {
+                return;
+            }
             this->set_json(std::move(data));
             this->base().result(status);
         }
@@ -105,6 +117,10 @@ namespace httplib::server
         void
         set_file_content(fs::path const& path, http::fields const& req_header = {})
         {
+            if (header_sent())
+            {
+                return;
+            }
             std::error_code ec;
             auto file_size = fs::file_size(path, ec);
             if (ec)
@@ -170,6 +186,10 @@ namespace httplib::server
         void
         set_form_data_content(std::vector<httplib::form_data::field>&& data)
         {
+            if (header_sent())
+            {
+                return;
+            }
             httplib::form_data value;
             value.boundary = html::generate_boundary();
             value.fields = std::move(data);
@@ -195,7 +215,7 @@ namespace httplib::server
         bool
         header_sent() const
         {
-            return this->header_done();
+            return this->header_on_wire();
         }
 
         static response

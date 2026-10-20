@@ -321,6 +321,16 @@ namespace httplib::detail
             return sr_ && sr_->is_header_done();
         }
 
+        /// header 字节是否已实际上线。与 @ref header_done 的区别在于本状态是事实闩锁：
+        /// 一旦置位永不回落，不随 body/序列化器被中途重置而丢失。流式场景中 header
+        /// 写出后 body 未完，序列化器可能被 discard_body() 重置——"是否已上线"必须
+        /// 以已发生的事实为准，重写响应、keep-alive 协议失步判定均以此为准。
+        bool
+        header_on_wire() const
+        {
+            return header_on_wire_;
+        }
+
         // ---- 整消息写 ----
 
         /// 整消息写。`headers_only` 为真时只写 header：一个 body 字节都不写，连 chunked 的
@@ -421,6 +431,7 @@ namespace httplib::detail
                 msg_.keep_alive(false);
                 co_return ec;
             }
+            header_on_wire_ = true;
 
             // HEAD：头已写完就收工。body 留在 source_ 里不消费，序列化器停在 header_done——
             // 服务端不依赖 is_done()（只有客户端复用请求对象时才依赖，见 prepare_for_send()），
@@ -504,7 +515,9 @@ namespace httplib::detail
             if (ec)
             {
                 msg_.keep_alive(false);
+                co_return ec;
             }
+            header_on_wire_ = true;
             co_return ec;
         }
 
@@ -608,6 +621,9 @@ namespace httplib::detail
         std::unique_ptr<util::async_mutex> write_mutex_;
 
         body::source_ptr source_;
+
+        /// header 写出成功事实闩锁，见 @ref header_on_wire。
+        bool header_on_wire_ = false;
 
         std::unique_ptr<serializer_t> sr_;
         /// Content-Encoding 编码器，按需懒初始化（仅在需要压缩时存在）。
