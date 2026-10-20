@@ -509,18 +509,6 @@ A custom backing store can be supplied via `session_middleware(std::shared_ptr<s
 The patch is recorded by `session` itself (`pending_writes()` / `take_pending_writes()`); the store
 never sees or needs any of `session`'s internal state.
 
-### Database Middleware
-
-Only with `HTTPLIB_ENABLED_DATABASE` (see the Database section).
-
-```cpp
-#include <httplib/server/middleware/db_middleware.hpp>
-
-router.set_http_handler<method::get>(
-    "/api/users", handler,
-    middleware::db_middleware(pool, { .auto_transaction = true }));
-```
-
 ### Global Middleware
 
 Apply middleware to every route at once:
@@ -559,7 +547,7 @@ Both sync (`bool`) and coroutine (`net::awaitable<bool>`) return types are suppo
 
 ### Middleware Data Access
 
-Middleware that stores data on the request (like `jwt_auth_middleware`, `session_middleware`, `db_middleware`) exposes a `value_type`. Read it with the generic `middleware::fetch<>()` template:
+Middleware that stores data on the request (like `jwt_auth_middleware`, `session_middleware`) exposes a `value_type`. Read it with the generic `middleware::fetch<>()` template:
 
 ```cpp
 #include <httplib/server/middleware/data.hpp>
@@ -816,18 +804,7 @@ auto handle = co_await pool->async_acquire();
 co_await handle->query("SELECT 1");
 ```
 
-`sess.set_query_logger(cb)` receives a `db::query_log_entry` per statement. `db_middleware` binds a `db::connection_pool` to each request and optionally wraps handlers in a transaction; `db_query_log_middleware` aggregates per-request query logs:
-
-```cpp
-#include <httplib/server/middleware/db_query_log.hpp>
-
-router.set_http_handler<method::get>("/api/users", handler,
-    middleware::db_middleware(pool, { .auto_transaction = true }),
-    middleware::db_query_log_middleware(middleware::query_log_options{
-        .on_request_complete = [](server::request const& req, auto const& entries) { /* ... */ },
-        .slow_query_threshold = std::chrono::milliseconds(200),
-        .on_slow_query = [](db::query_log_entry const& e) { /* ... */ } }));
-```
+`sess.set_query_logger(cb)` receives a `db::query_log_entry` (SQL, duration, affected rows, ...) per statement, for slow-query metrics and auditing.
 
 Errors are thrown as `db::db_exception` carrying a `boost::system::error_code`.
 

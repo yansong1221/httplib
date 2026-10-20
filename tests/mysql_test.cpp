@@ -1,3 +1,4 @@
+#include "httplib/config.hpp"
 #ifdef HTTPLIB_ENABLED_DATABASE
 #include "common.hpp"
 #include "httplib/db/config.hpp"
@@ -6,10 +7,6 @@
 #include "httplib/db/options.hpp"
 #include "httplib/db/result.hpp"
 #include "httplib/db/session.hpp"
-#include "httplib/server/middleware/data.hpp"
-#include "httplib/server/middleware/db_middleware.hpp"
-#include "httplib/server/request.hpp"
-#include "httplib/server/response.hpp"
 #include <atomic>
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/cancellation_signal.hpp>
@@ -22,7 +19,6 @@
 #include <span>
 
 namespace db = httplib::db;
-namespace mw = httplib::server::middleware;
 namespace net = httplib::net;
 
 namespace
@@ -2691,50 +2687,6 @@ TEST_CASE("db(mysql): column access on empty resultset", "[db][mysql]")
             REQUIRE(r.column_name(0) == "id");
             co_await sess.query("DROP TABLE IF EXISTS __httplib_nerr");
         });
-}
-
-// ===========================================================================
-// Middleware
-// ===========================================================================
-
-TEST_CASE("db_middleware: returns empty when not registered", "[db][middleware]")
-{
-    net::io_context ioc;
-    std::exception_ptr err;
-
-    net::co_spawn(
-        ioc,
-        [&]() -> net::awaitable<void>
-        {
-            httplib::server::http_server server(ioc.get_executor());
-            server.router().template set_http_handler<httplib::method::get>(
-                "/db/nomw",
-                [](httplib::server::request& req, httplib::server::response& resp)
-                {
-                    // 未挂载 db_middleware，故取不到值：返回空 optional 而非抛异常。
-                    REQUIRE_FALSE(mw::fetch<mw::db_middleware>(req).has_value());
-                    resp.set_string_content("ok"sv, "text/plain"sv);
-                });
-            server.listen("127.0.0.1", 0);
-            auto ep = server.local_endpoint();
-            server.run();
-
-            httplib::client::http_client client(ioc.get_executor(), ep.address().to_string(), ep.port());
-            client.set_timeout(std::chrono::seconds(5));
-
-            auto resp = UNWRAP(co_await client.async_get("/db/nomw"));
-            REQUIRE(resp.result() == httplib::status::ok);
-
-            client.close();
-            server.stop();
-        },
-        [&](std::exception_ptr e) { err = e; });
-
-    ioc.run();
-    if (err)
-    {
-        std::rethrow_exception(err);
-    }
 }
 
 TEST_CASE("db: date/time/datetime utilities", "[db][unit]")

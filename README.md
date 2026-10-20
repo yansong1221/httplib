@@ -531,18 +531,6 @@ router.set_http_handler<method::get>(
 补丁由 `session` 自己记录（`pending_writes()` / `take_pending_writes()`），store 无需也拿不到
 `session` 的任何内部状态。
 
-### 数据库中间件
-
-仅在启用 `HTTPLIB_ENABLED_DATABASE` 时可用（见"数据库"一节）。
-
-```cpp
-#include <httplib/server/middleware/db_middleware.hpp>
-
-router.set_http_handler<method::get>(
-    "/api/users", handler,
-    middleware::db_middleware(pool, { .auto_transaction = true }));
-```
-
 ### 全局中间件
 
 一次性对所有路由应用中间件：
@@ -581,7 +569,7 @@ router.set_http_handler<method::get>("/api/logged", handler, logging_aspect{});
 
 ### 中间件数据访问
 
-在请求上存储数据的中间件（如 `jwt_auth_middleware`、`session_middleware`、`db_middleware`）都会暴露 `value_type`。使用通用模板 `middleware::fetch<>()` 读取：
+在请求上存储数据的中间件（如 `jwt_auth_middleware`、`session_middleware`）都会暴露 `value_type`。使用通用模板 `middleware::fetch<>()` 读取：
 
 ```cpp
 #include <httplib/server/middleware/data.hpp>
@@ -829,18 +817,7 @@ auto handle = co_await pool->async_acquire();
 co_await handle->query("SELECT 1");
 ```
 
-`sess.set_query_logger(cb)` 会为每条语句收到一个 `db::query_log_entry`。`db_middleware` 把 `db::connection_pool` 绑定到每个请求，并可选地用事务包裹处理器；`db_query_log_middleware` 聚合每个请求的查询日志：
-
-```cpp
-#include <httplib/server/middleware/db_query_log.hpp>
-
-router.set_http_handler<method::get>("/api/users", handler,
-    middleware::db_middleware(pool, { .auto_transaction = true }),
-    middleware::db_query_log_middleware(middleware::query_log_options{
-        .on_request_complete = [](server::request const& req, auto const& entries) { /* ... */ },
-        .slow_query_threshold = std::chrono::milliseconds(200),
-        .on_slow_query = [](db::query_log_entry const& e) { /* ... */ } }));
-```
+`sess.set_query_logger(cb)` 会为每条语句收到一个 `db::query_log_entry`（SQL、耗时、影响行数等），可用于慢查询统计与审计。
 
 错误以 `db::db_exception` 抛出，其中携带 `boost::system::error_code`。
 
