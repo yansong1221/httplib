@@ -5,9 +5,10 @@
 #include "httplib/server/response.hpp"
 #include "httplib/util/string_hash.hpp"
 #include "memory_store.hpp"
-#include <atomic>
+#include <boost/uuid/uuid.hpp>
+#include <boost/uuid/uuid_generators.hpp>
+#include <boost/uuid/uuid_io.hpp>
 #include <mutex>
-#include <random>
 #include <utility>
 
 namespace httplib::server::middleware
@@ -398,11 +399,12 @@ namespace httplib::server::middleware
         static std::string
         generate_id()
         {
-            static std::atomic<uint64_t> counter { 0 };
-            static thread_local std::mt19937_64 rng(std::random_device {}());
-            auto now = std::chrono::system_clock::now().time_since_epoch().count();
-            auto rand = rng();
-            return std::format("{:x}-{:x}-{:x}", now, rand, counter.fetch_add(1));
+            // session id 经 cookie 承载，属安全敏感值：整 id 取 boost 的 UUID 随机
+            // 生成器——各实例独立接线随机源，且生成器无会跨请求累积、可由样本外推
+            // 的状态（对比播种一次后连续产出的 MT19937）。生成器按线程实例化，
+            // 天生无竞争。
+            static thread_local boost::uuids::random_generator gen;
+            return boost::uuids::to_string(gen());
         }
 
         static void
