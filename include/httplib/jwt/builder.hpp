@@ -3,6 +3,7 @@
 
 #include "httplib/config.hpp"
 #include <boost/json/value.hpp>
+#include <boost/system/result.hpp>
 #include <chrono>
 #include <memory>
 #include <string>
@@ -62,10 +63,9 @@ namespace httplib::jwt
         /// \brief 用 alg 签名生成 token。
         ///
         /// alg 随本次 sign 写入 header；此前 set_key_id / set_content_type /
-        /// set_header_claim 写入的 claim 全部保留。
-        ///
-        /// \throw std::system_error 签名失败
-        std::string sign(algorithm const& alg);
+        /// set_header_claim 写入的 claim 全部保留。失败返回空 result，
+        /// 错误码为 error::signature_verification。
+        boost::system::result<std::string> sign(algorithm const& alg);
 
       private:
         class impl;

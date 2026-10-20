@@ -4,11 +4,11 @@
 #include "httplib/config.hpp"
 #include <boost/json/value.hpp>
 #include <boost/system/error_code.hpp>
+#include <boost/system/system_error.hpp>
 #include <chrono>
 #include <functional>
 #include <memory>
 #include <string_view>
-#include <system_error>
 
 namespace httplib::jwt
 {
@@ -59,7 +59,7 @@ namespace httplib::jwt
 
         /// \brief 校验 token。
         ///
-        /// 失败构造 std::system_error。
+        /// 失败抛出 boost::system::system_error。
         void
         verify(decoded_jwt const& jwt) const
         {
@@ -67,7 +67,7 @@ namespace httplib::jwt
             verify(jwt, ec);
             if (ec)
             {
-                throw std::system_error(ec);
+                throw boost::system::system_error(ec);
             }
         }
         /// \brief 同上，失败原因由 `ec` 报告。

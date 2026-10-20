@@ -192,7 +192,7 @@ namespace httplib::jwt
         // 与 jwt-cpp 引擎一致的签名协议：待签数据 = b64(header) + "." + b64(payload)。
         std::string const data = inner->get_header_base64() + "." + inner->get_payload_base64();
 
-        std::error_code sec;
+        boost::system::error_code sec;
         std::string expected;
         try
         {
@@ -209,7 +209,8 @@ namespace httplib::jwt
         }
         if (sec)
         {
-            ec = make_error_code(error::signature_verification);
+            // alg 报告的已是公共 boost 契约的错误码，原样穿透
+            ec = sec;
             return false;
         }
 

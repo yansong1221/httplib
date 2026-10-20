@@ -54,6 +54,9 @@ namespace httplib::jwt::detail
 
     /// 本库抽象 algorithm 与 jwt-cpp 引擎之间的转发桥：公共原语与引擎的
     /// Algorithm concept 逐字同构（sign 返回原始字节），无编码换算。
+    /// 错误通道横跨两个世界 —— 引擎在 std::error_code 运作，公共原语是
+    /// boost::system::error_code；boost 侧错误码经 boost 自带的 std 兼容
+    /// 包装原样穿透（值与 message 保持一致）。
     struct algo_adapter
     {
         std::shared_ptr<httplib::jwt::algorithm const> alg;
@@ -67,7 +70,15 @@ namespace httplib::jwt::detail
         std::string
         sign(std::string const& data, std::error_code& ec) const
         {
-            return alg->sign(data, ec);
+            boost::system::error_code bec;
+            auto const out = alg->sign(data, bec);
+            if (bec)
+            {
+                ec = std::error_code(bec);
+                return {};
+            }
+            ec.clear();
+            return out;
         }
 
         void
@@ -75,23 +86,21 @@ namespace httplib::jwt::detail
         {
             // 与 jwt-cpp hmac::verify 相同：重算签名后做常量时间全字节比较
             //（不因首个差异位置提前返回）。
-            std::error_code sec;
-            auto const expected = alg->sign(data, sec);
-            if (sec)
+            boost::system::error_code bec;
+            auto const expected = alg->sign(data, bec);
+            if (!bec)
             {
-                ec = jwtpp::error::signature_verification_error::invalid_signature;
-                return;
+                bool matched = expected.size() == signature.size();
+                for (size_t i = 0; i < (std::min)(expected.size(), signature.size()); i++)
+                {
+                    if (expected[i] != signature[i]) matched = false;
+                }
+                if (matched)
+                {
+                    return;
+                }
             }
-
-            bool matched = expected.size() == signature.size();
-            for (size_t i = 0; i < (std::min)(expected.size(), signature.size()); i++)
-            {
-                if (expected[i] != signature[i]) matched = false;
-            }
-            if (!matched)
-            {
-                ec = jwtpp::error::signature_verification_error::invalid_signature;
-            }
+            ec = jwtpp::error::signature_verification_error::invalid_signature;
         }
     };
 } // namespace httplib::jwt::detail

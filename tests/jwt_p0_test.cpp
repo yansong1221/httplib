@@ -36,7 +36,7 @@ TEST_CASE("P0-1: verifier without allow_algorithm() must reject a forged token (
                             .set_issuer("my-app")
                             .set_subject("victim")
                             .set_expires_in(std::chrono::hours { 1 })
-                            .sign(good_secret);
+                            .sign(good_secret).value();
     auto victim_decoded = httplib::jwt::decode(victim_token).value();
 
     // 攻击者用**自己的密钥**签同样的 claims —— 签名校验理应失败。
@@ -44,7 +44,7 @@ TEST_CASE("P0-1: verifier without allow_algorithm() must reject a forged token (
                               .set_issuer("my-app")
                               .set_subject("victim")
                               .set_expires_in(std::chrono::hours { 1 })
-                              .sign(httplib::jwt::hs256("attacker-key"));
+                              .sign(httplib::jwt::hs256("attacker-key")).value();
     auto attacker_decoded = httplib::jwt::decode(attacker_token).value();
 
     INFO("control：配置 secret 的 verifier 拒绝攻击者签名 —— 断言/脚手架可靠");
@@ -75,7 +75,7 @@ TEST_CASE("P0-2: set_key_id/set_content_type/set_header_claim must survive sign(
                              .set_key_id("k1")
                              .set_content_type("at+jwt")
                              .set_header_claim("x-header-tag", boost::json::value("v1"))
-                             .sign(httplib::jwt::hs256("secret"));
+                             .sign(httplib::jwt::hs256("secret")).value();
     auto control_hdr = httplib::jwt::decode(control_token).value().get_header();
     REQUIRE(control_hdr.is_object());
     auto const& typ = control_hdr.get_object();
@@ -92,7 +92,7 @@ TEST_CASE("P0-2: set_key_id/set_content_type/set_header_claim must survive sign(
                      .set_key_id("k1")
                      .set_content_type("at+jwt")
                      .set_header_claim("x-header-tag", boost::json::value("v1"))
-                     .sign(httplib::jwt::hs256("secret"));
+                     .sign(httplib::jwt::hs256("secret")).value();
     auto hdr = httplib::jwt::decode(token).value().get_header();
     REQUIRE(hdr.is_object());
     auto const& obj = hdr.get_object();
@@ -123,7 +123,7 @@ TEST_CASE("control: fully configured verifier still accepts a valid token",
     auto token = httplib::jwt::create() //
                      .set_issuer("my-app")
                      .set_expires_in(std::chrono::hours { 1 })
-                     .sign(alg);
+                     .sign(alg).value();
     auto decoded = httplib::jwt::decode(token).value();
 
     boost::system::error_code ec;

@@ -2,13 +2,14 @@
 /// \brief 抽象签名算法与 HS 家族。
 ///
 /// `sign()` 原语与 jwt-cpp 的 Algorithm concept 一致：返回原始字节，
-/// base64url 编码由引擎（builder / verifier）负责。
+/// base64url 编码由引擎（builder / verifier）负责。错误通道为公共契约的
+/// boost::system::error_code，自定义算法用 make_error_code 报告失败。
 
 #include "httplib/config.hpp"
+#include <boost/system/error_code.hpp>
 #include <memory>
 #include <string>
 #include <string_view>
-#include <system_error>
 
 namespace httplib::jwt
 {
@@ -24,8 +25,9 @@ namespace httplib::jwt
 
         /// \brief 计算 `data` 的签名。
         ///
-        /// \return 签名原始字节；失败返回空串并在 `ec` 报告原因。
-        virtual std::string sign(std::string_view data, std::error_code& ec) const = 0;
+        /// \return 签名原始字节；失败返回空串并在 `ec` 报告原因
+        ///        （如 make_error_code(error::signature_verification)）。
+        virtual std::string sign(std::string_view data, boost::system::error_code& ec) const = 0;
 
         /// \brief 复制自身（builder / verifier 内部按值持有）。
         virtual std::shared_ptr<algorithm> clone() const = 0;
@@ -40,7 +42,7 @@ namespace httplib::jwt
         {
             return "HS256";
         }
-        std::string sign(std::string_view data, std::error_code& ec) const override;
+        std::string sign(std::string_view data, boost::system::error_code& ec) const override;
         std::shared_ptr<algorithm>
         clone() const override
         {
@@ -60,7 +62,7 @@ namespace httplib::jwt
         {
             return "HS384";
         }
-        std::string sign(std::string_view data, std::error_code& ec) const override;
+        std::string sign(std::string_view data, boost::system::error_code& ec) const override;
         std::shared_ptr<algorithm>
         clone() const override
         {
@@ -80,7 +82,7 @@ namespace httplib::jwt
         {
             return "HS512";
         }
-        std::string sign(std::string_view data, std::error_code& ec) const override;
+        std::string sign(std::string_view data, boost::system::error_code& ec) const override;
         std::shared_ptr<algorithm>
         clone() const override
         {

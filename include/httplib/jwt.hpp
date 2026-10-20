@@ -5,9 +5,9 @@
 /// \code
 ///     auto token = httplib::jwt::create()
 ///                      .set_subject("alice").set_expires_in(1h)
-///                      .sign(httplib::jwt::hs256("secret"));
+///                      .sign(httplib::jwt::hs256("secret")).value();
 ///
-///     auto decoded = httplib::jwt::decode(token);
+///     auto decoded = httplib::jwt::decode(token).value();
 ///     httplib::jwt::verify(httplib::jwt::hs256("secret"))
 ///         .with_issuer("my-app")
 ///         .verify(decoded);

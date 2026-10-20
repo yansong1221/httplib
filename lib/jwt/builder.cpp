@@ -102,7 +102,7 @@ namespace httplib::jwt
         return *this;
     }
 
-    std::string
+    boost::system::result<std::string>
     builder::sign(algorithm const& alg)
     {
         // alg 恒随 sign 刷新（换算法重签安全）；其余 header claim ——
@@ -113,7 +113,7 @@ namespace httplib::jwt
         auto token = impl_->engine.sign(detail::algo_adapter { alg.clone() }, sec);
         if (sec)
         {
-            throw std::system_error(sec);
+            return make_error_code(error::signature_verification);
         }
         return token;
     }

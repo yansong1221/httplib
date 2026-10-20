@@ -440,7 +440,7 @@ auto token = jwt::create()
     .set_subject("alice")
     .set_issuer("my-app")
     .set_expires_in(std::chrono::hours(1))
-    .sign(jwt::hs256("secret"));
+    .sign(jwt::hs256("secret")).value();
 
 // Decode (returns a result)
 auto result = jwt::decode(token);
