@@ -1,4 +1,5 @@
 #pragma once
+#include "httplib/config.hpp"
 #ifdef HTTPLIB_ENABLED_DATABASE
 
 #include "backend.hpp"

@@ -1,3 +1,4 @@
+#include "httplib/config.hpp"
 #ifdef HTTPLIB_ENABLED_DATABASE
 #include "db/render.hpp"
 #include "httplib/db/binder.hpp"

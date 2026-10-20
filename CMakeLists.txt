@@ -98,9 +98,20 @@ set(HTTPLIB_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lib)
 option(HTTPLIB_ENABLED_SSL "HTTLIB ENABLED SSL" OFF)
 option(HTTPLIB_ENABLED_COMPRESS "HTTLIB ENABLED COMPRESS" OFF)
 option(HTTPLIB_ENABLED_DATABASE "HTTLIB ENABLED DATABASE (requires Boost.MySQL 1.85+)" OFF)
+option(HTTPLIB_ENABLED_JWT "HTTLIB ENABLED JWT (delegates jwt-cpp; requires OpenSSL)" ON)
 option(HTTPLIB_ENABLED_EXAMPLES "HTTLIB Build Examples" ${IS_ROOT_PROJECT})
 option(HTTPLIB_ENABLED_TESTS "HTTLIB Build Tests" ${IS_ROOT_PROJECT})
 option(HTTPLIB_SHARED_LIBRARY "HTTLIB Build Shared Library" OFF)
+
+# 能力特征位：只以 PRIVATE 编译定义注入库自身（以及本仓库内的测试/示例），
+# 不进导出接口。公共头恒定声明全部 API、零宏，能力缺失在运行期以
+# protocol_not_supported（或 not_supported 错误码）收口。
+set(HTTPLIB_FEATURE_DEFINITIONS "")
+foreach(feature IN ITEMS SSL COMPRESS DATABASE JWT)
+    if(HTTPLIB_ENABLED_${feature})
+        list(APPEND HTTPLIB_FEATURE_DEFINITIONS HTTPLIB_ENABLED_${feature})
+    endif()
+endforeach()
 
 add_subdirectory(lib)
 

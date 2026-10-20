@@ -1,4 +1,5 @@
 #pragma once
+#include "httplib/config.hpp"
 #include <cstddef>
 #include <variant>
 #ifdef HTTPLIB_ENABLED_SSL

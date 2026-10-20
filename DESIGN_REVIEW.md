@@ -172,6 +172,11 @@ std::string origin_header() const {
 
 ### 1.6 session id 使用 MT19937 随机源【中→低】
 
+> **✅ 已修复（2026-10）**：`generate_id()` 改为整 id 由 boost 的 UUID 随机生成器
+> 产出（`random_generator` 各实例独立接线随机源，生成器按线程实例化，无跨请求
+> 可外推的状态）；id 作为 store 键与 cookie 值本身不透明，形状变化无外部依赖。
+> 回归测试：`tests/middleware_test.cpp` session 系列。
+
 **证据**：`lib/server/middleware/session_mw.cpp:402`
 
 ```cpp
@@ -558,6 +563,15 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 | 6.18 | `url_decode` 无错误通道 + `to_url()` 对 IPv6 用裸 `find(':')` 判断（未检查已带括号 → `[[::1]]`） | `url.cpp:124-129`、`:186-199` |
 | 6.19 | `parse_url` 丢弃 userinfo，URL 身份信息静默消失（host 白名单/缓存键场景有歧义风险） | `url.cpp:152-160` |
 | 6.20 | 枚举名表三处人工镜像（enums.hpp / enum_conv.hpp 460+ 行 / test 名单），违约静默降级 unknown | `lib/enum_conv.hpp:39-497` 及头部注释自述 |
+| 6.21 | 可选功能宏曾以 `target_compile_definitions` PUBLIC 注入下游：开关选项同时改变符号有无、ABI 与下游构建要求三件事，下游必须自己记得加同名 `-D` 才能编译；漏带即头文件与库 ABI 静默分叉 | 曾见 `lib/CMakeLists.txt` 各 feature 分支 |
+
+> **✅ 已修正（2026-10）**：统一为「**常在接口 + 运行期失效**」：
+> 公共头（含 `jwt*` / `middleware/jwt_auth.hpp`）
+> 恒定声明 API、零宏；选项经根 `CMakeLists.txt` 汇总后以 `PRIVATE` 编译定义只
+> 注入库自身（测试/示例镜像同一组），宏不进任何导出接口。未启用能力的运行期收口：SSL 抛
+> `protocol_not_supported`；JWT 在各自实现文件内以 `#ifdef/#else` 双段定义，
+> 失效桩段兜底全部公共入口（非 noexcept 抛错 / noexcept `abort`）；DB 基座常编、
+> 注册表返回 `unknown backend` 错误码；COMPRESS 无公共 API。
 
 ---
 
@@ -581,12 +595,12 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 
 | # | 条目 | 一句话修复 |
 |---|---|---|
-| §1.1 | JWT verifier 默认不验签 | `if (!alg_) ec = not_initialized; return;` |
-| §1.2 | `sign()` 丢 header claims | `header_.emplace(algorithm, ...)` 而非整体赋值 |
-| §1.3 | WS 升级 404 不回响应 | 未命中走 HTTP 404 |
-| §1.4 | 流式响应失败不标脏连接（协议 desync） | `mark_broken()` + 复用前检查 |
-| §1.5 | CORS 多 origin 静默失效 | 反射 Origin + 白名单 + Vary |
-| §1.6 | session id MT19937 | `RAND_bytes`（SSL 构建下） |
+| §1.1 ✅ | JWT verifier 默认不验签 | `if (!alg_) ec = not_initialized; return;` |
+| §1.2 ✅ | `sign()` 丢 header claims | `header_.emplace(algorithm, ...)` 而非整体赋值 |
+| §1.3 ✅ | WS 升级 404 不回响应 | 未命中走 HTTP 404 |
+| §1.4 ✅ | 流式响应失败不标脏连接（协议 desync） | header 上线闩锁 + 上线后拒绝改写 |
+| §1.5 ✅ | CORS 多 origin 静默失效 | 回显请求 Origin + 白名单 + Vary |
+| §1.6 ✅ | session id MT19937 | boost UUID 随机生成器（id 整体不透明化） |
 
 ### P1（正确性）
 

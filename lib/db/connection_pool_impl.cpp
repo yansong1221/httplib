@@ -1,4 +1,4 @@
-#ifdef HTTPLIB_ENABLED_DATABASE
+#include "httplib/config.hpp"
 #include "connection_pool_impl.h"
 #include "httplib/db/error.hpp"
 #include "httplib/db/exception.hpp"
@@ -854,4 +854,3 @@ namespace httplib::db
     }
 
 } // namespace httplib::db
-#endif // HTTPLIB_ENABLED_DATABASE

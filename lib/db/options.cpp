@@ -1,4 +1,4 @@
-#ifdef HTTPLIB_ENABLED_DATABASE
+#include "httplib/config.hpp"
 #include "httplib/db/options.hpp"
 #include <cctype>
 #include <charconv>
@@ -206,4 +206,3 @@ namespace httplib::db
     }
 
 } // namespace httplib::db
-#endif // HTTPLIB_ENABLED_DATABASE

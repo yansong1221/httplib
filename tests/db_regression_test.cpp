@@ -1,3 +1,4 @@
+#include "httplib/config.hpp"
 #ifdef HTTPLIB_ENABLED_DATABASE
 #include "db/backend.hpp"
 #include "db/registry.hpp"

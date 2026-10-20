@@ -1,3 +1,4 @@
+#include "httplib/config.hpp"
 #ifdef HTTPLIB_ENABLED_DATABASE
 // db 模块缺陷复现测试：
 // 每个用例按"正确行为"断言，当前实现下应当失败（FAIL），用于在修复前验证缺陷存在；

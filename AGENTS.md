@@ -12,6 +12,7 @@ cmake --build .
 - Add `-DHTTPLIB_ENABLED_SSL=ON` for HTTPS/WSS (requires OpenSSL).
 - Add `-DHTTPLIB_ENABLED_COMPRESS=ON` for Brotli (requires Boost.Iostreams + unofficial-brotli).
 - Add `-DHTTPLIB_ENABLED_DATABASE=ON` for the DB module (requires Boost.MySQL 1.85+ / Boost.Charconv, SQLite3, and ODBC).
+- JWT is ON by default (`-DHTTPLIB_ENABLED_JWT=OFF` to disable); delegates to jwt-cpp + OpenSSL.
 
 ## Test
 
@@ -88,9 +89,13 @@ Violating any of these introduces a data race or undefined behavior. `THREAD_MOD
 
 ## Optional features
 
-- `HTTPLIB_ENABLED_SSL` macro gates OpenSSL code. Check `#ifdef HTTPLIB_ENABLED_SSL` before adding SSL-dependent code.
-- `HTTPLIB_ENABLED_COMPRESS` macro gates Brotli compression.
-- `HTTPLIB_ENABLED_DATABASE` macro gates the DB module (`include/httplib/db/*`, `middleware/db_middleware.hpp`, `middleware/db_query_log.hpp`); include `#ifdef HTTPLIB_ENABLED_DATABASE` guards.
+- 统一模型「**常在接口 + 运行期失效**」：所有可选能力（SSL / COMPRESS / DATABASE / JWT）的公共 API 在 `<httplib/>` 公共头中**恒定声明、零宏**；能力开关经根 `CMakeLists.txt` 汇总成 `HTTPLIB_FEATURE_DEFINITIONS`，以 `PRIVATE` 编译定义只注入库自身（测试与仓库内示例镜像同一组），宏不进导出接口、不进 ABI。
+- 编译新代码时**不要**在公共头上加 `#ifdef HTTPLIB_ENABLED_*`——开关由 CMake 选项表达；lib 侧未启用时以运行期错误收口（见下）。lib 内部 TU 引用特征宏前须先 `#include "httplib/config.hpp"`。
+- 各能力未启用时的运行期行为：
+  - **SSL**：`use_ssl` / `http_stream::create` 等抛/返回 `protocol_not_supported`（`server_impl.cpp`、`http_stream.hpp` 的 `#else` 分支）。
+  - **JWT**：`lib/jwt/*.cpp` 与 `server/middleware/jwt_auth.cpp` 各自以 `#ifdef/#else` 双段编译，失效桩段兜底定义全部公共入口——非 noexcept 入口抛 `protocol_not_supported`，noexcept 入口 `std::abort`。
+  - **DATABASE**：`connect` / `make_pool` 经注册表返回 `db: unknown backend '...'` 错误码（基座常编、后端 TU 门控）。
+  - **COMPRESS**：无公共 API，仅 lib 内部 TU 门控。
 - `HTTPLIB_ENABLED_UNITY_BUILD` turns on CMAKE_UNITY_BUILD for the library; tests stay TU-isolated. `HTTPLIB_ENABLED_EXAMPLES` / `HTTPLIB_ENABLED_TESTS` default ON for root builds.
 - `HTTPLIB_SHARED_LIBRARY` switches library type; `HTTPLIB_API` controls dllimport/dllexport on Windows.
 

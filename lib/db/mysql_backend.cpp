@@ -1,3 +1,4 @@
+#include "httplib/config.hpp"
 #ifdef HTTPLIB_ENABLED_DATABASE
 #include "mysql_backend.hpp"
 #include "httplib/db/error.hpp"

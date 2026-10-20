@@ -17,6 +17,12 @@ if(HTTPLIB_ENABLED_COMPRESS)
     find_dependency(unofficial-brotli REQUIRED)
 endif()
 
+set(HTTPLIB_ENABLED_JWT @HTTPLIB_ENABLED_JWT@)
+if(HTTPLIB_ENABLED_JWT)
+    find_dependency(OpenSSL REQUIRED)
+    find_dependency(jwt-cpp REQUIRED)
+endif()
+
 include("${CMAKE_CURRENT_LIST_DIR}/httplib-targets.cmake")
 
 check_required_components(httplib)

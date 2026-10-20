@@ -1,4 +1,5 @@
-﻿#ifdef HTTPLIB_ENABLED_DATABASE
+﻿#include "httplib/config.hpp"
+#ifdef HTTPLIB_ENABLED_DATABASE
 #include "httplib/db/binder.hpp"
 #include "httplib/db/exception.hpp"
 #include "httplib/db/session.hpp"

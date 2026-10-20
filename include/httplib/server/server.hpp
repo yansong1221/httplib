@@ -355,7 +355,8 @@ namespace httplib::server
         /**
          * @brief 使用给定的证书与私钥缓冲区启用 HTTPS/WSS。
          *
-         * 需要库以 @c HTTPLIB_ENABLED_SSL 编译。
+         * 需要库以 @c -DHTTPLIB_ENABLED_SSL=ON 构建；未启用时抛
+         * @c protocol_not_supported。
          *
          * @throws boost::system::system_error 若库未启用 SSL 支持，或证书/
          * 私钥无法加载。
@@ -369,7 +370,8 @@ namespace httplib::server
         /**
          * @brief 使用指定路径的证书与私钥文件启用 HTTPS/WSS。
          *
-         * 需要库以 @c HTTPLIB_ENABLED_SSL 编译。
+         * 需要库以 @c -DHTTPLIB_ENABLED_SSL=ON 构建；未启用时抛
+         * @c protocol_not_supported。
          *
          * @throws boost::system::system_error 若库未启用 SSL 支持，或证书/
          * 私钥无法加载。

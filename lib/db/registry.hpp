@@ -1,6 +1,5 @@
 #pragma once
-#ifdef HTTPLIB_ENABLED_DATABASE
-
+#include "httplib/config.hpp"
 #include "backend.hpp"
 #include "httplib/db/options.hpp"
 #include <functional>
@@ -27,10 +26,11 @@ namespace httplib::db::detail
     /// 注册编译进库的默认后端（幂等）。新增后端只需在此登记并提供注册函数。
     void register_backends();
 
+#ifdef HTTPLIB_ENABLED_DATABASE
     // 各后端提供的注册函数（在各自的实现文件里定义）。
     void register_mysql_backend();
     void register_sqlite_backend();
     void register_odbc_backend();
+#endif // HTTPLIB_ENABLED_DATABASE
 
 } // namespace httplib::db::detail
-#endif // HTTPLIB_ENABLED_DATABASE

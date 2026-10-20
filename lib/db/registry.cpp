@@ -1,4 +1,4 @@
-#ifdef HTTPLIB_ENABLED_DATABASE
+#include "httplib/config.hpp"
 #include "registry.hpp"
 #include <map>
 #include <mutex>
@@ -63,11 +63,12 @@ namespace httplib::db::detail
         std::call_once(flag,
                        []
                        {
+#ifdef HTTPLIB_ENABLED_DATABASE
                            register_mysql_backend();
                            register_sqlite_backend();
                            register_odbc_backend();
+#endif // HTTPLIB_ENABLED_DATABASE
                        });
     }
 
 } // namespace httplib::db::detail
-#endif // HTTPLIB_ENABLED_DATABASE

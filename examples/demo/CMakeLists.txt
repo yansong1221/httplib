@@ -9,6 +9,9 @@ target_link_libraries(${MOUDLE}
 PRIVATE httplib
 )
 
+# 与库使用同一组能力特征位（演示程序里按能力分支）。
+target_compile_definitions(${MOUDLE} PRIVATE ${HTTPLIB_FEATURE_DEFINITIONS})
+
 if (MSVC)
     target_compile_options(${MOUDLE} PRIVATE /bigobj)
 endif()
