@@ -1,15 +1,14 @@
 // =============================================================================
-// P0 设计审查验证用例（DESIGN_REVIEW.md）
+// P0 设计审查修复的回归用例（DESIGN_REVIEW.md §八；均已修复并通过）
 //
-// 每个问题写成"断言期望（修复后）的行为"，当前代码下预期失败：
-//   * 失败 ⇒ 证实该缺陷存在（这是本文件的用途）；修复后 ⇒ 通过，转为回归测试。
-// 每个问题都带一组 control 正例，证明脚手架/断言本身可靠，而非测试写错。
+// 每个用例固化"修复后的行为"，守卫以下服务器端缺陷不复发；附带的 control
+// 正例证明脚手架/断言本身可靠，而非测试写对。
 //
-// 覆盖（SERVER/CLIENT 行为类）：
-//   P0-3  WS 升级请求路由不命中 ⇒ 应回 4xx HTTP 响应（当前：TCP 直接关闭，零字节）
-//   P0-4  流式响应中途失败 ⇒ 连接必须标脏（当前：keep-alive 继续，下一条响应头
-//         会被客户端当作上一条 chunked 响应 body 的延续 —— 协议 desync）
-//   P0-5  cors_middleware 多 origin 配置静默失效（含 * + credentials 组合）
+// 覆盖（SERVER 行为类）：
+//   P0-3  WS 升级请求路由不命中 ⇒ 必须回 4xx HTTP 响应，不得静默关闭
+//   P0-4  流式响应中途失败 ⇒ 连接必须标脏关闭，不得在同连接续写其它响应
+//   P0-5  cors_middleware 多 origin 白命中必须回显 Origin；ACAO:"*" 不得与
+//         Access-Control-Allow-Credentials:true 同屏
 //
 // 注意：与既有测试同目录，TU 隔离规则（CMakeLists.txt 注释）适用 —— 本文件
 // 辅助符号均在匿名 namespace 且带 p0_ 前缀。
@@ -142,7 +141,7 @@ namespace
 // ===========================================================================
 
 TEST_CASE("P0-3: WS upgrade to a route without handler must get a 4xx HTTP response",
-          "[p0][ws][expected-fail]")
+          "[p0][ws]")
 {
     run_with_ep(
         [](auto& server)
@@ -160,9 +159,9 @@ TEST_CASE("P0-3: WS upgrade to a route without handler must get a 4xx HTTP respo
             auto result
                 = co_await p0_raw_exchange(ep, p0_ws_handshake("/no-such-ws"), std::chrono::seconds { 2 });
 
-            // 期望（修复后）：对端至少回一个 4xx 状态行的 HTTP 响应。
-            // 当前（缺陷）：bytes 为空 —— 服务端零字节关闭。
-            INFO("P0-3 缺陷证据：升级请求未命中 WS 路由时服务端未发送任何 HTTP 响应（bytes 截取: "
+            // 对端至少要回一个 4xx 状态行的 HTTP 响应（修复前为零字节关闭）。
+
+            INFO("P0-3 回归失败：升级请求未命中 WS 路由时服务端未发送 HTTP 响应（bytes 截取: "
                  << (result.bytes.size() > 80 ? result.bytes.substr(0, 80) : result.bytes) << ")");
             REQUIRE(!result.bytes.empty());
             REQUIRE(result.bytes.starts_with("HTTP/1.1 4"));
@@ -181,7 +180,7 @@ TEST_CASE("P0-3: WS upgrade to a route without handler must get a 4xx HTTP respo
 // ===========================================================================
 
 TEST_CASE("P0-4: failed mid-stream response must not be followed by another response on the same connection",
-          "[p0][stream][expected-fail]")
+          "[p0][stream]")
 {
     run_with_ep(
         [](auto& server)
@@ -216,7 +215,7 @@ TEST_CASE("P0-4: failed mid-stream response must not be followed by another resp
             constexpr std::string_view chunk_probe = "4\r\nAAAA\r\n";
             constexpr std::string_view terminator = "0\r\n\r\n";
 
-            INFO("P0-4 缺陷证据：同连接的第二个响应头出现在第一条 chunked 响应 body 的延续位置上"
+            INFO("P0-4 回归失败：同连接的第二个响应头出现在第一条 chunked 响应 body 的延续位置上"
                  "（原始流截取: "
                  << (result.bytes.size() > 120 ? result.bytes.substr(0, 120) : result.bytes) << ")");
 
@@ -230,8 +229,8 @@ TEST_CASE("P0-4: failed mid-stream response must not be followed by another resp
 
             bool desync = next_status != std::string_view::npos && (term == std::string_view::npos ||
                                                                     next_status < term);
-            // 期望：要么第一个连接被关闭（EOF 且没有第二个状态行），要么 body
-            // 完整终结（在出现第二个状态行之前有 0\r\n\r\n）。
+            // 合法形态二选一：第一个响应后连接被关闭（EOF 且没有第二个状态行），
+            // 或 body 完整终结（在出现第二个状态行之前有 0\r\n\r\n）。
             REQUIRE(!desync);
         });
 }
@@ -248,7 +247,7 @@ TEST_CASE("P0-4: failed mid-stream response must not be followed by another resp
 // ===========================================================================
 
 TEST_CASE("P0-5: cors_middleware should reflect a whitelisted Origin from a multi-origin list",
-          "[p0][cors][expected-fail]")
+          "[p0][cors]")
 {
     mw::cors_middleware cors;
     cors.allow_origins({ "https://a.com", "https://b.com" });
@@ -270,9 +269,8 @@ TEST_CASE("P0-5: cors_middleware should reflect a whitelisted Origin from a mult
             auto resp = UNWRAP(co_await client.async_send_request(req));
             REQUIRE(resp.result() == httplib::status::ok);
 
-            // 期望（修复后）： ACAO 应等于命中的白名单 origin；同时带 Vary: Origin。
-            // 当前（缺陷）：ACAO 为空 —— 吞掉。
-            INFO("P0-5 缺陷证据：多 origin 白名单命中后响应仍无 "
+            // ACAO 应等于命中的白名单 origin，且带 Vary: Origin（修复前：ACAO 为空 —— 吞掉）。
+            INFO("P0-5 回归失败：多 origin 白名单命中后响应仍无 "
                  "Access-Control-Allow-Origin，跨源 JS 无法读取");
             REQUIRE_FALSE(resp["Access-Control-Allow-Origin"].empty());
             REQUIRE(resp["Access-Control-Allow-Origin"] == "https://a.com");
@@ -281,7 +279,7 @@ TEST_CASE("P0-5: cors_middleware should reflect a whitelisted Origin from a mult
 }
 
 TEST_CASE("P0-5: cors_middleware must not emit '*' alongside credentials",
-          "[p0][cors][expected-fail]")
+          "[p0][cors]")
 {
     // control：未配置 credentials，* 是合法的
     mw::cors_middleware anonymous;
@@ -305,7 +303,7 @@ TEST_CASE("P0-5: cors_middleware must not emit '*' alongside credentials",
             REQUIRE(resp["Access-Control-Allow-Credentials"].empty());
         });
 
-    // 缺陷：credentials(true) + 默认 * —— 运行时求解星形 vs credentialed 可协商性
+    // 凭据开启 + 默认通配：ACAO 必须回显请求 Origin 而非 "*"（Fetch 规范）
     mw::cors_middleware credentialed;
     credentialed.allow_credentials(true);
     run(
@@ -324,8 +322,8 @@ TEST_CASE("P0-5: cors_middleware must not emit '*' alongside credentials",
             httplib::client::request req(httplib::method::get, "/p0-cors-cred", hdrs);
             auto resp = UNWRAP(co_await client.async_send_request(req));
 
-            // 期望（修复后）：ACAO:*（可见的）与 ACAC:true 不同屏。
-            INFO("P0-5 缺陷证据：ACAO:'* 与 ACAC:true 同屏（Fetch 规范禁止；浏览器将拒绝）");
+            // ACAO:"*"（可见的）与 ACAC:true 不同屏（修复前：同屏，Fetch 规范禁止）。
+            INFO("P0-5 回归失败：ACAO:'* 与 ACAC:true 同屏（Fetch 规范禁止；浏览器将拒绝）");
             if (resp["Access-Control-Allow-Credentials"] == "true")
             {
                 REQUIRE_FALSE(resp["Access-Control-Allow-Origin"] == "*");
