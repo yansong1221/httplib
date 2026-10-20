@@ -6,6 +6,7 @@
 #include "httplib/util/use_awaitable.hpp"
 #include "stream/http_stream.hpp"
 #include "stream/websocket_stream.hpp"
+#include "router_impl.h"
 #include <atomic>
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
@@ -198,7 +199,8 @@ namespace httplib::server
       public:
         explicit websocket_task(websocket_stream&& stream,
                                 request&& req,
-                                std::shared_ptr<http_server::impl> server_impl);
+                                std::shared_ptr<http_server::impl> server_impl,
+                                router_impl::ws_handler_entry entry);
 
       public:
         net::awaitable<task::ptr> then() override;

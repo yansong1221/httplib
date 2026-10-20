@@ -277,9 +277,18 @@ namespace httplib::server
             if (websocket::is_upgrade(get_impl(req).get()))
             {
                 server_impl_->get_logger()->trace("ws upgrade {}", req.target());
-                co_return std::make_shared<websocket_task>(websocket_stream(std::move(stream_)),
-                                                           std::move(req),
-                                                           server_impl_);
+
+                // 路由在此一次判定并随构造移交：未命中 WS 路由的升级请求按普通
+                // HTTP 请求处理（中间件与 404/405 语义照常），绝不静默关闭连接。
+                auto ws_entry = _router.query_ws_handler(req);
+                if (ws_entry)
+                {
+                    co_return std::make_shared<websocket_task>(websocket_stream(std::move(stream_)),
+                                                               std::move(req),
+                                                               server_impl_,
+                                                               std::move(*ws_entry));
+                }
+                server_impl_->get_logger()->debug("ws upgrade miss ws routes, downgrade to http {}", req.target());
             }
             auto resp = response::impl::create(get_impl(req).get().version(), get_impl(req).get().keep_alive(), self);
 
@@ -468,8 +477,12 @@ namespace httplib::server
 
     session::websocket_task::websocket_task(websocket_stream&& stream,
                                             request&& req,
-                                            std::shared_ptr<http_server::impl> server_impl)
-        : conn_(std::make_shared<websocket_conn_impl>(server_impl, std::move(stream), std::move(req)))
+                                            std::shared_ptr<http_server::impl> server_impl,
+                                            router_impl::ws_handler_entry entry)
+        : conn_(std::make_shared<websocket_conn_impl>(server_impl,
+                                                      std::move(stream),
+                                                      std::move(req),
+                                                      std::move(entry)))
     {
     }
 

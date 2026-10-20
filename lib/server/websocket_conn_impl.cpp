@@ -14,10 +14,12 @@ namespace httplib::server
 
     websocket_conn_impl::websocket_conn_impl(std::shared_ptr<http_server::impl> server_impl,
                                              websocket_stream&& stream,
-                                             request&& req)
+                                             request&& req,
+                                             router_impl::ws_handler_entry entry)
 
         : server_impl_(std::move(server_impl))
         , req_(std::move(req))
+        , entry_(std::move(entry))
         , ws_(std::move(stream))
         , write_mutex_(ws_.get_executor())
     {
@@ -215,11 +217,9 @@ namespace httplib::server
     httplib::net::awaitable<void>
     websocket_conn_impl::run()
     {
-        auto entry = server_impl_->router().query_ws_handler(req_);
-        if (!entry)
-        {
-            co_return;
-        }
+        // 路由命中判定发生在 session 分叉点，entry 随本对象构造移交；
+        // 能被构造出来就必然已有 open/message/close 三个 handler。
+        auto& entry = entry_;
 
         boost::system::error_code ec;
         auto remote_endp = ws_.socket().remote_endpoint(ec);
@@ -237,7 +237,7 @@ namespace httplib::server
 
         try
         {
-            co_await entry->open_handler(weak_from_this());
+            co_await entry.open_handler(weak_from_this());
         }
         catch (std::exception const& e)
         {
@@ -263,7 +263,7 @@ namespace httplib::server
             msg.set_binary(ws_.got_binary());
             try
             {
-                co_await entry->message_handler(weak_from_this(), std::move(msg));
+                co_await entry.message_handler(weak_from_this(), std::move(msg));
             }
             catch (std::exception const& e)
             {
@@ -273,7 +273,7 @@ namespace httplib::server
 
         try
         {
-            co_await entry->close_handler(weak_from_this());
+            co_await entry.close_handler(weak_from_this());
         }
         catch (std::exception const& e)
         {

@@ -5,6 +5,7 @@
 #include "httplib/util/async_mutex.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
+#include "router_impl.h"
 #include "server_impl.h"
 #include "stream/websocket_stream.hpp"
 #include <boost/asio/awaitable.hpp>
@@ -19,7 +20,10 @@ namespace httplib::server
     class websocket_conn_impl : public websocket_conn
     {
       public:
-        websocket_conn_impl(std::shared_ptr<http_server::impl> server_impl, websocket_stream&& stream, request&& req);
+        websocket_conn_impl(std::shared_ptr<http_server::impl> server_impl,
+                            websocket_stream&& stream,
+                            request&& req,
+                            router_impl::ws_handler_entry entry);
         ~websocket_conn_impl();
 
       public:
@@ -62,6 +66,7 @@ namespace httplib::server
         std::shared_ptr<http_server::impl> server_impl_;
 
         request req_;
+        router_impl::ws_handler_entry entry_;
         websocket_stream ws_;
         util::async_mutex write_mutex_;
     };
