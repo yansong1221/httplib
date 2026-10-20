@@ -53,6 +53,7 @@ add_httplib_test(httplib_test_core core
     client_ip_test.cpp
     lazy_request_test.cpp
     middleware_test.cpp
+    p0_review_test.cpp
     request_data_test.cpp
     router_test.cpp
     server_lifecycle_test.cpp
