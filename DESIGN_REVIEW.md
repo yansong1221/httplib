@@ -64,7 +64,7 @@ void verifier::verify(decoded_jwt const& jwt, boost::system::error_code& ec) con
 或把 `jwt.hpp:276-282` 已鼓励的 `verify(algorithm const&)` 工厂变成唯一入口，删除无参路径。
 
 > **✅ 已修复（2026-10）**：jwt 模块整体改为委托 jwt-cpp（模块拆分为 `include/httplib/jwt/`
-> + `lib/jwt/`，分工边界见 `lib/jwt/common.hpp` 顶部注释）。
+> + `lib/jwt/`，分工边界见 `lib/jwt/engine.hpp` 与 `lib/jwt/error_detail.hpp` 顶部注释）。
 > verifier 改为 PIMPL + 算法白名单：允许列表为空 → `error::not_initialized`（新增枚举值）；
 > token 声明的算法不在白名单 → `error::algorithm_mismatch`（与 jwt-cpp verifier 的
 > wrong_algorithm 语义一致）。`allow_algorithm()` 同时从「覆盖」改为「追加」，支持多算法

@@ -3,7 +3,7 @@
 ///
 /// 只被 `HTTPLIB_ENABLED_JWT` 打开的实现段包含：未启用构建里 CMake 不做
 /// find_package(jwt-cpp)，`<jwt-cpp/...>` 不在包含路径上，故此处不能出现在
-/// 常编 TU 的包含闭包里（这也是 common.hpp 只留纯声明的原因）。
+/// 常编 TU 的包含闭包里（这也是 error_detail.hpp 只留纯声明的原因）。
 ///
 /// 实现侧不做任何 JWT 逻辑的二次实现：
 ///   * base64url 编解码 / JSON（反）序列化       → jwt-cpp base.h + traits
@@ -17,7 +17,7 @@
 ///   2. 错误翻译 —— 引擎信号（token_expired 覆盖 exp/nbf/iat、claim 失配为
 ///      泛型码）翻回公共 error 枚举（粒度一致，见 error.hpp / verifier.cpp）。
 
-#include "common.hpp"
+#include "error_detail.hpp"
 #include "httplib/jwt.hpp"
 #include <jwt-cpp/jwt.h>
 #include <jwt-cpp/traits/boost-json/traits.h>

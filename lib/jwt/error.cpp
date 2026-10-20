@@ -3,7 +3,7 @@
 // 与 std 侧（jwt-cpp 的检查器在 std::error_code 世界里回报错误）。
 
 #include "httplib/jwt.hpp"
-#include "common.hpp"
+#include "error_detail.hpp"
 #include <string>
 
 namespace httplib::jwt::detail

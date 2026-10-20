@@ -1,9 +1,9 @@
 #pragma once
 #include "httplib/config.hpp"
-/// \brief JWT 实现内部共享声明（公共头不含本文件）。
+/// \brief JWT 错误类别与消息翻译的内部声明（公共头不含本文件）。
 ///
-/// 本文件恒定编译，且不含任何 jwt-cpp 依赖：只放与引擎无关的内部声明，
-/// 供常编 TU（error.cpp —— 纯错误类别注册）使用。
+/// 本文件恒定编译，且不含任何 jwt-cpp 依赖：只放 error.cpp（纯错误类别注册）
+/// 定义、由 verifier.cpp / engine.hpp 消费的 detail 函数声明。
 ///
 /// 引擎侧内部件（jwt-cpp 别名、base64url 解码、algorithm 桥）见 engine.hpp，
 /// 它只被 `HTTPLIB_ENABLED_JWT` 打开的实现段包含。
