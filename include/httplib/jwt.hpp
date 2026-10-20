@@ -17,6 +17,7 @@
 /// 全部委托 jwt-cpp（boost-json traits 实例化）；公共 API 只暴露 boost::json
 /// 与本库类型，不泄漏 jwt-cpp 类型（与 Beast 同规）。
 
+#include "httplib/config.hpp"
 #include "httplib/jwt/error.hpp"
 #include "httplib/jwt/algorithm.hpp"
 #include "httplib/jwt/decoded_jwt.hpp"

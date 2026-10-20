@@ -1,3 +1,6 @@
+#include "httplib/config.hpp"
+#include "httplib/jwt.hpp" // 公共 API 恒在：失效桩段也按同一签名定义
+#ifdef HTTPLIB_ENABLED_JWT
 /// \brief verifier —— jwtpp::verifier<system_clock, jtraits> 的 PIMPL。
 ///
 /// 校验全部委托 jwt-cpp 引擎：签名、exp/nbf/iat 时间检查、iss/sub/aud/jti 用
@@ -6,7 +9,6 @@
 /// 引擎的 token_expired 覆盖 exp/nbf/iat，按 token 实值区分
 /// expired / not_yet_valid；claim 失配统一报 claim_mismatch。
 
-#include "httplib/jwt.hpp"
 #include "impl.hpp"
 #include <functional>
 #include <utility>
@@ -188,3 +190,99 @@ namespace httplib::jwt
     }
 
 } // namespace httplib::jwt
+
+#else // !HTTPLIB_ENABLED_JWT —— 运行期失效桩（同 use_ssl 形态）
+
+#include <boost/json/value.hpp>
+#include <boost/system/error_code.hpp>
+#include <boost/system/system_error.hpp>
+#include <chrono>
+#include <cstdlib>
+#include <functional>
+#include <memory>
+#include <string_view>
+
+namespace httplib::jwt
+{
+    namespace
+    {
+        [[noreturn]] inline void
+        unavailable()
+        {
+            throw boost::system::system_error(
+                boost::system::errc::make_error_code(boost::system::errc::protocol_not_supported));
+        }
+
+        [[noreturn]] inline void
+        unavailable_noexcept()
+        {
+            std::abort();
+        }
+    } // namespace
+
+    class verifier::impl
+    {
+    };
+
+    verifier::verifier() { unavailable(); }
+    verifier::verifier(verifier const&) : impl_(nullptr) { unavailable(); }
+    verifier&
+    verifier::operator=(verifier const&)
+    {
+        unavailable();
+    }
+    verifier::verifier(verifier&& other) noexcept : impl_(std::move(other.impl_))
+    {
+        unavailable_noexcept();
+    }
+    verifier&
+    verifier::operator=(verifier&&) noexcept
+    {
+        unavailable_noexcept();
+    }
+    verifier::~verifier() = default;
+
+    verifier&
+    verifier::allow_algorithm(algorithm const& alg)
+    {
+        (void)alg;
+        unavailable();
+    }
+    verifier&
+    verifier::with_issuer(std::string_view)
+    {
+        unavailable();
+    }
+    verifier&
+    verifier::with_subject(std::string_view)
+    {
+        unavailable();
+    }
+    verifier&
+    verifier::with_audience(std::string_view)
+    {
+        unavailable();
+    }
+    verifier&
+    verifier::with_id(std::string_view)
+    {
+        unavailable();
+    }
+    verifier&
+    verifier::with_claim(std::string_view, claim_check_fn)
+    {
+        unavailable();
+    }
+    verifier&
+    verifier::with_clock_skew(std::chrono::seconds)
+    {
+        unavailable();
+    }
+    void
+    verifier::verify(decoded_jwt const&, boost::system::error_code& ec) const
+    {
+        ec = boost::system::errc::make_error_code(boost::system::errc::protocol_not_supported);
+    }
+
+} // namespace httplib::jwt
+#endif // HTTPLIB_ENABLED_JWT

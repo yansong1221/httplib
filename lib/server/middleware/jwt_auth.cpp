@@ -1,4 +1,6 @@
-﻿#include "httplib/server/middleware/jwt_auth.hpp"
+﻿#include "httplib/config.hpp"
+#ifdef HTTPLIB_ENABLED_JWT
+#include "httplib/server/middleware/jwt_auth.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include <spdlog/spdlog.h>
@@ -114,3 +116,91 @@ namespace httplib::server::middleware
     }
 
 } // namespace httplib::server::middleware
+
+#else // !HTTPLIB_ENABLED_JWT —— 运行期失效桩（公共头恒定声明，未启用构建经此收口）
+
+#include "httplib/jwt.hpp"
+#include "httplib/server/middleware/jwt_auth.hpp"
+#include <boost/system/error_code.hpp>
+#include <boost/system/system_error.hpp>
+#include <cstdlib>
+#include <memory>
+
+namespace httplib::server::middleware
+{
+    namespace
+    {
+        [[noreturn]] inline void
+        unavailable()
+        {
+            throw boost::system::system_error(
+                boost::system::errc::make_error_code(boost::system::errc::protocol_not_supported));
+        }
+
+        [[noreturn]] inline void
+        unavailable_noexcept()
+        {
+            std::abort();
+        }
+    } // namespace
+
+    // PIMPL 替身（同 lib/jwt 各文件桩的说明）
+    class jwt_auth_middleware::impl
+    {
+    };
+
+    jwt_auth_middleware::jwt_auth_middleware(jwt::algorithm const& alg) : impl_(nullptr)
+    {
+        (void)alg;
+        unavailable();
+    }
+    jwt_auth_middleware::jwt_auth_middleware(jwt_auth_middleware const&) : impl_(nullptr)
+    {
+        unavailable();
+    }
+    jwt_auth_middleware&
+    jwt_auth_middleware::operator=(jwt_auth_middleware const&)
+    {
+        unavailable();
+    }
+    jwt_auth_middleware::jwt_auth_middleware(jwt_auth_middleware&& other) noexcept
+        : impl_(std::move(other.impl_))
+    {
+        unavailable_noexcept();
+    }
+    jwt_auth_middleware&
+    jwt_auth_middleware::operator=(jwt_auth_middleware&&) noexcept
+    {
+        unavailable_noexcept();
+    }
+    jwt_auth_middleware::~jwt_auth_middleware() = default;
+
+    jwt_auth_middleware&
+    jwt_auth_middleware::with_issuer(std::string_view)
+    {
+        unavailable();
+    }
+    jwt_auth_middleware&
+    jwt_auth_middleware::with_audience(std::string_view)
+    {
+        unavailable();
+    }
+    jwt_auth_middleware&
+    jwt_auth_middleware::with_scheme(std::string_view)
+    {
+        unavailable();
+    }
+    jwt_auth_middleware&
+    jwt_auth_middleware::with_header_name(std::string_view)
+    {
+        unavailable();
+    }
+
+    bool
+    jwt_auth_middleware::before(request&, response&)
+    {
+        unavailable();
+    }
+
+} // namespace httplib::server::middleware
+#endif // HTTPLIB_ENABLED_JWT

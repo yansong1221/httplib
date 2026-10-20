@@ -3,8 +3,9 @@
 ///
 /// 集中定义，供 decoded_jwt / builder / verifier 的实现文件互相取用
 ///（verifier 校验借道 decoded_jwt::impl::inner）。
+/// 依赖 jwt-cpp，只被 `HTTPLIB_ENABLED_JWT` 打开的实现段包含。
 
-#include "common.hpp"
+#include "engine.hpp"
 #include <chrono>
 #include <optional>
 #include <string_view>

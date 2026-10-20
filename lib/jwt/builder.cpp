@@ -1,9 +1,11 @@
+#include "httplib/config.hpp"
+#include "httplib/jwt.hpp" // 公共 API 恒在：失效桩段也按同一签名定义
+#ifdef HTTPLIB_ENABLED_JWT
 /// \brief builder —— jwtpp::builder<system_clock, jtraits> 的 PIMPL。
 ///
 /// set_* 全部直通 jwt-cpp；sign() 刷新 alg claim，其余 header claim
 ///（kid / cty / 自定义）一一保留，换算法重签安全。
 
-#include "httplib/jwt.hpp"
 #include "impl.hpp"
 
 namespace httplib::jwt
@@ -119,3 +121,130 @@ namespace httplib::jwt
     }
 
 } // namespace httplib::jwt
+
+#else // !HTTPLIB_ENABLED_JWT —— 运行期失效桩（同 use_ssl 形态）
+
+#include <boost/json/value.hpp>
+#include <boost/system/error_code.hpp>
+#include <boost/system/result.hpp>
+#include <boost/system/system_error.hpp>
+#include <chrono>
+#include <cstdlib>
+#include <memory>
+#include <string>
+#include <string_view>
+
+namespace httplib::jwt
+{
+    namespace
+    {
+        [[noreturn]] inline void
+        unavailable()
+        {
+            throw boost::system::system_error(
+                boost::system::errc::make_error_code(boost::system::errc::protocol_not_supported));
+        }
+
+        [[noreturn]] inline void
+        unavailable_noexcept()
+        {
+            std::abort();
+        }
+    } // namespace
+
+    class builder::impl
+    {
+    };
+
+    builder::builder() { unavailable(); }
+    builder::builder(builder const&) : impl_(nullptr) { unavailable(); }
+    builder&
+    builder::operator=(builder const&)
+    {
+        unavailable();
+    }
+    builder::builder(builder&& other) noexcept : impl_(std::move(other.impl_))
+    {
+        unavailable_noexcept();
+    }
+    builder&
+    builder::operator=(builder&&) noexcept
+    {
+        unavailable_noexcept();
+    }
+    builder::~builder() = default;
+
+    builder&
+    builder::set_type(std::string_view)
+    {
+        unavailable();
+    }
+    builder&
+    builder::set_content_type(std::string_view)
+    {
+        unavailable();
+    }
+    builder&
+    builder::set_key_id(std::string_view)
+    {
+        unavailable();
+    }
+    builder&
+    builder::set_header_claim(std::string_view, boost::json::value)
+    {
+        unavailable();
+    }
+    builder&
+    builder::set_issuer(std::string_view)
+    {
+        unavailable();
+    }
+    builder&
+    builder::set_subject(std::string_view)
+    {
+        unavailable();
+    }
+    builder&
+    builder::set_audience(std::string_view)
+    {
+        unavailable();
+    }
+    builder&
+    builder::set_id(std::string_view)
+    {
+        unavailable();
+    }
+    builder&
+    builder::set_issued_at(std::chrono::system_clock::time_point)
+    {
+        unavailable();
+    }
+    builder&
+    builder::set_issued_now()
+    {
+        unavailable();
+    }
+    builder&
+    builder::set_not_before(std::chrono::system_clock::time_point)
+    {
+        unavailable();
+    }
+    builder&
+    builder::set_expires_at(std::chrono::system_clock::time_point)
+    {
+        unavailable();
+    }
+    builder&
+    builder::set_payload_claim(std::string_view, boost::json::value)
+    {
+        unavailable();
+    }
+    boost::system::result<std::string>
+    builder::sign(algorithm const& alg)
+    {
+        (void)alg;
+        return boost::system::errc::make_error_code(boost::system::errc::protocol_not_supported);
+    }
+
+} // namespace httplib::jwt
+#endif // HTTPLIB_ENABLED_JWT

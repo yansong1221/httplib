@@ -1,3 +1,4 @@
+#include "httplib/config.hpp"
 // 两个错误类别的定义：同一 error 枚举的 boost 侧（公共 make_error_code）
 // 与 std 侧（jwt-cpp 的检查器在 std::error_code 世界里回报错误）。
 

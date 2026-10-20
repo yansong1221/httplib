@@ -1,4 +1,5 @@
 #pragma once
+#include "httplib/config.hpp"
 #include "httplib/jwt.hpp"
 #include "httplib/server/server_fwd.hpp"
 #include <memory>
