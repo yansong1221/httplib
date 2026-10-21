@@ -299,7 +299,10 @@ namespace httplib::html
     } // namespace detail
 
     std::string
-    format_dir_to_html(std::string_view target, fs::path const& path, boost::system::error_code& ec)
+    format_dir_to_html(std::string_view target,
+                       fs::path const& path,
+                       boost::system::error_code& ec,
+                       bool include_parent)
     {
         auto path_list = detail::format_path_list(path, ec);
         if (ec)
@@ -311,7 +314,11 @@ namespace httplib::html
         auto escaped_target = detail::html_escape(target);
         std::string head = fmt::format((char const*)detail::head_fmt, escaped_target, escaped_target);
 
-        std::string body = fmt::format((char const*)detail::body_fmt, "../", "../", "", "", "");
+        std::string body;
+        if (include_parent)
+        {
+            body = fmt::format((char const*)detail::body_fmt, "../", "../", "", "", "");
+        }
 
         for (auto& s : path_list)
         {

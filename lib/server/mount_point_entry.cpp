@@ -49,6 +49,22 @@ namespace httplib::server
             return out;
         }
 
+        /// 目录下是否存在任一默认文档。用于判断补尾斜杠后是否还有内容可服务：
+        /// 关闭目录列表且没有默认文档时，301 之后必然 403，应直接返回 403。
+        inline bool
+        has_default_document(fs::path const& dir, std::vector<std::string> const& names)
+        {
+            std::error_code ec;
+            for (auto const& name : names)
+            {
+                if (fs::is_regular_file(dir / name, ec))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+
         inline static bool
         is_within(fs::path const& path, fs::path const& base_dir, std::error_code& ec)
         {
@@ -135,8 +151,9 @@ namespace httplib::server
 
         auto const relative = segments.subspan(mount_segments.size());
         // 尾随字面 '/' 会保留成一个空段。以它作为“这是一个目录请求”的显式信号，
-        // 不再依赖 fs::path::has_filename() 的平台细节。
-        bool const dir_requested = relative.empty() || relative.back().empty();
+        // 不再依赖 fs::path::has_filename() 的平台细节。裸挂载点（relative 为空）
+        // 与普通目录一样先按“无尾斜杠的目录”处理，走下面的 301/403 判定。
+        bool const dir_requested = !relative.empty() && relative.back().empty();
 
         // 直接用段构造 fs::path，避免先把段拼回字符串再解析。
         // level 只用于拒绝越过 mount 根的 ".."；内部 "a/../b" 仍交给
@@ -198,6 +215,16 @@ namespace httplib::server
             }
             if (fs::is_directory(path, ec))
             {
+                // 目录列表已关闭且没有默认文档时，补完斜杠也只会 403。这里不做
+                // 无意义的重定向；同时无尾斜杠的 URL 本身不指向可服务的文件，
+                // 因此按 not_found 处理，避免用 403 暴露目录存在性。
+                if (!impl_->enabled_directory
+                    && !detail::has_default_document(path, impl_->default_document_name))
+                {
+                    res.set_error_content(status::not_found);
+                    return;
+                }
+
                 // 目录存在才补尾斜杠；不存在或普通文件不会走到这里。
                 std::string location(req.path());
                 location += '/';
@@ -249,7 +276,9 @@ namespace httplib::server
             break;
             case mount_point_entry::dir_format_type::html:
             {
-                auto body = html::format_dir_to_html(req.path(), path, html_ec);
+                // 挂载根目录没有 mount point 内的父目录：生成 "../" 会让浏览器
+                // 跳到宿主 URL 空间（例如 /static/ 的上一级是 /）。
+                auto body = html::format_dir_to_html(req.path(), path, html_ec, !relative_path.empty());
                 res.set_string_content(body, "text/html; charset=utf-8");
             }
             break;

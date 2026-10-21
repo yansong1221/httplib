@@ -661,8 +661,12 @@ router.set_static_mount_point("/secure-storage", "/data",
     middleware::basic_auth_middleware{...});
 ```
 
-A URL without a trailing `/` is redirected with 301 only when the directory exists. A trailing `/`
-always means a directory request (default document or listing); a file followed by `/` returns 404.
+A URL without a trailing `/` is redirected with 301 only when the directory exists. If directory
+listing is disabled and the directory has no default document, no redirect is issued and the request
+fails with 404 (the slash-less URL does not name a servable file, and this also avoids revealing the
+directory's existence). A trailing `/` always means a directory request (default document or
+listing); when listing is disabled and there is no default document it returns 403, and a file
+followed by `/` returns 404.
 A decoded `%2F` inside a segment is rejected with 400 instead of becoming a filesystem separator.
 
 ## Threading Model

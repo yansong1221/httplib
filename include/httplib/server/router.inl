@@ -280,21 +280,40 @@ namespace httplib::server
     void
     router::set_static_mount_point(mount_point_entry&& entry, Aspects&&... asps)
     {
-        std::string key = entry.mount_point();
-        if (!key.ends_with("/"))
+        // 挂载点本身（不带尾斜杠）也要注册：只注册 "/mount/*" 时，GET /mount
+        // 不会命中静态处理器，若用户另有全局兜底路由（例如 OPTIONS "/*"），
+        // 路由会把它判成 405 而不是进入静态目录。裸路径由 mount_point_entry
+        // 统一 301 到带尾斜杠的形式。
+        std::string base = entry.mount_point();
+        while (base.size() > 1 && base.back() == '/')
         {
-            key += "/";
+            base.pop_back();
         }
-        key += "*";
+        bool const is_root = base.empty() || base == "/";
+        std::string const wildcard_key = is_root ? "/*" : base + "/*";
 
-        set_http_handler<httplib::method::get, httplib::method::head>(
-            key,
+        // 同一个 entry 同时服务裸挂载点与通配路径；aspects 只构造一次，
+        // 否则 rvalue aspect 会在第一次注册时被移走，第二次拿到 moved-from 对象。
+        auto handler = make_coro_http_handler(
             [entry = std::move(entry)](request& req, response& resp) -> void
             {
                 entry(req, resp);
-                return;
             },
             std::forward<Aspects>(asps)...);
+
+        auto register_handler = [&](httplib::method m, std::string_view route)
+        {
+            auto copy = handler;
+            set_http_handler_impl(m, route, std::move(copy));
+        };
+
+        register_handler(httplib::method::get, wildcard_key);
+        register_handler(httplib::method::head, wildcard_key);
+        if (!is_root)
+        {
+            register_handler(httplib::method::get, base);
+            register_handler(httplib::method::head, base);
+        }
     }
     template <typename Func>
     void

@@ -103,6 +103,59 @@ TEST_CASE("Static mount: serves files and rejects missing paths", "[mount]")
         });
 }
 
+TEST_CASE("Static mount: bare mount point redirects to trailing slash", "[mount]")
+{
+    temporary_dir tmp("httplib_mount_bare");
+    write_file(tmp.path() / "index.html", "<h1>root</h1>");
+
+    run(
+        [&](auto& server)
+        {
+            // demo 里的全局 OPTIONS 兜底会让未命中的路径变成 405。这里保留同样的注册，
+            // 确保裸挂载点真正命中静态处理器，而不是被兜底路由判定为方法不允许。
+            server.router().set_http_handler<httplib::method::options>(
+                "/*", [](httplib::server::request&, httplib::server::response&) {});
+            server.router().set_static_mount_point("/static", tmp.path());
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto bare = UNWRAP(co_await client.async_get("/static"));
+            REQUIRE(bare.result() == httplib::status::moved_permanently);
+            REQUIRE(bare[httplib::field::location] == "/static/");
+
+            // 查询串必须原样带到重定向目标。
+            auto query = UNWRAP(co_await client.async_get("/static?x=1"));
+            REQUIRE(query.result() == httplib::status::moved_permanently);
+            REQUIRE(query[httplib::field::location] == "/static/?x=1");
+
+            auto slash = UNWRAP(co_await client.async_get("/static/"));
+            REQUIRE(slash.result() == httplib::status::ok);
+            REQUIRE(slash.as_string() == "<h1>root</h1>");
+
+            co_return;
+        });
+}
+
+TEST_CASE("Static mount: trailing slash in mount point still redirects bare path", "[mount]")
+{
+    temporary_dir tmp("httplib_mount_bare_slash");
+    write_file(tmp.path() / "index.html", "<h1>root</h1>");
+
+    run([&](auto& server) { server.router().set_static_mount_point("/assets/v1/", tmp.path()); },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto bare = UNWRAP(co_await client.async_get("/assets/v1"));
+            REQUIRE(bare.result() == httplib::status::moved_permanently);
+            REQUIRE(bare[httplib::field::location] == "/assets/v1/");
+
+            auto slash = UNWRAP(co_await client.async_get("/assets/v1/"));
+            REQUIRE(slash.result() == httplib::status::ok);
+            REQUIRE(slash.as_string() == "<h1>root</h1>");
+
+            co_return;
+        });
+}
+
 TEST_CASE("Static mount: rejects traversal and encoded separators", "[mount]")
 {
     temporary_dir tmp("httplib_mount_security");
@@ -356,10 +409,16 @@ TEST_CASE("Static mount: directory listing can be disabled", "[mount]")
             auto listing = UNWRAP(co_await client.async_get("/files/empty/"));
             REQUIRE(listing.result() == httplib::status::forbidden);
 
-            // 目录存在时，关闭列表也仍然先补尾斜杠。
-            auto redirect = UNWRAP(co_await client.async_get("/files/empty"));
+            // 关闭列表且没有默认文档：补斜杠后必然 403，因此不 301；
+            // 无尾斜杠的 URL 不指向可服务的文件，按 404 处理。
+            auto no_redirect = UNWRAP(co_await client.async_get("/files/empty"));
+            REQUIRE(no_redirect.result() == httplib::status::not_found);
+            REQUIRE(no_redirect[httplib::field::location].empty());
+
+            // 有默认文档时补斜杠仍然有意义，保留 301。
+            auto redirect = UNWRAP(co_await client.async_get("/files/with-index"));
             REQUIRE(redirect.result() == httplib::status::moved_permanently);
-            REQUIRE(redirect[httplib::field::location] == "/files/empty/");
+            REQUIRE(redirect[httplib::field::location] == "/files/with-index/");
 
             // 关闭目录列表不影响默认文档。
             auto index = UNWRAP(co_await client.async_get("/files/with-index/"));
@@ -457,6 +516,34 @@ TEST_CASE("Static mount: html directory listing escapes target and file names", 
             // 文件名中的 '&' 必须 HTML 转义，href 必须 URL 编码。
             REQUIRE(body.find("a&amp;b.txt") != std::string::npos);
             REQUIRE(body.find("a%26b.txt") != std::string::npos);
+
+            co_return;
+        });
+}
+
+TEST_CASE("Static mount: html listing omits parent link at mount root", "[mount]")
+{
+    temporary_dir tmp("httplib_mount_html_parent");
+    write_file(tmp.path() / "sub" / "file.txt", "x");
+
+    run(
+        [&](auto& server)
+        {
+            auto entry = httplib::server::mount_point_entry("/static", tmp.path());
+            entry.set_directory_format(httplib::server::mount_point_entry::dir_format_type::html);
+            server.router().set_static_mount_point(std::move(entry));
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            // 挂载根目录的 "../" 会跳出 mount point，不能生成。
+            auto root = UNWRAP(co_await client.async_get("/static/"));
+            REQUIRE(root.result() == httplib::status::ok);
+            REQUIRE(root.as_string().find("href=\"../\"") == std::string::npos);
+
+            // 子目录里的 "../" 指向挂载内父目录，必须保留。
+            auto sub = UNWRAP(co_await client.async_get("/static/sub/"));
+            REQUIRE(sub.result() == httplib::status::ok);
+            REQUIRE(sub.as_string().find("href=\"../\"") != std::string::npos);
 
             co_return;
         });
