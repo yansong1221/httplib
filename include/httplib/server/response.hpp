@@ -16,6 +16,12 @@ namespace boost::json
 namespace httplib::server
 {
 
+    /// \brief 单个 HTTP 响应。
+    /// @par 线程安全
+    /// 非线程安全。response 及其 writer（stream_writer / sse_writer / ndjson_writer）
+    /// 只能在处理该请求的连接 strand 上访问。需要跨线程写入时，调用方必须自行
+    /// post/dispatch 回该 strand，不能并发调用。socket I/O 内部会投递到连接 strand，
+    /// 但这只串行化 I/O，不保护 headers / Beast message / serializer 等对象状态。
     class HTTPLIB_API response
     {
       public:

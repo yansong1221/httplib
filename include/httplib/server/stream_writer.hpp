@@ -13,6 +13,10 @@ namespace httplib::server
     /// handler 协程内 co_await 完成）。response 销毁后，所有写操作返回
     /// \c net::error::operation_aborted；不支持把 writer 交给 handler 返回后才运行
     /// 的后台任务继续写。
+    /// @par 线程安全
+    /// 非线程安全。只能在处理该请求的连接 strand 上调用；需要跨线程写入时，调用方
+    /// 必须自行 post/dispatch 回该 strand，不能并发调用 write_header / write_body。
+    /// 底层 socket I/O 会投递到连接 strand，但这不保护 headers / serializer / mode_。
     class HTTPLIB_API stream_writer
     {
       public:

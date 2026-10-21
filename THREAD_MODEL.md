@@ -92,6 +92,19 @@ accept 全部结束
 再 `net::post` 回**本连接的 strand** 才执行真正的 `task->abort()`。不能从调用线程直接
 `cancel`/`close` 别人的连接对象。
 
+### 2.5 request / response / writer 只在连接 strand 上访问
+
+`session::http_task` 的 `read_*` / `write_*` 会 `co_spawn` 到连接 strand，所以 socket I/O
+可以从其它 executor 发起；但它**只串行化 I/O**，不保护对象内存状态：`request` /
+`response` 的 headers、Beast message、serializer，以及 `stream_writer` / `sse_writer` /
+`ndjson_writer` 的 `mode_` 都没有同步。
+
+契约：
+
+- handler 在连接 strand 上执行；`request`、`response` 及其所有 writer 都只在该 strand 上访问。
+- 需要跨线程写入时，调用方必须自行 `post` / `net::dispatch` 回该 strand，且不能与 handler 并发。
+- `response::create_stream_writer()` 的懒初始化缓存（`stream_writer_`）同样受此约束，不为它单独加锁。
+
 ---
 
 ## 3. 客户端 `http_client`
