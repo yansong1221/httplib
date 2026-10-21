@@ -27,9 +27,15 @@ namespace httplib::client
         using body_writer_t = httplib::detail::body_writer<true, http_client::impl>;
 
         explicit lazy_request_impl(net::any_io_executor ex, std::shared_ptr<http_client::impl> parent)
-            :parent_(std::move(parent))
+            : parent_(std::move(parent))
         {
             attach(parent_.get(), std::move(ex));
+            ++parent_->live_writers_;
+        }
+        ~lazy_request_impl() override
+        {
+            // writer 存活期间连接被排除在池外；最后一个 writer 释放后才能复用。
+            --parent_->live_writers_;
         }
         net::awaitable<void>
         write_header(httplib::method method, std::string_view target, httplib::headers const& headers, mode m) override

@@ -313,17 +313,20 @@ void release(std::unique_ptr<http_client> conn)
 **建议**：`lazy_request` 完成 `read_response*` 时（on_stored 同型回调）在 strand 上
 `write_impl_.reset()`；`create_lazy_request` 语义文档化或改名（`borrow_lazy_request()`）。
 
-> **✅ 已修复（2026-10）**：把「对象寿命」与「会话在途」解耦，改为显式登记/注销。
-> - `write_impl_` 的登记点从「创建」移到 `lazy_request_impl::write_header` 开头
->   （`begin_write()`），注销点在 `read_response_lazy` 收到响应头之后；空闲 writer、
->   已完成交换的 writer 都不再计入 `has_active_session()`，连接可正常回池。
-> - `create_lazy_request()` 回归工厂语义：每次返回新对象，不再返回当前在途写端；
->   单飞与「上一条响应体未读完」由 `begin_write()` 裁决，冲突返回新增的
->   `error::already_in_use`。
-> - 写失败不注销：连接状态未知，保持 active 让归还时销毁而非回池。
-> 回归：`tests/client_pool_test.cpp` 的 "idle lazy writer does not pin the connection"
-> （修复前 `idle_count() == 0`）、`tests/client_test.cpp` 的 "lazy writers are distinct
-> and exclusive" 与 "next request waits for the previous response body"。
+> **✅ 已修复（2026-10）**：复核后确认原第 1 条不成立——**writer 存活即占用连接是必要的
+> 安全语义，不是缺陷**：空闲 writer 随时可能再次 `write_header`，连接若已借给下一个
+> borrower 就会写到别人的连接上。真正保留并修正的是第 2 条（工厂语义 + 单飞裁决）。
+> - 新增 `live_writers_`（writer 构造 +1 / 析构 -1）；`has_active_session()` 在存活
+>   writer 数 > 0 时恒为 true，连接不回池，随最后一个 writer 析构关闭。
+> - `write_impl_` 改为 `write_header` 时登记、响应头到达后注销，仅用于单飞裁决。
+> - `create_lazy_request()` 回归工厂语义：每次返回新对象；已有请求在途（含同一 writer
+>   上一次响应尚未读取）、或上一条响应体未读完时，`write_header` 返回新增的
+>   `error::already_in_use`，避免同一条连接上 pipeline 出第二个请求。
+> 回归：`tests/client_pool_test.cpp` 的 "live lazy writer keeps the connection out of the
+> pool" 与 "releasing the writer before the handle allows pooling"；
+> `tests/client_test.cpp` 的 "lazy writers are distinct and exclusive"、
+> "same lazy writer cannot start a second request before reading the response" 与
+> "next request waits for the previous response body"。
 
 ### 2.5 默认构造的 `response` 半数成员方法是 UB【高】
 
@@ -680,7 +683,7 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 | §2.1 ✅ | 析构不等待 stop（文档与实现矛盾） |
 | §2.2 ✅ | proxy_client 读失败死代码 |
 | §2.3（契约化） | pool 归还 detached spawn（Asio 语义，文档化停止顺序） |
-| §2.4 ✅ | `write_impl_` 永不清理 / create_lazy_request 复用 |
+| §2.4 ✅ | writer 存活即占用连接（必要语义）/ create_lazy_request 工厂化 + 单飞裁决 |
 | §2.5 ✅ | 默认构造 response 半数 UB |
 | §2.6 ✅ | per-route aspects 所有权 |
 | §2.10 | reverse_proxy location `/*` 校验 |

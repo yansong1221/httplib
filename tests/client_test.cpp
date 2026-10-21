@@ -730,7 +730,8 @@ TEST_CASE("client: lazy writers are distinct and exclusive", "[client]")
             co_await w1->write_body(net::buffer("", 0), false);
             auto resp = UNWRAP(co_await w1->read_response());
             REQUIRE(resp.as_string() == "pong");
-            CHECK_FALSE(client.has_active_session());
+            // 交换已结束，但 writer 仍存活，连接依旧被占用。
+            CHECK(client.has_active_session());
 
             // 完成一次交换后重新登记，同一 writer 可继续使用。
             co_await w1->write_header(httplib::method::get,
@@ -740,6 +741,55 @@ TEST_CASE("client: lazy writers are distinct and exclusive", "[client]")
             co_await w1->write_body(net::buffer("", 0), false);
             auto resp2 = UNWRAP(co_await w1->read_response());
             REQUIRE(resp2.as_string() == "pong");
+
+            w1.reset();
+            w2.reset();
+            CHECK_FALSE(client.has_active_session());
+        });
+}
+
+TEST_CASE("client: same lazy writer cannot start a second request before reading the response", "[client]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/ping",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("pong"sv, "text/plain"); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto writer = client.create_lazy_request();
+
+            co_await writer->write_header(httplib::method::get,
+                                          "/ping",
+                                          {},
+                                          httplib::client::lazy_request::mode::relay);
+
+            // 响应头尚未读取：同一 writer 重入也必须被拒绝，否则同一条连接上会 pipeline
+            // 出两个请求，读走第一个响应后第二个响应残留，连接回池即协议 desync。
+            boost::system::error_code ec;
+            co_await writer->write_header(httplib::method::get,
+                                          "/ping",
+                                          {},
+                                          httplib::client::lazy_request::mode::relay,
+                                          ec);
+            CHECK(ec == httplib::client::error::already_in_use);
+
+            // 被拒绝不影响第一次请求。
+            co_await writer->write_body(net::buffer("", 0), false);
+            auto resp = UNWRAP(co_await writer->read_response());
+            CHECK(resp.as_string() == "pong");
+
+            // 读完响应后同一 writer 可继续使用。
+            co_await writer->write_header(httplib::method::get,
+                                          "/ping",
+                                          {},
+                                          httplib::client::lazy_request::mode::relay);
+            co_await writer->write_body(net::buffer("", 0), false);
+            auto resp2 = UNWRAP(co_await writer->read_response());
+            CHECK(resp2.as_string() == "pong");
         });
 }
 
@@ -775,7 +825,8 @@ TEST_CASE("client: next request waits for the previous response body", "[client]
 
             auto body = UNWRAP(co_await resp.read_string());
             CHECK(body == "pong");
-            CHECK_FALSE(client.has_active_session());
+            // body 已读完，但 writer 存活，连接仍被视为占用。
+            CHECK(client.has_active_session());
 
             // body 读完后可继续发送。
             co_await writer->write_header(httplib::method::get,
@@ -785,6 +836,9 @@ TEST_CASE("client: next request waits for the previous response body", "[client]
             co_await writer->write_body(net::buffer("", 0), false);
             auto resp2 = UNWRAP(co_await writer->read_response());
             REQUIRE(resp2.as_string() == "pong");
+
+            writer.reset();
+            CHECK_FALSE(client.has_active_session());
         });
 }
 

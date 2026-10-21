@@ -105,14 +105,18 @@ accept 全部结束
 
 ### 3.2 单飞行（single-flight）约束
 
-**同一时刻同一 client 上最多只允许一个请求在途。** eager 请求返回即结束；lazy 请求必须等
-响应体读完（或响应对象析构）才结束。
+**同一时刻同一 client 上最多只允许一个请求在途。** eager 请求返回即结束；lazy 请求的
+writer 一旦创建就占用连接，直到 writer 析构（即使请求尚未发送或上一次交换已完成）。
 
 lazy 路径有运行期防护：`create_lazy_request()` 返回的 writer 在 `write_header` 时经
-`begin_write()` 登记，若已有另一个 writer 在途、或上一条响应体未读完，返回
-`error::already_in_use`，而不是静默交错读写。eager 路径（`async_send_request` 及其族）仍是
-调用方契约，没有运行时防护。连接池靠 `has_active_session()` 判断复用时机
-（`lib/client/client_impl.h:83`），手动用 client 时调用方自负其责。
+`begin_write()` 登记，若已有请求在途（包括同一 writer 上一次响应尚未读取）、或上一条
+响应体未读完，返回 `error::already_in_use`，而不是静默交错读写或 pipeline 出第二个请求。eager 路径（`async_send_request` 及其族）仍是
+调用方契约，没有运行时防护。
+
+连接池通过 `has_active_session()` 判断复用时机（`lib/client/client_impl.h:83`）：存活 writer
+数（`live_writers_`）> 0 即视为占用，因为空闲 writer 随时可能再次 `write_header`；连接一旦
+借给下一个 borrower，旧 writer 就会写到别人的连接上。因此持有 writer 归还 handle 时连接
+不回池，而是随 writer 析构关闭。
 
 ### 3.3 `stream_mutex_` 保护 lazy 会话配对
 
@@ -120,6 +124,7 @@ lazy 路径有运行期防护：`create_lazy_request()` 返回的 writer 在 `wr
 `write_impl_` 与 `read_impl_` 这对 weak_ptr（写端 / 读端的**在途标记**：`write_impl_`
 在 `write_header` 开始时登记、响应头到达后注销；`read_impl_` 在响应创建时登记、body 读完后
 注销），使用点在 `has_active_session()`、`begin_write()` 与 `read_response_lazy()`。
+writer 的**存活计数** `live_writers_` 是 atomic，由 writer 构造/析构更新。
 **它不保护 socket I/O**——I/O 靠 strand。
 
 ### 3.4 超时计时

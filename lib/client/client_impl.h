@@ -310,8 +310,12 @@ namespace httplib::client
         /// strand 后共享该缓冲。
         beast::flat_buffer buffer_;
         /// 仅由 stream_mutex_ 保护。登记时机：write_header 开始处；注销时机：
-        /// 响应头到达（写侧结束）。因此“持有但空闲”的 writer 不计入 active。
+        /// 响应头到达（写侧结束）。仅用于单飞裁决；连接能否回池由 live_writers_ 决定。
         std::weak_ptr<lazy_request_impl> write_impl_;
+        /// 存活的 lazy_request 数（含从未发送、已完成交换的空闲 writer）。
+        /// >0 时连接不可回池：writer 随时可能再次 write_header，一旦连接借给下一个
+        /// borrower，旧 writer 就会写到别人的连接上。由 writer 的构造/析构维护。
+        std::atomic<std::size_t> live_writers_ { 0 };
         /// 仅由 stream_mutex_ 保护。
         std::weak_ptr<void> read_impl_;
 

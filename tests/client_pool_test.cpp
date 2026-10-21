@@ -767,7 +767,7 @@ TEST_CASE("client_pool: reader survives handle destruction", "[client_pool]")
         });
 }
 
-TEST_CASE("client_pool: idle lazy writer does not pin the connection", "[client_pool]")
+TEST_CASE("client_pool: live lazy writer keeps the connection out of the pool", "[client_pool]")
 {
     run_with_server(
         [](httplib::server::http_server& server)
@@ -783,23 +783,53 @@ TEST_CASE("client_pool: idle lazy writer does not pin the connection", "[client_
             auto host = ep.address().to_string();
             auto port = ep.port();
 
-            // 只创建、不发送的 writer 不应计入 active 会话。
+            // 只创建、不发送的 writer 也占用连接：它随时可能开始写。
             {
                 auto h = co_await p.async_acquire(host, port, httplib::url::scheme::plain);
                 REQUIRE(h);
                 auto writer = h->create_lazy_request();
                 REQUIRE(writer);
-                h.release();
+                REQUIRE(h->has_active_session());
+
+                h.release(); // writer 仍存活
                 CHECK(p.active_count() == 0);
-                CHECK(p.idle_count() == 1);
-            }
+                CHECK(p.idle_count() == 0); // 不回池
+                CHECK(p.total_count() == 0); // 连接已从池丢弃，由 writer 持有
+            } // writer 析构后 impl/socket 才回收
 
-            // 完整交换后仍持有 writer，也不应阻止连接回池。
+            // 下一次借出新建连接；旧 writer 不可能写到这条连接上。
+            auto h = co_await p.async_acquire(host, port, httplib::url::scheme::plain);
+            REQUIRE(h);
+            CHECK(p.total_count() == 1);
+            auto resp = UNWRAP(co_await h->async_get("/ping"));
+            CHECK(resp.as_string() == "pong");
+            h.release();
+            CHECK(p.idle_count() == 1);
+
+            p.stop();
+        });
+}
+
+TEST_CASE("client_pool: releasing the writer before the handle allows pooling", "[client_pool]")
+{
+    run_with_server(
+        [](httplib::server::http_server& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/ping",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("pong"sv, "text/plain"); });
+        },
+        [](net::any_io_executor ex, httplib::tcp::endpoint const& ep) -> net::awaitable<void>
+        {
+            httplib::client::http_client_pool p(ex, { .max_size = 2, .idle_timeout = std::chrono::seconds(30) });
+            auto host = ep.address().to_string();
+            auto port = ep.port();
+
+            auto h = co_await p.async_acquire(host, port, httplib::url::scheme::plain);
+            REQUIRE(h);
             {
-                auto h = co_await p.async_acquire(host, port, httplib::url::scheme::plain);
-                REQUIRE(h);
                 auto writer = h->create_lazy_request();
-
                 co_await writer->write_header(httplib::method::get,
                                               "/ping",
                                               {},
@@ -809,20 +839,21 @@ TEST_CASE("client_pool: idle lazy writer does not pin the connection", "[client_
                 auto resp = UNWRAP(co_await writer->read_response());
                 REQUIRE(resp.result() == httplib::status::ok);
                 REQUIRE(resp.as_string() == "pong");
-                REQUIRE_FALSE(h->has_active_session());
+                REQUIRE(h->has_active_session()); // writer 还在
+            } // writer 释放
 
-                h.release(); // writer 仍存活
-                CHECK(p.idle_count() == 1);
-            }
+            REQUIRE_FALSE(h->has_active_session());
+            h.release();
+            CHECK(p.idle_count() == 1);
+            CHECK(p.total_count() == 1);
 
             // 复用的就是上一条连接。
-            auto h = co_await p.async_acquire(host, port, httplib::url::scheme::plain);
-            REQUIRE(h);
-            auto resp = UNWRAP(co_await h->async_get("/ping"));
-            CHECK(resp.as_string() == "pong");
+            auto h2 = co_await p.async_acquire(host, port, httplib::url::scheme::plain);
+            REQUIRE(h2);
+            auto resp2 = UNWRAP(co_await h2->async_get("/ping"));
+            CHECK(resp2.as_string() == "pong");
             CHECK(p.total_count() == 1);
-            CHECK(p.idle_count() == 0);
-            h.release();
+            h2.release();
 
             p.stop();
         });

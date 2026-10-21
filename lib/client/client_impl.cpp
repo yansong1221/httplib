@@ -110,6 +110,12 @@ namespace httplib::client
     bool
     http_client::impl::has_active_session() const
     {
+        // 只要还有一个 writer 活着，连接就不能回池：它在任意时刻都可能开始新的请求。
+        // 这是对象寿命约束，不是“是否有请求在途”——writer 空闲也算占用。
+        if (live_writers_.load() != 0)
+        {
+            return true;
+        }
         std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
         return !read_impl_.expired() || !write_impl_.expired();
     }
@@ -415,8 +421,8 @@ namespace httplib::client
     std::shared_ptr<lazy_request>
     http_client::impl::create_lazy_request()
     {
-        // 工厂语义：每次返回新对象。互相排斥不在这里裁决，而由 begin_write() 在
-        // 真正开始发送时判断——这样“创建了但没发”的 writer 不会把连接钉在 active 状态。
+        // 工厂语义：每次返回新对象。请求互斥由 begin_write() 在真正开始发送时裁决；
+        // 但 writer 只要存活就占用连接（live_writers_），见 has_active_session()。
         return std::make_shared<lazy_request_impl>(strand_, shared_from_this());
     }
 
@@ -431,8 +437,9 @@ namespace httplib::client
             return make_error_code(error::already_in_use);
         }
 
-        // 另一个 writer 已经在写或等待响应头。
-        if (auto cur = write_impl_.lock(); cur && cur != writer)
+        // 已有请求在写或等待响应头。包括 writer 自己：同一条连接上不允许 pipeline
+        // 第二个请求，否则读走第一个响应后第二个响应残留、连接回池即协议 desync。
+        if (!write_impl_.expired())
         {
             return make_error_code(error::already_in_use);
         }
