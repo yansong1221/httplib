@@ -127,11 +127,14 @@ namespace httplib::client
                 {
                     co_return 0;
                 }
-                co_return co_await s->async_read_some(buffer, util::net_awaitable[ec]);
+                auto n = co_await s->async_read_some(buffer, util::net_awaitable[ec]);
                 if (ec)
                 {
+                    // 读失败后隧道已不可用：立刻关闭，否则底层 fd/SSL 对象会被一直占着，
+                    // 下次 get_stream() 只能报 not_initialized。
                     co_await async_close();
                 }
+                co_return n;
             },
             net::use_awaitable);
     }

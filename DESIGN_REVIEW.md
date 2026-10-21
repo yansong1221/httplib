@@ -255,6 +255,11 @@ if (ec)                      // ← co_return 之后，永不可达
 
 **建议**：拆成 `auto n = co_await ...; if (ec) { co_await async_close(); } co_return n;`。
 
+> **✅ 已修复（2026-10）**：`async_read_some` 改为先取返回值，`ec` 非空时在同一 strand 上
+> `co_await async_close()`，再 `co_return n`——与 `async_write` / `client_impl` 的写法对齐。
+> 回归：`tests/proxy_test.cpp` 的 "CONNECT: read failure closes the tunnel"（隧道对端先关闭，
+> 断言读失败后 `is_open()` 为 false；未修复时该断言失败）。
+
 ### 2.3 连接池归还经 `net::detached` 投递 —— ioContext 停转后连接永久悬挂【高】
 
 **证据**：`lib/client/client_pool.cpp:199-211`
@@ -635,11 +640,11 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 
 | # | 条目 |
 |---|---|
-| §2.1 | 析构不等待 stop（文档与实现矛盾） |
-| §2.2 | proxy_client 读失败死代码 |
+| §2.1 ✅ | 析构不等待 stop（文档与实现矛盾） |
+| §2.2 ✅ | proxy_client 读失败死代码 |
 | §2.3 | pool 归还 detached spawn |
 | §2.4 | `write_impl_` 永不清理 / create_lazy_request 复用 |
-| §2.5 | 默认构造 response 半数 UB |
+| §2.5 ✅ | 默认构造 response 半数 UB |
 | §2.6 | per-route aspects 所有权 |
 | §2.10 | reverse_proxy location `/*` 校验 |
 | §2.11 | 路由匹配语义三连（%2F / 优先级 / 尾斜杠） |

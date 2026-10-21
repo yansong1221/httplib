@@ -1523,6 +1523,76 @@ TEST_CASE("CONNECT: tunnel forwards data bidirectionally", "[proxy]")
     REQUIRE(echo_data == "ping");
 }
 
+// 回归：隧道读失败后必须关闭底层流。修复前 async_read_some 里的 close 位于 co_return
+// 之后（死代码），socket 会一直开着占住 fd/SSL 对象，而 is_open() 仍返回 true。
+TEST_CASE("CONNECT: read failure closes the tunnel", "[proxy]")
+{
+    net::io_context ioc;
+
+    tcp::acceptor upstream_acceptor(ioc);
+    upstream_acceptor.open(tcp::v4());
+    upstream_acceptor.bind(tcp::endpoint(net::ip::make_address("127.0.0.1"), 0));
+    upstream_acceptor.listen();
+    auto upstream_port = upstream_acceptor.local_endpoint().port();
+
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            // 隧道建好后立刻关闭，客户端下一次读只会拿到 eof。
+            auto sock = co_await upstream_acceptor.async_accept(net::use_awaitable);
+            boost::system::error_code ignored;
+            sock.shutdown(tcp::socket::shutdown_both, ignored);
+            sock.close(ignored);
+        },
+        net::detached);
+
+    httplib::server::http_server proxy(ioc.get_executor());
+    proxy.router().set_connect_handler(
+        "*",
+        [](httplib::server::request&, httplib::server::response& resp) -> net::awaitable<void>
+        {
+            // 显式放行：2xx 才会建立隧道。
+            resp.set_empty_content(httplib::status::ok);
+            co_return;
+        });
+    proxy.listen("127.0.0.1", 0);
+    auto proxy_ep = proxy.local_endpoint();
+    proxy.run();
+
+    bool read_failed = false;
+    bool closed_after_failure = false;
+
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            httplib::client::proxy_client pc(ioc.get_executor(), proxy_ep.address().to_string(), proxy_ep.port());
+
+            boost::system::error_code ec;
+            co_await pc.async_connect(std::format("127.0.0.1:{}", upstream_port), {}, ec);
+            if (ec)
+            {
+                proxy.stop();
+                co_return;
+            }
+
+            std::vector<char> buf(64);
+            co_await pc.async_read_some(net::buffer(buf), ec);
+            read_failed = static_cast<bool>(ec);
+            closed_after_failure = !pc.is_open();
+
+            pc.close();
+            proxy.stop();
+        },
+        net::detached);
+
+    ioc.run();
+
+    REQUIRE(read_failed);
+    REQUIRE(closed_after_failure);
+}
+
 TEST_CASE("proxy: chunked request body forwarded", "[proxy]")
 {
     run_proxy(
