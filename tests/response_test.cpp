@@ -1584,3 +1584,71 @@ TEST_CASE("response: empty response reports not_initialized", "[response]")
 
     REQUIRE(ec == httplib::client::make_error_code(httplib::client::error::not_initialized));
 }
+
+// 回归：默认构造/移出的 client::response 是显式空状态（impl_ 为空），
+// 所有查询成员必须有定义行为，不能解引用空 impl_。
+TEST_CASE("response: default-constructed response has defined behaviour", "[response]")
+{
+    httplib::client::response resp;
+
+    REQUIRE_FALSE(resp.valid());
+    CHECK(resp.result() == httplib::status::unknown);
+    CHECK(resp.result_int() == 0u);
+    CHECK(resp["X-Test"].empty());
+    CHECK(resp[httplib::field::content_type].empty());
+    CHECK_FALSE(resp.has("X-Test"));
+    CHECK_FALSE(resp.has(httplib::field::content_type));
+    CHECK(resp.count("X-Test") == 0);
+    CHECK(resp.headers().empty());
+    CHECK(resp.base().empty());
+    CHECK_FALSE(resp.content_length().has_value());
+    CHECK(resp.type() == httplib::body_type::none);
+    CHECK(resp.is_body_done());
+
+    REQUIRE_THROWS_AS(resp.at("X-Test"), std::out_of_range);
+    REQUIRE_THROWS_AS(resp.as_string(), boost::system::system_error);
+    REQUIRE_THROWS_AS(resp.as_json(), boost::system::system_error);
+    REQUIRE_THROWS_AS(resp.as_form_data(), boost::system::system_error);
+    REQUIRE_THROWS_AS(resp.as_query_params(), boost::system::system_error);
+    REQUIRE_THROWS_AS(resp.create_sse_reader(), boost::system::system_error);
+    REQUIRE_THROWS_AS(resp.create_ndjson_reader(), boost::system::system_error);
+
+    // 移出后同样不得解引用空 impl_（源与目标都是空状态）。
+    auto moved = std::move(resp);
+    REQUIRE_FALSE(moved.valid());
+    REQUIRE_FALSE(resp.valid());
+    CHECK(moved.result() == httplib::status::unknown);
+    CHECK(resp.result() == httplib::status::unknown);
+    CHECK(resp.headers().empty());
+    CHECK(resp.is_body_done());
+}
+
+// 空响应的异步读取入口统一以 not_initialized 收口，而不是崩在空 impl_ 上。
+TEST_CASE("response: empty response async readers report not_initialized", "[response]")
+{
+    httplib::client::response resp;
+    auto const expected = httplib::client::make_error_code(httplib::client::error::not_initialized);
+
+    net::io_context ioc;
+    auto fut = net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            auto body_ec = co_await resp.read_body();
+            CHECK(body_ec == expected);
+
+            auto file_ec = co_await resp.read_to_file("empty-response-should-not-exist.txt");
+            CHECK(file_ec == expected);
+
+            auto text = co_await resp.read_string();
+            REQUIRE(text.has_error());
+            CHECK(text.error() == expected);
+
+            auto json = co_await resp.read_json();
+            REQUIRE(json.has_error());
+            CHECK(json.error() == expected);
+        },
+        net::use_future);
+    ioc.run();
+    fut.get();
+}

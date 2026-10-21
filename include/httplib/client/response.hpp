@@ -28,6 +28,17 @@ namespace httplib::client
         response& operator=(response&&) noexcept;
         ~response();
 
+        /// \brief 是否绑定到真实响应。
+        ///
+        /// 默认构造或已移出的对象返回 @c false；此时所有成员仍有定义行为：
+        /// 查询类返回空值（@c status::unknown / 空头集合 / @c body_type::none），
+        /// 读取类返回 @c error::not_initialized，@c as_* 与流式 reader 工厂抛
+        /// @c boost::system::system_error。
+        bool valid() const noexcept
+        {
+            return impl_ != nullptr;
+        }
+
         httplib::status result() const;
         unsigned result_int() const;
         std::string_view operator[](httplib::field name) const;

@@ -311,6 +311,14 @@ void release(std::unique_ptr<http_client> conn)
 **建议**：所有成员统一走判空分支返回 `not_initialized`；或私有化默认构造，
 要求通过 `result<response>` 获取实例。
 
+> **✅ 已修复（2026-10）**：取「显式空状态」方案（私有化默认构造不彻底——移出后的对象
+> 仍是空的，判空逻辑无论如何都要写）。新增 `valid()`；查询类返回空值
+> （`status::unknown` / 空头集合 / `body_type::none` / `nullopt`），`at()` 抛
+> `std::out_of_range`，`as_*` 与流式 reader 工厂抛 `system_error(not_initialized)`，
+> 异步读取统一返回 `not_initialized`，`is_body_done()` 视为已结束。
+> 回归：`tests/response_test.cpp` 的 "default-constructed response has defined behaviour"
+> 与 "empty response async readers report not_initialized"。
+
 ### 2.6 per-route aspects 的所有权取决于实参值类别【中】
 
 **证据**：`include/httplib/server/router.inl:117-124`
