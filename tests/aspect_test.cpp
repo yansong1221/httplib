@@ -18,6 +18,38 @@ namespace
         resp.set_string_content(body, "text/plain"sv, st);
     }
 
+    struct counting_aspect
+    {
+        int* copies = nullptr;
+        std::string* log = nullptr;
+
+        counting_aspect(int& c, std::string& l)
+            : copies(&c)
+            , log(&l)
+        {
+        }
+        counting_aspect(counting_aspect const& other)
+            : copies(other.copies)
+            , log(other.log)
+        {
+            ++*copies;
+        }
+        counting_aspect& operator=(counting_aspect const&) = delete;
+
+        bool
+        before(httplib::server::request&, httplib::server::response&)
+        {
+            *log += "before;";
+            return true;
+        }
+        bool
+        after(httplib::server::request&, httplib::server::response&)
+        {
+            *log += "after;";
+            return true;
+        }
+    };
+
 } // namespace
 
 struct logging_aspect
@@ -145,6 +177,62 @@ TEST_CASE("Aspect: multiple aspects chain in order", "[aspect]")
             auto resp = UNWRAP(co_await client.async_get("/multi-aspect"));
             REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE(order == "A.before;B.before;A.after;B.after;");
+        });
+}
+
+TEST_CASE("Aspect: lvalue is copied into the route at registration", "[aspect]")
+{
+    net::io_context ioc;
+    httplib::server::http_server server(ioc.get_executor());
+
+    int copies = 0;
+    std::string log;
+    {
+        counting_aspect asp(copies, log);
+        server.router().template set_http_handler<httplib::method::get>(
+            "/owned",
+            [](httplib::server::request&, httplib::server::response&) {},
+            asp);
+
+        // 注册即拥有：路由闭包必须持有副本，而不是调用方对象的引用。
+        CHECK(copies >= 1);
+    }
+    // 调用方对象已析构；引用语义下闭包此刻已悬垂。
+    CHECK(copies >= 1);
+}
+
+TEST_CASE("Aspect: lvalue aspect survives the registration scope", "[aspect]")
+{
+    int copies = 0;
+    bool owns_copy = false;
+    std::string log;
+
+    run(
+        [&](auto& server)
+        {
+            {
+                counting_aspect asp(copies, log);
+                server.router().template set_http_handler<httplib::method::get>(
+                    "/owned-lifetime",
+                    [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "handler"); },
+                    asp);
+            }
+            owns_copy = copies > 0;
+        },
+        [&](auto& client) -> net::awaitable<void>
+        {
+            // 注册用的 lvalue 已析构；只有注册时拷贝过，路由才能安全使用。
+            CHECK(owns_copy);
+            if (!owns_copy)
+            {
+                // 未修复：跳过真实请求，避免对悬垂引用发起调用（UB）。
+                co_return;
+            }
+
+            auto resp = UNWRAP(co_await client.async_get("/owned-lifetime"));
+            CHECK(resp.result() == httplib::status::ok);
+            CHECK(as_string(resp) == "handler");
+            CHECK(log == "before;after;");
         });
 }
 

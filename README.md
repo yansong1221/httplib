@@ -512,7 +512,7 @@ router.set_http_handler<method::get>(
         auto sess = middleware::fetch<middleware::session_middleware>(req);  // shared_ptr<session>
         sess->set("user", "alice");
         auto user = sess->get("user");
-    }, sm);
+    }, std::ref(sm));
 ```
 
 可通过 `session_middleware(std::shared_ptr<session_store>)` 提供自定义存储后端。`session_store`
@@ -566,6 +566,11 @@ router.set_http_handler<method::get>("/api/logged", handler, logging_aspect{});
 ```
 
 `before`/`after` 支持同步（`bool`）与协程（`net::awaitable<bool>`）两种返回类型。
+
+aspect 在注册时按值拥有：rvalue 被 move，lvalue 被拷贝。因此临时对象和普通 lvalue 都不会
+产生悬垂。需要让多条路由共享同一个有状态、且不可拷贝的中间件实例（如
+`session_middleware`）时，用 `std::ref(instance)` 显式借用；此时 `instance` 必须比
+`router` 活得久，框架无法在编译期检查这一点。
 
 ### 中间件数据访问
 

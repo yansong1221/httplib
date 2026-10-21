@@ -368,6 +368,18 @@ if constexpr (sizeof...(Aspects) > 0)
 **建议**：统一为 `router::use()` 的做法 —— 注册即拷贝进 shared_ptr；或文档明示
 「aspect 必须比服务器活得久」并加 static_assert 栈地址断言。
 
+> **✅ 已修复（2026-10）**：`make_coro_http_handler` 与 `router::use()` 统一为注册期接管：
+> `helper::own_aspect()` 把每个 aspect 移入/拷贝进 `shared_ptr<decay_t<Aspect>>`，
+> 闭包不再保存 `T&`。
+> - rvalue 被 move、lvalue 被拷贝；`do_before`/`do_after` 经 `unwrap_aspect()`
+>   取回真实对象，同时支持显式借用 `std::ref(instance)` / `std::cref(instance)`。
+> - 有状态且不可拷贝的中间件（`session_middleware`）通过 `std::ref` 共享同一实例，
+>   寿命约束写进 `router.hpp` 与 README；误传不可拷贝 lvalue 会在注册处
+>   `static_assert` 报错并提示改用 `std::ref`。
+> 回归：`tests/aspect_test.cpp` 的 "lvalue is copied into the route at registration"、
+> "lvalue aspect survives the registration scope"（修复前分别为 `copies == 0` 与
+> 直接失败）；`[session]` 全部用例改为 `std::ref(sm)` 后通过。
+
 ### 2.7 `const request/response` 的 `base()` 返回可写借用视图【中】
 
 **证据**：`lib/server/request.cpp:47-52`、`lib/client/response.cpp:86-90`、
@@ -670,7 +682,7 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 | §2.3（契约化） | pool 归还 detached spawn（Asio 语义，文档化停止顺序） |
 | §2.4 ✅ | `write_impl_` 永不清理 / create_lazy_request 复用 |
 | §2.5 ✅ | 默认构造 response 半数 UB |
-| §2.6 | per-route aspects 所有权 |
+| §2.6 ✅ | per-route aspects 所有权 |
 | §2.10 | reverse_proxy location `/*` 校验 |
 | §2.11 | 路由匹配语义三连（%2F / 优先级 / 尾斜杠） |
 | §2.12 | 上游健康机制死代码 + ticket 配对 |

@@ -33,6 +33,12 @@ namespace httplib::server
      * @note 服务器停止时（@ref http_server::stop "stop()" 之后所有在途会话排空），
      *       框架会自动清空路由表。若同一个 @ref http_server 实例要再次
      *       @ref http_server::run "run()"，需在此之前重新注册路由。
+     *
+     * @par aspect 所有权
+     * 每路由与全局 aspect 都在注册时按值拥有：rvalue 被 move，lvalue 被拷贝，
+     * 因此调用方的局部对象在注册后即可析构。需要让多条路由共享同一个有状态、
+     * 且不可拷贝的实例（如 `session_middleware`）时，传 `std::ref(instance)`
+     * 显式借用——此时 `instance` 必须比 router 活得久，框架无法在编译期检查。
      */
     class HTTPLIB_API router
     {

@@ -2,6 +2,7 @@
 #include "httplib/server/server_fwd.hpp"
 #include "httplib/util/misc.hpp"
 #include <exception>
+#include <functional>
 
 namespace httplib::server
 {
@@ -37,6 +38,45 @@ namespace httplib::server
 
         template <class T>
         constexpr bool has_before_v = has_before<T>::value;
+
+        /// aspect 通过 std::ref / std::cref 传入时是借用；其余按值拥有。
+        template <typename T>
+        struct is_reference_wrapper : std::false_type
+        {
+        };
+        template <typename T>
+        struct is_reference_wrapper<std::reference_wrapper<T>> : std::true_type
+        {
+        };
+
+        /// 取出真正的 aspect 对象：reference_wrapper 解包，其余原样返回。
+        template <typename T>
+        decltype(auto)
+        unwrap_aspect(T& aspect)
+        {
+            if constexpr (is_reference_wrapper<std::decay_t<T>>::value)
+            {
+                return aspect.get();
+            }
+            else
+            {
+                return (aspect);
+            }
+        }
+
+        /// 注册期接管 aspect 的所有权：rvalue 移入，lvalue 拷贝入。
+        ///
+        /// 需要共享同一个有状态、不可拷贝的实例时，调用方应显式传 std::ref(instance)，
+        /// 并保证 instance 的寿命长于 router——这条约束无法在编译期检查。
+        template <typename T>
+        std::shared_ptr<std::decay_t<T>>
+        own_aspect(T&& aspect)
+        {
+            static_assert(std::is_constructible_v<std::decay_t<T>, T&&>,
+                          "aspect is owned by value: pass std::ref(instance) to borrow a non-copyable "
+                          "stateful aspect, and keep instance alive longer than the router");
+            return std::make_shared<std::decay_t<T>>(std::forward<T>(aspect));
+        }
 
         template <class T>
         constexpr bool has_after_v = has_after<T>::value;
@@ -94,18 +134,18 @@ namespace httplib::server
     {
         auto do_use = [this]<typename T>(T&& asp)
         {
-            auto m = std::make_shared<std::decay_t<T>>(std::forward<T>(asp));
+            auto m = helper::own_aspect(std::forward<T>(asp));
             use_impl(
                 [m](request& req, response& resp) mutable -> net::awaitable<bool>
                 {
                     bool ok = true;
-                    co_await helper::do_before(*m, req, resp, ok);
+                    co_await helper::do_before(helper::unwrap_aspect(*m), req, resp, ok);
                     co_return ok;
                 },
                 [m](request& req, response& resp) mutable -> net::awaitable<bool>
                 {
                     bool ok = true;
-                    co_await helper::do_after(*m, req, resp, ok);
+                    co_await helper::do_after(helper::unwrap_aspect(*m), req, resp, ok);
                     co_return ok;
                 });
         };
@@ -120,17 +160,20 @@ namespace httplib::server
 
         if constexpr (sizeof...(Aspects) > 0)
         {
-            // std::tuple<std::decay_t<Aspects>...> aspects(std::move(asps)...);
-            std::tuple<Aspects...> aspects(std::forward<Aspects>(asps)...);
+            // 注册即拥有：与 router::use() 一致，rvalue 移入、lvalue 拷贝入 shared_ptr。
+            // 不能存 T&——传 lvalue 时闭包会长期持有调用方栈对象的地址。
+            // 需要共享不可拷贝的有状态实例时用 std::ref(instance) 显式借用。
+            auto aspects = std::make_tuple(helper::own_aspect(std::forward<Aspects>(asps))...);
 
             return [coro_handler = std::move(coro_handler),
                     aspects = std::move(aspects)](request& req, response& resp) mutable -> net::awaitable<void>
             {
                 bool ok = true;
 
-                co_await std::apply([&](auto&... aspect) -> net::awaitable<void>
-                                    { ((co_await helper::do_before(aspect, req, resp, ok)), ...); },
-                                    aspects);
+                co_await std::apply(
+                    [&](auto&... aspect) -> net::awaitable<void>
+                    { ((co_await helper::do_before(helper::unwrap_aspect(*aspect), req, resp, ok)), ...); },
+                    aspects);
 
                 std::exception_ptr eptr;
                 if (ok)
@@ -149,9 +192,10 @@ namespace httplib::server
                 if (!eptr)
                 {
                     ok = true;
-                    co_await std::apply([&](auto&... aspect) -> net::awaitable<void>
-                                        { ((co_await helper::do_after(aspect, req, resp, ok)), ...); },
-                                        aspects);
+                    co_await std::apply(
+                        [&](auto&... aspect) -> net::awaitable<void>
+                        { ((co_await helper::do_after(helper::unwrap_aspect(*aspect), req, resp, ok)), ...); },
+                        aspects);
                 }
 
                 if (eptr)

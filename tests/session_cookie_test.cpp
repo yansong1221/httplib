@@ -6,6 +6,7 @@
 #include "server/middleware/memory_store.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <functional>
 #include <initializer_list>
 #include <mutex>
 #include <string>
@@ -120,7 +121,7 @@ TEST_CASE("Session: middleware creates new session ID", "[session]")
                     REQUIRE_FALSE(sess->id().empty());
                     resp.set_string_content("ok"sv, "text/plain"sv);
                 },
-                sm);
+                std::ref(sm));
         },
         [](auto& client) -> net::awaitable<void>
         {
@@ -149,7 +150,7 @@ TEST_CASE("Session: middleware persists data across requests", "[session]")
                     sess->set("user", "alice");
                     resp.set_string_content("logged-in"sv, "text/plain"sv);
                 },
-                sm);
+                std::ref(sm));
 
             server.router().template set_http_handler<httplib::method::get>(
                 "/whoami",
@@ -159,7 +160,7 @@ TEST_CASE("Session: middleware persists data across requests", "[session]")
                     auto user = sess->get("user");
                     resp.set_string_content(user.value_or("anonymous"), "text/plain"sv);
                 },
-                sm);
+                std::ref(sm));
         },
         [](auto& client) -> net::awaitable<void>
         {
@@ -196,7 +197,7 @@ TEST_CASE("Session: get_session returns valid pointer", "[session]")
                     REQUIRE(*c == "1");
                     resp.set_string_content("ok"sv, "text/plain"sv);
                 },
-                sm);
+                std::ref(sm));
         },
         [](auto& client) -> net::awaitable<void>
         {
@@ -226,7 +227,7 @@ TEST_CASE("Session: session has and remove", "[session]")
                     REQUIRE(sess->empty());
                     resp.set_string_content("ok"sv, "text/plain"sv);
                 },
-                sm);
+                std::ref(sm));
         },
         [](auto& client) -> net::awaitable<void>
         {
@@ -258,7 +259,7 @@ TEST_CASE("Session: a custom store can be injected", "[session]")
                     sess->set("store", "injected");
                     resp.set_string_content("fresh"sv, "text/plain"sv);
                 },
-                sm);
+                std::ref(sm));
         },
         [](auto& client) -> net::awaitable<void>
         {
@@ -298,7 +299,7 @@ TEST_CASE("Session: configurable cookie name", "[session]")
                     sess->set("key", "val");
                     resp.set_string_content("ok"sv, "text/plain"sv);
                 },
-                sm);
+                std::ref(sm));
         },
         [](auto& client) -> net::awaitable<void>
         {
@@ -325,7 +326,7 @@ TEST_CASE("Session: cookie attributes http_only, secure, max_age", "[session]")
                     mw::fetch<mw::session_middleware>(req).value()->set("x", "1");
                     resp.set_string_content("ok"sv, "text/plain"sv);
                 },
-                sm);
+                std::ref(sm));
         },
         [](auto& client) -> net::awaitable<void>
         {
@@ -353,7 +354,7 @@ TEST_CASE("Session: same_site strict", "[session]")
                     mw::fetch<mw::session_middleware>(req).value()->set("x", "1");
                     resp.set_string_content("ok"sv, "text/plain"sv);
                 },
-                sm);
+                std::ref(sm));
         },
         [](auto& client) -> net::awaitable<void>
         {
@@ -379,7 +380,7 @@ TEST_CASE("Session: max_age cookie attribute", "[session]")
                     mw::fetch<mw::session_middleware>(req).value()->set("x", "1");
                     resp.set_string_content("ok"sv, "text/plain"sv);
                 },
-                sm);
+                std::ref(sm));
         },
         [](auto& client) -> net::awaitable<void>
         {
