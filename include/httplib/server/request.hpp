@@ -15,6 +15,7 @@
 #include <charconv>
 #include <cstddef>
 #include <memory>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -55,7 +56,21 @@ namespace httplib::server
         std::size_t count(httplib::field name) const;
         std::size_t count(std::string_view name) const;
 
+        /// 请求路径（target 中 '?' 之前的部分），<b>原样返回</b>：保留百分号编码，
+        /// 不做路径归一化。路由匹配按 '/' 分段后逐段解码，因此段内的 "%2F" 是段内容，
+        /// 不是分隔符。
         std::string_view path() const;
+
+        /// 对 path() 做完整百分号解码后的新字符串。因为 "%2F" 也会变成 '/'，该字符串
+        /// 无法区分「段内斜杠」与「段分隔符」，只适合日志、展示和兼容旧代码；
+        /// 需要精确的段边界时用 decoded_segments()。该接口按需分配，不参与路由。
+        std::string decoded_path() const;
+
+        /// 原始 path 按字面 '/' 分段后逐段百分号解码的结果。段边界不会因为 "%2F"
+        /// 丢失；尾随 '/' 会产生一个空段。解码后的段仍可能包含 '/'、'\\' 或 NUL，
+        /// 用作文件路径或下游 URL 前必须自行校验。视图在 request 存活期间有效。
+        std::span<std::string const> decoded_segments() const;
+
         httplib::query_params const& query_params() const;
 
         net::ip::address get_client_ip() const;
@@ -97,6 +112,8 @@ namespace httplib::server
 
         bool is_body_done() const;
 
+        /// 路径参数已经逐段百分号解码。注意 "%2F" 会变成 '/'、"%00" 会变成 NUL；
+        /// 把参数当文件名、路径或下游 URL 使用前必须自行校验，不能直接拼接。
         template <typename T = std::string_view>
             requires std::integral<T> || std::floating_point<T> || std::same_as<T, std::string>
                      || std::same_as<T, std::string_view>

@@ -39,6 +39,11 @@ namespace httplib::server
      * 因此调用方的局部对象在注册后即可析构。需要让多条路由共享同一个有状态、
      * 且不可拷贝的实例（如 `session_middleware`）时，传 `std::ref(instance)`
      * 显式借用——此时 `instance` 必须比 router 活得久，框架无法在编译期检查。
+     *
+     * @par 路径匹配
+     * 请求 path 先按原始字符串中的 '/' 分段，再对每段单独做百分号解码。因此
+     * "%2F" 是段内容而不是段分隔符：`/api%2Fsecret` 不会命中 `/api/secret`。
+     * 注册 key 使用解码后的字面文本（如 `/café`、`/a b`），不要写 `%XX` 转义。
      */
     class HTTPLIB_API router
     {

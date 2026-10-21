@@ -872,6 +872,37 @@ TEST_CASE("Static mount: blocks path traversal", "[response]")
     std::filesystem::remove_all(tmp_dir);
 }
 
+TEST_CASE("Static mount: encoded slash does not change mount segment count", "[response]")
+{
+    auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_encoded_slash";
+    std::filesystem::create_directories(tmp_dir);
+    {
+        std::ofstream f(tmp_dir / "test.txt");
+        f << "static content";
+    }
+
+    run([&](auto& server) { server.router().set_static_mount_point("/static", tmp_dir); },
+        [](auto& client) -> net::awaitable<void>
+        {
+            // 正常路径仍然可访问。
+            auto ok = UNWRAP(co_await client.async_get("/static/test.txt"));
+            REQUIRE(ok.result() == httplib::status::ok);
+            REQUIRE(ok.as_string() == "static content");
+
+            // /static%2Ftest.txt 是一个段，不能命中 /static/*。
+            auto not_mounted = UNWRAP(co_await client.async_get("/static%2Ftest.txt"));
+            REQUIRE(not_mounted.result() == httplib::status::not_found);
+
+            // 解码后出现 .. 仍然被 mount point 的路径校验拦截。
+            auto traversal = UNWRAP(co_await client.async_get("/static/..%2Ftest.txt"));
+            REQUIRE(traversal.result() == httplib::status::bad_request);
+
+            co_return;
+        });
+
+    std::filesystem::remove_all(tmp_dir);
+}
+
 TEST_CASE("Static mount: default document index.html", "[response]")
 {
     auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_dd";

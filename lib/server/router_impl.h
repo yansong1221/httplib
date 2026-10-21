@@ -7,6 +7,7 @@
 #include <memory>
 #include <regex>
 #include <set>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -96,7 +97,7 @@ namespace httplib::server
         using MatchHandlerType = std::function<bool(Node const* node)>;
 
         Node const* match_nodes(Node const* node,
-                                std::vector<std::string_view> const& segments,
+                                std::span<std::string const> segments,
                                 size_t index,
                                 util::string_map<std::string>& params,
                                 MatchHandlerType const& handler) const;

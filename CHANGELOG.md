@@ -45,6 +45,10 @@ tag；以下变更相对仓库初始状态累积。
 - **下载缓存污染**：cache key 纳入 scheme/host/port 与认证上下文，校验最终 URL，尊重
   `no-store` / `Vary: *`。
 - **客户端部分写入**：仅在零字节写入时允许重试。
+- **路由路径混淆**：请求路径改为先按原始 `/` 分段、再逐段百分号解码，`%2F` 不再
+  变成段分隔符；`/api%2Fsecret` 不再命中 `/api/secret` 或 `/api/*`。新增
+  `request::decoded_segments()` 提供保留段边界的精确值；`request::decoded_path()`
+  提供完整解码字符串（有损，仅供展示/兼容）；`request::path()` 改为返回原始编码路径。
 
 ### 修复
 
@@ -71,6 +75,9 @@ tag；以下变更相对仓库初始状态累积。
 - **新增中间件**：限流、Session、JWT 认证、DB 等。中间件改为「切面」形态：作为
   `set_http_handler` 的尾随可变参数传入，或经 `router::use()` 全局注册，可提供
   `before()` / `after()`。
+- **`request::path()` 语义明确化**：返回 target 中 `?` 之前的原始路径（保留
+  percent-encoding）；新增 `request::decoded_segments()` 返回逐段解码结果，
+  `request::decoded_path()` 返回完整解码值。路由注册 key 按解码后的字面文本匹配。
 
 ### 文档
 
@@ -86,6 +93,9 @@ tag；以下变更相对仓库初始状态累积。
 - `router::use()` 的中间件改为「切面」形态，不再是简单的请求处理器。
 - `any_body::value_type` 移除，改用 `body_state` 与类型化访问器。
 - 公共头不再包含 `boost/beast/*`。
+- `request::path()` 不再返回百分号解码后的路径；需要保留段边界的解码值时改用
+  `request::decoded_segments()`，仅需展示字符串时用 `request::decoded_path()`
+  （注意 `%2F` 与真实分隔符不可区分）。
 
 ## [1.0.5] — 链接
 

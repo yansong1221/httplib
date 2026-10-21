@@ -201,6 +201,127 @@ TEST_CASE("Router: wildcard path *", "[router]")
         });
 }
 
+TEST_CASE("Router: percent-encoded slash does not separate segments", "[router]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/api/secret",
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "secret"); });
+            server.router().template set_http_handler<httplib::method::get>(
+                "/api/*",
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "wildcard"); });
+            server.router().template set_http_handler<httplib::method::get>(
+                "/users/:id",
+                [](httplib::server::request& req, httplib::server::response& resp)
+                { set_text(resp, "id=" + std::string(req.path_param("id"))); });
+            // 注册 key 使用解码后的字面文本。
+            server.router().template set_http_handler<httplib::method::get>(
+                "/space/a b",
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "space"); });
+            server.router().set_http_not_found_handler(
+                [](httplib::server::request&, httplib::server::response& resp)
+                { set_text(resp, "not-found", httplib::status::not_found); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            // %2F 是段内容，不能命中 /api/secret，也不能命中 /api/*。
+            auto r1 = UNWRAP(co_await client.async_get("/api%2Fsecret"));
+            REQUIRE(r1.result() == httplib::status::not_found);
+            REQUIRE(as_string(r1) == "not-found");
+
+            auto r2 = UNWRAP(co_await client.async_get("/api%2Fother"));
+            REQUIRE(r2.result() == httplib::status::not_found);
+            REQUIRE(as_string(r2) == "not-found");
+
+            // 未命中路由时是 404，而不是「命中节点但方法不允许」的 405。
+            auto r3 = UNWRAP(co_await client.async_post("/api%2Fsecret", std::string_view(""), "text/plain"sv));
+            REQUIRE(r3.result() == httplib::status::not_found);
+
+            // :id 捕获到的是一个完整段，解码后可以包含 '/'。
+            auto r4 = UNWRAP(co_await client.async_get("/users/a%2Fb"));
+            REQUIRE(r4.result() == httplib::status::ok);
+            REQUIRE(as_string(r4) == "id=a/b");
+
+            // 十六进制大小写不敏感。
+            auto r5 = UNWRAP(co_await client.async_get("/users/a%2fb"));
+            REQUIRE(r5.result() == httplib::status::ok);
+            REQUIRE(as_string(r5) == "id=a/b");
+
+            // 只解码一次：%252F -> "%2F"，不会再变成 "/"。
+            auto r6 = UNWRAP(co_await client.async_get("/users/a%252Fb"));
+            REQUIRE(r6.result() == httplib::status::ok);
+            REQUIRE(as_string(r6) == "id=a%2Fb");
+
+            // 真正的两段路径仍然不匹配单参数路由。
+            auto r7 = UNWRAP(co_await client.async_get("/users/a/b"));
+            REQUIRE(r7.result() == httplib::status::not_found);
+
+            // 普通静态路由不受影响。
+            auto r8 = UNWRAP(co_await client.async_get("/api/secret"));
+            REQUIRE(r8.result() == httplib::status::ok);
+            REQUIRE(as_string(r8) == "secret");
+
+            // 注册 key 仍是解码后的字面文本：%20 能匹配 key 中的空格。
+            auto r9 = UNWRAP(co_await client.async_get("/space/a%20b"));
+            REQUIRE(r9.result() == httplib::status::ok);
+            REQUIRE(as_string(r9) == "space");
+
+            co_return;
+        });
+}
+
+TEST_CASE("Router: path(), decoded_path() and decoded_segments()", "[router]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/path/:id",
+                [](httplib::server::request& req, httplib::server::response& resp)
+                {
+                    std::string segments;
+                    for (auto const& seg : req.decoded_segments())
+                    {
+                        segments += "[" + seg + "]";
+                    }
+
+                    set_text(resp,
+                             std::string(req.path()) + "|" + req.decoded_path() + "|"
+                                 + std::string(req.path_param("id")) + "|" + segments);
+                });
+            server.router().template set_http_handler<httplib::method::get>(
+                "/segments/*",
+                [](httplib::server::request& req, httplib::server::response& resp)
+                {
+                    std::string segments;
+                    for (auto const& seg : req.decoded_segments())
+                    {
+                        segments += "[" + seg + "]";
+                    }
+                    set_text(resp, segments);
+                });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto r1 = UNWRAP(co_await client.async_get("/path/a%2Fb?x=1"));
+            REQUIRE(r1.result() == httplib::status::ok);
+            REQUIRE(as_string(r1) == "/path/a%2Fb|/path/a/b|a/b|[path][a/b]");
+
+            auto r2 = UNWRAP(co_await client.async_get("/path/a%20b"));
+            REQUIRE(r2.result() == httplib::status::ok);
+            REQUIRE(as_string(r2) == "/path/a%20b|/path/a b|a b|[path][a b]");
+
+            // 尾随 '/' 按路由既有规则产生一个空段。
+            auto r3 = UNWRAP(co_await client.async_get("/segments/a%2Fb/"));
+            REQUIRE(r3.result() == httplib::status::ok);
+            REQUIRE(as_string(r3) == "[segments][a/b][]");
+
+            co_return;
+        });
+}
+
 TEST_CASE("Router: multiple HTTP verbs on one route", "[router]")
 {
     run(

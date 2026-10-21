@@ -485,6 +485,12 @@ vector（:180-260 插入即合并），「先注册的 param 路由优先」契�
 **建议**：a) 逐段解码（`%2F` 保留为段内容）；b) param 子按注册序合并 + 距离优先，
 allows 收集并入匹配过程；c) 注册时把尾斜杠归一（或 301 重定向），split 不要 trim 路径段。
 
+> **✅ a) 已修复（2026-10）**：`request::path()` 改为返回原始编码路径，路由器先按字面 `/`
+> 分段再逐段解码并缓存到 `request::decoded_segments()`，段边界不再因 `%2F` 丢失；
+> `request::decoded_path()` 保留完整解码值，仅供展示/兼容。回归用例覆盖
+> `/api%2Fsecret`、`:id = "a/b"`、`%252F` 单次解码、mount point 的 `%2F` 段数与 `..` 校验。
+> b)、c) 仍未处理。
+
 ### 2.12 `upstream_group` 健康机制是死代码；on_acquired/on_released 按字符串配对【中】
 
 **证据**：
@@ -702,7 +708,8 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 | §2.5 ✅ | 默认构造 response 半数 UB |
 | §2.6 ✅ | per-route aspects 所有权 |
 | §2.10 | reverse_proxy location `/*` 校验 |
-| §2.11 | 路由匹配语义三连（%2F / 优先级 / 尾斜杠） |
+| §2.11a ✅ | `%2F` 逐段解码；`path()` raw + `decoded_segments()` / `decoded_path()` |
+| §2.11b/c | 路由优先级/回溯/allows 双遍历；尾斜杠与 trim |
 | §2.12 | 上游健康机制死代码 + ticket 配对 |
 
 ### P2（契约整理）

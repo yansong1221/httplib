@@ -207,6 +207,12 @@ router.set_http_not_found_handler([](server::request& req, server::response& res
 });
 ```
 
+路径匹配先按原始 `/` 分段，再逐段百分号解码：`/a%2Fb` 是一个路径段，
+`path_param()` 得到 `a/b`，不会命中 `/a/b`。`req.path()` 返回原始编码路径；
+`req.decoded_segments()` 返回保留段边界的解码结果（如 `["a/b"]`），适合路由、
+鉴权或文件路径判断；`req.decoded_path()` 返回完整解码字符串（`%2F` 会变成 `/`，
+仅适合展示/兼容，不要用于安全判断）。
+
 注意：公共 API 使用库自身的枚举 `httplib::method` 与 `httplib::status`（并非 `boost::beast::http`），头字段使用 `httplib::headers` / `httplib::field`，因此 Boost 类型不会泄漏到用户代码中。
 
 ## 响应类型

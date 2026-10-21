@@ -1,6 +1,7 @@
 #include "router_impl.h"
 #include "beast_alias.hpp"
 #include "enum_conv.hpp"
+#include "path_segments.hpp"
 #include "request_impl.hpp"
 #include "response_impl.hpp"
 #include <boost/algorithm/string/join.hpp>
@@ -105,19 +106,6 @@ namespace httplib::server
             return false;
         }
 
-        static auto
-        split_segments(std::string_view path)
-        {
-            auto segments = util::split(path, "/");
-
-            if (path.ends_with("/"))
-            {
-                segments.push_back(std::string_view());
-            }
-
-            return segments;
-        }
-
     } // namespace detail
 
     router_impl::router_impl() : root_(std::make_unique<Node>()) {}
@@ -125,7 +113,7 @@ namespace httplib::server
     void
     router_impl::set_http_handler_impl(method m, std::string_view key, coro_http_handler_type&& handler)
     {
-        auto segments = detail::split_segments(key);
+        auto segments = detail::split_path_segments(key);
         auto node = insert(root_.get(), segments, 0);
         node->handlers[m] = http_handler_entry { wrap_global(std::move(handler)), false };
     }
@@ -296,7 +284,7 @@ namespace httplib::server
                                      websocket_conn::coro_message_handler_type&& message_handler,
                                      websocket_conn::coro_close_handler_type&& close_handler)
     {
-        auto segments = detail::split_segments(path);
+        auto segments = detail::split_path_segments(path);
 
         auto node = insert(root_.get(), segments, 0);
 
@@ -310,7 +298,7 @@ namespace httplib::server
     std::optional<router_impl::ws_handler_entry>
     router_impl::query_ws_handler(request& req) const
     {
-        auto segments = detail::split_segments(req.path());
+        auto const segments = get_impl(req).decoded_segments();
 
         util::string_map<std::string> params;
         auto node = match_nodes(root_.get(),
@@ -331,7 +319,7 @@ namespace httplib::server
     {
         route_match result;
 
-        auto segments = detail::split_segments(req.path());
+        auto const segments = get_impl(req).decoded_segments();
 
         result.node = match_nodes(root_.get(),
                                   segments,
@@ -373,7 +361,7 @@ namespace httplib::server
 
     router_impl::Node const*
     router_impl::match_nodes(Node const* parent,
-                             std::vector<std::string_view> const& segments,
+                             std::span<std::string const> segments,
                              size_t index,
                              util::string_map<std::string>& params,
                              MatchHandlerType const& handler) const
@@ -497,7 +485,7 @@ namespace httplib::server
     void
     router_impl::set_lazy_http_handler_impl(method m, std::string_view key, coro_http_handler_type&& handler)
     {
-        auto segments = detail::split_segments(key);
+        auto segments = detail::split_path_segments(key);
         auto node = insert(root_.get(), segments, 0);
         node->handlers[m] = http_handler_entry { wrap_global(std::move(handler)), true };
     }

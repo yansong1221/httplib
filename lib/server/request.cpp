@@ -105,6 +105,18 @@ namespace httplib::server
         return impl_->path();
     }
 
+    std::string
+    request::decoded_path() const
+    {
+        return impl_->decoded_path();
+    }
+
+    std::span<std::string const>
+    request::decoded_segments() const
+    {
+        return impl_->decoded_segments();
+    }
+
     httplib::net::ip::address
     request::get_client_ip() const
     {

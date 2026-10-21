@@ -207,6 +207,13 @@ router.set_http_not_found_handler([](server::request& req, server::response& res
 });
 ```
 
+Routing splits the raw path on `/` first, then percent-decodes each segment:
+`/a%2Fb` is one segment and `path_param()` returns `a/b`; it will not match `/a/b`.
+`req.path()` returns the raw encoded path; `req.decoded_segments()` returns the
+decoded segments with boundaries preserved (`["a/b"]`) and is suitable for routing,
+authorization, or filesystem checks. `req.decoded_path()` returns the fully decoded
+string (`%2F` becomes `/`), so it is for display/compatibility only.
+
 Note: the public API uses the library enums `httplib::method` and `httplib::status` (not `boost::beast::http`) and the `httplib::headers` / `httplib::field` types, so Boost types do not leak into user code.
 
 ## Response Types

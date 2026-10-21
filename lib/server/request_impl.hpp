@@ -6,6 +6,7 @@
 #include "httplib/url/url.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/string_hash.hpp"
+#include "path_segments.hpp"
 #include "session.hpp"
 #include "trusted_proxies.hpp"
 #include <algorithm>
@@ -40,13 +41,13 @@ namespace httplib::server
             , task_(std::move(task))
         {
             auto const target = get().target();
-            if (auto pos = target.find("?"); pos == std::string_view::npos)
+            auto const pos = target.find('?');
+
+            raw_path_ = target.substr(0, pos);
+            decoded_segments_ = detail::decode_path_segments(raw_path_);
+
+            if (pos != std::string_view::npos)
             {
-                decoded_path_ = url::url_decode(target);
-            }
-            else
-            {
-                decoded_path_ = url::url_decode(target.substr(0, pos));
                 query_params_.decode(target.substr(pos + 1));
             }
             set_form_data_params(task_->form_data_params());
@@ -58,11 +59,19 @@ namespace httplib::server
         std::string_view
         path() const
         {
-            if (decoded_path_.empty())
-            {
-                return get().target();
-            }
-            return decoded_path_;
+            return raw_path_;
+        }
+
+        std::string
+        decoded_path() const
+        {
+            return url::url_decode(raw_path_);
+        }
+
+        std::span<std::string const>
+        decoded_segments() const
+        {
+            return decoded_segments_;
         }
         httplib::query_params const&
         query_params() const
@@ -177,7 +186,10 @@ namespace httplib::server
         }
 
       private:
-        std::string decoded_path_;
+        /// 按字面 '/' 分段后逐段解码的结果；段边界不会因 %2F 丢失。
+        /// decoded_path() 不缓存：它只用于展示，按需解码即可。
+        std::string_view raw_path_;
+        std::vector<std::string> decoded_segments_;
         httplib::query_params query_params_;
 
         tcp::endpoint local_endpoint_;
