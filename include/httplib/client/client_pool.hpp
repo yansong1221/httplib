@@ -119,8 +119,15 @@ namespace httplib::client
         size_t idle_count() const;
         size_t total_count() const;
 
-        /// 关闭池（终态，不可重启），唤醒所有等待者。实际清理在池的 strand 上
-        /// （ticker 的 on_stop）执行。
+        /// \brief 关闭池（终态，不可重启），唤醒所有等待者。
+        /// \details 实际清理在池的 strand 上（ticker 的 on_stop）执行。调用方应保证
+        /// **先关闭池、再停止或析构其执行器**（池的析构函数会自动调用本函数）：
+        /// 执行器停止后，已投递的清理任务与归还协程不会再被派发，连接要等到
+        /// `io_context::restart()` 后再次 `run()`，或随执行器析构才回收。
+        /// \note 与 Asio 的通用语义一致，本函数**不取消**未完成的操作与回调；需要
+        /// 立即断开时，应在停止执行器前先关闭/取消对应连接。
+        /// \note 执行器停止期间 \ref active_count() / \ref idle_count() /
+        /// \ref total_count() 不再更新，不代表当前可用连接数。
         void stop();
 
         /// \return 在池执行器上完成读取后变为 ready 的 future；不阻塞调用线程。
