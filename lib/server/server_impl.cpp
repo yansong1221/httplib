@@ -481,7 +481,13 @@ namespace httplib::server
 
     http_server::http_server(net::any_io_executor const& ex) : impl_(std::make_shared<impl>(ex)) {}
 
-    http_server::~http_server() { stop(); }
+    http_server::~http_server()
+    {
+        // 契约：析构不等待停止完成（见 server.hpp）。等待会在两种情况下必然死锁：
+        // 析构发生在 io 线程上时等待自己所在的 strand；io_context 已停转时停止
+        // 协程永远不会执行。这里只发出请求，impl 由在途协程的 shared_ptr 维持。
+        stop();
+    }
 
     http_server&
     http_server::listen(std::string_view host, uint16_t port)
