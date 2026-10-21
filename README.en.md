@@ -242,7 +242,7 @@ resp.set_form_data_content({
 router.set_http_handler<method::get>(
     "/stream",
     [](server::request&, server::response& resp) -> net::awaitable<void> {
-        auto* writer = resp.create_stream_writer();
+        auto writer = resp.create_stream_writer();   // shared_ptr; holds response weakly
         httplib::headers headers;
         headers.set(httplib::field::content_type, "text/plain");
         co_await writer->write_header(httplib::status::ok, headers,
@@ -268,6 +268,8 @@ router.set_http_handler<method::get>(
 ```
 
 `create_sse_writer()` returns `unique_ptr<sse_writer>`. Methods: `begin()`, `send_event(data, event, id, more)`, `send_retry(ms, more)`, `send_comment(msg, more)`. Every method has an `error_code&` overload.
+
+`stream_writer` / `sse_writer` / `ndjson_writer` only hold their creating response weakly: use them inside the handler coroutine while the response is alive. Writing after the response is destroyed returns `net::error::operation_aborted` instead of dangling.
 
 ### NDJSON (Newline Delimited JSON)
 

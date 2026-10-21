@@ -1,7 +1,9 @@
 #pragma once
 #include "httplib/server/sse_writer.hpp"
 #include "httplib/server/stream_writer.hpp"
+#include <memory>
 #include <string>
+#include <utility>
 #include "beast_alias.hpp"
 
 namespace httplib::server
@@ -10,7 +12,9 @@ namespace httplib::server
     class sse_writer_impl : public server::sse_writer
     {
       public:
-        explicit sse_writer_impl(server::stream_writer* cw) : cw_(cw) {}
+        // 共享持有 stream_writer：SSE writer 可以安全地比 response 活得更久；
+        // 越界写由 stream_writer 的 weak 检查收口为 operation_aborted。
+        explicit sse_writer_impl(std::shared_ptr<server::stream_writer> cw) : cw_(std::move(cw)) {}
 
         net::awaitable<void>
         begin() override
@@ -133,7 +137,7 @@ namespace httplib::server
         }
 
       private:
-        server::stream_writer* cw_;
+        std::shared_ptr<server::stream_writer> cw_;
     };
 
 } // namespace httplib::server

@@ -14,7 +14,7 @@
 namespace httplib::server
 {
 
-    response::response(std::unique_ptr<impl>&& _impl) : impl_(std::move(_impl)) {}
+    response::response(std::shared_ptr<impl> _impl) : impl_(std::move(_impl)) {}
 
     response::~response() {}
 
@@ -27,7 +27,7 @@ namespace httplib::server
     httplib::headers
     response::base() const
     {
-        // unique_ptr 的 const 不传递到被指对象，故这里无需 const_cast：
+        // shared_ptr 的 const 不传递到被指对象，故这里无需 const_cast：
         // 借用视图本身就指向消息自己的字段集合，写入语义与非常量重载一致。
         return httplib::headers::impl::borrow(impl_->base());
     }
@@ -188,14 +188,14 @@ namespace httplib::server
         return std::make_unique<ndjson_writer_impl>(create_stream_writer());
     }
 
-    stream_writer*
+    std::shared_ptr<stream_writer>
     response::create_stream_writer()
     {
         if (!impl_->stream_writer_)
         {
-            impl_->stream_writer_ = std::make_unique<stream_writer_impl>(*impl_);
+            impl_->stream_writer_ = std::make_shared<stream_writer_impl>(impl_);
         }
-        return impl_->stream_writer_.get();
+        return impl_->stream_writer_;
     }
 
 } // namespace httplib::server

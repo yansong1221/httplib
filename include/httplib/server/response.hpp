@@ -21,6 +21,11 @@ namespace httplib::server
       public:
         ~response();
 
+        // impl_ 改为 shared_ptr 后编译器会隐式生成拷贝；response 原本因 unique_ptr
+        // 成员而不可拷贝，这里保持同一语义。
+        response(response const&) = delete;
+        response& operator=(response const&) = delete;
+
         /// 全部响应头。返回的是「借用」视图：写入直接落到本响应上，拷贝它仍指向同一集合。
         /// 遍历用 all()，按名字查用 operator[]/at/count/values。
         httplib::headers base();
@@ -71,13 +76,16 @@ namespace httplib::server
         std::unique_ptr<server::sse_writer> create_sse_writer();
         std::unique_ptr<server::ndjson_writer> create_ndjson_writer();
 
-        // 低层流式写响应：write_header 后逐段 write_body（可配合 Content-Encoding 压缩）
-        stream_writer* create_stream_writer();
+        /// 低层流式写响应：write_header 后逐段 write_body（可配合 Content-Encoding 压缩）。
+        /// \note 返回共享所有权。writer 只弱持有本 response：response 销毁后（handler 已
+        /// 返回、或把 writer 留给后台任务时），writer 上所有写操作返回
+        /// \c net::error::operation_aborted。写操作必须在 response 存活期内完成。
+        std::shared_ptr<server::stream_writer> create_stream_writer();
 
         class impl;
 
       protected:
-        response(std::unique_ptr<impl>&& _impl);
+        response(std::shared_ptr<impl> _impl);
 
       private:
         friend impl&
@@ -90,7 +98,7 @@ namespace httplib::server
         {
             return *self.impl_;
         }
-        std::unique_ptr<impl> impl_;
+        std::shared_ptr<impl> impl_;
     };
 
 } // namespace httplib::server

@@ -7,6 +7,9 @@
 namespace httplib::server
 {
 
+    /// \brief 服务端 NDJSON 写端，由 response 创建。
+    /// \note 绑定创建它的 response：必须在 response 存活期内使用（即 handler 协程内
+    /// co_await 完成）。response 销毁后所有写操作返回 \c net::error::operation_aborted。
     class HTTPLIB_API ndjson_writer
     {
       public:

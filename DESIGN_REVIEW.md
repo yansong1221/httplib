@@ -419,6 +419,21 @@ const 重载与非常量重载**同语义** —— 经过 `const request&` 传�
 **建议**：sse/ndjson writer 持 `shared_ptr<stream_writer>`，stream_writer 持
 weak/shared `response::impl`；或文档写死「writer 生命周期 ≤ response」并加调试断言。
 
+> **✅ 已修复（2026-10）**：采用「共享所有权 + weak 观察」，三层引用链全部 RAII 化：
+> - `response::impl` 改为 `std::shared_ptr` 持有；`response` 显式删除拷贝，保持原本
+>   因 `unique_ptr` 成员而不可拷贝的语义。
+> - `stream_writer_impl` 持 `std::weak_ptr<response::impl>`，每个入口 `lock()`；response
+>   已销毁时返回 `net::error::operation_aborted`。写操作在 `co_await` 期间持有局部
+>   `shared_ptr`，挂起中析构也不会踩空。
+> - `sse_writer_impl` / `ndjson_writer_impl` 由 `stream_writer*` 改为
+>   `std::shared_ptr<stream_writer>`；`create_stream_writer()` 改为返回
+>   `std::shared_ptr<stream_writer>`（公共 API 变更），SSE/NDJSON 工厂签名不变。
+> 契约：writer 必须在 response 存活期内（handler 协程内）用完。真正支持「handler 返回后
+> 后台继续推事件」需要 session 侧等待流结束的握手（`header_sent` 后当前直接读下一请求），
+> 单列为后续项，不在本条范围内。
+> 回归：`tests/response_test.cpp` 的 stream / sse / ndjson 三条
+> "reports operation_aborted after response destruction"。
+
 ### 2.9 request/response 反向强持有 `http_task`，使用窗口无约束【中】
 
 **证据**：`lib/server/request_impl.hpp:194-198`、`lib/server/response_impl.hpp:209-210` ——
@@ -621,7 +636,7 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 | 6.2 | server `close(reason)` 带 reason，client 恒 `"normal"` | `websocket_conn.hpp:66-76` vs `ws_client.hpp:178-187`、`ws_client_impl.cpp:323` |
 | 6.3 | 三个 writer 的 ec/throw 双重载是机械复制，而 request read 族又是另一套单身形态 | `stream_writer.hpp:24-33`、`sse_writer.hpp:15-35`、`ndjson_writer.hpp:15-19` vs `request.cpp:236-267` |
 | 6.4 | `stream_writer::mode::relay` 是反代内部语义却放公共 API，普通用户写 relay 得理解上游分帧 | `stream_writer.hpp:16-22`、`stream_writer_impl.hpp:37-44` |
-| 6.5 | `stream_writer` 空 statements: `create_stream_writer` 裸指针 vs `create_sse_writer` unique_ptr（同 §2.8） | `response.cpp:179-199` |
+| 6.5 ✅ | `stream_writer` 空 statements: `create_stream_writer` 裸指针 vs `create_sse_writer` unique_ptr（同 §2.8） | `response.cpp:179-199`；已统一为 shared_ptr（低层）/ unique_ptr（高层），内部持 `shared_ptr<stream_writer>` |
 | 6.6 | websocket open handler 抛异常时不关连接、close_handler 不触发；正常路径 close 必回调 —— 生命周期不对称 | `websocket_conn_impl.cpp:238-246`（catch 后 `co_return`，跳过 :274-281） |
 | 6.7 | websocket 读循环无 idle/timeout 定时器（HTTP 路径全程 `expires_after`，WS 没有），半开连接永久占会话表 | `websocket_conn_impl.cpp:248-262` |
 | 6.8 | downloader `download_single` 对永久错误也退避重试；预算耗尽兜底码 `errc::timed_out` 语义错位 | `downloader_impl.cpp:505-514,700`（详见 §3.7） |
@@ -696,7 +711,7 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 |---|---|
 | §三 全部 | 全库统一错误模型（先定契约再机械改写） |
 | §2.7 | const 收口为只读视图 |
-| §2.8 / §6.5 | writer 所有权统一 |
+| §2.8 / §6.5 ✅ | writer 所有权统一（shared_ptr + weak response） |
 | §5.5 | EOF 哨兵歧义 |
 | §2.9 | request/response 使用窗口文档化 + 失效断言 |
 

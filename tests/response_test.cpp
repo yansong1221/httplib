@@ -3,11 +3,15 @@
 #include "httplib/client/error.hpp"
 #include "httplib/client/lazy_request.hpp"
 #include "httplib/server/mount_point_entry.hpp"
+#include "httplib/server/ndjson_writer.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
+#include "httplib/server/sse_writer.hpp"
 #include "httplib/server/stream_writer.hpp"
+#include "server/response_impl.hpp"
 #include <array>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/io_context.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/use_future.hpp>
@@ -17,6 +21,8 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <future>
+#include <memory>
 #include <string>
 
 namespace net = httplib::net;
@@ -142,6 +148,88 @@ TEST_CASE("Response: set_chunked_write_handler with multiple chunks", "[response
             REQUIRE(streamed == "ABC");
             co_return;
         });
+}
+
+TEST_CASE("Response: stream writer reports operation_aborted after response destruction", "[response][stream]")
+{
+    std::shared_ptr<httplib::server::stream_writer> writer;
+    {
+        auto resp = httplib::server::response::impl::create(11, true, nullptr);
+        writer = resp.create_stream_writer();
+        REQUIRE(writer);
+    } // response 析构，writer 仍存活
+
+    net::io_context ioc;
+    auto fut = net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            boost::system::error_code ec;
+            co_await writer->write_header(httplib::status::ok,
+                                          {},
+                                          httplib::server::stream_writer::mode::chunked,
+                                          ec);
+            CHECK(ec == net::error::operation_aborted);
+
+            boost::system::error_code body_ec;
+            co_await writer->write_body(net::buffer("x", 1), false, body_ec);
+            CHECK(body_ec == net::error::operation_aborted);
+        },
+        net::use_future);
+    ioc.run();
+    fut.get();
+}
+
+TEST_CASE("Response: sse writer reports operation_aborted after response destruction", "[response][sse]")
+{
+    std::unique_ptr<httplib::server::sse_writer> sse;
+    {
+        auto resp = httplib::server::response::impl::create(11, true, nullptr);
+        sse = resp.create_sse_writer();
+        REQUIRE(sse);
+    }
+
+    net::io_context ioc;
+    auto fut = net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            boost::system::error_code ec;
+            co_await sse->begin(ec);
+            CHECK(ec == net::error::operation_aborted);
+
+            co_await sse->send_event("x", {}, {}, false, ec);
+            CHECK(ec == net::error::operation_aborted);
+        },
+        net::use_future);
+    ioc.run();
+    fut.get();
+}
+
+TEST_CASE("Response: ndjson writer reports operation_aborted after response destruction", "[response][ndjson]")
+{
+    std::unique_ptr<httplib::server::ndjson_writer> ndjson;
+    {
+        auto resp = httplib::server::response::impl::create(11, true, nullptr);
+        ndjson = resp.create_ndjson_writer();
+        REQUIRE(ndjson);
+    }
+
+    net::io_context ioc;
+    auto fut = net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            boost::system::error_code ec;
+            co_await ndjson->begin(ec);
+            CHECK(ec == net::error::operation_aborted);
+
+            co_await ndjson->write(boost::json::value { "x" }, false, ec);
+            CHECK(ec == net::error::operation_aborted);
+        },
+        net::use_future);
+    ioc.run();
+    fut.get();
 }
 
 #ifdef HTTPLIB_ENABLED_COMPRESS

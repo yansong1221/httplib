@@ -242,7 +242,7 @@ resp.set_form_data_content({
 router.set_http_handler<method::get>(
     "/stream",
     [](server::request&, server::response& resp) -> net::awaitable<void> {
-        auto* writer = resp.create_stream_writer();
+        auto writer = resp.create_stream_writer();   // shared_ptr，弱持有 response
         httplib::headers headers;
         headers.set(httplib::field::content_type, "text/plain");
         co_await writer->write_header(httplib::status::ok, headers,
@@ -268,6 +268,8 @@ router.set_http_handler<method::get>(
 ```
 
 `create_sse_writer()` 返回 `unique_ptr<sse_writer>`。方法：`begin()`、`send_event(data, event, id, more)`、`send_retry(ms, more)`、`send_comment(msg, more)`。每个方法都有带 `error_code&` 的重载。
+
+`stream_writer` / `sse_writer` / `ndjson_writer` 都只弱持有创建它们的 response：必须在 handler 协程内、response 存活期间用完。response 销毁后再写会返回 `net::error::operation_aborted`，不会悬垂。
 
 ### NDJSON（Newline Delimited JSON）
 

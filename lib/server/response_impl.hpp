@@ -215,7 +215,7 @@ namespace httplib::server
         static response
         create(unsigned int version, bool keep_alive, std::shared_ptr<session::http_task> task)
         {
-            auto _impl = std::make_unique<response::impl>(version, keep_alive, std::move(task));
+            auto _impl = std::make_shared<response::impl>(version, keep_alive, std::move(task));
             return response(std::move(_impl));
         }
 

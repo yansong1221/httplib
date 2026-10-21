@@ -2,7 +2,9 @@
 #include "httplib/server/ndjson_writer.hpp"
 #include "httplib/server/stream_writer.hpp"
 #include <boost/json/serialize.hpp>
+#include <memory>
 #include <string>
+#include <utility>
 #include "beast_alias.hpp"
 
 namespace httplib::server
@@ -11,7 +13,8 @@ namespace httplib::server
     class ndjson_writer_impl : public server::ndjson_writer
     {
       public:
-        explicit ndjson_writer_impl(server::stream_writer* cw) : cw_(cw) {}
+        // 共享持有 stream_writer，理由同 sse_writer_impl。
+        explicit ndjson_writer_impl(std::shared_ptr<server::stream_writer> cw) : cw_(std::move(cw)) {}
 
         net::awaitable<void>
         begin() override
@@ -50,7 +53,7 @@ namespace httplib::server
         }
 
       private:
-        server::stream_writer* cw_;
+        std::shared_ptr<server::stream_writer> cw_;
     };
 
 } // namespace httplib::server
