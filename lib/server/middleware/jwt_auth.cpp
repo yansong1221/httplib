@@ -122,27 +122,14 @@ namespace httplib::server::middleware
 #include "httplib/jwt.hpp"
 #include "httplib/server/middleware/jwt_auth.hpp"
 #include <boost/system/error_code.hpp>
-#include <boost/system/system_error.hpp>
-#include <cstdlib>
 #include <memory>
+
+#include "jwt/unavailable.hpp"
 
 namespace httplib::server::middleware
 {
-    namespace
-    {
-        [[noreturn]] inline void
-        unavailable()
-        {
-            throw boost::system::system_error(
-                boost::system::errc::make_error_code(boost::system::errc::protocol_not_supported));
-        }
-
-        [[noreturn]] inline void
-        unavailable_noexcept()
-        {
-            std::abort();
-        }
-    } // namespace
+    using jwt::detail::unavailable;
+    using jwt::detail::unavailable_noexcept;
 
     // PIMPL 替身（同 lib/jwt 各文件桩的说明）
     class jwt_auth_middleware::impl

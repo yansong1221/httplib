@@ -195,30 +195,17 @@ namespace httplib::jwt
 
 #include <boost/json/value.hpp>
 #include <boost/system/error_code.hpp>
-#include <boost/system/system_error.hpp>
 #include <chrono>
-#include <cstdlib>
 #include <functional>
 #include <memory>
 #include <string_view>
 
+#include "unavailable.hpp"
+
 namespace httplib::jwt
 {
-    namespace
-    {
-        [[noreturn]] inline void
-        unavailable()
-        {
-            throw boost::system::system_error(
-                boost::system::errc::make_error_code(boost::system::errc::protocol_not_supported));
-        }
-
-        [[noreturn]] inline void
-        unavailable_noexcept()
-        {
-            std::abort();
-        }
-    } // namespace
+    using detail::unavailable;
+    using detail::unavailable_noexcept;
 
     class verifier::impl
     {

@@ -264,30 +264,17 @@ namespace httplib::jwt
 #include <boost/json/value.hpp>
 #include <boost/system/error_code.hpp>
 #include <boost/system/result.hpp>
-#include <boost/system/system_error.hpp>
 #include <chrono>
-#include <cstdlib>
 #include <memory>
 #include <string>
 #include <string_view>
 
+#include "unavailable.hpp"
+
 namespace httplib::jwt
 {
-    namespace
-    {
-        [[noreturn]] inline void
-        unavailable()
-        {
-            throw boost::system::system_error(
-                boost::system::errc::make_error_code(boost::system::errc::protocol_not_supported));
-        }
-
-        [[noreturn]] inline void
-        unavailable_noexcept()
-        {
-            std::abort();
-        }
-    } // namespace
+    using detail::unavailable;
+    using detail::unavailable_noexcept;
 
     // PIMPL 替身：未启用构建里补齐 unique_ptr<impl> 的完整性（真实 impl 定义在
     // impl.hpp，仅启用构建可见）。impl 只以指针形态出现，空类布局兼容；

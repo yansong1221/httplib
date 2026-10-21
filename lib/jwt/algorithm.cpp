@@ -60,23 +60,15 @@ namespace httplib::jwt
       // （noexcept 入口用 std::abort；与 server_impl.cpp 的 use_ssl 同形态）。
 
 #include <boost/system/error_code.hpp>
-#include <boost/system/system_error.hpp>
-#include <cstdlib>
 #include <memory>
 #include <string>
 #include <string_view>
 
+#include "unavailable.hpp"
+
 namespace httplib::jwt
 {
-    namespace
-    {
-        [[noreturn]] inline void
-        unavailable()
-        {
-            throw boost::system::system_error(
-                boost::system::errc::make_error_code(boost::system::errc::protocol_not_supported));
-        }
-    } // namespace
+    using detail::unavailable;
 
     // HS 家族：name / clone / 构造均为头文件内联，无链接依赖；仅 sign 为
     // out-of-line 定义（vtable 弱符号引用它），此处兜底。
