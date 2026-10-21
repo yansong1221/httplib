@@ -70,6 +70,7 @@ add_httplib_test(httplib_test_http http
     enum_conv_test.cpp
     headers_test.cpp
     http_methods_test.cpp
+    mount_point_test.cpp
     ndjson_test.cpp
     response_test.cpp
     sse_test.cpp

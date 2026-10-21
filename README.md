@@ -686,6 +686,8 @@ router.set_static_mount_point("/secure-storage", "/data",
     middleware::basic_auth_middleware{...});
 ```
 
+目录存在但 URL 没有尾 `/` 时返回 301 补齐；目录不存在不会重定向。带尾 `/` 时只按目录处理（默认文档或目录列表），文件加尾 `/` 返回 404。段内 `%2F` 不会被解释成目录分隔符，而是返回 400。
+
 ## 线程模型
 
 本库基于 Boost.Asio 协程。几条最容易踩的约束：

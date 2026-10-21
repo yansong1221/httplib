@@ -33,6 +33,8 @@ tag；以下变更相对仓库初始状态累积。
 - **URL 解码越界**：`%xx` 解码的边界与非法输入处理。
 - **Range 边界**：畸形 `Range` 头不再越界读。
 - **目录列表注入**：目录 HTML 输出做 escaping，并对符号链接做 containment 约束。
+- **静态目录边界**：mount point 改用 `decoded_segments()` 做前缀匹配与逐段校验；目录存在但
+  URL 无尾 `/` 时 301 补齐；段内 `%2F` 不再变成文件系统目录层级。
 - **CONNECT 开放代理**：默认拒绝 CONNECT（405），启用时走完整 pre/post-routing 管线。
 - **资源上限（DoS）**：统一 header / body / 解压后大小 / multipart 字段数与单 part 大小 /
   Range 段数上限；解压限额只约束**解压产出**，不会被压缩长度预检绕过。

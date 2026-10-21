@@ -31,6 +31,10 @@ namespace httplib::server
         void set_directory_format(dir_format_type type);
         void set_default_document_name(std::vector<std::string> const& default_document_name);
 
+        /// 处理静态文件请求。路径按 request::decoded_segments() 逐段消费：
+        /// - 目录存在但 URL 无尾 '/'：301 补齐；
+        /// - 带尾 '/' 时只按目录处理，文件加尾 '/' 返回 404；
+        /// - 解码后段内包含 '/'（来自 %2F）时返回 400，不会变成目录层级。
         void operator()(request& req, response& resp) const;
 
       private:

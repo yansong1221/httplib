@@ -2,7 +2,6 @@
 #include "compress/compressor.hpp"
 #include "httplib/client/error.hpp"
 #include "httplib/client/lazy_request.hpp"
-#include "httplib/server/mount_point_entry.hpp"
 #include "httplib/server/ndjson_writer.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
@@ -816,258 +815,6 @@ TEST_CASE("Response: keep-alive close response", "[response]")
         });
 }
 
-TEST_CASE("Static mount: serves a file", "[response]")
-{
-    auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static";
-    auto filepath = tmp_dir / "test.txt";
-    std::filesystem::create_directories(tmp_dir);
-    {
-        std::ofstream f(filepath);
-        f << "static content";
-    }
-
-    {
-        run([&](auto& server) { server.router().set_static_mount_point("/static", tmp_dir); },
-            [](auto& client) -> net::awaitable<void>
-            {
-                auto resp = UNWRAP(co_await client.async_get("/static/test.txt"));
-                REQUIRE(resp.result() == httplib::status::ok);
-                REQUIRE(resp.as_string() == "static content");
-                co_return;
-            });
-    }
-
-    std::filesystem::remove_all(tmp_dir);
-}
-
-TEST_CASE("Static mount: returns 404 for non-existent file", "[response]")
-{
-    auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_404";
-    std::filesystem::create_directories(tmp_dir);
-
-    run([&](auto& server) { server.router().set_static_mount_point("/files", tmp_dir); },
-        [](auto& client) -> net::awaitable<void>
-        {
-            auto resp = UNWRAP(co_await client.async_get("/files/nope.txt"));
-            REQUIRE(resp.result() == httplib::status::not_found);
-            co_return;
-        });
-
-    std::filesystem::remove_all(tmp_dir);
-}
-
-TEST_CASE("Static mount: blocks path traversal", "[response]")
-{
-    auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_pt";
-    std::filesystem::create_directories(tmp_dir);
-
-    run([&](auto& server) { server.router().set_static_mount_point("/files", tmp_dir); },
-        [](auto& client) -> net::awaitable<void>
-        {
-            auto resp = UNWRAP(co_await client.async_get("/files/../../../etc/passwd"));
-            REQUIRE(resp.result() == httplib::status::bad_request);
-            co_return;
-        });
-
-    std::filesystem::remove_all(tmp_dir);
-}
-
-TEST_CASE("Static mount: encoded slash does not change mount segment count", "[response]")
-{
-    auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_encoded_slash";
-    std::filesystem::create_directories(tmp_dir);
-    {
-        std::ofstream f(tmp_dir / "test.txt");
-        f << "static content";
-    }
-
-    run([&](auto& server) { server.router().set_static_mount_point("/static", tmp_dir); },
-        [](auto& client) -> net::awaitable<void>
-        {
-            // 正常路径仍然可访问。
-            auto ok = UNWRAP(co_await client.async_get("/static/test.txt"));
-            REQUIRE(ok.result() == httplib::status::ok);
-            REQUIRE(ok.as_string() == "static content");
-
-            // /static%2Ftest.txt 是一个段，不能命中 /static/*。
-            auto not_mounted = UNWRAP(co_await client.async_get("/static%2Ftest.txt"));
-            REQUIRE(not_mounted.result() == httplib::status::not_found);
-
-            // 解码后出现 .. 仍然被 mount point 的路径校验拦截。
-            auto traversal = UNWRAP(co_await client.async_get("/static/..%2Ftest.txt"));
-            REQUIRE(traversal.result() == httplib::status::bad_request);
-
-            co_return;
-        });
-
-    std::filesystem::remove_all(tmp_dir);
-}
-
-TEST_CASE("Static mount: default document index.html", "[response]")
-{
-    auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_dd";
-    std::filesystem::create_directories(tmp_dir);
-    {
-        std::ofstream f(tmp_dir / "index.html");
-        f << "<h1>hello</h1>";
-    }
-
-    {
-        run([&](auto& server) { server.router().set_static_mount_point("/", tmp_dir); },
-            [](auto& client) -> net::awaitable<void>
-            {
-                auto resp = UNWRAP(co_await client.async_get("/"));
-                REQUIRE(resp.result() == httplib::status::ok);
-                REQUIRE(resp.as_string() == "<h1>hello</h1>");
-                co_return;
-            });
-    }
-
-    std::filesystem::remove_all(tmp_dir);
-}
-
-TEST_CASE("Static mount: directory listing via subpath", "[response]")
-{
-    auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_list";
-    auto sub_dir = tmp_dir / "data";
-    std::filesystem::create_directories(sub_dir);
-    {
-        std::ofstream f(sub_dir / "a.txt");
-        f << "a";
-    }
-
-    {
-        run(
-            [&](auto& server)
-            {
-                auto entry = httplib::server::mount_point_entry("/dir", tmp_dir);
-                entry.set_enabled_directory(true);
-                entry.set_directory_format(httplib::server::mount_point_entry::dir_format_type::json);
-                server.router().set_static_mount_point(std::move(entry));
-            },
-            [](auto& client) -> net::awaitable<void>
-            {
-                auto resp = UNWRAP(co_await client.async_get("/dir/data/"));
-                REQUIRE(resp.result() == httplib::status::ok);
-                co_return;
-            });
-    }
-
-    std::filesystem::remove_all(tmp_dir);
-}
-
-TEST_CASE("Static mount: html directory listing escapes target and file names", "[response]")
-{
-    auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_html";
-    std::filesystem::create_directories(tmp_dir);
-    {
-        std::ofstream f(tmp_dir / "a&b.txt");
-        f << "x";
-    }
-
-    {
-        run(
-            [&](auto& server)
-            {
-                // mount point 故意包含 '<' '>'：目录列表的 target 来自请求路径，
-                // 必须被 HTML 转义，不能原样进入 <title>/<h1>。
-                auto entry = httplib::server::mount_point_entry("/<x>", tmp_dir);
-                entry.set_enabled_directory(true);
-                entry.set_directory_format(httplib::server::mount_point_entry::dir_format_type::html);
-                server.router().set_static_mount_point(std::move(entry));
-            },
-            [](auto& client) -> net::awaitable<void>
-            {
-                auto resp = UNWRAP(co_await client.async_get("/<x>/"));
-                REQUIRE(resp.result() == httplib::status::ok);
-                REQUIRE(resp[httplib::field::content_type] == "text/html; charset=utf-8");
-
-                auto body = resp.as_string();
-
-                // target 中的 '<' '>' 必须 HTML 转义。
-                REQUIRE(body.find("&lt;x&gt;") != std::string::npos);
-                REQUIRE(body.find("<x>") == std::string::npos);
-
-                // 文件名中的 '&' 必须 HTML 转义，href 必须 URL 编码。
-                REQUIRE(body.find("a&amp;b.txt") != std::string::npos);
-                REQUIRE(body.find("a%26b.txt") != std::string::npos);
-
-                co_return;
-            });
-    }
-
-    std::filesystem::remove_all(tmp_dir);
-}
-
-TEST_CASE("Static mount: symlink escaping base dir is blocked", "[response]")
-{
-    auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_symlink";
-    auto out_dir = std::filesystem::temp_directory_path() / "httplib_static_symlink_out";
-    std::filesystem::create_directories(tmp_dir);
-    std::filesystem::create_directories(out_dir);
-    {
-        std::ofstream f(out_dir / "secret.txt");
-        f << "secret";
-    }
-    std::error_code ec;
-    std::filesystem::create_symlink(out_dir / "secret.txt", tmp_dir / "link.txt", ec);
-    if (ec)
-    {
-        SKIP("symlink creation not permitted");
-    }
-
-    run([&](auto& server) { server.router().set_static_mount_point("/files", tmp_dir); },
-        [](auto& client) -> net::awaitable<void>
-        {
-            auto resp = UNWRAP(co_await client.async_get("/files/link.txt"));
-            REQUIRE(resp.result() != httplib::status::ok);
-            co_return;
-        });
-
-    std::filesystem::remove_all(tmp_dir);
-    std::filesystem::remove_all(out_dir);
-}
-
-TEST_CASE("Static mount: non-existent file returns 404 via mount", "[response]")
-{
-    auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_no";
-    std::filesystem::create_directories(tmp_dir);
-
-    run([&](auto& server) { server.router().set_static_mount_point("/pub", tmp_dir); },
-        [](auto& client) -> net::awaitable<void>
-        {
-            auto resp = UNWRAP(co_await client.async_get("/pub/nope.txt"));
-            REQUIRE(resp.result() == httplib::status::not_found);
-            co_return;
-        });
-
-    std::filesystem::remove_all(tmp_dir);
-}
-
-TEST_CASE("Static mount: file in subdirectory", "[response]")
-{
-    auto tmp_dir = std::filesystem::temp_directory_path() / "httplib_static_sub";
-    auto sub_dir = tmp_dir / "sub";
-    std::filesystem::create_directories(sub_dir);
-    {
-        std::ofstream f(sub_dir / "deep.txt");
-        f << "nested";
-    }
-
-    {
-        run([&](auto& server) { server.router().set_static_mount_point("/pub", tmp_dir); },
-            [](auto& client) -> net::awaitable<void>
-            {
-                auto resp = UNWRAP(co_await client.async_get("/pub/sub/deep.txt"));
-                REQUIRE(resp.result() == httplib::status::ok);
-                REQUIRE(resp.as_string() == "nested");
-                co_return;
-            });
-    }
-
-    std::filesystem::remove_all(tmp_dir);
-}
-
 namespace
 {
     constexpr std::string_view kGzipPayload
@@ -1570,31 +1317,34 @@ TEST_CASE("response: HEAD headers match GET when the body length is unknown", "[
         f << "0123456789";
     }
 
-    test_common::test_scaffold sc;
-    auto handler = [&](httplib::server::request& req, httplib::server::response& resp)
-    { resp.set_file_content(tmp_path, req.base()); };
-    sc.server.router().set_http_handler<httplib::method::get>("/head-mr", handler);
-    sc.server.router().set_http_handler<httplib::method::head>("/head-mr", handler);
-    sc.start();
+    {
+        test_common::test_scaffold sc;
+        auto handler = [&](httplib::server::request& req, httplib::server::response& resp)
+        { resp.set_file_content(tmp_path, req.base()); };
+        sc.server.router().set_http_handler<httplib::method::get>("/head-mr", handler);
+        sc.server.router().set_http_handler<httplib::method::head>("/head-mr", handler);
+        sc.start();
 
-    auto head = test_common::raw_request(sc.endpoint,
-                                         "HEAD /head-mr HTTP/1.1\r\nHost: x\r\n"
-                                         "Range: bytes=0-2,5-7\r\nConnection: close\r\n\r\n");
-    auto get = test_common::raw_request(sc.endpoint,
-                                        "GET /head-mr HTTP/1.1\r\nHost: x\r\n"
-                                        "Range: bytes=0-2,5-7\r\nConnection: close\r\n\r\n");
+        auto head = test_common::raw_request(sc.endpoint,
+                                             "HEAD /head-mr HTTP/1.1\r\nHost: x\r\n"
+                                             "Range: bytes=0-2,5-7\r\nConnection: close\r\n\r\n");
+        auto get = test_common::raw_request(sc.endpoint,
+                                            "GET /head-mr HTTP/1.1\r\nHost: x\r\n"
+                                            "Range: bytes=0-2,5-7\r\nConnection: close\r\n\r\n");
+
+        // 关键断言：不得谎报 Content-Length: 0。
+        REQUIRE(test_common::raw_header(head, "Content-Length").empty());
+        // 长度未知时与 GET 同分帧。
+        REQUIRE(test_common::raw_header(head, "Transfer-Encoding") == "chunked");
+        REQUIRE(test_common::raw_header(get, "Transfer-Encoding") == "chunked");
+        // 头之后零字节：这次连终止块都没有，长度未知不再是代价。
+        REQUIRE(head.size() == head.find("\r\n\r\n") + 4);
+        // 同一个 GET 必须真的带出 multipart 文档，证明那个 0 确实是谎报。
+        REQUIRE(get.size() > get.find("\r\n\r\n") + 4);
+        REQUIRE(test_common::raw_header(get, "Content-Type").starts_with("multipart/byteranges"));
+    }
+    // server 已停止，file_source 释放后再删文件；否则 Windows 会因文件仍被占用抛异常。
     std::filesystem::remove(tmp_path);
-
-    // 关键断言：不得谎报 Content-Length: 0。
-    REQUIRE(test_common::raw_header(head, "Content-Length").empty());
-    // 长度未知时与 GET 同分帧。
-    REQUIRE(test_common::raw_header(head, "Transfer-Encoding") == "chunked");
-    REQUIRE(test_common::raw_header(get, "Transfer-Encoding") == "chunked");
-    // 头之后零字节：这次连终止块都没有，长度未知不再是代价。
-    REQUIRE(head.size() == head.find("\r\n\r\n") + 4);
-    // 同一个 GET 必须真的带出 multipart 文档，证明那个 0 确实是谎报。
-    REQUIRE(get.size() > get.find("\r\n\r\n") + 4);
-    REQUIRE(test_common::raw_header(get, "Content-Type").starts_with("multipart/byteranges"));
 }
 
 // 回归：HEAD 应回显 GET 会发的 Content-Length，只是不发 body。

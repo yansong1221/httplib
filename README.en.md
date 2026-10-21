@@ -661,6 +661,10 @@ router.set_static_mount_point("/secure-storage", "/data",
     middleware::basic_auth_middleware{...});
 ```
 
+A URL without a trailing `/` is redirected with 301 only when the directory exists. A trailing `/`
+always means a directory request (default document or listing); a file followed by `/` returns 404.
+A decoded `%2F` inside a segment is rejected with 400 instead of becoming a filesystem separator.
+
 ## Threading Model
 
 This library is built on Boost.Asio coroutines. The constraints most easily tripped over:

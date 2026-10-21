@@ -1,9 +1,10 @@
 #include "httplib/server/mount_point_entry.hpp"
+#include "beast_alias.hpp"
 #include "html/html.h"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
+#include "path_segments.hpp"
 #include "request_impl.hpp"
-#include "beast_alias.hpp"
 
 namespace httplib::server
 {
@@ -12,6 +13,7 @@ namespace httplib::server
     {
         std::string mount_point;
         fs::path base_dir;
+        std::vector<std::string> mount_segments;
         bool enabled_directory = true;
         mount_point_entry::dir_format_type directory_type = mount_point_entry::dir_format_type::json;
         std::vector<std::string> default_document_name = { "index.html", "index.htm" };
@@ -19,63 +21,32 @@ namespace httplib::server
 
     namespace detail
     {
-        inline static bool
-        is_valid_path(std::string_view path)
+        /// mount point 的段按注册 key 的规则归一：去掉首尾 '/'，逐段 trim。
+        /// "/" 与空串都表示根，返回空段列表。
+        inline std::vector<std::string>
+        split_mount_point(std::string_view mount_point)
         {
-            size_t level = 0;
-            size_t i = 0;
-
-            // Skip slash
-            while (i < path.size() && path[i] == '/')
+            while (!mount_point.empty() && mount_point.front() == '/')
             {
-                i++;
+                mount_point.remove_prefix(1);
+            }
+            while (!mount_point.empty() && mount_point.back() == '/')
+            {
+                mount_point.remove_suffix(1);
+            }
+            if (mount_point.empty())
+            {
+                return {};
             }
 
-            while (i < path.size())
+            auto raw = split_path_segments(mount_point);
+            std::vector<std::string> out;
+            out.reserve(raw.size());
+            for (auto seg : raw)
             {
-                // Read component
-                auto beg = i;
-                while (i < path.size() && path[i] != '/')
-                {
-                    if (path[i] == '\0')
-                    {
-                        return false;
-                    }
-                    else if (path[i] == '\\')
-                    {
-                        return false;
-                    }
-                    i++;
-                }
-
-                auto len = i - beg;
-                assert(len > 0);
-
-                if (!path.compare(beg, len, "."))
-                {
-                    ;
-                }
-                else if (!path.compare(beg, len, ".."))
-                {
-                    if (level == 0)
-                    {
-                        return false;
-                    }
-                    level--;
-                }
-                else
-                {
-                    level++;
-                }
-
-                // Skip slash
-                while (i < path.size() && path[i] == '/')
-                {
-                    i++;
-                }
+                out.emplace_back(seg);
             }
-
-            return true;
+            return out;
         }
 
         inline static bool
@@ -114,6 +85,7 @@ namespace httplib::server
     mount_point_entry::mount_point_entry(std::string const& mount_point, fs::path const& base_dir)
         : impl_(std::make_unique<impl>(mount_point, base_dir))
     {
+        impl_->mount_segments = detail::split_mount_point(impl_->mount_point);
     }
     mount_point_entry::mount_point_entry(mount_point_entry const& other) : impl_(std::make_unique<impl>(*other.impl_))
     {
@@ -144,16 +116,68 @@ namespace httplib::server
     void
     mount_point_entry::operator()(request& req, response& res) const
     {
-        auto relative_path = req.path_param<std::string>("*");
-        if (!detail::is_valid_path(relative_path))
+        auto const segments = req.decoded_segments();
+        auto const& mount_segments = impl_->mount_segments;
+
+        if (segments.size() < mount_segments.size())
         {
-            res.set_error_content(status::bad_request);
+            res.set_error_content(status::not_found);
             return;
+        }
+        for (size_t i = 0; i < mount_segments.size(); ++i)
+        {
+            if (segments[i] != mount_segments[i])
+            {
+                res.set_error_content(status::not_found);
+                return;
+            }
+        }
+
+        auto const relative = segments.subspan(mount_segments.size());
+        // 尾随字面 '/' 会保留成一个空段。以它作为“这是一个目录请求”的显式信号，
+        // 不再依赖 fs::path::has_filename() 的平台细节。
+        bool const dir_requested = relative.empty() || relative.back().empty();
+
+        // 直接用段构造 fs::path，避免先把段拼回字符串再解析。
+        // level 只用于拒绝越过 mount 根的 ".."；内部 "a/../b" 仍交给
+        // weakly_canonical() 解析，保持原有语义。
+        size_t level = 0;
+        fs::path relative_path;
+        for (auto const& seg : relative)
+        {
+            // 段内出现 '/' 只可能来自 %2F；它是段内容，不能重新变成目录层级。
+            if (seg.find('/') != std::string::npos || seg.find('\\') != std::string::npos
+                || seg.find('\0') != std::string::npos)
+            {
+                res.set_error_content(status::bad_request);
+                return;
+            }
+
+            // 空段只表示尾斜杠或重复斜杠；尾斜杠已由 dir_requested 单独记录。
+            if (seg.empty() || seg == ".")
+            {
+                continue;
+            }
+
+            if (seg == "..")
+            {
+                if (level == 0)
+                {
+                    res.set_error_content(status::bad_request);
+                    return;
+                }
+                --level;
+            }
+            else
+            {
+                ++level;
+            }
+
+            relative_path /= fs::path(std::u8string_view((char8_t const*)seg.data(), seg.size()));
         }
 
         std::error_code ec;
-        auto path = impl_->base_dir
-                    / fs::path(std::u8string_view((char8_t const*)relative_path.data(), relative_path.size()));
+        auto path = impl_->base_dir / relative_path;
         if (!detail::is_within(path, impl_->base_dir, ec))
         {
             res.set_error_content(status::forbidden);
@@ -165,68 +189,77 @@ namespace httplib::server
             return;
         }
 
-        if (!path.has_filename())
-        {
-            for (auto const& doc_name : impl_->default_document_name)
-            {
-                auto doc_path = path / doc_name;
-
-                boost::system::error_code ec;
-                if (!fs::is_regular_file(doc_path, ec))
-                {
-                    continue;
-                }
-
-                path = doc_path;
-                break;
-            }
-        }
-        if (path.has_filename())
+        if (!dir_requested)
         {
             if (fs::is_regular_file(path, ec))
             {
                 res.set_file_content(path, req.base());
+                return;
             }
-            else
+            if (fs::is_directory(path, ec))
             {
-                res.set_error_content(status::not_found);
+                // 目录存在才补尾斜杠；不存在或普通文件不会走到这里。
+                std::string location(req.path());
+                location += '/';
+
+                auto const target = req.target();
+                if (auto const q = target.find('?'); q != std::string_view::npos)
+                {
+                    location.append(target.substr(q));
+                }
+
+                res.set_redirect(location, status::moved_permanently);
+                return;
             }
+            res.set_error_content(status::not_found);
             return;
         }
-        else if (fs::is_directory(path, ec))
+
+        if (!fs::is_directory(path, ec))
         {
-            if (impl_->enabled_directory)
-            {
-                beast::error_code ec;
-                switch (impl_->directory_type)
-                {
-                    case mount_point_entry::dir_format_type::json:
-                    {
-                        auto doc = html::format_dir_to_json(path, ec);
-                        res.set_json_content(std::move(doc));
-                    }
-                    break;
-                    case mount_point_entry::dir_format_type::html:
-                    {
-                        auto body = html::format_dir_to_html(req.path(), path, ec);
-                        res.set_string_content(body, "text/html; charset=utf-8");
-                    }
-                    break;
-                    default:
-                        break;
-                }
-                if (ec)
-                {
-                    res.set_error_content(status::internal_server_error);
-                }
-            }
-            else
-            {
-                res.set_error_content(status::forbidden);
-            }
+            // 例如 /file.txt/：尾斜杠明确要求目录，不能回退成文件。
+            res.set_error_content(status::not_found);
             return;
         }
-        res.set_error_content(status::forbidden);
+
+        for (auto const& doc_name : impl_->default_document_name)
+        {
+            auto doc_path = path / doc_name;
+            if (fs::is_regular_file(doc_path, ec))
+            {
+                res.set_file_content(doc_path, req.base());
+                return;
+            }
+        }
+
+        if (!impl_->enabled_directory)
+        {
+            res.set_error_content(status::forbidden);
+            return;
+        }
+
+        beast::error_code html_ec;
+        switch (impl_->directory_type)
+        {
+            case mount_point_entry::dir_format_type::json:
+            {
+                auto doc = html::format_dir_to_json(path, html_ec);
+                res.set_json_content(std::move(doc));
+            }
+            break;
+            case mount_point_entry::dir_format_type::html:
+            {
+                auto body = html::format_dir_to_html(req.path(), path, html_ec);
+                res.set_string_content(body, "text/html; charset=utf-8");
+            }
+            break;
+            default:
+                break;
+        }
+        if (html_ec)
+        {
+            res.set_error_content(status::internal_server_error);
+        }
     }
 
     void

@@ -487,7 +487,8 @@ allows 收集并入匹配过程；c) 注册时把尾斜杠归一（或 301 重�
 
 > **✅ a) 已修复（2026-10）**：`request::path()` 改为返回原始编码路径，路由器先按字面 `/`
 > 分段再逐段解码并缓存到 `request::decoded_segments()`，段边界不再因 `%2F` 丢失；
-> `request::decoded_path()` 保留完整解码值，仅供展示/兼容。回归用例覆盖
+> `request::decoded_path()` 保留完整解码值，仅供展示/兼容。mount point 也改为直接消费
+> `decoded_segments()`：目录存在时无尾 `/` 补 301，段内 `%2F` 返回 400。回归用例覆盖
 > `/api%2Fsecret`、`:id = "a/b"`、`%252F` 单次解码、mount point 的 `%2F` 段数与 `..` 校验。
 > b)、c) 仍未处理。
 
