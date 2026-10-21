@@ -87,22 +87,21 @@ namespace httplib::client::http_header_util
     cache_auth_scope(httplib::headers const& headers)
     {
         std::string material;
-        auto append = [&](field f)
+        auto append = [&](std::string_view name)
         {
-            auto v = headers[f];
+            auto v = headers[name];
             if (!v.empty())
             {
-                auto name = http::to_string(enum_conv::to_field(f));
                 material.append(name.data(), name.size());
                 material.push_back(':');
                 material.append(v.data(), v.size());
                 material.push_back('\n');
             }
         };
-        append(field::authorization);
-        append(field::proxy_authorization);
-        append(field::cookie);
-        append(field::cookie2);
+        append("Authorization");
+        append("Proxy-Authorization");
+        append("Cookie");
+        append("Cookie2");
         if (material.empty())
         {
             return {};

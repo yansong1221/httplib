@@ -13,7 +13,7 @@ namespace httplib::client::redirect
         headers.erase(field::authorization);
         headers.erase(field::proxy_authorization);
         headers.erase(field::cookie);
-        headers.erase(field::cookie2);
+        headers.erase("Cookie2");
     }
 
 } // namespace httplib::client::redirect

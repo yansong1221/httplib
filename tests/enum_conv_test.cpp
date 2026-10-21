@@ -18,7 +18,7 @@ namespace
 {
     // method 与 field 的枚举值连续（0 起逐个递增），可按范围穷举。
     constexpr unsigned kMethodCount = 34;
-    constexpr unsigned kFieldCount = 357;
+    constexpr unsigned kFieldCount = 130;
 
     // status 的枚举值就是真实 HTTP 状态码，不连续（200 / 404 / 503 ...），无法按范围
     // 穷举，只能显式列出——这份列表同时把 enums.hpp 里的数值钉在标准码上，那些数字

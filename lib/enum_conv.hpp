@@ -139,18 +139,15 @@ namespace httplib::enum_conv
 
 #define HTTPLIB_FIELD_TABLE(X) \
     X(unknown)                                                                                     \
-    X(a_im)                                                                                        \
     X(accept)                                                                                      \
-    X(accept_additions)                                                                            \
+    X(accept_ch)                                                                                   \
     X(accept_charset)                                                                              \
-    X(accept_datetime)                                                                             \
     X(accept_encoding)                                                                             \
-    X(accept_features)                                                                             \
     X(accept_language)                                                                             \
     X(accept_patch)                                                                                \
     X(accept_post)                                                                                 \
     X(accept_ranges)                                                                               \
-    X(access_control)                                                                              \
+    X(accept_signature)                                                                            \
     X(access_control_allow_credentials)                                                            \
     X(access_control_allow_headers)                                                                \
     X(access_control_allow_methods)                                                                \
@@ -161,340 +158,116 @@ namespace httplib::enum_conv
     X(access_control_request_method)                                                               \
     X(age)                                                                                         \
     X(allow)                                                                                       \
-    X(alpn)                                                                                        \
-    X(also_control)                                                                                \
     X(alt_svc)                                                                                     \
     X(alt_used)                                                                                    \
-    X(alternate_recipient)                                                                         \
-    X(alternates)                                                                                  \
-    X(apparently_to)                                                                               \
-    X(apply_to_redirect_ref)                                                                       \
-    X(approved)                                                                                    \
-    X(archive)                                                                                     \
-    X(archived_at)                                                                                 \
-    X(article_names)                                                                               \
-    X(article_updates)                                                                             \
-    X(authentication_control)                                                                      \
-    X(authentication_info)                                                                         \
-    X(authentication_results)                                                                      \
     X(authorization)                                                                               \
-    X(auto_submitted)                                                                              \
-    X(autoforwarded)                                                                               \
-    X(autosubmitted)                                                                               \
-    X(base)                                                                                        \
-    X(bcc)                                                                                         \
-    X(body)                                                                                        \
-    X(c_ext)                                                                                       \
-    X(c_man)                                                                                       \
-    X(c_opt)                                                                                       \
-    X(c_pep)                                                                                       \
-    X(c_pep_info)                                                                                  \
     X(cache_control)                                                                               \
-    X(caldav_timezones)                                                                            \
-    X(cancel_key)                                                                                  \
-    X(cancel_lock)                                                                                 \
-    X(cc)                                                                                          \
-    X(close)                                                                                       \
-    X(comments)                                                                                    \
-    X(compliance)                                                                                  \
+    X(clear_site_data)                                                                             \
     X(connection)                                                                                  \
-    X(content_alternative)                                                                         \
-    X(content_base)                                                                                \
-    X(content_description)                                                                         \
+    X(content_digest)                                                                              \
     X(content_disposition)                                                                         \
-    X(content_duration)                                                                            \
+    X(content_dpr)                                                                                 \
     X(content_encoding)                                                                            \
-    X(content_features)                                                                            \
-    X(content_id)                                                                                  \
-    X(content_identifier)                                                                          \
     X(content_language)                                                                            \
     X(content_length)                                                                              \
     X(content_location)                                                                            \
-    X(content_md5)                                                                                 \
     X(content_range)                                                                               \
-    X(content_return)                                                                              \
-    X(content_script_type)                                                                         \
-    X(content_style_type)                                                                          \
-    X(content_transfer_encoding)                                                                   \
+    X(content_security_policy)                                                                     \
+    X(content_security_policy_report_only)                                                         \
     X(content_type)                                                                                \
-    X(content_version)                                                                             \
-    X(control)                                                                                     \
-    X(conversion)                                                                                  \
-    X(conversion_with_loss)                                                                        \
     X(cookie)                                                                                      \
-    X(cookie2)                                                                                     \
-    X(cost)                                                                                        \
-    X(dasl)                                                                                        \
+    X(cross_origin_embedder_policy)                                                                \
+    X(cross_origin_opener_policy)                                                                  \
+    X(cross_origin_resource_policy)                                                                \
     X(date)                                                                                        \
-    X(date_received)                                                                               \
-    X(dav)                                                                                         \
-    X(default_style)                                                                               \
-    X(deferred_delivery)                                                                           \
-    X(delivery_date)                                                                               \
-    X(delta_base)                                                                                  \
-    X(depth)                                                                                       \
-    X(derived_from)                                                                                \
-    X(destination)                                                                                 \
-    X(differential_id)                                                                             \
+    X(deprecation)                                                                                 \
+    X(device_memory)                                                                               \
     X(digest)                                                                                      \
-    X(discarded_x400_ipms_extensions)                                                              \
-    X(discarded_x400_mts_extensions)                                                               \
-    X(disclose_recipients)                                                                         \
-    X(disposition_notification_options)                                                            \
-    X(disposition_notification_to)                                                                 \
-    X(distribution)                                                                                \
-    X(dkim_signature)                                                                              \
-    X(dl_expansion_history)                                                                        \
-    X(downgraded_bcc)                                                                              \
-    X(downgraded_cc)                                                                               \
-    X(downgraded_disposition_notification_to)                                                      \
-    X(downgraded_final_recipient)                                                                  \
-    X(downgraded_from)                                                                             \
-    X(downgraded_in_reply_to)                                                                      \
-    X(downgraded_mail_from)                                                                        \
-    X(downgraded_message_id)                                                                       \
-    X(downgraded_original_recipient)                                                               \
-    X(downgraded_rcpt_to)                                                                          \
-    X(downgraded_references)                                                                       \
-    X(downgraded_reply_to)                                                                         \
-    X(downgraded_resent_bcc)                                                                       \
-    X(downgraded_resent_cc)                                                                        \
-    X(downgraded_resent_from)                                                                      \
-    X(downgraded_resent_reply_to)                                                                  \
-    X(downgraded_resent_sender)                                                                    \
-    X(downgraded_resent_to)                                                                        \
-    X(downgraded_return_path)                                                                      \
-    X(downgraded_sender)                                                                           \
-    X(downgraded_to)                                                                               \
-    X(ediint_features)                                                                             \
-    X(eesst_version)                                                                               \
-    X(encoding)                                                                                    \
-    X(encrypted)                                                                                   \
-    X(errors_to)                                                                                   \
+    X(dnt)                                                                                         \
+    X(dpr)                                                                                         \
     X(etag)                                                                                        \
     X(expect)                                                                                      \
+    X(expect_ct)                                                                                   \
     X(expires)                                                                                     \
-    X(expiry_date)                                                                                 \
-    X(ext)                                                                                         \
-    X(followup_to)                                                                                 \
     X(forwarded)                                                                                   \
     X(from)                                                                                        \
-    X(generate_delivery_report)                                                                    \
-    X(getprofile)                                                                                  \
-    X(hobareg)                                                                                     \
     X(host)                                                                                        \
     X(http2_settings)                                                                              \
-    X(if_)                                                                                         \
     X(if_match)                                                                                    \
     X(if_modified_since)                                                                           \
     X(if_none_match)                                                                               \
     X(if_range)                                                                                    \
-    X(if_schedule_tag_match)                                                                       \
     X(if_unmodified_since)                                                                         \
-    X(im)                                                                                          \
-    X(importance)                                                                                  \
-    X(in_reply_to)                                                                                 \
-    X(incomplete_copy)                                                                             \
-    X(injection_date)                                                                              \
-    X(injection_info)                                                                              \
-    X(jabber_id)                                                                                   \
     X(keep_alive)                                                                                  \
-    X(keywords)                                                                                    \
-    X(label)                                                                                       \
-    X(language)                                                                                    \
     X(last_modified)                                                                               \
-    X(latest_delivery_time)                                                                        \
-    X(lines)                                                                                       \
     X(link)                                                                                        \
-    X(list_archive)                                                                                \
-    X(list_help)                                                                                   \
-    X(list_id)                                                                                     \
-    X(list_owner)                                                                                  \
-    X(list_post)                                                                                   \
-    X(list_subscribe)                                                                              \
-    X(list_unsubscribe)                                                                            \
-    X(list_unsubscribe_post)                                                                       \
     X(location)                                                                                    \
-    X(lock_token)                                                                                  \
-    X(man)                                                                                         \
     X(max_forwards)                                                                                \
-    X(memento_datetime)                                                                            \
-    X(message_context)                                                                             \
-    X(message_id)                                                                                  \
-    X(message_type)                                                                                \
-    X(meter)                                                                                       \
-    X(method_check)                                                                                \
-    X(method_check_expires)                                                                        \
-    X(mime_version)                                                                                \
-    X(mmhs_acp127_message_identifier)                                                              \
-    X(mmhs_authorizing_users)                                                                      \
-    X(mmhs_codress_message_indicator)                                                              \
-    X(mmhs_copy_precedence)                                                                        \
-    X(mmhs_exempted_address)                                                                       \
-    X(mmhs_extended_authorisation_info)                                                            \
-    X(mmhs_handling_instructions)                                                                  \
-    X(mmhs_message_instructions)                                                                   \
-    X(mmhs_message_type)                                                                           \
-    X(mmhs_originator_plad)                                                                        \
-    X(mmhs_originator_reference)                                                                   \
-    X(mmhs_other_recipients_indicator_cc)                                                          \
-    X(mmhs_other_recipients_indicator_to)                                                          \
-    X(mmhs_primary_precedence)                                                                     \
-    X(mmhs_subject_indicator_codes)                                                                \
-    X(mt_priority)                                                                                 \
-    X(negotiate)                                                                                   \
-    X(newsgroups)                                                                                  \
-    X(nntp_posting_date)                                                                           \
-    X(nntp_posting_host)                                                                           \
-    X(non_compliance)                                                                              \
-    X(obsoletes)                                                                                   \
-    X(opt)                                                                                         \
-    X(optional)                                                                                    \
-    X(optional_www_authenticate)                                                                   \
-    X(ordering_type)                                                                               \
-    X(organization)                                                                                \
     X(origin)                                                                                      \
-    X(original_encoded_information_types)                                                          \
-    X(original_from)                                                                               \
-    X(original_message_id)                                                                         \
-    X(original_recipient)                                                                          \
-    X(original_sender)                                                                             \
-    X(original_subject)                                                                            \
-    X(originator_return_address)                                                                   \
-    X(overwrite)                                                                                   \
-    X(p3p)                                                                                         \
-    X(path)                                                                                        \
-    X(pep)                                                                                         \
-    X(pep_info)                                                                                    \
-    X(pics_label)                                                                                  \
-    X(position)                                                                                    \
-    X(posting_version)                                                                             \
+    X(origin_agent_cluster)                                                                        \
     X(pragma)                                                                                      \
     X(prefer)                                                                                      \
     X(preference_applied)                                                                          \
-    X(prevent_nondelivery_report)                                                                  \
     X(priority)                                                                                    \
-    X(privicon)                                                                                    \
-    X(profileobject)                                                                               \
-    X(protocol)                                                                                    \
-    X(protocol_info)                                                                               \
-    X(protocol_query)                                                                              \
-    X(protocol_request)                                                                            \
     X(proxy_authenticate)                                                                          \
-    X(proxy_authentication_info)                                                                   \
     X(proxy_authorization)                                                                         \
     X(proxy_connection)                                                                            \
-    X(proxy_features)                                                                              \
-    X(proxy_instruction)                                                                           \
-    X(public_)                                                                                     \
-    X(public_key_pins)                                                                             \
-    X(public_key_pins_report_only)                                                                 \
     X(range)                                                                                       \
-    X(received)                                                                                    \
-    X(received_spf)                                                                                \
-    X(redirect_ref)                                                                                \
-    X(references)                                                                                  \
     X(referer)                                                                                     \
-    X(referer_root)                                                                                \
-    X(relay_version)                                                                               \
-    X(reply_by)                                                                                    \
-    X(reply_to)                                                                                    \
-    X(require_recipient_valid_since)                                                               \
-    X(resent_bcc)                                                                                  \
-    X(resent_cc)                                                                                   \
-    X(resent_date)                                                                                 \
-    X(resent_from)                                                                                 \
-    X(resent_message_id)                                                                           \
-    X(resent_reply_to)                                                                             \
-    X(resent_sender)                                                                               \
-    X(resent_to)                                                                                   \
-    X(resolution_hint)                                                                             \
-    X(resolver_location)                                                                           \
+    X(referrer_policy)                                                                             \
+    X(refresh)                                                                                     \
+    X(report_to)                                                                                   \
+    X(reporting_endpoints)                                                                         \
+    X(repr_digest)                                                                                 \
     X(retry_after)                                                                                 \
-    X(return_path)                                                                                 \
-    X(safe)                                                                                        \
-    X(schedule_reply)                                                                              \
-    X(schedule_tag)                                                                                \
+    X(sec_ch_ua_full_version)                                                                      \
     X(sec_fetch_dest)                                                                              \
     X(sec_fetch_mode)                                                                              \
     X(sec_fetch_site)                                                                              \
     X(sec_fetch_user)                                                                              \
+    X(sec_purpose)                                                                                 \
     X(sec_websocket_accept)                                                                        \
     X(sec_websocket_extensions)                                                                    \
     X(sec_websocket_key)                                                                           \
     X(sec_websocket_protocol)                                                                      \
     X(sec_websocket_version)                                                                       \
-    X(security_scheme)                                                                             \
-    X(see_also)                                                                                    \
-    X(sender)                                                                                      \
-    X(sensitivity)                                                                                 \
     X(server)                                                                                      \
+    X(server_timing)                                                                               \
+    X(service_worker)                                                                              \
+    X(service_worker_allowed)                                                                      \
+    X(service_worker_navigation_preload)                                                           \
     X(set_cookie)                                                                                  \
-    X(set_cookie2)                                                                                 \
-    X(setprofile)                                                                                  \
-    X(sio_label)                                                                                   \
-    X(sio_label_history)                                                                           \
-    X(slug)                                                                                        \
-    X(soapaction)                                                                                  \
-    X(solicitation)                                                                                \
-    X(status_uri)                                                                                  \
+    X(set_login)                                                                                   \
+    X(signature)                                                                                   \
+    X(signature_input)                                                                             \
+    X(sourcemap)                                                                                   \
     X(strict_transport_security)                                                                   \
-    X(subject)                                                                                     \
-    X(subok)                                                                                       \
-    X(subst)                                                                                       \
-    X(summary)                                                                                     \
-    X(supersedes)                                                                                  \
-    X(surrogate_capability)                                                                        \
-    X(surrogate_control)                                                                           \
-    X(tcn)                                                                                         \
     X(te)                                                                                          \
-    X(timeout)                                                                                     \
-    X(title)                                                                                       \
-    X(to)                                                                                          \
-    X(topic)                                                                                       \
+    X(timing_allow_origin)                                                                         \
+    X(tk)                                                                                          \
     X(trailer)                                                                                     \
     X(transfer_encoding)                                                                           \
-    X(ttl)                                                                                         \
-    X(ua_color)                                                                                    \
-    X(ua_media)                                                                                    \
-    X(ua_pixels)                                                                                   \
-    X(ua_resolution)                                                                               \
-    X(ua_windowpixels)                                                                             \
     X(upgrade)                                                                                     \
-    X(urgency)                                                                                     \
-    X(uri)                                                                                         \
+    X(upgrade_insecure_requests)                                                                   \
     X(user_agent)                                                                                  \
-    X(variant_vary)                                                                                \
     X(vary)                                                                                        \
-    X(vbr_info)                                                                                    \
-    X(version)                                                                                     \
     X(via)                                                                                         \
-    X(want_digest)                                                                                 \
+    X(viewport_width)                                                                              \
+    X(want_content_digest)                                                                         \
+    X(want_repr_digest)                                                                            \
     X(warning)                                                                                     \
+    X(width)                                                                                       \
     X(www_authenticate)                                                                            \
-    X(x_archived_at)                                                                               \
-    X(x_device_accept)                                                                             \
-    X(x_device_accept_charset)                                                                     \
-    X(x_device_accept_encoding)                                                                    \
-    X(x_device_accept_language)                                                                    \
-    X(x_device_user_agent)                                                                         \
+    X(x_content_type_options)                                                                      \
+    X(x_dns_prefetch_control)                                                                      \
+    X(x_forwarded_for)                                                                             \
+    X(x_forwarded_host)                                                                            \
+    X(x_forwarded_proto)                                                                           \
     X(x_frame_options)                                                                             \
-    X(x_mittente)                                                                                  \
-    X(x_pgp_sig)                                                                                   \
-    X(x_ricevuta)                                                                                  \
-    X(x_riferimento_message_id)                                                                    \
-    X(x_tiporicevuta)                                                                              \
-    X(x_trasporto)                                                                                 \
-    X(x_verificasicurezza)                                                                         \
-    X(x400_content_identifier)                                                                     \
-    X(x400_content_return)                                                                         \
-    X(x400_content_type)                                                                           \
-    X(x400_mts_identifier)                                                                         \
-    X(x400_originator)                                                                             \
-    X(x400_received)                                                                               \
-    X(x400_recipients)                                                                             \
-    X(x400_trace)                                                                                  \
-    X(xref)
+    X(x_permitted_cross_domain_policies)                                                           \
+    X(x_powered_by)                                                                                \
+    X(x_robots_tag)                                                                                \
+    X(x_xss_protection)
 
     // clang-format on
 
