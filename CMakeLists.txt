@@ -97,7 +97,12 @@ set(HTTPLIB_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lib)
 
 option(HTTPLIB_ENABLED_SSL "HTTLIB ENABLED SSL" OFF)
 option(HTTPLIB_ENABLED_COMPRESS "HTTLIB ENABLED COMPRESS" OFF)
-option(HTTPLIB_ENABLED_DATABASE "HTTLIB ENABLED DATABASE (requires Boost.MySQL 1.85+)" OFF)
+# 数据库核心模块（session/pool/绑定/结果）始终编译，无外部依赖。
+# 以下开关只按需启用具体后端及其依赖；未启用的后端不注册，
+# connect() 会以 unknown_backend 收口。
+option(HTTPLIB_ENABLED_DATABASE_MYSQL "HTTLIB ENABLED DATABASE MySQL backend (requires Boost.MySQL 1.85+)" OFF)
+option(HTTPLIB_ENABLED_DATABASE_SQLITE "HTTLIB ENABLED DATABASE SQLite backend" OFF)
+option(HTTPLIB_ENABLED_DATABASE_ODBC "HTTLIB ENABLED DATABASE ODBC backend" OFF)
 option(HTTPLIB_ENABLED_JWT "HTTLIB ENABLED JWT (delegates jwt-cpp; requires OpenSSL)" ON)
 option(HTTPLIB_ENABLED_EXAMPLES "HTTLIB Build Examples" ${IS_ROOT_PROJECT})
 option(HTTPLIB_ENABLED_TESTS "HTTLIB Build Tests" ${IS_ROOT_PROJECT})
@@ -107,9 +112,16 @@ option(HTTPLIB_SHARED_LIBRARY "HTTLIB Build Shared Library" OFF)
 # 不进导出接口。公共头恒定声明全部 API、零宏，能力缺失在运行期以
 # protocol_not_supported（或 not_supported 错误码）收口。
 set(HTTPLIB_FEATURE_DEFINITIONS "")
-foreach(feature IN ITEMS SSL COMPRESS DATABASE JWT)
+foreach(feature IN ITEMS SSL COMPRESS JWT)
     if(HTTPLIB_ENABLED_${feature})
         list(APPEND HTTPLIB_FEATURE_DEFINITIONS HTTPLIB_ENABLED_${feature})
+    endif()
+endforeach()
+
+# 后端特征位同样只注入 PRIVATE 定义：未启用后端的 TU 整体为空。
+foreach(backend IN ITEMS MYSQL SQLITE ODBC)
+    if(HTTPLIB_ENABLED_DATABASE_${backend})
+        list(APPEND HTTPLIB_FEATURE_DEFINITIONS HTTPLIB_ENABLED_DATABASE_${backend})
     endif()
 endforeach()
 

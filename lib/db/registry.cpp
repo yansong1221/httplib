@@ -63,11 +63,15 @@ namespace httplib::db::detail
         std::call_once(flag,
                        []
                        {
-#ifdef HTTPLIB_ENABLED_DATABASE
+#ifdef HTTPLIB_ENABLED_DATABASE_MYSQL
                            register_mysql_backend();
+#endif
+#ifdef HTTPLIB_ENABLED_DATABASE_SQLITE
                            register_sqlite_backend();
+#endif
+#ifdef HTTPLIB_ENABLED_DATABASE_ODBC
                            register_odbc_backend();
-#endif // HTTPLIB_ENABLED_DATABASE
+#endif
                        });
     }
 

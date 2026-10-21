@@ -1,5 +1,5 @@
 #include "httplib/config.hpp"
-#ifdef HTTPLIB_ENABLED_DATABASE
+#ifdef HTTPLIB_ENABLED_DATABASE_ODBC
 #include "odbc_backend.hpp"
 #include "httplib/db/error.hpp"
 #include "httplib/db/exception.hpp"
@@ -1334,4 +1334,4 @@ namespace httplib::db::detail
     }
 
 } // namespace httplib::db::detail
-#endif // HTTPLIB_ENABLED_DATABASE
+#endif // HTTPLIB_ENABLED_DATABASE_ODBC

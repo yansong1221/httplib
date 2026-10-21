@@ -27,7 +27,7 @@ Version: see `httplib::version()` (`<httplib/version.hpp>`).
 - **Custom middleware** - per-route `before`/`after` aspects, sync (`bool`) or coroutine (`awaitable<bool>`) returns
 - **Reverse proxy** - static or dynamic upstreams, weighted/least-connections load balancing, cookie/referer rewriting, `X-Forwarded-*` headers, request/response interceptors
 - **Client download stack** - `downloader` (resume, progress), `disk_cache` (size/TTL eviction)
-- **Database** - backend-agnostic `session` with parameter binding, prepared statements, transactions and pooling; SQLite / MySQL / ODBC backends (optional, `-DHTTPLIB_ENABLED_DATABASE=ON`)
+- **Database** - backend-agnostic `session` with parameter binding, prepared statements, transactions and pooling; the core is always built, while SQLite / MySQL / ODBC backends are opt-in (`HTTPLIB_ENABLED_DATABASE_*`)
 - **URL utilities** - parsing, resolution, percent encoding, Host/URL assembly
 - **Logging** - integrated spdlog, configurable per-component loggers
 
@@ -49,9 +49,9 @@ Version: see `httplib::version()` (`<httplib/version.hpp>`).
 | fmt | Yes | String formatting |
 | OpenSSL | Optional | SSL/TLS (`HTTPLIB_ENABLED_SSL`) |
 | Boost.Iostreams + Brotli | Optional | Compression (`HTTPLIB_ENABLED_COMPRESS`) |
-| Boost.MySQL (1.85+), Boost.Charconv | Optional | MySQL backend (`HTTPLIB_ENABLED_DATABASE`) |
-| SQLite3 | Optional | SQLite backend (`HTTPLIB_ENABLED_DATABASE`) |
-| ODBC (unixODBC / `odbc32`) | Optional | ODBC backend (`HTTPLIB_ENABLED_DATABASE`) |
+| Boost.MySQL (1.85+), Boost.Charconv | Optional | MySQL backend (`HTTPLIB_ENABLED_DATABASE_MYSQL`) |
+| SQLite3 | Optional | SQLite backend (`HTTPLIB_ENABLED_DATABASE_SQLITE`) |
+| ODBC (unixODBC / `odbc32`) | Optional | ODBC backend (`HTTPLIB_ENABLED_DATABASE_ODBC`) |
 | Catch2, jwt-cpp | Tests only | Test suite |
 
 ## Quick Start
@@ -79,7 +79,9 @@ Labels: `core`, `http`, `client`, `proxy`, `jwt`, `db`.
 |--------|---------|-------------|
 | `HTTPLIB_ENABLED_SSL` | OFF | Enable HTTPS/WSS (OpenSSL) |
 | `HTTPLIB_ENABLED_COMPRESS` | OFF | Enable Brotli compression |
-| `HTTPLIB_ENABLED_DATABASE` | OFF | Enable the database module (Boost.MySQL 1.85+, SQLite3, ODBC) |
+| `HTTPLIB_ENABLED_DATABASE_MYSQL` | OFF | Enable the MySQL backend (Boost.MySQL 1.85+, Boost.Charconv) |
+| `HTTPLIB_ENABLED_DATABASE_SQLITE` | OFF | Enable the SQLite backend (SQLite3) |
+| `HTTPLIB_ENABLED_DATABASE_ODBC` | OFF | Enable the ODBC backend (unixODBC / `odbc32`) |
 | `HTTPLIB_ENABLED_EXAMPLES` | ON (root project) | Build examples |
 | `HTTPLIB_ENABLED_TESTS` | ON (root project) | Build test suite |
 | `HTTPLIB_SHARED_LIBRARY` | OFF | Build as a shared library |
@@ -767,7 +769,17 @@ co_await pc.async_connect("example.com:443", {}, ec);
 
 ## Database
 
-Enable with `-DHTTPLIB_ENABLED_DATABASE=ON`. Backends: `"sqlite"`, `"mysql"`, `"odbc"`.
+The database core (`session`, pooling, binding, result decoding) is always built and needs no
+switch. Enable backends individually:
+
+```bash
+# SQLite only
+cmake .. -DHTTPLIB_ENABLED_DATABASE_SQLITE=ON
+# Other backend options: HTTPLIB_ENABLED_DATABASE_MYSQL / HTTPLIB_ENABLED_DATABASE_ODBC
+```
+
+Backend names: `"sqlite"`, `"mysql"`, `"odbc"`. A backend that was not enabled is not registered,
+so `connect()` / `make_pool()` fail with the `unknown_backend` error code.
 
 ```cpp
 #include <httplib/db/session.hpp>

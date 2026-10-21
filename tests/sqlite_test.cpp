@@ -1,5 +1,5 @@
 #include "httplib/config.hpp"
-#ifdef HTTPLIB_ENABLED_DATABASE
+#ifdef HTTPLIB_ENABLED_DATABASE_SQLITE
 #include "db/render.hpp"
 #include "httplib/db/binder.hpp"
 #include "httplib/db/connection_pool.hpp"
@@ -1101,4 +1101,7 @@ TEST_CASE("db(sqlite): busy_timeout waits for a held write lock", "[db][sqlite]"
         std::rethrow_exception(errB);
     }
 }
+#else
+#include <catch2/catch_test_macros.hpp>
+TEST_CASE("db(sqlite): skipped", "[db][sqlite]") { SKIP("requires HTTPLIB_ENABLED_DATABASE_SQLITE"); }
 #endif

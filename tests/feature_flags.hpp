@@ -23,10 +23,22 @@
 #define HTTPLIB_TEST_COMPRESS 0
 #endif
 
-#ifdef HTTPLIB_ENABLED_DATABASE
-#define HTTPLIB_TEST_DATABASE 1
+#ifdef HTTPLIB_ENABLED_DATABASE_MYSQL
+#define HTTPLIB_TEST_DATABASE_MYSQL 1
 #else
-#define HTTPLIB_TEST_DATABASE 0
+#define HTTPLIB_TEST_DATABASE_MYSQL 0
+#endif
+
+#ifdef HTTPLIB_ENABLED_DATABASE_SQLITE
+#define HTTPLIB_TEST_DATABASE_SQLITE 1
+#else
+#define HTTPLIB_TEST_DATABASE_SQLITE 0
+#endif
+
+#ifdef HTTPLIB_ENABLED_DATABASE_ODBC
+#define HTTPLIB_TEST_DATABASE_ODBC 1
+#else
+#define HTTPLIB_TEST_DATABASE_ODBC 0
 #endif
 
 #include <catch2/catch_test_macros.hpp>
@@ -45,4 +57,28 @@
         {                                                \
             SKIP("requires HTTPLIB_ENABLED_COMPRESS");   \
         }                                                \
+    } while (false)
+
+#define SKIP_WITHOUT_DATABASE_MYSQL()                          \
+    do {                                                       \
+        if (!HTTPLIB_TEST_DATABASE_MYSQL)                      \
+        {                                                      \
+            SKIP("requires HTTPLIB_ENABLED_DATABASE_MYSQL");   \
+        }                                                      \
+    } while (false)
+
+#define SKIP_WITHOUT_DATABASE_SQLITE()                          \
+    do {                                                        \
+        if (!HTTPLIB_TEST_DATABASE_SQLITE)                      \
+        {                                                       \
+            SKIP("requires HTTPLIB_ENABLED_DATABASE_SQLITE");   \
+        }                                                       \
+    } while (false)
+
+#define SKIP_WITHOUT_DATABASE_ODBC()                          \
+    do {                                                      \
+        if (!HTTPLIB_TEST_DATABASE_ODBC)                      \
+        {                                                     \
+            SKIP("requires HTTPLIB_ENABLED_DATABASE_ODBC");   \
+        }                                                     \
     } while (false)

@@ -1,5 +1,5 @@
 ﻿#include "httplib/config.hpp"
-#ifdef HTTPLIB_ENABLED_DATABASE
+#ifdef HTTPLIB_ENABLED_DATABASE_ODBC
 #include "httplib/db/binder.hpp"
 #include "httplib/db/exception.hpp"
 #include "httplib/db/session.hpp"
@@ -571,4 +571,7 @@ TEST_CASE("db(odbc): error paths", "[db][odbc]")
     ioc.run();
     rethrow_or_skip(err);
 }
-#endif // HTTPLIB_ENABLED_DATABASE
+#else
+#include <catch2/catch_test_macros.hpp>
+TEST_CASE("db(odbc): skipped", "[db][odbc]") { SKIP("requires HTTPLIB_ENABLED_DATABASE_ODBC"); }
+#endif // HTTPLIB_ENABLED_DATABASE_ODBC

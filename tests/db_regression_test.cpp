@@ -1,5 +1,4 @@
 #include "httplib/config.hpp"
-#ifdef HTTPLIB_ENABLED_DATABASE
 #include "db/backend.hpp"
 #include "db/registry.hpp"
 #include "db/render.hpp"
@@ -700,4 +699,3 @@ TEST_CASE("db: parameterized multi-statement is rejected at session layer", "[db
             REQUIRE(ctrl->prepare_calls.load() == 1);
         });
 }
-#endif

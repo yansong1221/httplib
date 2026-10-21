@@ -1,6 +1,6 @@
 #pragma once
 #include "httplib/config.hpp"
-#ifdef HTTPLIB_ENABLED_DATABASE
+#ifdef HTTPLIB_ENABLED_DATABASE_ODBC
 
 #include "backend.hpp"
 #include "httplib/db/config.hpp"
@@ -139,4 +139,4 @@ namespace httplib::db::detail
     };
 
 } // namespace httplib::db::detail
-#endif // HTTPLIB_ENABLED_DATABASE
+#endif // HTTPLIB_ENABLED_DATABASE_ODBC

@@ -1,5 +1,5 @@
 #include "httplib/config.hpp"
-#ifdef HTTPLIB_ENABLED_DATABASE
+#ifdef HTTPLIB_ENABLED_DATABASE_MYSQL
 #include "common.hpp"
 #include "httplib/db/config.hpp"
 #include "httplib/db/connection_pool.hpp"
@@ -3007,5 +3007,5 @@ TEST_CASE("db(mysql): multi-row fetch 1000 rows", "[db][mysql]")
 
 #else
 #include <catch2/catch_test_macros.hpp>
-TEST_CASE("db: skipped", "[db]") { SKIP("HTTPLIB_ENABLED_DATABASE not enabled"); }
+TEST_CASE("db(mysql): skipped", "[db][mysql]") { SKIP("requires HTTPLIB_ENABLED_DATABASE_MYSQL"); }
 #endif

@@ -101,15 +101,13 @@ else()
     message(STATUS "HTTPLIB: skipping httplib_test_jwt (HTTPLIB_ENABLED_JWT=OFF)")
 endif()
 
-if(HTTPLIB_ENABLED_DATABASE)
-    add_httplib_test(httplib_test_db db
-        db_bug_test.cpp
-        db_error_test.cpp
-        db_regression_test.cpp
-        mysql_test.cpp
-        odbc_test.cpp
-        sqlite_test.cpp
-    )
-else()
-    message(STATUS "HTTPLIB: skipping httplib_test_db (HTTPLIB_ENABLED_DATABASE=OFF)")
-endif()
+# 数据库核心模块始终编译；各后端套件在自己的 TU 里按后端宏
+# 编译成 skip 用例（see tests/feature_flags.hpp）。
+add_httplib_test(httplib_test_db db
+    db_bug_test.cpp
+    db_error_test.cpp
+    db_regression_test.cpp
+    mysql_test.cpp
+    odbc_test.cpp
+    sqlite_test.cpp
+)

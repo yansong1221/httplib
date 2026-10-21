@@ -78,14 +78,19 @@ if(HTTPLIB_ENABLED_COMPRESS)
 
     target_link_libraries(${MODULE} PRIVATE Boost::iostreams unofficial::brotli::brotlidec unofficial::brotli::brotlienc)
 endif()
-if(HTTPLIB_ENABLED_DATABASE)
+# 数据库核心模块无外部依赖；每个后端只查找/链接自己需要的依赖，
+# 未启用的后端 TU 整体为空。
+if(HTTPLIB_ENABLED_DATABASE_MYSQL)
     find_package(Boost REQUIRED COMPONENTS mysql charconv CONFIG)
-
     target_link_libraries(${MODULE} PRIVATE Boost::mysql Boost::charconv)
+endif()
 
+if(HTTPLIB_ENABLED_DATABASE_SQLITE)
     find_package(unofficial-sqlite3 CONFIG REQUIRED)
     target_link_libraries(${MODULE} PRIVATE unofficial::sqlite3::sqlite3)
+endif()
 
+if(HTTPLIB_ENABLED_DATABASE_ODBC)
     if(WIN32)
         target_link_libraries(${MODULE} PRIVATE odbc32)
     else()

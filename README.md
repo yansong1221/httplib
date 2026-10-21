@@ -27,7 +27,7 @@
 - **自定义中间件** - 每路由的 `before`/`after` aspect，支持同步（`bool`）或协程（`awaitable<bool>`）返回
 - **反向代理** - 静态或动态上游、加权 / 最少连接负载均衡、Cookie/Referer 改写、`X-Forwarded-*` 头、请求/响应拦截器
 - **客户端下载栈** - `downloader`（断点续传、进度）、`disk_cache`（按大小 / TTL 淘汰）
-- **数据库** - 后端无关的 `session`，支持参数绑定、预编译语句、事务与连接池；SQLite / MySQL / ODBC 后端（可选，`-DHTTPLIB_ENABLED_DATABASE=ON`）
+- **数据库** - 后端无关的 `session`，支持参数绑定、预编译语句、事务与连接池；核心模块始终编译，SQLite / MySQL / ODBC 后端按需启用（`HTTPLIB_ENABLED_DATABASE_*`）
 - **URL 工具** - 解析、解析相对路径、百分号编码、Host/URL 拼装
 - **日志** - 集成 spdlog，各组件日志器可配置
 
@@ -49,9 +49,9 @@
 | fmt | 必需 | 字符串格式化 |
 | OpenSSL | 可选 | SSL/TLS（`HTTPLIB_ENABLED_SSL`） |
 | Boost.Iostreams + Brotli | 可选 | 压缩（`HTTPLIB_ENABLED_COMPRESS`） |
-| Boost.MySQL (1.85+), Boost.Charconv | 可选 | MySQL 后端（`HTTPLIB_ENABLED_DATABASE`） |
-| SQLite3 | 可选 | SQLite 后端（`HTTPLIB_ENABLED_DATABASE`） |
-| ODBC（unixODBC / `odbc32`） | 可选 | ODBC 后端（`HTTPLIB_ENABLED_DATABASE`） |
+| Boost.MySQL (1.85+), Boost.Charconv | 可选 | MySQL 后端（`HTTPLIB_ENABLED_DATABASE_MYSQL`） |
+| SQLite3 | 可选 | SQLite 后端（`HTTPLIB_ENABLED_DATABASE_SQLITE`） |
+| ODBC（unixODBC / `odbc32`） | 可选 | ODBC 后端（`HTTPLIB_ENABLED_DATABASE_ODBC`） |
 | Catch2, jwt-cpp | 仅测试 | 测试套件 |
 
 ## 快速开始
@@ -79,7 +79,9 @@ ctest --test-dir build -C Debug -L http  # 按 label 过滤
 |--------|---------|-------------|
 | `HTTPLIB_ENABLED_SSL` | OFF | 启用 HTTPS/WSS（OpenSSL） |
 | `HTTPLIB_ENABLED_COMPRESS` | OFF | 启用 Brotli 压缩 |
-| `HTTPLIB_ENABLED_DATABASE` | OFF | 启用数据库模块（Boost.MySQL 1.85+、SQLite3、ODBC） |
+| `HTTPLIB_ENABLED_DATABASE_MYSQL` | OFF | 启用 MySQL 后端（Boost.MySQL 1.85+、Boost.Charconv） |
+| `HTTPLIB_ENABLED_DATABASE_SQLITE` | OFF | 启用 SQLite 后端（SQLite3） |
+| `HTTPLIB_ENABLED_DATABASE_ODBC` | OFF | 启用 ODBC 后端（unixODBC / `odbc32`） |
 | `HTTPLIB_ENABLED_EXAMPLES` | ON（根项目） | 构建示例 |
 | `HTTPLIB_ENABLED_TESTS` | ON（根项目） | 构建测试套件 |
 | `HTTPLIB_SHARED_LIBRARY` | OFF | 构建为动态库 |
@@ -778,7 +780,15 @@ co_await pc.async_connect("example.com:443", {}, ec);
 
 ## 数据库
 
-使用 `-DHTTPLIB_ENABLED_DATABASE=ON` 启用。后端：`"sqlite"`、`"mysql"`、`"odbc"`。
+数据库核心模块（`session`、连接池、绑定、结果解析）始终编译，无需开关。按需启用后端：
+
+```bash
+# 只启用 SQLite
+cmake .. -DHTTPLIB_ENABLED_DATABASE_SQLITE=ON
+# 其它后端选项：HTTPLIB_ENABLED_DATABASE_MYSQL / HTTPLIB_ENABLED_DATABASE_ODBC
+```
+
+后端名：`"sqlite"`、`"mysql"`、`"odbc"`。未启用的后端未注册，`connect()`/`make_pool()` 会返回 `unknown_backend` 错误码。
 
 ```cpp
 #include <httplib/db/session.hpp>

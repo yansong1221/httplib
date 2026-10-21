@@ -26,11 +26,15 @@ namespace httplib::db::detail
     /// 注册编译进库的默认后端（幂等）。新增后端只需在此登记并提供注册函数。
     void register_backends();
 
-#ifdef HTTPLIB_ENABLED_DATABASE
-    // 各后端提供的注册函数（在各自的实现文件里定义）。
+    // 各后端提供的注册函数（在各自的实现文件里定义）。按后端子开关裁剪。
+#ifdef HTTPLIB_ENABLED_DATABASE_MYSQL
     void register_mysql_backend();
+#endif
+#ifdef HTTPLIB_ENABLED_DATABASE_SQLITE
     void register_sqlite_backend();
+#endif
+#ifdef HTTPLIB_ENABLED_DATABASE_ODBC
     void register_odbc_backend();
-#endif // HTTPLIB_ENABLED_DATABASE
+#endif
 
 } // namespace httplib::db::detail

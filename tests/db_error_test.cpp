@@ -1,5 +1,4 @@
 #include "httplib/config.hpp"
-#ifdef HTTPLIB_ENABLED_DATABASE
 #include "db/backend.hpp"
 #include "db/render.hpp"
 #include "httplib/db/binder.hpp"
@@ -182,5 +181,3 @@ TEST_CASE("db error: unknown backend maps to unknown_backend", "[db][error]")
     REQUIRE(code_thrown_by([&] { (void)db::make_pool(ioc.get_executor(), "no_such_backend", ""); })
             == db::make_error_code(db::error::unknown_backend));
 }
-
-#endif // HTTPLIB_ENABLED_DATABASE

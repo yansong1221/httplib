@@ -1,5 +1,4 @@
 #include "httplib/config.hpp"
-#ifdef HTTPLIB_ENABLED_DATABASE
 // db 模块缺陷复现测试：
 // 每个用例按"正确行为"断言，当前实现下应当失败（FAIL），用于在修复前验证缺陷存在；
 // 修复一个缺陷后对应用例应转绿。运行：httplib_tests.exe "[db][bug]"
@@ -9,6 +8,7 @@
 #include "httplib/db/session.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
+#include "feature_flags.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <chrono>
@@ -54,6 +54,7 @@ namespace
 
 TEST_CASE("db(sqlite/bug): temporal column decls recognized case-insensitively and with modifiers", "[db][sqlite][bug]")
 {
+    SKIP_WITHOUT_DATABASE_SQLITE();
     net::io_context ioc;
     std::exception_ptr err;
     net::co_spawn(
@@ -97,6 +98,7 @@ TEST_CASE("db(sqlite/bug): temporal column decls recognized case-insensitively a
 
 TEST_CASE("db(sqlite/bug): multi-statement SQL executes every statement", "[db][sqlite][bug]")
 {
+    SKIP_WITHOUT_DATABASE_SQLITE();
     net::io_context ioc;
     std::exception_ptr err;
     net::co_spawn(
@@ -117,6 +119,7 @@ TEST_CASE("db(sqlite/bug): multi-statement SQL executes every statement", "[db][
 
 TEST_CASE("db(sqlite/bug): last_insert_id does not leak into SELECT results", "[db][sqlite][bug]")
 {
+    SKIP_WITHOUT_DATABASE_SQLITE();
     net::io_context ioc;
     std::exception_ptr err;
     net::co_spawn(
@@ -139,6 +142,7 @@ TEST_CASE("db(sqlite/bug): last_insert_id does not leak into SELECT results", "[
 
 TEST_CASE("db(sqlite/bug): uint64 binding above INT64_MAX fails instead of wrapping", "[db][sqlite][bug]")
 {
+    SKIP_WITHOUT_DATABASE_SQLITE();
     net::io_context ioc;
     std::exception_ptr err;
     net::co_spawn(
@@ -158,6 +162,7 @@ TEST_CASE("db(sqlite/bug): uint64 binding above INT64_MAX fails instead of wrapp
 
 TEST_CASE("db(sqlite/bug): non-DML statements report zero affected rows", "[db][sqlite][bug]")
 {
+    SKIP_WITHOUT_DATABASE_SQLITE();
     net::io_context ioc;
     std::exception_ptr err;
     net::co_spawn(
@@ -181,6 +186,7 @@ TEST_CASE("db(sqlite/bug): non-DML statements report zero affected rows", "[db][
 
 TEST_CASE("db(sqlite/bug): ping reports a corrupted database file as dead", "[db][sqlite][bug]")
 {
+    SKIP_WITHOUT_DATABASE_SQLITE();
     auto path = (std::filesystem::temp_directory_path() / "httplib_bug_ping.db").string();
     std::error_code ec;
     std::filesystem::remove(path, ec);
@@ -223,6 +229,7 @@ TEST_CASE("db(sqlite/bug): ping reports a corrupted database file as dead", "[db
 
 TEST_CASE("db(sqlite/bug): parameterized multi-statement SQL is rejected", "[db][sqlite][bug]")
 {
+    SKIP_WITHOUT_DATABASE_SQLITE();
     net::io_context ioc;
     std::exception_ptr err;
     net::co_spawn(
@@ -275,6 +282,7 @@ namespace
 
 TEST_CASE("db(odbc/bug): DATETIMEOFFSET column maps to absolute timestamp", "[db][odbc][bug][integration]")
 {
+    SKIP_WITHOUT_DATABASE_ODBC();
     net::io_context ioc;
     std::exception_ptr err;
     net::co_spawn(
@@ -321,6 +329,7 @@ TEST_CASE("db(odbc/bug): DATETIMEOFFSET column maps to absolute timestamp", "[db
 
 TEST_CASE("db(odbc/bug): uint64 binding above INT64_MAX fails explicitly", "[db][odbc][bug][integration]")
 {
+    SKIP_WITHOUT_DATABASE_ODBC();
     net::io_context ioc;
     std::exception_ptr err;
     net::co_spawn(
@@ -343,6 +352,7 @@ TEST_CASE("db(odbc/bug): uint64 binding above INT64_MAX fails explicitly", "[db]
 
 TEST_CASE("db(odbc/bug): column name longer than 1023 chars does not corrupt metadata", "[db][odbc][bug][integration]")
 {
+    SKIP_WITHOUT_DATABASE_ODBC();
     net::io_context ioc;
     std::exception_ptr err;
     net::co_spawn(
@@ -375,4 +385,3 @@ TEST_CASE("db(odbc/bug): column name longer than 1023 chars does not corrupt met
     ioc.run();
     rethrow_or_skip(err, "odbc connect");
 }
-#endif // HTTPLIB_ENABLED_DATABASE
