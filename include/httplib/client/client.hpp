@@ -151,9 +151,10 @@ namespace httplib::client
         /// 线程安全。建议仅在连接空闲时调用。
         bool is_open() const;
 
-        /// \brief 是否存在未结束的 lazy 会话（未发送的 lazy_request，或响应体未读完的
-        /// lazy \ref response）。
-        /// \details 供连接池判断连接是否已可复用；返回 \c false 才可安全发起下一个请求。
+        /// \brief 是否存在未结束的 lazy 会话。
+        /// \details 仅在两种情况下为 \c true：已开始发送且响应头未到（write_impl_），
+        /// 或响应体未读完。仅“持有 writer”不会计入——空闲 writer 不占用连接。
+        /// 供连接池判断连接是否已可复用；返回 \c false 才可安全发起下一个请求。
         /// 可任意线程调用。
         bool has_active_session() const;
 
@@ -169,8 +170,12 @@ namespace httplib::client
 
       public:
         /// \brief 创建一个可延迟发送的请求对象（lazy）。
-        /// \details 返回的 \ref lazy_request 绑定到本 client：在其上发送时写请求体走
-        /// 独立缓冲，与 \ref async_send_request 互斥。同一时刻仍只允许一个请求在途。
+        /// \details 每次调用返回新对象。返回的 \ref lazy_request 绑定到本 client：
+        /// 在其上发送时写请求体走独立缓冲，与 \ref async_send_request 互斥。
+        /// 同一时刻只允许一个请求在途；两个 writer 并发使用（或上一个响应体未读完就
+        /// 开始下一个请求）时，write_header 返回 \c error::already_in_use。
+        /// \note 使用窗口受限于 client（或池 handle）的借出窗口：归还 handle 后不应
+        /// 继续使用先前取得的 writer。创建后未发送的 writer 不占用连接。
         std::shared_ptr<lazy_request> create_lazy_request();
         // ---- core send ----
 

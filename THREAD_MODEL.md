@@ -108,15 +108,19 @@ accept 全部结束
 **同一时刻同一 client 上最多只允许一个请求在途。** eager 请求返回即结束；lazy 请求必须等
 响应体读完（或响应对象析构）才结束。
 
-这个约束**没有做运行时防护**——违反会导致同一 socket 的交错读写，是未定义行为。连接池靠
-`has_active_session()` 判断复用时机（`lib/client/client_impl.h:83`），手动用 client 时
-调用方自负其责。
+lazy 路径有运行期防护：`create_lazy_request()` 返回的 writer 在 `write_header` 时经
+`begin_write()` 登记，若已有另一个 writer 在途、或上一条响应体未读完，返回
+`error::already_in_use`，而不是静默交错读写。eager 路径（`async_send_request` 及其族）仍是
+调用方契约，没有运行时防护。连接池靠 `has_active_session()` 判断复用时机
+（`lib/client/client_impl.h:83`），手动用 client 时调用方自负其责。
 
 ### 3.3 `stream_mutex_` 保护 lazy 会话配对
 
 `std::recursive_mutex stream_mutex_`（`lib/client/client_impl.h:303`）只保护两件事：
-`write_impl_` 与 `read_impl_` 这对 weak_ptr（`lazy_request` / `lazy_response` 的配对关系），
-使用点在 `lib/client/client_impl.cpp:112` 与 `:411`。**它不保护 socket I/O**——I/O 靠 strand。
+`write_impl_` 与 `read_impl_` 这对 weak_ptr（写端 / 读端的**在途标记**：`write_impl_`
+在 `write_header` 开始时登记、响应头到达后注销；`read_impl_` 在响应创建时登记、body 读完后
+注销），使用点在 `has_active_session()`、`begin_write()` 与 `read_response_lazy()`。
+**它不保护 socket I/O**——I/O 靠 strand。
 
 ### 3.4 超时计时
 

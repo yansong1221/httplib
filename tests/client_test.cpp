@@ -1,5 +1,6 @@
 #include "common.hpp"
 #include "httplib/client/client_pool.hpp"
+#include "httplib/client/error.hpp"
 #include "httplib/client/lazy_request.hpp"
 #include "httplib/client/stream_reader.hpp"
 #include "httplib/server/request.hpp"
@@ -692,6 +693,98 @@ TEST_CASE("client: has_active_session after request", "[client]")
             auto resp = UNWRAP(co_await client.async_get("/simple"));
             REQUIRE(resp.result() == httplib::status::ok);
             REQUIRE_FALSE(client.has_active_session());
+        });
+}
+
+TEST_CASE("client: lazy writers are distinct and exclusive", "[client]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/ping",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("pong"sv, "text/plain"); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            // create_lazy_request 是工厂：空闲时每次返回新对象。
+            auto w1 = client.create_lazy_request();
+            auto w2 = client.create_lazy_request();
+            REQUIRE(w1 != w2);
+
+            co_await w1->write_header(httplib::method::get,
+                                      "/ping",
+                                      {},
+                                      httplib::client::lazy_request::mode::relay);
+
+            // 另一个 writer 并发使用被拒绝。
+            boost::system::error_code ec;
+            co_await w2->write_header(httplib::method::get,
+                                      "/ping",
+                                      {},
+                                      httplib::client::lazy_request::mode::relay,
+                                      ec);
+            CHECK(ec == httplib::client::error::already_in_use);
+
+            co_await w1->write_body(net::buffer("", 0), false);
+            auto resp = UNWRAP(co_await w1->read_response());
+            REQUIRE(resp.as_string() == "pong");
+            CHECK_FALSE(client.has_active_session());
+
+            // 完成一次交换后重新登记，同一 writer 可继续使用。
+            co_await w1->write_header(httplib::method::get,
+                                      "/ping",
+                                      {},
+                                      httplib::client::lazy_request::mode::relay);
+            co_await w1->write_body(net::buffer("", 0), false);
+            auto resp2 = UNWRAP(co_await w1->read_response());
+            REQUIRE(resp2.as_string() == "pong");
+        });
+}
+
+TEST_CASE("client: next request waits for the previous response body", "[client]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/ping",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("pong"sv, "text/plain"); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto writer = client.create_lazy_request();
+            co_await writer->write_header(httplib::method::get,
+                                          "/ping",
+                                          {},
+                                          httplib::client::lazy_request::mode::relay);
+            co_await writer->write_body(net::buffer("", 0), false);
+
+            // 只读响应头，body 留下未读。
+            auto resp = UNWRAP(co_await writer->read_response_lazy());
+
+            boost::system::error_code ec;
+            co_await writer->write_header(httplib::method::get,
+                                          "/ping",
+                                          {},
+                                          httplib::client::lazy_request::mode::relay,
+                                          ec);
+            CHECK(ec == httplib::client::error::already_in_use);
+
+            auto body = UNWRAP(co_await resp.read_string());
+            CHECK(body == "pong");
+            CHECK_FALSE(client.has_active_session());
+
+            // body 读完后可继续发送。
+            co_await writer->write_header(httplib::method::get,
+                                          "/ping",
+                                          {},
+                                          httplib::client::lazy_request::mode::relay);
+            co_await writer->write_body(net::buffer("", 0), false);
+            auto resp2 = UNWRAP(co_await writer->read_response());
+            REQUIRE(resp2.as_string() == "pong");
         });
 }
 

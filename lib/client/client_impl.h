@@ -88,6 +88,11 @@ namespace httplib::client
 
         std::shared_ptr<lazy_request> create_lazy_request();
 
+        /// 在 write_header 真正开始发送时登记写端：同一时刻只允许一个写端在途，
+        /// 且上一条响应体未读完时拒绝。成功后 write_impl_ 指向 writer，直到响应头
+        /// 到达（read_response_lazy）才注销。
+        boost::system::error_code begin_write(std::shared_ptr<lazy_request_impl> const& writer);
+
         net::awaitable<http_client::response_result> read_response_lazy(http::verb method);
 
         // body_writer 的连接写入原语：
@@ -304,7 +309,8 @@ namespace httplib::client
         /// 仅由 strand（strand_）串行访问：所有基于 Beast parser 的读取都投递到
         /// strand 后共享该缓冲。
         beast::flat_buffer buffer_;
-        /// 仅由 stream_mutex_ 保护。
+        /// 仅由 stream_mutex_ 保护。登记时机：write_header 开始处；注销时机：
+        /// 响应头到达（写侧结束）。因此“持有但空闲”的 writer 不计入 active。
         std::weak_ptr<lazy_request_impl> write_impl_;
         /// 仅由 stream_mutex_ 保护。
         std::weak_ptr<void> read_impl_;

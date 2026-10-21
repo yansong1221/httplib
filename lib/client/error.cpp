@@ -35,6 +35,8 @@ namespace httplib::client
                         return "handle does not own a connection";
                     case error::not_initialized:
                         return "object is not bound to a stream";
+                    case error::already_in_use:
+                        return "client already has an active request";
                 }
                 return "unknown error";
             }

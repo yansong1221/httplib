@@ -27,6 +27,8 @@ namespace httplib::client
         invalid_handle,
         /// 对象尚未绑定底层流（如空的 response，或已脱离父 client 的 lazy_request）。
         not_initialized,
+        /// 该 client 上已有进行中的请求，或上一条响应体尚未读完。
+        already_in_use,
     };
 
     HTTPLIB_API boost::system::error_code make_error_code(error e);

@@ -12,6 +12,7 @@
 #include <boost/beast/http/serializer.hpp>
 #include <boost/beast/version.hpp>
 #include <limits>
+#include <memory>
 #include "beast_alias.hpp"
 #include "enum_conv.hpp"
 
@@ -19,6 +20,7 @@ namespace httplib::client
 {
     class http_client::impl::lazy_request_impl final
         : public lazy_request
+        , public std::enable_shared_from_this<lazy_request_impl>
         , public httplib::detail::body_writer<true, http_client::impl>
     {
       public:
@@ -49,6 +51,14 @@ namespace httplib::client
             if (!parent_)
             {
                 ec = make_error_code(error::not_initialized);
+                co_return;
+            }
+
+            // 真正开始发送才登记：同一 client 单飞，且上一条响应体必须已读完。
+            // 失败时保持 writer 原状，不修改消息，便于调用方修正后重试。
+            ec = parent_->begin_write(shared_from_this());
+            if (ec)
+            {
                 co_return;
             }
 

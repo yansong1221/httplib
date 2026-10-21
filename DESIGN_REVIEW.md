@@ -260,7 +260,7 @@ if (ec)                      // ← co_return 之后，永不可达
 > 回归：`tests/proxy_test.cpp` 的 "CONNECT: read failure closes the tunnel"（隧道对端先关闭，
 > 断言读失败后 `is_open()` 为 false；未修复时该断言失败）。
 
-### 2.3 连接池归还经 `net::detached` 投递 —— ioContext 停转后连接永久悬挂【高】
+### 2.3 连接池归还经 `net::detached` 投递 —— ioContext 停转后归还被推迟【低 / 契约化】
 
 **证据**：`lib/client/client_pool.cpp:199-211`
 
@@ -281,6 +281,19 @@ void release(std::unique_ptr<http_client> conn)
 
 **建议**：`release()` 先探测 executor 可用性，不可用直接析构 `conn`；或先同步修正计数再投递。
 
+> **➖ 契约化，不修（2026-10）**：结论是「按 Asio 语义，这里没有需要代码兜底的缺陷」。
+>
+> - `stop()` 之后池是终态：`async_acquire` 直接返回 `operation_canceled`，计数不再有使用者；
+>   teardown 没跑也不影响任何可用行为，`impl` 随 context 析构。
+> - 未 `stop()` 时，排队中的归还协程会在 `io_context::restart() + run()` 后自行恢复，
+>   记账、归池、唤醒 waiter 全部照常完成，不需要补偿逻辑。
+> - 两种情况都不存在「永久泄漏」：`io_context` 析构会销毁未执行的 handler，连同捕获的
+>   `conn` 一起回收并关闭 socket。这正是 `async_read(..., callback)` 在 stop 后回调不回来
+>   的同一条规则 —— stop 只停止派发，不取消未完成操作。
+>
+> 因此不引入执行器探测或离线队列，改为契约化：`client_pool.hpp` 的 `stop()` 写明
+> 「先停池、再停执行器」的停止顺序、`stop` 不取消未完成操作、以及停转期间计数不再更新。
+
 ### 2.4 `write_impl_` 永不清理 → 连接永不回池；`create_lazy_request` 复用同一对象【高】
 
 **证据**：
@@ -299,6 +312,18 @@ void release(std::unique_ptr<http_client> conn)
 
 **建议**：`lazy_request` 完成 `read_response*` 时（on_stored 同型回调）在 strand 上
 `write_impl_.reset()`；`create_lazy_request` 语义文档化或改名（`borrow_lazy_request()`）。
+
+> **✅ 已修复（2026-10）**：把「对象寿命」与「会话在途」解耦，改为显式登记/注销。
+> - `write_impl_` 的登记点从「创建」移到 `lazy_request_impl::write_header` 开头
+>   （`begin_write()`），注销点在 `read_response_lazy` 收到响应头之后；空闲 writer、
+>   已完成交换的 writer 都不再计入 `has_active_session()`，连接可正常回池。
+> - `create_lazy_request()` 回归工厂语义：每次返回新对象，不再返回当前在途写端；
+>   单飞与「上一条响应体未读完」由 `begin_write()` 裁决，冲突返回新增的
+>   `error::already_in_use`。
+> - 写失败不注销：连接状态未知，保持 active 让归还时销毁而非回池。
+> 回归：`tests/client_pool_test.cpp` 的 "idle lazy writer does not pin the connection"
+> （修复前 `idle_count() == 0`）、`tests/client_test.cpp` 的 "lazy writers are distinct
+> and exclusive" 与 "next request waits for the previous response body"。
 
 ### 2.5 默认构造的 `response` 半数成员方法是 UB【高】
 
@@ -642,8 +667,8 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 |---|---|
 | §2.1 ✅ | 析构不等待 stop（文档与实现矛盾） |
 | §2.2 ✅ | proxy_client 读失败死代码 |
-| §2.3 | pool 归还 detached spawn |
-| §2.4 | `write_impl_` 永不清理 / create_lazy_request 复用 |
+| §2.3（契约化） | pool 归还 detached spawn（Asio 语义，文档化停止顺序） |
+| §2.4 ✅ | `write_impl_` 永不清理 / create_lazy_request 复用 |
 | §2.5 ✅ | 默认构造 response 半数 UB |
 | §2.6 | per-route aspects 所有权 |
 | §2.10 | reverse_proxy location `/*` 校验 |

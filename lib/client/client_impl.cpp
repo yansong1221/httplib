@@ -169,7 +169,13 @@ namespace httplib::client
                 {
                     co_return ec;
                 }
-                co_return client::response::impl::create(std::move(header_parser), shared_from_this());
+                auto resp = client::response::impl::create(std::move(header_parser), shared_from_this());
+                {
+                    // 响应头已到手，写侧结束；余下的“响应体是否读完”由 read_impl_ 跟踪。
+                    std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
+                    write_impl_.reset();
+                }
+                co_return resp;
             },
             net::use_awaitable);
     }
@@ -409,14 +415,30 @@ namespace httplib::client
     std::shared_ptr<lazy_request>
     http_client::impl::create_lazy_request()
     {
+        // 工厂语义：每次返回新对象。互相排斥不在这里裁决，而由 begin_write() 在
+        // 真正开始发送时判断——这样“创建了但没发”的 writer 不会把连接钉在 active 状态。
+        return std::make_shared<lazy_request_impl>(strand_, shared_from_this());
+    }
+
+    boost::system::error_code
+    http_client::impl::begin_write(std::shared_ptr<lazy_request_impl> const& writer)
+    {
         std::unique_lock<std::recursive_mutex> lck(stream_mutex_);
-        auto sp = write_impl_.lock();
-        if (!sp)
+
+        // 上一条响应体还没读完：这条连接上不能再发下一个请求。
+        if (!read_impl_.expired())
         {
-            sp = std::make_shared<lazy_request_impl>(strand_, shared_from_this());
-            write_impl_ = sp;
+            return make_error_code(error::already_in_use);
         }
-        return sp;
+
+        // 另一个 writer 已经在写或等待响应头。
+        if (auto cur = write_impl_.lock(); cur && cur != writer)
+        {
+            return make_error_code(error::already_in_use);
+        }
+
+        write_impl_ = writer;
+        return {};
     }
 
     net::awaitable<void>
