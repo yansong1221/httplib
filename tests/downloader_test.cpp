@@ -1779,6 +1779,62 @@ TEST_CASE("Downloader: redirect exhaustion reports too_many_redirects", "[downlo
     fs::remove(dl_path, rm_ec);
 }
 
+TEST_CASE("Downloader: redirect exhaustion is not retried", "[downloader]")
+{
+    auto dl_path = fs::temp_directory_path() / "httplib_dl_loop_noretry_out.bin";
+
+    std::atomic<int> hits { 0 };
+
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<httplib::method::get>("/loop",
+                                                       [&](httplib::server::request&, httplib::server::response& resp)
+                                                       {
+                                                           hits.fetch_add(1);
+                                                           resp.set_redirect("/loop", httplib::status::found);
+                                                       });
+    ts.start();
+
+    httplib::client::downloader dl(ts.ioc_, ts.pool);
+    dl.set_config({ .max_retries = 2, .max_redirects = 1, .retry_backoff = std::chrono::milliseconds(0) });
+
+    auto ec = dl.download(ts.url_for_path("/loop"), dl_path).get();
+    REQUIRE(ec == httplib::client::make_error_code(httplib::client::error::too_many_redirects));
+    REQUIRE(dl.current_state() == httplib::client::downloader::state::failed);
+    // max_redirects + 1 requests for the single attempt; the chain is not replayed.
+    REQUIRE(hits.load() == 2);
+
+    std::error_code rm_ec;
+    fs::remove(dl_path, rm_ec);
+}
+
+TEST_CASE("Downloader: negative max_retries still makes one attempt", "[downloader]")
+{
+    auto dl_path = fs::temp_directory_path() / "httplib_dl_negative_retries_out.bin";
+
+    std::atomic<int> hits { 0 };
+
+    dl_test_scaffold ts;
+    ts.router().set_http_handler<httplib::method::get>(
+        "/500",
+        [&](httplib::server::request&, httplib::server::response& resp)
+        {
+            hits.fetch_add(1);
+            resp.set_empty_content(httplib::status::internal_server_error);
+        });
+    ts.start();
+
+    httplib::client::downloader dl(ts.ioc_, ts.pool);
+    dl.set_config({ .max_retries = -1, .retry_backoff = std::chrono::milliseconds(0) });
+
+    auto ec = dl.download(ts.url_for_path("/500"), dl_path).get();
+    REQUIRE(ec == httplib::client::make_error_code(httplib::client::error::http_status));
+    REQUIRE(dl.http_status() == httplib::status::internal_server_error);
+    REQUIRE(hits.load() == 1);
+
+    std::error_code rm_ec;
+    fs::remove(dl_path, rm_ec);
+}
+
 TEST_CASE("Downloader: invalid URL maps to a failed error, not a throw", "[downloader]")
 {
     auto dl_path = fs::temp_directory_path() / "httplib_dl_badurl_out.bin";

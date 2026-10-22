@@ -116,8 +116,9 @@ namespace httplib::client
         ///
         /// Permanent statuses (4xx other than 408/429) fail immediately without
         /// retrying; 408/429 and 5xx are retried up to `config::max_retries`
-        /// times. When the run fails on such a status, http_status() reports
-        /// which one.
+        /// times. Redirect-budget exhaustion and cancellation are also
+        /// conclusive and are not retried. When the run fails on a server
+        /// status, http_status() reports which one.
         ///
         /// At most one run may be in flight per downloader. To download
         /// concurrently, use one downloader per run and share the pool; see the

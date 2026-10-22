@@ -475,7 +475,10 @@ namespace httplib::client
                                       downloader::config const& cfg,
                                       httplib::headers const& base_headers)
     {
-        for (int attempt = 0; attempt <= cfg.max_retries; ++attempt)
+        // Always make at least one attempt. `max_retries < 0` therefore behaves
+        // like zero retries instead of skipping the request and returning a
+        // misleading fallback error.
+        for (int attempt = 0;; ++attempt)
         {
             if (cancelled_.load(std::memory_order_relaxed))
             {
@@ -505,10 +508,15 @@ namespace httplib::client
             auto result = co_await send_request(ui, method::get, req_headers);
             if (!result.has_value())
             {
-                if (attempt == cfg.max_retries)
+                auto ec = result.error();
+                // Cancellation and redirect-budget exhaustion are conclusive:
+                // retrying would replay the whole redirect chain for an answer
+                // that cannot change.
+                if (ec == boost::asio::error::operation_aborted
+                    || ec == make_error_code(error::too_many_redirects)
+                    || attempt >= cfg.max_retries)
                 {
-                    co_return result.error() ? result.error()
-                                             : boost::system::errc::make_error_code(boost::system::errc::timed_out);
+                    co_return ec;
                 }
                 co_await httplib::util::sleep(cfg.retry_backoff * (attempt + 1));
                 continue;
@@ -539,8 +547,7 @@ namespace httplib::client
                 auto retry = co_await send_request(ui, method::get, req_headers);
                 if (!retry.has_value())
                 {
-                    co_return retry.error() ? retry.error()
-                                            : boost::system::errc::make_error_code(boost::system::errc::timed_out);
+                    co_return retry.error();
                 }
                 result = std::move(retry);
                 status = result->response.result();
@@ -575,7 +582,7 @@ namespace httplib::client
                 // Permanent statuses fail at once, and a transient one that has
                 // exhausted the retry budget fails too. The status code travels
                 // in the error; http_status() exposes it as httplib::status too.
-                if (!is_transient_status(status) || attempt == cfg.max_retries)
+                if (!is_transient_status(status) || attempt >= cfg.max_retries)
                 {
                     co_return make_error_code(error::http_status);
                 }
@@ -604,7 +611,7 @@ namespace httplib::client
                 if (auto start = http_header_util::parse_content_range_start(result->response.headers());
                     start.has_value() && *start != existing_size)
                 {
-                    if (attempt == cfg.max_retries)
+                    if (attempt >= cfg.max_retries)
                     {
                         co_return make_error_code(error::protocol_violation);
                     }
@@ -672,7 +679,7 @@ namespace httplib::client
             if (validate_size && file_total > existing_size && session_bytes != file_total - existing_size)
             {
                 co_await disk_.close();
-                if (attempt == cfg.max_retries)
+                if (attempt >= cfg.max_retries)
                 {
                     co_return make_error_code(error::truncated_body);
                 }
@@ -696,8 +703,6 @@ namespace httplib::client
             payload.final_ui = result->final_ui;
             co_return payload;
         }
-
-        co_return boost::system::errc::make_error_code(boost::system::errc::timed_out);
     }
 
     // =========================================================================
