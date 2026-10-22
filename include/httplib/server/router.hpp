@@ -44,6 +44,9 @@ namespace httplib::server
      * 请求 path 先按原始字符串中的 '/' 分段，再对每段单独做百分号解码。因此
      * "%2F" 是段内容而不是段分隔符：`/api%2Fsecret` 不会命中 `/api/secret`。
      * 注册 key 使用解码后的字面文本（如 `/café`、`/a b`），不要写 `%XX` 转义。
+     *
+     * 同一层路径段的匹配优先级为 static > regex > param > wildcard；同类段之间
+     * 按注册顺序。
      */
     class HTTPLIB_API router
     {

@@ -476,26 +476,31 @@ request/response 持有 `shared_ptr<http_task>`；而 `http_task::read_header/re
 参数防穿越（mount_point_entry.cpp:147-161），客户端可以用 `%2F` 拼出预期外段数。
 RFC 3986 里 `%2F` 与 `/` 不同 —— 常规做法是逐段解码而非整条。
 
-**b) 同类节点注册优先级丢失 + 无界回溯 + 404 双遍历**：`lib/server/router_impl.cpp:374-458`
-`match_nodes` 每层按 static→regex→param→wildcard 固定类序尝试，但 param/regex 无序
-vector（:180-260 插入即合并），「先注册的 param 路由优先」契约（Express/cpp-httplib 通行）
-不存在；一类失配回溯重展其他类（:402-435），深混合树失配时可指数级重放；未命中还要
-整树二次遍历收集 allows（:351-368）。
+**b) 动态路由优先级未文档化 + 无界回溯 + 404 双遍历**：`lib/server/router_impl.cpp:374-458`
+`match_nodes` 每层按 static→regex→param→wildcard 固定类序尝试，同类子节点按插入序。
+这是有意设计，但公共文档此前未写明。一类失配回溯重展其他类（:402-435），深混合树
+失配时可指数级重放；未命中还要整树二次遍历收集 allows（:351-368）。
 
 **c) 尾斜杠不对称与段 trim**：`lib/server/router_impl.cpp:108-118` ——
 `util::split`（lib/util/misc.cpp:38-41）对每段 trim + 去头尾分隔符；注册 `/x/` →
 `["x",""]`，请求 `/x` → `["x"]`，互不 404 且文档未写该约定；含空格路径 `/ a /` 等价
 `/a/` 意外命中。
 
-**建议**：a) 逐段解码（`%2F` 保留为段内容）；b) param 子按注册序合并 + 距离优先，
-allows 收集并入匹配过程；c) 注册时把尾斜杠归一（或 301 重定向），split 不要 trim 路径段。
+**建议**：a) 逐段解码（`%2F` 保留为段内容）；b) 文档写明
+static→regex→param→wildcard、同类按注册序，allows 收集并入匹配过程，回溯加去重/步数上限；
+c) 注册时把尾斜杠归一（或 301 重定向），split 不要 trim 路径段。
 
 > **✅ a) 已修复（2026-10）**：`request::path()` 改为返回原始编码路径，路由器先按字面 `/`
 > 分段再逐段解码并缓存到 `request::decoded_segments()`，段边界不再因 `%2F` 丢失；
 > `request::decoded_path()` 保留完整解码值，仅供展示/兼容。mount point 也改为直接消费
 > `decoded_segments()`：目录存在时无尾 `/` 补 301，段内 `%2F` 返回 400。回归用例覆盖
 > `/api%2Fsecret`、`:id = "a/b"`、`%252F` 单次解码、mount point 的 `%2F` 段数与 `..` 校验。
-> b)、c) 仍未处理。
+>
+> **b) / c) 现状（2026-10）**：c) 已采用严格字面分段，尾斜杠精确匹配、不 trim
+> 路径段，测试覆盖单路由不回落、空格段、重复 `/`；b) 的优先级是设计契约
+> （static→regex→param→wildcard，同类按注册序），`router_test.cpp` 的
+> `regex route wins over param route` 与 `dynamic route priority is class-ordered`
+> 锁定该契约；仍待处理的是结构性回溯成本与 404 allows 二次遍历。
 
 ### 2.12 `upstream_group` 健康机制是死代码；on_acquired/on_released 按字符串配对【中】
 
@@ -763,7 +768,7 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 | §2.6 ✅ | per-route aspects 所有权 |
 | §2.10 ✅（文档） | reverse_proxy / ws_forward location 的 `/*` 契约已在头文件与 README 明确 |
 | §2.11a ✅ | `%2F` 逐段解码；`path()` raw + `decoded_segments()` / `decoded_path()` |
-| §2.11b/c | 路由优先级/回溯/allows 双遍历；尾斜杠与 trim |
+| §2.11b（c ✅） | 仅剩结构性回溯 / 404 allows 双遍历；优先级为 static→regex→param→wildcard 契约 |
 | §2.12 ✅ | 上游健康机制已接入：失败标脏 + 被动半开探测；ticket 替代字符串配对 |
 
 ### P2（契约整理）

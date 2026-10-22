@@ -558,6 +558,39 @@ TEST_CASE("Router: trailing slash exact match", "[router]")
         });
 }
 
+TEST_CASE("Router: trailing slash does not fall back to the other form", "[router]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/slash-only/",
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "slash"); });
+            server.router().template set_http_handler<httplib::method::get>(
+                "/plain-only",
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "plain"); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            // 只注册带尾斜杠的路由时，无尾斜杠请求不能回落到它。
+            auto no_slash = UNWRAP(co_await client.async_get("/slash-only"));
+            REQUIRE(no_slash.result() == httplib::status::not_found);
+
+            // 只注册无尾斜杠的路由时，带尾斜杠请求也不能回落到它。
+            auto with_slash = UNWRAP(co_await client.async_get("/plain-only/"));
+            REQUIRE(with_slash.result() == httplib::status::not_found);
+
+            auto slash_hit = UNWRAP(co_await client.async_get("/slash-only/"));
+            REQUIRE(slash_hit.result() == httplib::status::ok);
+            REQUIRE(as_string(slash_hit) == "slash");
+
+            auto plain_hit = UNWRAP(co_await client.async_get("/plain-only"));
+            REQUIRE(plain_hit.result() == httplib::status::ok);
+            REQUIRE(as_string(plain_hit) == "plain");
+            co_return;
+        });
+}
+
 TEST_CASE("Router: returns 404 for missing route", "[router]")
 {
     run([](auto&) {},
@@ -672,6 +705,8 @@ TEST_CASE("Router: same class routes keep registration order", "[router]")
 
 TEST_CASE("Router: regex route wins over param route", "[router]")
 {
+    // 动态路由优先级契约：static -> regex -> param -> wildcard。
+    // 这里 param 先注册、regex 后注册，regex 仍优先；同类节点才看注册顺序。
     run(
         [](auto& server)
         {
@@ -691,6 +726,51 @@ TEST_CASE("Router: regex route wins over param route", "[router]")
             auto param_hit = UNWRAP(co_await client.async_get("/priority/abc"));
             REQUIRE(param_hit.result() == httplib::status::ok);
             REQUIRE(as_string(param_hit) == "param");
+            co_return;
+        });
+}
+
+TEST_CASE("Router: dynamic route priority is class-ordered", "[router]")
+{
+    run(
+        [](auto& server)
+        {
+            // 动态路由优先级按类：regex 先于 param，与注册顺序无关。
+            // 同类节点仍按注册顺序（见 same class routes keep registration order）。
+            server.router().template set_http_handler<httplib::method::get>(
+                "/order-param-first/:id",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { set_text(resp, "param-first"); });
+            server.router().template set_http_handler<httplib::method::get>(
+                "/order-param-first/{id:^\\d+$}",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { set_text(resp, "regex-second"); });
+
+            // regex 先注册、param 后注册：同样由 regex 类优先。
+            server.router().template set_http_handler<httplib::method::get>(
+                "/order-regex-first/{id:^\\d+$}",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { set_text(resp, "regex-first"); });
+            server.router().template set_http_handler<httplib::method::get>(
+                "/order-regex-first/:id",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { set_text(resp, "param-second"); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto param_first = UNWRAP(co_await client.async_get("/order-param-first/42"));
+            REQUIRE(param_first.result() == httplib::status::ok);
+            // 动态路由优先级按类：regex 先于 param；param 先注册也不会抢占。
+            REQUIRE(as_string(param_first) == "regex-second");
+
+            auto regex_first = UNWRAP(co_await client.async_get("/order-regex-first/42"));
+            REQUIRE(regex_first.result() == httplib::status::ok);
+            REQUIRE(as_string(regex_first) == "regex-first");
+
+            // regex 不匹配时，param 仍能兜底。
+            auto fallback = UNWRAP(co_await client.async_get("/order-param-first/abc"));
+            REQUIRE(fallback.result() == httplib::status::ok);
+            REQUIRE(as_string(fallback) == "param-first");
             co_return;
         });
 }
