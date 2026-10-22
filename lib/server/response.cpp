@@ -35,7 +35,7 @@ namespace httplib::server
     void
     response::set(httplib::field name, std::string_view value)
     {
-        impl_->base().set(enum_conv::to_field(name), value);
+        impl_->base().set(enum_conv::field_name(name), value);
     }
 
     void
@@ -47,7 +47,7 @@ namespace httplib::server
     void
     response::insert(httplib::field name, std::string_view value)
     {
-        impl_->base().insert(enum_conv::to_field(name), value);
+        impl_->base().insert(enum_conv::field_name(name), value);
     }
 
     void
@@ -59,7 +59,7 @@ namespace httplib::server
     std::string_view
     response::operator[](httplib::field name) const
     {
-        return impl_->base()[enum_conv::to_field(name)];
+        return impl_->base()[enum_conv::field_name(name)];
     }
 
     std::string_view
@@ -71,7 +71,7 @@ namespace httplib::server
     std::string_view
     response::at(httplib::field name) const
     {
-        return impl_->base().at(enum_conv::to_field(name));
+        return impl_->base().at(enum_conv::field_name(name));
     }
 
     std::string_view
@@ -83,7 +83,7 @@ namespace httplib::server
     bool
     response::has(httplib::field name) const
     {
-        return impl_->base().find(enum_conv::to_field(name)) != impl_->base().end();
+        return impl_->base().find(enum_conv::field_name(name)) != impl_->base().end();
     }
 
     bool
@@ -95,7 +95,7 @@ namespace httplib::server
     void
     response::erase(httplib::field name)
     {
-        impl_->base().erase(enum_conv::to_field(name));
+        impl_->base().erase(enum_conv::field_name(name));
     }
 
     void
@@ -107,7 +107,7 @@ namespace httplib::server
     std::size_t
     response::count(httplib::field name) const
     {
-        return impl_->base().count(enum_conv::to_field(name));
+        return impl_->base().count(enum_conv::field_name(name));
     }
 
     std::size_t

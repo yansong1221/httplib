@@ -1,5 +1,7 @@
 #include "enum_conv.hpp"
 #include <catch2/catch_test_macros.hpp>
+#include <set>
+#include <string_view>
 
 // 名字表在 httplib::enum_conv，Beast 侧类型经 httplib::http 暴露；测试用例统一写
 // enum_conv:: / http::，靠这一行引入，不必逐处写全限定名。
@@ -31,7 +33,7 @@ namespace
     };
 
     // 逐值检查一个方向的全覆盖 + 往返一致。fwd / rev 用 lambda 传入而非函数指针：
-    // to_field 与 to_status 都是重载集，模板无法从重载集推导。
+    // to_status 是重载集，模板无法从重载集推导。
     template <typename Mine, typename Theirs, typename Fwd, typename Rev>
     void check_pair(unsigned count, Fwd fwd, Rev rev)
     {
@@ -59,11 +61,30 @@ TEST_CASE("enum_conv: method 与 http::verb 双向全覆盖")
         [](http::verb v) { return enum_conv::to_method(v); });
 }
 
-TEST_CASE("enum_conv: field 与 http::field 双向全覆盖")
+TEST_CASE("enum_conv: field 与本库字段名字面值双向一致")
 {
-    check_pair<httplib::field, http::field>(
-        kFieldCount, [](httplib::field v) { return enum_conv::to_field(v); },
-        [](http::field v) { return enum_conv::to_field(v); });
+    std::set<std::string_view> names;
+
+    for (unsigned i = 1; i < kFieldCount; ++i)
+    {
+        auto const mine = static_cast<httplib::field>(i);
+        auto const name = enum_conv::field_name(mine);
+
+        CAPTURE(i);
+        REQUIRE_FALSE(name.empty());
+        CHECK(names.insert(name).second);
+        CHECK(enum_conv::field_from_name(name) == mine);
+    }
+
+    CHECK(enum_conv::field_name(httplib::field::unknown).empty());
+}
+
+TEST_CASE("enum_conv: 字段名匹配大小写不敏感")
+{
+    CHECK(enum_conv::field_from_name("content-type") == httplib::field::content_type);
+    CHECK(enum_conv::field_from_name("CONTENT-TYPE") == httplib::field::content_type);
+    CHECK(enum_conv::field_from_name("X-No-Such-Header") == httplib::field::unknown);
+    CHECK(enum_conv::field_from_name("") == httplib::field::unknown);
 }
 
 TEST_CASE("enum_conv: status 与 http::status 双向全覆盖，且数值是标准 HTTP 码")
@@ -84,12 +105,12 @@ TEST_CASE("enum_conv: status 与 http::status 双向全覆盖，且数值是标�
 
 TEST_CASE("enum_conv: 枚举外的数值退回 unknown")
 {
-    // 与 enum_conv.hpp 里那六条 static_assert 同一件事，从调用方角度再验一次，确认
+    // 与 enum_conv.hpp 里的 static_assert 同一件事，从调用方角度再验一次，确认
     // 兜底 return 没被改成 UB。
     CHECK(enum_conv::to_verb(static_cast<httplib::method>(9999)) == http::verb::unknown);
     CHECK(enum_conv::to_method(static_cast<http::verb>(9999)) == httplib::method::unknown);
     CHECK(enum_conv::to_status(static_cast<httplib::status>(9999)) == http::status::unknown);
     CHECK(enum_conv::to_status(static_cast<http::status>(9999)) == httplib::status::unknown);
-    CHECK(enum_conv::to_field(static_cast<httplib::field>(9999)) == http::field::unknown);
-    CHECK(enum_conv::to_field(static_cast<http::field>(9999)) == httplib::field::unknown);
+    CHECK(enum_conv::field_name(static_cast<httplib::field>(9999)).empty());
+    CHECK(enum_conv::field_from_name("X-No-Such-Header") == httplib::field::unknown);
 }

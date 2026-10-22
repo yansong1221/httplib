@@ -30,13 +30,13 @@ namespace httplib
             return header();
         }
 
-        /// \note 枚举外的值也安全退到 \c field::unknown （\c enum_conv 的对照表里
-        /// 每个枚举值另有 \c static_assert 兜底）。勿改回 \c static_cast ：两套
-        /// \c field 枚举各自独立声明，错位时照样编译通过。
+        /// \note 未知字段与枚举外的值都退到 \c field::unknown，名字以
+        /// \ref name_string 为准。这里按线上字段名反查本库的字面值表，
+        /// 不依赖 Beast 的 \c http::field 集合。
         field
         name() const noexcept
         {
-            return enum_conv::to_field(it_->name());
+            return enum_conv::field_from_name(name_string());
         }
 
         std::string_view

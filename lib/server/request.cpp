@@ -54,7 +54,7 @@ namespace httplib::server
     std::string_view
     request::operator[](httplib::field name) const
     {
-        return impl_->get()[enum_conv::to_field(name)];
+        return impl_->get()[enum_conv::field_name(name)];
     }
 
     std::string_view
@@ -66,7 +66,7 @@ namespace httplib::server
     std::string_view
     request::at(httplib::field name) const
     {
-        return impl_->get().at(enum_conv::to_field(name));
+        return impl_->get().at(enum_conv::field_name(name));
     }
 
     std::string_view
@@ -78,7 +78,7 @@ namespace httplib::server
     bool
     request::has(httplib::field name) const
     {
-        return impl_->get().find(enum_conv::to_field(name)) != impl_->get().end();
+        return impl_->get().find(enum_conv::field_name(name)) != impl_->get().end();
     }
 
     bool
@@ -90,7 +90,7 @@ namespace httplib::server
     std::size_t
     request::count(httplib::field name) const
     {
-        return impl_->get().count(enum_conv::to_field(name));
+        return impl_->get().count(enum_conv::field_name(name));
     }
 
     std::size_t

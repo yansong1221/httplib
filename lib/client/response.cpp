@@ -49,7 +49,7 @@ namespace httplib::client
     std::string_view
     response::operator[](httplib::field name) const
     {
-        return impl_ ? std::string_view(impl_->get()[enum_conv::to_field(name)]) : std::string_view{};
+        return impl_ ? std::string_view(impl_->get()[enum_conv::field_name(name)]) : std::string_view{};
     }
 
     std::string_view
@@ -65,7 +65,7 @@ namespace httplib::client
         {
             throw std::out_of_range("response::at: empty response");
         }
-        return impl_->get().at(enum_conv::to_field(name));
+        return impl_->get().at(enum_conv::field_name(name));
     }
 
     std::string_view
@@ -81,7 +81,7 @@ namespace httplib::client
     bool
     response::has(httplib::field name) const
     {
-        return impl_ && impl_->get().find(enum_conv::to_field(name)) != impl_->get().end();
+        return impl_ && impl_->get().find(enum_conv::field_name(name)) != impl_->get().end();
     }
 
     bool
@@ -93,7 +93,7 @@ namespace httplib::client
     std::size_t
     response::count(httplib::field name) const
     {
-        return impl_ ? impl_->get().count(enum_conv::to_field(name)) : 0;
+        return impl_ ? impl_->get().count(enum_conv::field_name(name)) : 0;
     }
 
     std::size_t

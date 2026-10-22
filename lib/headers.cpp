@@ -162,7 +162,7 @@ namespace httplib
     std::string_view
     headers::operator[](field name) const
     {
-        return to_sv(get_impl(*this)[enum_conv::to_field(name)]);
+        return to_sv(get_impl(*this)[enum_conv::field_name(name)]);
     }
 
     std::string_view
@@ -174,7 +174,7 @@ namespace httplib
     std::string_view
     headers::at(field name) const
     {
-        return to_sv(get_impl(*this).at(enum_conv::to_field(name)));
+        return to_sv(get_impl(*this).at(enum_conv::field_name(name)));
     }
 
     std::string_view
@@ -186,7 +186,7 @@ namespace httplib
     void
     headers::set(field name, std::string_view value)
     {
-        get_impl(*this).set(enum_conv::to_field(name), to_bsv(value));
+        get_impl(*this).set(enum_conv::field_name(name), to_bsv(value));
     }
 
     void
@@ -198,7 +198,7 @@ namespace httplib
     void
     headers::insert(field name, std::string_view value)
     {
-        get_impl(*this).insert(enum_conv::to_field(name), to_bsv(value));
+        get_impl(*this).insert(enum_conv::field_name(name), to_bsv(value));
     }
 
     void
@@ -210,7 +210,7 @@ namespace httplib
     void
     headers::erase(field name)
     {
-        get_impl(*this).erase(enum_conv::to_field(name));
+        get_impl(*this).erase(enum_conv::field_name(name));
     }
 
     void
@@ -223,7 +223,7 @@ namespace httplib
     headers::has(field name) const
     {
         auto const& f = get_impl(*this);
-        return f.find(enum_conv::to_field(name)) != f.end();
+        return f.find(enum_conv::field_name(name)) != f.end();
     }
 
     bool
@@ -236,7 +236,7 @@ namespace httplib
     std::size_t
     headers::count(field name) const
     {
-        return get_impl(*this).count(enum_conv::to_field(name));
+        return get_impl(*this).count(enum_conv::field_name(name));
     }
 
     std::size_t
@@ -248,7 +248,7 @@ namespace httplib
     std::vector<std::string_view>
     headers::values(field name) const
     {
-        return collect(get_impl(*this), enum_conv::to_field(name));
+        return collect(get_impl(*this), enum_conv::field_name(name));
     }
 
     std::vector<std::string_view>
