@@ -643,7 +643,7 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 | 5.1 | handler 抛异常时**整条 after 链被跳过**，无 error 钩子 | `router.inl:148-155`（`if (!eptr) ... do_after`）、`router_impl.cpp:161-171`（全局层同样） | 提供 `after(req, resp, error)` 形态，或异常路径保证 after 执行且可读错误 |
 | 5.2 | 全局 `use()` 在路由注册**之后**对新路由不生效，无告警 | `router_impl.cpp:130`（wrap_global 在注册时固化捕获 `global_before_`/`global_after_`） | 改运行期查表；或 run() 校验 use 与注册的时间序 |
 | 5.3 | 405/404 响应不经过任何全局中间件 | `session.cpp:305-313`（未命中直接 `set_error_content`）；限流/CORS/审计对「最常被攻击的 404」不生效 | 全局 before/after 由 session 在派发前显式调用 |
-| 5.4 | accept 循环任何非 EMFILE 错误永久退环，无自愈无上报 | `server_impl.cpp:216-232`（其余错误 `break`） | ECONNABORTED/EINTR 类 continue；异常退出上报 ec |
+| 5.4 ✅ | accept 循环任何非 EMFILE 错误永久退环，无自愈无上报 | `server_impl.cpp:216-232`（其余错误 `break`） | ECONNABORTED/EINTR 类 continue；异常退出上报 ec |
 | 5.5 | SSE/NDJSON 用「空载荷/空 value」当 EOF 哨兵，与合法数据同形 | `sse_reader_impl.hpp:31-36`（EOF := `sse_event{}`）、`ndjson_reader_impl.hpp:88-91`（EOF := null，而 RFC 7464 keep-alive 就是 null 行） | 返回 `result<std::optional<T>>` 或加 `is_eof` 字段 |
 | 5.6 ✅ | `Location: //host/path` 协议相对重定向被当相对路径发给原主机 | `client_impl.cpp:216-251`、`http_header_util.hpp:246-261`（两处独立实现，均只判 `http://`/`https://` 前缀） | 抽出共用 `classify_location()` 处理 `//` 分支 |
 | 5.7 ✅ | 重定向 drain 把 body 整体读进内存（OOM 面） | `client_impl.cpp:209-213`（`read_string()`）、`downloader_impl.cpp:304-311,557-563`（`read_body()`） | 提供 `response::drain()`（空 sink） |
@@ -656,6 +656,10 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 | 5.14 | 正则段缺 `:` 名时 param_name 退化成整个 pattern 堆进 params | `router_impl.cpp:229-247` | 注册期报错 |
 | 5.15 ✅ | `on_released` 字符串配对 miss 时静默 | 见 §2.12；ticket 路径 + miss debug 日志已落地 | 已随 §2.12 修复 |
 
+> **✅ 5.4 已修复（2026-10）**：accept 遇到 `ECONNABORTED` / `ECONNRESET` / `EINTR` /
+> `EAGAIN` / `EWOULDBLOCK` 继续等待；`EMFILE` 保留 100ms 退避；`operation_aborted`
+> 作为停机正常退出；其余错误记录 `error` 日志并返回 ec。
+>
 > **✅ 5.6 已修复（2026-10）**：`client` 与 `downloader` 共用
 > `redirect::classify_location()`；`Location: //host/path` 先继承当前 scheme 再按绝对 URL
 > 解析，authority 变化时仍走跨 origin 的敏感头剥离。

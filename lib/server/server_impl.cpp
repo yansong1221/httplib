@@ -32,6 +32,16 @@ namespace httplib::server
 {
     namespace detail
     {
+        static bool
+        is_transient_accept_error(boost::system::error_code const& ec)
+        {
+            return ec == boost::system::errc::connection_aborted
+                || ec == boost::system::errc::connection_reset
+                || ec == boost::system::errc::interrupted
+                || ec == boost::system::errc::operation_would_block
+                || ec == boost::system::errc::resource_unavailable_try_again;
+        }
+
         static std::string
         read_file_fast(fs::path const& path)
         {
@@ -227,6 +237,17 @@ namespace httplib::server
                     {
                         continue;
                     }
+                }
+                else if (detail::is_transient_accept_error(ec))
+                {
+                    // 单次 accept 失败不应永久减少 acceptor；继续等待下一条连接。
+                    get_logger()->trace("accept transient error: {}", ec.message());
+                    ec = {};
+                    continue;
+                }
+                else if (ec != net::error::operation_aborted)
+                {
+                    get_logger()->error("accept failed: {}", ec.message());
                 }
                 break;
             }
