@@ -302,6 +302,17 @@ TEST_CASE("Router: path(), decoded_path() and decoded_segments()", "[router]")
                     }
                     set_text(resp, segments);
                 });
+            server.router().template set_http_handler<httplib::method::get>(
+                "/",
+                [](httplib::server::request& req, httplib::server::response& resp)
+                {
+                    std::string segments;
+                    for (auto const& seg : req.decoded_segments())
+                    {
+                        segments += "[" + seg + "]";
+                    }
+                    set_text(resp, segments);
+                });
         },
         [](auto& client) -> net::awaitable<void>
         {
@@ -317,6 +328,11 @@ TEST_CASE("Router: path(), decoded_path() and decoded_segments()", "[router]")
             auto r3 = UNWRAP(co_await client.async_get("/segments/a%2Fb/"));
             REQUIRE(r3.result() == httplib::status::ok);
             REQUIRE(as_string(r3) == "[segments][a/b][]");
+
+            // 根路径只有一个空段，不再产生两个。
+            auto root = UNWRAP(co_await client.async_get("/"));
+            REQUIRE(root.result() == httplib::status::ok);
+            REQUIRE(as_string(root) == "[]");
 
             co_return;
         });
@@ -549,6 +565,207 @@ TEST_CASE("Router: returns 404 for missing route", "[router]")
         {
             auto resp = UNWRAP(co_await client.async_get("/nonexistent"));
             REQUIRE(resp.result() == httplib::status::not_found);
+            co_return;
+        });
+}
+
+TEST_CASE("Router: strict segment split preserves spaces", "[router]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/strict/ a /",
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "spaced"); });
+            server.router().template set_http_handler<httplib::method::get>(
+                "/strict/a/",
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "plain"); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            // 字面空格是段内容，不能 trim 后命中 /strict/a/。
+            auto spaced = UNWRAP(co_await client.async_get("/strict/%20a%20/"));
+            REQUIRE(spaced.result() == httplib::status::ok);
+            REQUIRE(as_string(spaced) == "spaced");
+
+            auto plain = UNWRAP(co_await client.async_get("/strict/a/"));
+            REQUIRE(plain.result() == httplib::status::ok);
+            REQUIRE(as_string(plain) == "plain");
+            co_return;
+        });
+}
+
+TEST_CASE("Router: repeated slash is a distinct segment", "[router]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/dup/a/b",
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "single"); });
+            server.router().template set_http_handler<httplib::method::get>(
+                "/dup/a//b",
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "double"); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto single = UNWRAP(co_await client.async_get("/dup/a/b"));
+            REQUIRE(single.result() == httplib::status::ok);
+            REQUIRE(as_string(single) == "single");
+
+            auto doubled = UNWRAP(co_await client.async_get("/dup/a//b"));
+            REQUIRE(doubled.result() == httplib::status::ok);
+            REQUIRE(as_string(doubled) == "double");
+            co_return;
+        });
+}
+
+TEST_CASE("Router: static dead end falls back to param", "[router]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/fallback/all/end",
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "static"); });
+            server.router().template set_http_handler<httplib::method::get>(
+                "/fallback/:id/other",
+                [](httplib::server::request& req, httplib::server::response& resp)
+                { set_text(resp, "param-" + std::string(req.path_param("id"))); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto static_hit = UNWRAP(co_await client.async_get("/fallback/all/end"));
+            REQUIRE(static_hit.result() == httplib::status::ok);
+            REQUIRE(as_string(static_hit) == "static");
+
+            // 静态分支 all 走到 other 是死路，必须回退到 :id。
+            auto param_hit = UNWRAP(co_await client.async_get("/fallback/all/other"));
+            REQUIRE(param_hit.result() == httplib::status::ok);
+            REQUIRE(as_string(param_hit) == "param-all");
+            co_return;
+        });
+}
+
+TEST_CASE("Router: same class routes keep registration order", "[router]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/ordered/:first",
+                [](httplib::server::request& req, httplib::server::response& resp)
+                { set_text(resp, "first-" + std::string(req.path_param("first"))); });
+            server.router().template set_http_handler<httplib::method::get>(
+                "/ordered/:second",
+                [](httplib::server::request& req, httplib::server::response& resp)
+                { set_text(resp, "second-" + std::string(req.path_param("second"))); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto resp = UNWRAP(co_await client.async_get("/ordered/x"));
+            REQUIRE(resp.result() == httplib::status::ok);
+            REQUIRE(as_string(resp) == "first-x");
+            co_return;
+        });
+}
+
+TEST_CASE("Router: regex route wins over param route", "[router]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/priority/:id",
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "param"); });
+            server.router().template set_http_handler<httplib::method::get>(
+                "/priority/{id:^\\d+$}",
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "regex"); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto regex_hit = UNWRAP(co_await client.async_get("/priority/42"));
+            REQUIRE(regex_hit.result() == httplib::status::ok);
+            REQUIRE(as_string(regex_hit) == "regex");
+
+            auto param_hit = UNWRAP(co_await client.async_get("/priority/abc"));
+            REQUIRE(param_hit.result() == httplib::status::ok);
+            REQUIRE(as_string(param_hit) == "param");
+            co_return;
+        });
+}
+
+TEST_CASE("Router: 405 collects methods from all matching branches", "[router]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/allow/:id",
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "get"); });
+            server.router().template set_http_handler<httplib::method::post>(
+                "/allow/{id:^\\d+$}",
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "post"); });
+            server.router().template set_http_handler<httplib::method::patch>(
+                "/allow/42",
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "patch"); });
+            server.router().template set_http_handler<httplib::method::delete_>(
+                "/allow/*",
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "delete"); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            // 静态 /allow/42、regex、param、wildcard 都匹配该 URL；静态分支没有 PUT
+            // 时必须回退，并把四类分支的方法并入同一个 Allow。
+            auto resp = UNWRAP(co_await client.async_put("/allow/42", std::string_view(""), "text/plain"sv));
+            REQUIRE(resp.result() == httplib::status::method_not_allowed);
+            REQUIRE(resp["Allow"] == "DELETE,GET,PATCH,POST");
+            co_return;
+        });
+}
+
+TEST_CASE("Router: wildcard preserves leading empty segment", "[router]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/wild/*",
+                [](httplib::server::request& req, httplib::server::response& resp)
+                { set_text(resp, "[" + std::string(req.path_param("*")) + "]"); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto leading = UNWRAP(co_await client.async_get("/wild//x"));
+            REQUIRE(leading.result() == httplib::status::ok);
+            REQUIRE(as_string(leading) == "[/x]");
+
+            auto middle = UNWRAP(co_await client.async_get("/wild/a//b"));
+            REQUIRE(middle.result() == httplib::status::ok);
+            REQUIRE(as_string(middle) == "[a//b]");
+            co_return;
+        });
+}
+
+TEST_CASE("Router: wildcard requires at least one segment", "[router]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/files/*",
+                [](httplib::server::request& req, httplib::server::response& resp)
+                { set_text(resp, "[" + std::string(req.path_param("*")) + "]"); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            // 尾斜杠产生一个空段，因此 /files/ 命中；/files 没有剩余段。
+            auto slash = UNWRAP(co_await client.async_get("/files/"));
+            REQUIRE(slash.result() == httplib::status::ok);
+            REQUIRE(as_string(slash) == "[]");
+
+            auto bare = UNWRAP(co_await client.async_get("/files"));
+            REQUIRE(bare.result() == httplib::status::not_found);
             co_return;
         });
 }

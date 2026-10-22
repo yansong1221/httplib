@@ -215,6 +215,11 @@ router.set_http_not_found_handler([](server::request& req, server::response& res
 鉴权或文件路径判断；`req.decoded_path()` 返回完整解码字符串（`%2F` 会变成 `/`，
 仅适合展示/兼容，不要用于安全判断）。
 
+分段是严格的：段内空格原样保留，连续 `/` 产生空段，因此 `/a`、`/a/`、`/a//b`
+互不相等；根路径 `/` 只有一个空段。动态路由按「静态段 > 正则约束 > 命名参数 >
+通配符」的顺序匹配，同一类内按注册顺序。通配符 `*` 至少消费一个段，并保留剩余
+路径中的空段（`/files/*` 命中 `/files/`，不命中 `/files`）。
+
 注意：公共 API 使用库自身的枚举 `httplib::method` 与 `httplib::status`（并非 `boost::beast::http`），头字段使用 `httplib::headers` / `httplib::field`，因此 Boost 类型不会泄漏到用户代码中。
 
 ## 响应类型

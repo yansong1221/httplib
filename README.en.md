@@ -216,6 +216,13 @@ decoded segments with boundaries preserved (`["a/b"]`) and is suitable for routi
 authorization, or filesystem checks. `req.decoded_path()` returns the fully decoded
 string (`%2F` becomes `/`), so it is for display/compatibility only.
 
+Segmentation is strict: spaces inside a segment are preserved, consecutive `/`
+produce empty segments, and `/a`, `/a/`, and `/a//b` are all different paths; the
+root path `/` has exactly one empty segment. Dynamic routes match in the order
+static segment > regex constraint > named parameter > wildcard, with registration
+order inside each class. A wildcard `*` consumes at least one segment and preserves
+empty segments in the remainder (`/files/*` matches `/files/`, not `/files`).
+
 Note: the public API uses the library enums `httplib::method` and `httplib::status` (not `boost::beast::http`) and the `httplib::headers` / `httplib::field` types, so Boost types do not leak into user code.
 
 ## Response Types

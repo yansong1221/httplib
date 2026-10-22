@@ -21,7 +21,7 @@ namespace httplib::server
 
     namespace detail
     {
-        /// mount point 的段按注册 key 的规则归一：去掉首尾 '/'，逐段 trim。
+        /// mount point 的段按注册 key 的规则归一：只去掉首尾 '/'，段内空格原样保留。
         /// "/" 与空串都表示根，返回空段列表。
         inline std::vector<std::string>
         split_mount_point(std::string_view mount_point)

@@ -429,7 +429,7 @@ namespace httplib::server
             std::string rest;
             for (size_t i = index; i < segments.size(); ++i)
             {
-                if (!rest.empty())
+                if (i != index)
                 {
                     rest += "/";
                 }
