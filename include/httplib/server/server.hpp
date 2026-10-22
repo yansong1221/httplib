@@ -60,6 +60,14 @@ namespace httplib::server
      *     "stop()" 与 @ref async_stop "async_stop()" 可从任意线程调用，
      *     其返回的 future 在服务器完全停止、所有会话排空后变为就绪。
      *
+     * @par 反向代理 location
+     * @ref set_reverse_proxy "set_reverse_proxy()" 与 @ref set_ws_forward
+     * "set_ws_forward()" 的 @c location 是路由模式，不是裸前缀：@c "/api" 只匹配
+     * 精确路径 @c /api，要覆盖 @c /api 下的子路径必须写 @c "/api/*"。该位置只支持
+     * 静态前缀（末尾可带 @c *），不支持 @c :param 或 @c {name:regex} 等动态段；
+     * 上游路径按字面前缀重写。通配符至少消费一个路径段，因此 @c "/api/*" 不匹配
+     * @c /api 本身；需要同时代理两者时，分别注册 @c "/api" 与 @c "/api/*"。
+     *
      * @note 每个连接在服务器 strand 派生的独立 strand 上执行，连接内串行、连接间并行。
      *       完整拓扑与停机时序见仓库根目录的 \c THREAD_MODEL.md。
      */
@@ -309,7 +317,11 @@ namespace httplib::server
         void set_trusted_proxies(std::vector<std::string> const& cidrs);
 
         /**
-         * @brief 将 location 前缀下的请求反向代理到固定的上游 URL。
+         * @brief 将 location 路由模式匹配到的请求反向代理到固定的上游 URL。
+         *
+         * @par location
+         * 静态前缀；@c "/api" 只匹配精确路径，覆盖子路径用 @c "/api/*"。
+         * 详细规则见类文档的「反向代理 location」。
          *
          * @par 线程安全
          * 配置阶段。必须在服务器启动前调用。
@@ -318,7 +330,8 @@ namespace httplib::server
                                std::string_view url,
                                proxy_interceptor_factory factory = nullptr);
         /**
-         * @brief 将 location 前缀下的请求反向代理，上游由 provider 动态提供。
+         * @brief 将 location 路由模式匹配到的请求反向代理，上游由 provider 动态提供。
+         * location 规则同上一重载。
          *
          * @par 线程安全
          * 配置阶段。必须在服务器启动前调用。
@@ -327,7 +340,8 @@ namespace httplib::server
                                std::shared_ptr<upstream_provider> provider,
                                proxy_interceptor_factory factory = nullptr);
         /**
-         * @brief 将 location 前缀下的请求反向代理到一组后端，按 locator 选择。
+         * @brief 将 location 路由模式匹配到的请求反向代理到一组后端，按 locator 选择。
+         * location 规则同上一重载。
          *
          * @par 线程安全
          * 配置阶段。必须在服务器启动前调用。
@@ -338,15 +352,19 @@ namespace httplib::server
                                proxy_interceptor_factory factory = nullptr);
 
         /**
-         * @brief 将 location 前缀下的 WebSocket 连接转发到固定的上游 URL。
+         * @brief 将 location 路由模式匹配到的 WebSocket 连接转发到固定的上游 URL。
+         *
+         * @par location
+         * 静态前缀；@c "/ws" 只匹配精确路径，覆盖子路径用 @c "/ws/*"。
+         * 详细规则见类文档的「反向代理 location」。
          *
          * @par 线程安全
          * 配置阶段。必须在服务器启动前调用。
          */
         void set_ws_forward(std::string_view location, std::string_view url, ws_interceptor_factory factory = nullptr);
         /**
-         * @brief 将 location 前缀下的 WebSocket 连接转发，上游由 provider
-         * 动态提供。
+         * @brief 将 location 路由模式匹配到的 WebSocket 连接转发，上游由 provider
+         * 动态提供。location 规则同上一重载。
          *
          * @par 线程安全
          * 配置阶段。必须在服务器启动前调用。
@@ -355,8 +373,8 @@ namespace httplib::server
                             std::shared_ptr<upstream_provider> provider,
                             ws_interceptor_factory factory = nullptr);
         /**
-         * @brief 将 location 前缀下的 WebSocket 连接转发到一组后端，按
-         * locator 选择。
+         * @brief 将 location 路由模式匹配到的 WebSocket 连接转发到一组后端，按
+         * locator 选择。location 规则同上一重载。
          *
          * @par 线程安全
          * 配置阶段。必须在服务器启动前调用。

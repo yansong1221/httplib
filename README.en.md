@@ -379,6 +379,9 @@ svr.set_ws_forward("/ws/proxy", "ws://upstream:8080/ws");
 // or a dynamic/load-balanced upstream (see Reverse Proxy) with a ws_interceptor_factory
 ```
 
+`location` uses route matching too: the `"/ws/proxy"` above matches only that exact
+path; use `"/ws/*"` to forward its subpaths.
+
 ## Built-in Middleware
 
 Middleware can be applied per-route (variadic arguments) or globally (`router::use()`). Each middleware provides `bool before(...)` and optionally `after(...)` (sync or coroutine).
@@ -608,6 +611,12 @@ svr.set_reverse_proxy("/api/*",
     std::vector<server::upstream_backend>{ {"http://a:8080"}, {"http://b:8080", 2} },
     server::upstream_locator::least_connections);
 ```
+
+`location` is a route pattern, not a bare prefix: `"/api"` matches only the exact
+path `/api`; use `"/api/*"` to cover its subpaths (`*` consumes at least one segment
+and does not match `/api` itself). Only a static prefix is supported; do not use
+`:param` or `{name:regex}` dynamic segments, because the upstream path is rewritten
+from the literal prefix.
 
 `server::proxy_interceptor` hooks: `on_upstream_request`, `on_upstream_request_body`, `on_upstream_response`, `on_upstream_response_body`. Global middleware applies to proxy routes as well.
 

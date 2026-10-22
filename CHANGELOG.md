@@ -76,6 +76,8 @@ tag；以下变更相对仓库初始状态累积。
   body 类型，提供 `as_string()` / `as_json()` / `as_form_data()` / `as_query_params()`
   类型化访问器。
 - **枚举转换**改为 X-macro 名字表；`fields()` 改为生成器，header 改为 PIMPL 借用视图。
+- **反向代理 location 文档**：明确 `set_reverse_proxy` / `set_ws_forward` 的 location
+  是路由模式；`"/api"` 只匹配精确路径，子树用 `"/api/*"`，且只支持静态前缀。
 - **削减公共头的 Boost 传递依赖**；`ticker` 改用 PIMPL。
 - **新增中间件**：限流、Session、JWT 认证、DB 等。中间件改为「切面」形态：作为
   `set_http_handler` 的尾随可变参数传入，或经 `router::use()` 全局注册，可提供

@@ -376,6 +376,9 @@ svr.set_ws_forward("/ws/proxy", "ws://upstream:8080/ws");
 // 或使用动态 / 负载均衡上游（见"反向代理"），配合 ws_interceptor_factory
 ```
 
+`location` 同样按路由模式匹配：上面的 `"/ws/proxy"` 只匹配精确路径，要转发其下
+子路径请写 `"/ws/*"`。
+
 ## 内置中间件
 
 中间件可按路由应用（以变参形式传入），也可全局应用（`router::use()`）。每个中间件提供 `bool before(...)`，以及可选的 `after(...)`（同步或协程）。
@@ -632,6 +635,10 @@ svr.set_reverse_proxy("/api/*",
     std::vector<server::upstream_backend>{ {"http://a:8080"}, {"http://b:8080", 2} },
     server::upstream_locator::least_connections);
 ```
+
+`location` 是路由模式而非裸前缀：`"/api"` 只匹配精确路径 `/api`，要覆盖 `/api`
+下所有子路径必须写 `"/api/*"`（`*` 至少消费一个段，不匹配 `/api` 本身）。该位置
+只支持静态前缀，不支持 `:param` 或 `{name:regex}` 等动态段；上游路径按字面前缀重写。
 
 `server::proxy_interceptor` 钩子：`on_upstream_request`、`on_upstream_request_body`、`on_upstream_response`、`on_upstream_response_body`。全局中间件同样作用于代理路由。
 

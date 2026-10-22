@@ -461,6 +461,11 @@ request/response 持有 `shared_ptr<http_task>`；而 `http_task::read_header/re
 **建议**：注册时校验 location：不含 `/*` 或以 `/` 结尾时自动补 `/*` 或
 `throw std::invalid_argument`。
 
+> **✅ 文档已明确（2026-10）**：实现保持「location 必须显式写 `/*` 才覆盖子树」，
+> 不自动补全。`server.hpp` 的类文档与各重载注释、`README.md` / `README.en.md`
+> 已写明 `"/api"` 只匹配精确路径、子树用 `"/api/*"`，且 location 只支持静态前缀，
+> 不支持 `:param` / `{name:regex}`；上游路径按字面前缀重写。
+
 ### 2.11 路由匹配语义缺陷（route confusion / 优先级丢失 / 回溯）【高+中】
 
 三个相关子问题：
@@ -708,7 +713,7 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 | §2.4 ✅ | writer 存活即占用连接（必要语义）/ create_lazy_request 工厂化 + 单飞裁决 |
 | §2.5 ✅ | 默认构造 response 半数 UB |
 | §2.6 ✅ | per-route aspects 所有权 |
-| §2.10 | reverse_proxy location `/*` 校验 |
+| §2.10 ✅（文档） | reverse_proxy / ws_forward location 的 `/*` 契约已在头文件与 README 明确 |
 | §2.11a ✅ | `%2F` 逐段解码；`path()` raw + `decoded_segments()` / `decoded_path()` |
 | §2.11b/c | 路由优先级/回溯/allows 双遍历；尾斜杠与 trim |
 | §2.12 | 上游健康机制死代码 + ticket 配对 |
