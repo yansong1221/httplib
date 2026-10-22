@@ -1,4 +1,5 @@
 #pragma once
+#include "httplib/enums.hpp"
 #include "httplib/headers.hpp"
 #include "httplib/url/scheme.hpp"
 #include "httplib/config.hpp"
@@ -35,6 +36,12 @@ namespace httplib::client
         net::awaitable<void> async_close();
 
         bool is_open() const noexcept;
+
+        /// \brief 最近一次 CONNECT 响应的状态码。
+        /// \details 代理同意隧道时是 2xx 状态；拒绝时是代理返回的状态（如 407）。
+        /// 传输失败、取消或尚未发起 CONNECT 时为 status::unknown。
+        /// 每次实际发起 CONNECT 握手时重置。
+        httplib::status http_status() const;
 
         std::shared_ptr<spdlog::logger> logger() const;
         void set_logger(std::shared_ptr<spdlog::logger> logger);

@@ -9,7 +9,8 @@ namespace httplib::client
     /// \brief 客户端模块错误码。
     enum class error
     {
-        /// 服务器返回了非成功状态。具体状态码见 downloader::http_status()。
+        /// 服务器返回了非成功状态。具体状态码见 downloader::http_status() 或
+        /// proxy_client::http_status()。
         http_status = 1,
         /// 跟随重定向的次数超过 config::max_redirects。
         too_many_redirects,

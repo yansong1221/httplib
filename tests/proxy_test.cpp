@@ -1,4 +1,5 @@
 #include "common.hpp"
+#include "httplib/client/error.hpp"
 #include "httplib/client/lazy_request.hpp"
 #include "httplib/client/proxy_client.hpp"
 #include "httplib/client/ws_client.hpp"
@@ -1244,6 +1245,47 @@ TEST_CASE("CONNECT: rejected by default", "[proxy]")
         });
 }
 
+TEST_CASE("CONNECT: proxy rejection maps to client error", "[proxy]")
+{
+    net::io_context ioc;
+
+    server::http_server proxy(ioc.get_executor());
+    proxy.router().set_connect_handler(
+        "*",
+        [](server::request&, server::response& resp)
+        {
+            resp.set_empty_content(status::proxy_authentication_required);
+        });
+    proxy.listen("127.0.0.1", 0);
+    auto const proxy_ep = proxy.local_endpoint();
+    proxy.run();
+
+    boost::system::error_code ec;
+    auto seen = status::unknown;
+    bool open_after_rejection = true;
+
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            client::proxy_client pc(ioc.get_executor(), proxy_ep.address().to_string(), proxy_ep.port());
+
+            co_await pc.async_connect("example.com:80", {}, ec);
+            seen = pc.http_status();
+            open_after_rejection = pc.is_open();
+
+            co_await pc.async_close();
+            proxy.stop();
+        },
+        net::detached);
+
+    ioc.run();
+
+    REQUIRE(ec == client::make_error_code(client::error::http_status));
+    REQUIRE(seen == status::proxy_authentication_required);
+    REQUIRE_FALSE(open_after_rejection);
+}
+
 TEST_CASE("CONNECT: route handler can approve", "[proxy]")
 {
     using test_common::run;
@@ -1487,6 +1529,7 @@ TEST_CASE("CONNECT: tunnel forwards data bidirectionally", "[proxy]")
     proxy.run();
 
     bool tunnel_ok = false;
+    bool status_ok = false;
 
     net::co_spawn(
         ioc,
@@ -1501,6 +1544,7 @@ TEST_CASE("CONNECT: tunnel forwards data bidirectionally", "[proxy]")
                 proxy.stop();
                 co_return;
             }
+            status_ok = pc.http_status() == status::ok;
 
             co_await pc.async_write(net::buffer(std::string("ping")), ec);
 
@@ -1519,6 +1563,7 @@ TEST_CASE("CONNECT: tunnel forwards data bidirectionally", "[proxy]")
     ioc.run();
 
     REQUIRE(tunnel_ok);
+    REQUIRE(status_ok);
     REQUIRE(echo_recv_bytes.load() == 4);
     REQUIRE(echo_data == "ping");
 }

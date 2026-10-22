@@ -6,6 +6,7 @@
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
+#include <atomic>
 #include <future>
 
 namespace httplib::client
@@ -31,6 +32,12 @@ namespace httplib::client
         net::awaitable<void> async_close();
 
         bool is_open() const noexcept;
+
+        httplib::status
+        http_status() const noexcept
+        {
+            return http_status_.load(std::memory_order_relaxed);
+        }
 
         void
         set_verify_ssl(bool verify)
@@ -61,6 +68,7 @@ namespace httplib::client
         std::atomic<std::shared_ptr<std::string const>> ca_cert_;
 
         std::atomic<std::shared_ptr<http_stream>> stream_;
+        std::atomic<httplib::status> http_status_ { httplib::status::unknown };
         beast::flat_buffer buffer_;
     };
 

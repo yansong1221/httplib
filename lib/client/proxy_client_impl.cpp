@@ -1,5 +1,6 @@
 #include "proxy_client_impl.h"
 #include "beast_alias.hpp"
+#include "enum_conv.hpp"
 #include "httplib/client/error.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/use_awaitable.hpp"
@@ -43,6 +44,7 @@ namespace httplib::client
                     ec = boost::system::error_code {};
                     co_return;
                 }
+                http_status_.store(httplib::status::unknown, std::memory_order_relaxed);
                 get_logger()->trace("connecting proxy {}:{} -> {}", host_, port_, target);
 
                 // 取一致快照再读：setter 可能正从另一个线程改这两项。快照持有
@@ -100,10 +102,11 @@ namespace httplib::client
                     co_return;
                 }
 
-                auto status = parser.get().result_int();
+                auto const status = parser.get().result_int();
+                http_status_.store(enum_conv::to_status(parser.get().result()), std::memory_order_relaxed);
                 if (status < 200 || status >= 300)
                 {
-                    ec = http::error::bad_status;
+                    ec = make_error_code(error::http_status);
                     get_logger()->error("proxy CONNECT rejected {}:{}: status={}", host_, port_, status);
                     co_return;
                 }
@@ -255,6 +258,12 @@ namespace httplib::client
     proxy_client::is_open() const noexcept
     {
         return impl_->is_open();
+    }
+
+    httplib::status
+    proxy_client::http_status() const
+    {
+        return impl_->http_status();
     }
 
     std::shared_ptr<spdlog::logger>
