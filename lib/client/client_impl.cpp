@@ -218,7 +218,7 @@ namespace httplib::client
             if (is_redirect(resp.result()) && !resp[field::location].empty())
             {
                 // 跨 origin 递归后预算已为 0：再遇到重定向不能把 3xx 当成功返回。
-                if (auto drain_result = co_await resp.read_string(); drain_result.has_error())
+                if (auto drain_ec = co_await resp.drain(); drain_ec)
                 {
                     co_await async_close();
                 }
@@ -250,7 +250,7 @@ namespace httplib::client
             if (r >= max_redirects)
             {
                 // 预算耗尽：读完 redirect body 后返回模块错误，而不是把 3xx 当成功。
-                if (auto drain_result = co_await resp.read_string(); drain_result.has_error())
+                if (auto drain_ec = co_await resp.drain(); drain_ec)
                 {
                     co_await async_close();
                 }
@@ -259,8 +259,8 @@ namespace httplib::client
 
             get_logger()->trace("redirect {} -> {}", req_msg.base().target(), std::string_view(loc));
 
-            // 读完并丢弃 redirect 响应的 body，保证连接可复用
-            if (auto drain_result = co_await resp.read_string(); drain_result.has_error())
+            // 逐块丢弃 redirect 响应的 body，保证连接可复用且不整体读入内存
+            if (auto drain_ec = co_await resp.drain(); drain_ec)
             {
                 co_await async_close();
             }

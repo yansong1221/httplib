@@ -646,7 +646,7 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 | 5.4 | accept 循环任何非 EMFILE 错误永久退环，无自愈无上报 | `server_impl.cpp:216-232`（其余错误 `break`） | ECONNABORTED/EINTR 类 continue；异常退出上报 ec |
 | 5.5 | SSE/NDJSON 用「空载荷/空 value」当 EOF 哨兵，与合法数据同形 | `sse_reader_impl.hpp:31-36`（EOF := `sse_event{}`）、`ndjson_reader_impl.hpp:88-91`（EOF := null，而 RFC 7464 keep-alive 就是 null 行） | 返回 `result<std::optional<T>>` 或加 `is_eof` 字段 |
 | 5.6 ✅ | `Location: //host/path` 协议相对重定向被当相对路径发给原主机 | `client_impl.cpp:216-251`、`http_header_util.hpp:246-261`（两处独立实现，均只判 `http://`/`https://` 前缀） | 抽出共用 `classify_location()` 处理 `//` 分支 |
-| 5.7 | 重定向 drain 把 body 整体读进内存（OOM 面） | `client_impl.cpp:209-213`（`read_string()`）、`downloader_impl.cpp:304-311,557-563`（`read_body()`） | 提供 `response::drain()`（空 sink） |
+| 5.7 ✅ | 重定向 drain 把 body 整体读进内存（OOM 面） | `client_impl.cpp:209-213`（`read_string()`）、`downloader_impl.cpp:304-311,557-563`（`read_body()`） | 提供 `response::drain()`（空 sink） |
 | 5.8 | disk_cache 只用 64 位 FNV 哈希做 key，冲突即静默返回错误内容 | `disk_cache_impl.cpp:44-56,629-693,786-797`（put 冲突 `remove_all` 别的 entry；get 无 key 比对） | entry 落盘完整 key，命中后比对，不匹配按 miss 处理 |
 | 5.9 ✅ | pool `stats()` future 式重载的 `string_view` 参数可能悬空 | `client_pool.cpp:890-902`（co_spawn 延迟执行，临时 string 已亡）；对照 `downloader_impl.cpp:75-84` 的正确写法已存在 | 参数先拷贝 std::string |
 | 5.10 | `max_size == 0`（禁新路由）与 `max_total == 0`（不限）语义冲突未文档化 | `client_pool.cpp:374-377` vs `client_pool.hpp:19-25` | 文档写明或统一 0=不限 |
@@ -659,6 +659,10 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 > **✅ 5.6 已修复（2026-10）**：`client` 与 `downloader` 共用
 > `redirect::classify_location()`；`Location: //host/path` 先继承当前 scheme 再按绝对 URL
 > 解析，authority 变化时仍走跨 origin 的敏感头剥离。
+>
+> **✅ 5.7 已修复（2026-10）**：新增 `response::drain()`，用固定 8 KiB 缓冲逐块读取并丢弃
+> body，不经过 sink/body_state；redirect 与 downloader 的非成功响应均改用它，不再
+> `read_string()` / `read_body()` 整体物化。
 >
 > **✅ 5.9 已修复（2026-10）**：`stats()` 在 `co_spawn` 前把 host/URL 复制成拥有的
 > `std::string`，由闭包持有到协程结束；`stats(url)` 的规范化也放在持有副本的协程里。

@@ -305,7 +305,7 @@ namespace httplib::client
                     // pool; otherwise the leftover bytes corrupt the next
                     // request that reuses this connection. A failed drain means
                     // the connection is unusable, so close it explicitly.
-                    if (auto drain_ec = co_await resp.read_body(); drain_ec)
+                    if (auto drain_ec = co_await resp.drain(); drain_ec)
                     {
                         handle->close();
                     }
@@ -564,7 +564,7 @@ namespace httplib::client
                 // Non-success status: drain and discard the body so the pooled
                 // connection is clean and reusable; a failed drain means the
                 // connection is unusable, so close it explicitly.
-                if (auto drain_ec = co_await result->response.read_body(); drain_ec)
+                if (auto drain_ec = co_await result->response.drain(); drain_ec)
                 {
                     result->handle->close();
                 }

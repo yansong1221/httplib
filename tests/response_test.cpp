@@ -926,6 +926,38 @@ TEST_CASE("Response: read_some_decoded passes through identity body", "[response
         });
 }
 
+TEST_CASE("Response: drain discards a lazy body without materializing", "[response]")
+{
+    std::string const body(256 * 1024, 'X');
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/drain",
+                [&](httplib::server::request&, httplib::server::response& resp) { set_text(resp, body); });
+            server.router().template set_http_handler<httplib::method::get>(
+                "/after-drain",
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "next"sv); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            auto req = httplib::client::request(httplib::method::get, "/drain");
+            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
+            REQUIRE(resp.result() == httplib::status::ok);
+            REQUIRE(resp.type() == httplib::body_type::none);
+
+            auto ec = co_await resp.drain();
+            REQUIRE_FALSE(ec);
+            REQUIRE(resp.is_body_done());
+            REQUIRE(resp.type() == httplib::body_type::none);
+
+            auto next = UNWRAP(co_await client.async_get("/after-drain"));
+            REQUIRE(next.result() == httplib::status::ok);
+            REQUIRE(next.as_string() == "next");
+            co_return;
+        });
+}
+
 TEST_CASE("Response: unsupported request content-encoding is dropped", "[response]")
 {
     bool saw_encoding = false;

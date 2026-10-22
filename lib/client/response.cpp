@@ -4,6 +4,7 @@
 #include "ndjson_reader_impl.hpp"
 #include "response_impl.h"
 #include "sse_reader_impl.hpp"
+#include <array>
 #include <boost/beast/http/error.hpp>
 #include <boost/system/system_error.hpp>
 #include <fstream>
@@ -257,6 +258,32 @@ namespace httplib::client
             co_return make_error_code(error::not_initialized);
         }
         co_return co_await impl_->read_body();
+    }
+
+    net::awaitable<boost::system::error_code>
+    response::drain()
+    {
+        if (!impl_)
+        {
+            co_return make_error_code(error::not_initialized);
+        }
+
+        // 固定小块缓冲，边读边丢；不经过 sink/body_state，避免把 3xx body
+        // 整体物化到内存。读线上原始字节，不做 content-encoding 解码。
+        std::array<char, 8192> buf;
+        for (;;)
+        {
+            boost::system::error_code ec;
+            auto const n = co_await impl_->read_some_raw(net::buffer(buf), ec);
+            if (ec)
+            {
+                co_return ec;
+            }
+            if (n == 0)
+            {
+                co_return boost::system::error_code {};
+            }
+        }
     }
 
     net::awaitable<boost::system::error_code>

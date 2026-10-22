@@ -79,6 +79,12 @@ namespace httplib::client
         // 读取剩余 body 并物化到本响应（eager）
         net::awaitable<boost::system::error_code> read_body();
 
+        /// \brief 逐块读取并丢弃剩余 body，不物化到本响应。
+        /// \details 用于 3xx 等不需要 body 的响应，避免把大 body 整体读入内存。
+        /// 不进行 content-encoding 解码；成功后可安全复用底层连接，但不能再调用
+        /// read_* / as_* / 流式读取接口。
+        net::awaitable<boost::system::error_code> drain();
+
         // 流式读取器（接管本响应的 body）
         std::unique_ptr<sse_reader> create_sse_reader();
         std::unique_ptr<ndjson_reader> create_ndjson_reader();
