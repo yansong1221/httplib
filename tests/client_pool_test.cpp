@@ -10,9 +10,11 @@
 #include <atomic>
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <catch2/catch_test_macros.hpp>
+#include <thread>
 #include <type_traits>
 
 namespace
@@ -459,6 +461,57 @@ TEST_CASE("client_pool: stats(url) with path/query does not resolve to pool key"
 
             p.stop();
         });
+}
+
+TEST_CASE("client_pool: stats copies its inputs before deferring", "[client_pool]")
+{
+    net::io_context ioc;
+    httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 4 });
+
+    httplib::client::http_client_pool::client_handle held;
+    net::co_spawn(
+        ioc,
+        [&]() -> net::awaitable<void>
+        {
+            held = co_await p.async_acquire("127.0.0.1", 80, httplib::url::scheme::plain);
+        },
+        net::detached);
+
+    // Acquire without running the pool's long-lived ticker loop.
+    for (int i = 0; i < 100 && !held; ++i)
+    {
+        ioc.poll();
+    }
+    REQUIRE(held);
+
+    std::string host = "127.0.0.1";
+    std::string url = "http://127.0.0.1";
+
+    // The executor is not running here, so these co_spawns cannot start until
+    // poll() below. stats() must snapshot the inputs before returning.
+    auto by_host = p.stats(host, 80, httplib::url::scheme::plain);
+    auto by_url = p.stats(url);
+
+    host.assign("10.0.0.1");
+    url.assign("http://10.0.0.1:9999");
+
+    for (int i = 0; i < 1000 && (by_host.wait_for(std::chrono::milliseconds(0))
+                                     != std::future_status::ready
+                                 || by_url.wait_for(std::chrono::milliseconds(0))
+                                        != std::future_status::ready);
+         ++i)
+    {
+        ioc.poll();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    REQUIRE(by_host.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready);
+    REQUIRE(by_url.wait_for(std::chrono::milliseconds(0)) == std::future_status::ready);
+    CHECK(by_host.get().active == 1);
+    CHECK(by_url.get().active == 1);
+
+    p.stop();
+    ioc.poll();
 }
 
 TEST_CASE("client_pool: pool should be movable", "[client_pool]")

@@ -330,12 +330,12 @@ namespace httplib::client
         // ---- async 版本：先切到池执行器，再读取池状态，可从任意线程调用 ----
 
         net::awaitable<pool_stats>
-        async_stats(std::string url) const
+        async_stats(std::string key) const
         {
             co_await net::dispatch(get_executor(), net::use_awaitable);
 
             pool_stats s;
-            auto it = pools_.find(url);
+            auto it = pools_.find(key);
             if (it != pools_.end())
             {
                 s.idle = it->second.idle.size();
@@ -891,14 +891,30 @@ namespace httplib::client
     http_client_pool::stats(std::string_view host, uint16_t port, url::scheme s /*= url::scheme::plain*/) const
     {
         auto impl = impl_;
-        return net::co_spawn(impl->get_executor(), async_stats(host, port, s), net::use_future);
+        return net::co_spawn(
+            impl->get_executor(),
+            [impl, key = url::make_url_value(host, port, s)]() mutable -> net::awaitable<pool_stats>
+            { co_return co_await impl->async_stats(std::move(key)); },
+            net::use_future);
     }
 
     std::future<http_client_pool::pool_stats>
     http_client_pool::stats(std::string_view url) const
     {
         auto impl = impl_;
-        return net::co_spawn(impl->get_executor(), async_stats(url), net::use_future);
+        return net::co_spawn(
+            impl->get_executor(),
+            [impl, raw = std::string(url)]() -> net::awaitable<pool_stats>
+            {
+                auto parsed = url::parse_url(raw);
+                if (!parsed)
+                {
+                    co_return pool_stats {};
+                }
+                co_return co_await impl->async_stats(
+                    url::make_url_value(parsed->host, parsed->effective_port(), parsed->transport()));
+            },
+            net::use_future);
     }
 
     net::awaitable<http_client_pool::pool_stats>

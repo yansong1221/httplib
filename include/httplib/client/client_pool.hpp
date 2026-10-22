@@ -131,6 +131,7 @@ namespace httplib::client
         void stop();
 
         /// \return 在池执行器上完成读取后变为 ready 的 future；不阻塞调用线程。
+        /// \note 入参在调用时拷贝，返回的 future 不引用调用方缓冲区。
         std::future<pool_stats> stats(std::string_view host, uint16_t port, url::scheme s) const;
         std::future<pool_stats> stats(std::string_view url) const;
 
