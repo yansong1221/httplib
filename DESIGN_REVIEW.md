@@ -649,8 +649,8 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 | 5.7 ✅ | 重定向 drain 把 body 整体读进内存（OOM 面） | `client_impl.cpp:209-213`（`read_string()`）、`downloader_impl.cpp:304-311,557-563`（`read_body()`） | 提供 `response::drain()`（空 sink） |
 | 5.8 | disk_cache 只用 64 位 FNV 哈希做 key，冲突即静默返回错误内容 | `disk_cache_impl.cpp:44-56,629-693,786-797`（put 冲突 `remove_all` 别的 entry；get 无 key 比对） | entry 落盘完整 key，命中后比对，不匹配按 miss 处理 |
 | 5.9 ✅ | pool `stats()` future 式重载的 `string_view` 参数可能悬空 | `client_pool.cpp:890-902`（co_spawn 延迟执行，临时 string 已亡）；对照 `downloader_impl.cpp:75-84` 的正确写法已存在 | 参数先拷贝 std::string |
-| 5.10 | `max_size == 0`（禁新路由）与 `max_total == 0`（不限）语义冲突未文档化 | `client_pool.cpp:374-377` vs `client_pool.hpp:19-25` | 文档写明或统一 0=不限 |
-| 5.11 | ws/proxy `async_connect` 已连接时静默忽略新 target（ws 侧还用 ping 探测、未文档化） | `ws_client_impl.cpp:33-41`、`proxy_client_impl.cpp:41-45` | 显式检查已连接状态 + 文档化 or 返回专用错误 | 
+| 5.10 ✅ | `max_size == 0`（不再新建连接）与 `max_total == 0`（不限）语义冲突未文档化 | `client_pool.cpp:374-377` vs `client_pool.hpp:19-25` | 文档写明或统一 0=不限 |
+| 5.11 ✅ | ws/proxy `async_connect` 已连接时静默忽略新 target（ws 侧还用 ping 探测、未文档化） | `ws_client_impl.cpp:33-41`、`proxy_client_impl.cpp:41-45` | 显式检查已连接状态 + 文档化 or 返回专用错误 |
 | 5.12 | before 返回 false 且未写响应时落回「默认 404 页」（响应默认状态是 not_found） | `response_impl.hpp:48`、`session.cpp:312` | 调试日志提示「before 短路但响应未写」 |
 | 5.13 | url_decode 静默吞非法编码、url_encode 空格输出 `+`（form 约定用于 path 场景） | `url.cpp:39-55`、`:65-89` | 加 strict 变体（ec/result）；拆 `form_urlencode` 与 RFC3986 编码 |
 | 5.14 | 正则段缺 `:` 名时 param_name 退化成整个 pattern 堆进 params | `router_impl.cpp:229-247` | 注册期报错 |
@@ -667,6 +667,13 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 > **✅ 5.9 已修复（2026-10）**：`stats()` 在 `co_spawn` 前把 host/URL 复制成拥有的
 > `std::string`，由闭包持有到协程结束；`stats(url)` 的规范化也放在持有副本的协程里。
 > 回归用例在池执行器未运行时改写输入，确认查询不再读取调用方缓冲区。
+>
+> **✅ 5.10 已修复（2026-10）**：`pool_params` 文档明确 `max_size == 0` 表示不再新建连接
+> （已有 idle 连接仍可复用），`max_total == 0` 表示全局不限；运行期行为不变。
+>
+> **✅ 5.11 已修复（2026-10）**：ws/proxy 的 `async_connect` 在已连接时仍返回成功并保留
+> 现有连接，但会记录 warning；头部文档明确 target/headers 被忽略，ws 切换前需
+> `close()` / `async_abort()`，proxy 需先 `close()`。
 
 ---
 

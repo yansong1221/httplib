@@ -102,6 +102,10 @@ namespace httplib::client
          * @param timeout 覆盖解析、连接与握手的总超时。
          * @param ec 输出参数，失败时写入错误码。
          *
+         * @note 已连接且 ping 探测成功时直接返回成功，不重新握手；此时
+         *       @p target 与 @p headers 被忽略。需要切换 target 时先调用
+         *       @ref close "close()" 或 @ref async_abort "async_abort()"。
+         *
          * @par 线程安全
          * 可从任意线程 co_await。
          */

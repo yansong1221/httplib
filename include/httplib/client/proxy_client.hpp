@@ -25,6 +25,9 @@ namespace httplib::client
                               url::scheme s = url::scheme::plain);
         ~proxy_client();
 
+        /// \brief 建立到目标的 CONNECT 隧道。
+        /// \note 已连接时直接返回成功，不重新发起 CONNECT；此时 @p target 与
+        ///       @p headers 被忽略。需要切换目标时先调用 @ref close "close()"。
         net::awaitable<void> async_connect(std::string_view target,
                                            httplib::headers const& headers,
                                            boost::system::error_code& ec);

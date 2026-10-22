@@ -42,6 +42,11 @@ namespace httplib::client
                 if (is_open())
                 {
                     ec = boost::system::error_code {};
+                    get_logger()->warn(
+                        "proxy connect ignored: already connected to {}:{}, target {} ignored (close first to reconnect)",
+                        host_,
+                        port_,
+                        target);
                     co_return;
                 }
                 http_status_.store(httplib::status::unknown, std::memory_order_relaxed);

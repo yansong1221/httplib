@@ -16,12 +16,16 @@ namespace httplib::client
 
     /**
      * \brief HTTP 客户端连接池参数。
-     * \details \c max_size 为每个 host（route）的连接数上限，\c max_total 为全局连接数上限（0 表示不限）。
-     * 其余字段在新建连接时透传给 \c http_client。
+     * \details \c max_size 为每个 host（route）的连接数上限，\c max_total 为全局连接数上限。
+     * 两者对 `0` 的语义不同：`max_size == 0` 表示不再新建连接（已有 idle 连接仍可复用），
+     * `max_total == 0` 表示全局不限。其余字段在新建连接时透传给 \c http_client。
      */
     struct pool_params
     {
+        /// 每个 host（route）的连接数上限；`0` 表示不再新建连接，
+        /// 已存在的 idle 连接仍可复用；没有可复用连接时 acquire 会等待或超时。
         size_t max_size = 100;
+        /// 全局连接数上限；`0` 表示不限。
         size_t max_total = 0;
         /// 空闲连接过期时间；`0` 表示不按 idle_timeout 回收。
         std::chrono::steady_clock::duration idle_timeout = std::chrono::seconds(60);

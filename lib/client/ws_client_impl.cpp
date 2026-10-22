@@ -37,6 +37,11 @@ namespace httplib::client
                 co_await async_ping("ping", ec);
                 if (!ec)
                 {
+                    get_logger()->warn(
+                        "ws connect ignored: already connected to {}:{}, target {} ignored (close first to reconnect)",
+                        host_,
+                        port_,
+                        target);
                     co_return;
                 }
                 get_logger()->trace("connecting ws://{}:{}{}", host_, port_, target);
