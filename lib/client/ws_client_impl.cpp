@@ -193,12 +193,18 @@ namespace httplib::client
     std::future<boost::system::error_code>
     ws_client::impl::close()
     {
+        return close("normal");
+    }
+
+    std::future<boost::system::error_code>
+    ws_client::impl::close(std::string reason)
+    {
         return net::co_spawn(
             strand_,
-            [this, self = shared_from_this()]() -> net::awaitable<boost::system::error_code>
+            [this, self = shared_from_this(), reason = std::move(reason)]() -> net::awaitable<boost::system::error_code>
             {
                 boost::system::error_code ec;
-                co_await async_close(ec);
+                co_await async_close(reason, ec);
                 co_return ec;
             },
             net::use_future);
@@ -302,9 +308,15 @@ namespace httplib::client
     httplib::net::awaitable<void>
     ws_client::impl::async_close(boost::system::error_code& ec)
     {
+        co_await async_close("normal", ec);
+    }
+
+    httplib::net::awaitable<void>
+    ws_client::impl::async_close(std::string_view reason, boost::system::error_code& ec)
+    {
         co_return co_await net::co_spawn(
             strand_,
-            [&]() -> net::awaitable<void>
+            [&, reason = std::string(reason)]() -> net::awaitable<void>
             {
                 auto s = get_stream(ec);
                 if (ec)
@@ -325,8 +337,8 @@ namespace httplib::client
                 timer.expires_after(5s);
 
                 boost::system::error_code timer_ec;
-                websocket::close_reason reason("normal");
-                co_await (s->async_close(reason, util::net_awaitable[ec])
+                websocket::close_reason cr(websocket::close_code::normal, reason);
+                co_await (s->async_close(cr, util::net_awaitable[ec])
                           || timer.async_wait(util::net_awaitable[timer_ec]));
 
                 if (ec && ec != net::error::operation_aborted)
@@ -563,9 +575,21 @@ namespace httplib::client
     }
 
     net::awaitable<void>
+    ws_client::async_close(std::string_view reason, boost::system::error_code& ec)
+    {
+        co_await impl_->async_close(reason, ec);
+    }
+
+    net::awaitable<void>
     ws_client::async_close(boost::system::error_code& ec)
     {
         co_await impl_->async_close(ec);
+    }
+
+    std::future<boost::system::error_code>
+    ws_client::close(std::string_view reason)
+    {
+        return impl_->close(std::string(reason));
     }
 
     std::future<boost::system::error_code>

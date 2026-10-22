@@ -682,7 +682,7 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 | # | 问题 | 证据 |
 |---|---|---|
 | 6.1 | ws_client 与 server 端回调命名相同形态完全不同：server 带 `websocket_conn::weak_ptr`，client 的 close 回调**无参**（拿不到死因 ec）；client 读循环把 ec 丢弃 | `ws_client.hpp:322-324` vs `websocket_conn.hpp:37-42`；`ws_client_impl.cpp:368-393` |
-| 6.2 | server `close(reason)` 带 reason，client 恒 `"normal"` | `websocket_conn.hpp:66-76` vs `ws_client.hpp:178-187`、`ws_client_impl.cpp:323` |
+| 6.2 ✅ | server `close(reason)` 带 reason，client 恒 `"normal"` | `websocket_conn.hpp:66-76` vs `ws_client.hpp:178-187`、`ws_client_impl.cpp:323` |
 | 6.3 | 三个 writer 的 ec/throw 双重载是机械复制，而 request read 族又是另一套单身形态 | `stream_writer.hpp:24-33`、`sse_writer.hpp:15-35`、`ndjson_writer.hpp:15-19` vs `request.cpp:236-267` |
 | 6.4 | `stream_writer::mode::relay` 是反代内部语义却放公共 API，普通用户写 relay 得理解上游分帧 | `stream_writer.hpp:16-22`、`stream_writer_impl.hpp:37-44` |
 | 6.5 ✅ | `stream_writer` 空 statements: `create_stream_writer` 裸指针 vs `create_sse_writer` unique_ptr（同 §2.8） | `response.cpp:179-199`；已统一为 shared_ptr（低层）/ unique_ptr（高层），内部持 `shared_ptr<stream_writer>` |
@@ -705,6 +705,10 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 
 > **✅ 6.8 已随 §3.7 修复（2026-10）**：`download_single` 不再重试 `too_many_redirects` /
 > 取消等结论性错误，并移除 `errc::timed_out` 兜底，直接返回真实错误。
+
+> **✅ 6.2 已修复（2026-10）**：`ws_client::close` / `async_close` 增加 reason 重载，
+> 不再写死 `"normal"`；旧的无参接口保留并等价于 `reason = "normal"`。reason 在
+> `co_spawn` 前复制为 `std::string`，避免 `string_view` 悬空。
 
 > **✅ 已修正（2026-10）**：统一为「**常在接口 + 运行期失效**」：
 > 公共头（含 `jwt*` / `middleware/jwt_auth.hpp`）

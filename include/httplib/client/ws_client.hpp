@@ -172,7 +172,19 @@ namespace httplib::client
         std::future<boost::system::error_code> pong(std::string&& msg = std::string());
 
         /**
-         * @brief 优雅关闭连接，发送 close 帧。
+         * @brief 优雅关闭连接，发送带原因文本的 close 帧。
+         *
+         * @param reason close 帧中的 reason 文本。
+         * @param ec 输出参数，失败时写入错误码。
+         *
+         * @par 线程安全
+         * 可从任意线程 co_await。
+         */
+        net::awaitable<void> async_close(std::string_view reason, boost::system::error_code& ec);
+        /**
+         * @brief 优雅关闭连接，等价于 reason 为 @c "normal" 的
+         *        @ref async_close(std::string_view, boost::system::error_code&)
+         *        "async_close()"。
          *
          * @param ec 输出参数，失败时写入错误码。
          *
@@ -181,7 +193,19 @@ namespace httplib::client
          */
         net::awaitable<void> async_close(boost::system::error_code& ec);
         /**
-         * @brief 优雅关闭连接，不阻塞。
+         * @brief 优雅关闭连接，发送带原因文本的 close 帧，不阻塞。
+         *
+         * @param reason close 帧中的 reason 文本。
+         *
+         * @return 一个 future，在关闭完成后携带结果错误码。
+         *
+         * @par 线程安全
+         * 可从任意线程调用。
+         */
+        std::future<boost::system::error_code> close(std::string_view reason);
+        /**
+         * @brief 优雅关闭连接，等价于 reason 为 @c "normal" 的
+         *        @ref close(std::string_view) "close()"，不阻塞。
          *
          * @return 一个 future，在关闭完成后携带结果错误码。
          *

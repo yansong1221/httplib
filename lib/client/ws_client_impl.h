@@ -36,7 +36,9 @@ namespace httplib::client
         net::awaitable<void> async_pong(std::string_view msg, boost::system::error_code& ec);
         std::future<boost::system::error_code> pong(std::string&& msg = std::string());
 
+        net::awaitable<void> async_close(std::string_view reason, boost::system::error_code& ec);
         net::awaitable<void> async_close(boost::system::error_code& ec);
+        std::future<boost::system::error_code> close(std::string reason);
         std::future<boost::system::error_code> close();
 
         bool is_open() const noexcept;

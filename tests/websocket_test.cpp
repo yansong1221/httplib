@@ -380,7 +380,7 @@ TEST_CASE("websocket: close with reason", "[websocket]")
                 "/ws-close-reason",
                 [&](boost::system::error_code) -> net::awaitable<void>
                 {
-                    ws.close();
+                    ws.close("bye");
                     co_return;
                 },
                 [](httplib::websocket_message) -> net::awaitable<void> { co_return; },
@@ -495,7 +495,7 @@ TEST_CASE("websocket: async_read into message", "[websocket]")
             REQUIRE(msg.is_binary());
             REQUIRE(msg.data() == "binary message");
 
-            co_await ws.async_close(ec);
+            co_await ws.async_close("bye", ec);
             co_return;
         });
 }
