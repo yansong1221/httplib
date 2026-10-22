@@ -1,5 +1,6 @@
 #pragma once
 #include "beast_alias.hpp"
+#include "client/redirect_util.hpp"
 #include "enum_conv.hpp"
 #include "httplib/headers.hpp"
 #include "httplib/url/url.hpp"
@@ -11,6 +12,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace httplib::client::http_header_util
 {
@@ -234,17 +236,17 @@ namespace httplib::client::http_header_util
     }
 
     inline std::optional<url::url_info>
-    parse_redirect(httplib::headers const& headers)
+    parse_redirect(httplib::headers const& headers, url::scheme current)
     {
         auto loc = headers[field::location];
         if (loc.empty())
         {
             return std::nullopt;
         }
-        std::string location(loc);
-        if (location.starts_with("http://") || location.starts_with("https://"))
+        auto classified = redirect::classify_location(loc, current);
+        if (classified.absolute)
         {
-            auto r = url::parse_url(location);
+            auto r = url::parse_url(classified.value);
             if (!r)
             {
                 return std::nullopt;
@@ -256,7 +258,7 @@ namespace httplib::client::http_header_util
             return t;
         }
         url::url_info t;
-        t.path = location;
+        t.path = std::move(classified.value);
         return t;
     }
 

@@ -298,7 +298,7 @@ namespace httplib::client
                                      || status == status::permanent_redirect;
             if (is_redirect)
             {
-                auto rt = http_header_util::parse_redirect(resp.headers());
+                auto rt = http_header_util::parse_redirect(resp.headers(), s);
                 if (rt.has_value())
                 {
                     // Drain the redirect body before the handle returns to the

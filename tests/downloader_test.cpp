@@ -344,12 +344,15 @@ TEST_CASE("Downloader: strips sensitive headers on cross-origin redirect", "[dow
     origin.router().set_http_handler<httplib::method::get>(
         "/start",
         [&](httplib::server::request&, httplib::server::response& resp)
-        { resp.set_redirect(std::format("http://127.0.0.1:{}/target", target_port), httplib::status::found); });
+        {
+            // Protocol-relative Location: inherit http from the current scheme.
+            resp.set_redirect(std::format("//127.0.0.1:{}/target", target_port), httplib::status::found);
+        });
     origin.router().set_http_handler<httplib::method::head>(
         "/start",
         [&](httplib::server::request&, httplib::server::response& resp)
         {
-            resp.set(httplib::field::location, std::format("http://127.0.0.1:{}/target", target_port));
+            resp.set(httplib::field::location, std::format("//127.0.0.1:{}/target", target_port));
             resp.set_empty_content(httplib::status::found);
         });
     origin.listen("127.0.0.1", 0);

@@ -265,11 +265,13 @@ namespace httplib::client
                 co_await async_close();
             }
 
-            // Full URL (cross-domain) create new impl
+            // Absolute URL (cross-domain) create new impl; network-path
+            // references ("//host/path") inherit the current scheme.
             std::string target;
-            if (loc.starts_with("http://") || loc.starts_with("https://"))
+            auto classified = redirect::classify_location(loc, scheme_);
+            if (classified.absolute)
             {
-                auto parsed = url::parse_url(loc);
+                auto parsed = url::parse_url(classified.value);
                 if (!parsed)
                 {
                     co_return make_error_code(error::invalid_url);
@@ -309,7 +311,7 @@ namespace httplib::client
             {
                 // 相对 Location：按 RFC 3986 针对当前 target 解析，兼容
                 // "final"、"../a/b"、"?q=1" 等形式。
-                target = url::resolve(req_msg.base().target(), loc);
+                target = url::resolve(req_msg.base().target(), classified.value);
             }
 
             // s 来自 resp.result()，是 httplib::status

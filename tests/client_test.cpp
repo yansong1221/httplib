@@ -1088,7 +1088,11 @@ TEST_CASE("client: strips sensitive headers on cross-origin redirect", "[client]
             origin.router().template set_http_handler<httplib::method::get>(
                 "/start",
                 [&](httplib::server::request&, httplib::server::response& resp)
-                { resp.set_redirect(std::format("http://127.0.0.1:{}/target", target_port), httplib::status::found); });
+                {
+                    // Protocol-relative Location: inherit http from the current scheme,
+                    // but switch the authority to target_port.
+                    resp.set_redirect(std::format("//127.0.0.1:{}/target", target_port), httplib::status::found);
+                });
             origin.listen("127.0.0.1", 0);
             auto origin_port = origin.local_endpoint().port();
             origin.run();
