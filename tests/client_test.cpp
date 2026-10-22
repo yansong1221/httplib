@@ -972,6 +972,48 @@ TEST_CASE("client: follows 302 redirect", "[client]")
         });
 }
 
+TEST_CASE("client: max_redirects 0 does not follow", "[client]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/no-follow",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_redirect("/target", httplib::status::found); });
+            server.router().template set_http_handler<httplib::method::get>(
+                "/target",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("target"sv, "text/plain"sv); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            client.set_max_redirects(0);
+            auto resp = UNWRAP(co_await client.async_get("/no-follow"));
+            REQUIRE(resp.result() == httplib::status::found);
+            REQUIRE(resp[httplib::field::location] == "/target");
+        });
+}
+
+TEST_CASE("client: non-redirect is returned with redirect budget", "[client]")
+{
+    run(
+        [](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>(
+                "/plain",
+                [](httplib::server::request&, httplib::server::response& resp)
+                { resp.set_string_content("plain"sv, "text/plain"sv); });
+        },
+        [](auto& client) -> net::awaitable<void>
+        {
+            client.set_max_redirects(3);
+            auto resp = UNWRAP(co_await client.async_get("/plain"));
+            REQUIRE(resp.result() == httplib::status::ok);
+            REQUIRE(resp.as_string() == "plain");
+        });
+}
+
 TEST_CASE("client: redirect loop limited", "[client]")
 {
     run(
@@ -985,8 +1027,9 @@ TEST_CASE("client: redirect loop limited", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             client.set_max_redirects(3);
-            auto resp = UNWRAP(co_await client.async_get("/loop"));
-            REQUIRE(resp.result() == httplib::status::found);
+            auto result = co_await client.async_get("/loop");
+            REQUIRE(result.has_error());
+            REQUIRE(result.error() == httplib::client::make_error_code(httplib::client::error::too_many_redirects));
         });
 }
 
@@ -1062,6 +1105,62 @@ TEST_CASE("client: strips sensitive headers on cross-origin redirect", "[client]
             REQUIRE(resp.as_string() == "target-ok");
             REQUIRE_FALSE(leaked_auth.load());
             REQUIRE_FALSE(leaked_cookie.load());
+
+            client.close();
+            origin.stop();
+            target.stop();
+        },
+        [&](std::exception_ptr e) { err = e; });
+
+    pool.join();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
+TEST_CASE("client: cross-origin redirect budget is shared", "[client]")
+{
+    net::thread_pool pool { 2 };
+    std::exception_ptr err;
+    std::atomic<uint16_t> origin_port { 0 };
+
+    net::co_spawn(
+        pool.get_executor(),
+        [&]() -> net::awaitable<void>
+        {
+            httplib::server::http_server target(pool.get_executor());
+            setup_logger(target);
+            target.router().template set_http_handler<httplib::method::get>(
+                "/back",
+                [&](httplib::server::request&, httplib::server::response& resp)
+                {
+                    resp.set_redirect(std::format("http://127.0.0.1:{}/loop", origin_port.load()),
+                                      httplib::status::found);
+                });
+            target.listen("127.0.0.1", 0);
+            auto target_port = target.local_endpoint().port();
+            target.run();
+
+            httplib::server::http_server origin(pool.get_executor());
+            setup_logger(origin);
+            origin.router().template set_http_handler<httplib::method::get>(
+                "/loop",
+                [&](httplib::server::request&, httplib::server::response& resp)
+                {
+                    resp.set_redirect(std::format("http://127.0.0.1:{}/back", target_port), httplib::status::found);
+                });
+            origin.listen("127.0.0.1", 0);
+            origin_port.store(origin.local_endpoint().port());
+            origin.run();
+
+            httplib::client::http_client client(pool.get_executor(), "127.0.0.1", origin_port.load());
+            client.set_timeout(std::chrono::seconds(5));
+            client.set_max_redirects(1);
+
+            auto result = co_await client.async_get("/loop");
+            REQUIRE(result.has_error());
+            REQUIRE(result.error() == httplib::client::make_error_code(httplib::client::error::too_many_redirects));
 
             client.close();
             origin.stop();
@@ -1424,8 +1523,9 @@ TEST_CASE("client: lazy redirect loop limited", "[client]")
         {
             client.set_max_redirects(3);
             httplib::client::request req(httplib::method::get, "/lazy-loop");
-            auto resp = UNWRAP(co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy));
-            REQUIRE(resp.result() == httplib::status::found);
+            auto result = co_await client.async_send_request(req, httplib::client::http_client::body_mode::lazy);
+            REQUIRE(result.has_error());
+            REQUIRE(result.error() == httplib::client::make_error_code(httplib::client::error::too_many_redirects));
         });
 }
 

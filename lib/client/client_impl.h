@@ -85,6 +85,8 @@ namespace httplib::client
         net::awaitable<bool> async_is_alive() const;
 
         net::awaitable<http_client::response_result> async_send_request_lazy_with_redirect(request::impl& req);
+        net::awaitable<http_client::response_result>
+        async_send_request_lazy_with_redirect(request::impl& req, int max_redirects, bool exhausted_is_error);
 
         std::shared_ptr<lazy_request> create_lazy_request();
 

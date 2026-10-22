@@ -190,12 +190,41 @@ namespace httplib::client
     net::awaitable<http_client::response_result>
     http_client::impl::async_send_request_lazy_with_redirect(request::impl& req)
     {
-        auto max_redirects = max_redirects_.load();
+        co_return co_await async_send_request_lazy_with_redirect(req, max_redirects_.load(), false);
+    }
+
+    net::awaitable<http_client::response_result>
+    http_client::impl::async_send_request_lazy_with_redirect(request::impl& req,
+                                                             int max_redirects,
+                                                             bool exhausted_is_error)
+    {
         auto& req_msg = req;
+
+        auto const is_redirect = [](status s)
+        {
+            return s == status::moved_permanently || s == status::found || s == status::see_other
+                   || s == status::temporary_redirect || s == status::permanent_redirect;
+        };
 
         if (max_redirects <= 0)
         {
-            co_return co_await async_send_request_lazy(req);
+            auto result = co_await async_send_request_lazy(req);
+            if (result.has_error() || !exhausted_is_error)
+            {
+                co_return result;
+            }
+
+            auto& resp = result.value();
+            if (is_redirect(resp.result()) && !resp[field::location].empty())
+            {
+                // 跨 origin 递归后预算已为 0：再遇到重定向不能把 3xx 当成功返回。
+                if (auto drain_result = co_await resp.read_string(); drain_result.has_error())
+                {
+                    co_await async_close();
+                }
+                co_return make_error_code(error::too_many_redirects);
+            }
+            co_return result;
         }
 
         for (int r = 0; r <= max_redirects; ++r)
@@ -207,87 +236,98 @@ namespace httplib::client
             }
             auto& resp = result.value();
             auto s = resp.result();
-            if (r < max_redirects
-                && (s == status::moved_permanently || s == status::found || s == status::see_other
-                    || s == status::temporary_redirect || s == status::permanent_redirect))
+            if (!is_redirect(s))
             {
-                auto loc = resp[field::location];
-                if (loc.empty())
-                {
-                    co_return result;
-                }
+                co_return result;
+            }
 
-                get_logger()->trace("redirect {} -> {}", req_msg.base().target(), std::string_view(loc));
+            auto loc = resp[field::location];
+            if (loc.empty())
+            {
+                co_return result;
+            }
 
-                // 读完并丢弃 redirect 响应的 body，保证连接可复用
+            if (r >= max_redirects)
+            {
+                // 预算耗尽：读完 redirect body 后返回模块错误，而不是把 3xx 当成功。
                 if (auto drain_result = co_await resp.read_string(); drain_result.has_error())
                 {
                     co_await async_close();
                 }
-
-                // Full URL (cross-domain) create new impl
-                std::string target;
-                if (loc.starts_with("http://") || loc.starts_with("https://"))
-                {
-                    auto parsed = url::parse_url(loc);
-                    if (!parsed)
-                    {
-                        co_return result;
-                    }
-                    auto& u = *parsed;
-                    std::string new_host = u.host;
-                    auto new_port = u.effective_port();
-                    auto new_ssl = u.is_ssl();
-                    auto new_target = u.target(false);
-
-                    if (new_host != host_ || new_port != port_ || new_ssl != (scheme_ == url::scheme::tls))
-                    {
-                        // CL-02: 跨 origin 重定向时移除 origin-bound 敏感头，避免认证凭据泄露到新主机
-                        // req_msg.base() 是 beast message，借一个 httplib::headers 视图过去
-                        auto req_headers = httplib::headers::impl::borrow(req_msg.base());
-                        redirect::strip_origin_bound_headers(req_headers);
-
-                        req_msg.base().target(new_target);
-
-                        auto new_impl = std::make_shared<impl>(strand_.get_inner_executor(),
-                                                               new_host,
-                                                               new_port,
-                                                               new_ssl ? url::scheme::tls : url::scheme::plain);
-                        new_impl->copy_settings_from(*this);
-                        new_impl->max_redirects_.store(max_redirects - r - 1);
-
-                        co_return co_await new_impl->async_send_request_lazy_with_redirect(req);
-                    }
-
-                    // 同 host/port/ssl 的完整 URL，仅取 path 作为新 target
-                    target = new_target;
-                }
-                else
-                {
-                    // 相对 Location：按 RFC 3986 针对当前 target 解析，兼容
-                    // "final"、"../a/b"、"?q=1" 等形式。
-                    target = url::resolve(req_msg.base().target(), loc);
-                }
-
-                // s 来自 resp.result()，是 httplib::status
-                if (s == status::see_other
-                    || ((s == status::moved_permanently || s == status::found)
-                        // req_msg.base() 是 beast message，这里保留 beast 枚举
-                        && req_msg.base().method() != http::verb::head))
-                {
-                    req_msg.base().method(http::verb::get);
-                    req.reset();
-                    req_msg.base().erase(http::field::content_type);
-                    req_msg.base().erase(http::field::content_length);
-                    req_msg.content_length(0);
-                }
-
-                req_msg.base().target(std::move(target));
-
-                continue;
+                co_return make_error_code(error::too_many_redirects);
             }
 
-            co_return result;
+            get_logger()->trace("redirect {} -> {}", req_msg.base().target(), std::string_view(loc));
+
+            // 读完并丢弃 redirect 响应的 body，保证连接可复用
+            if (auto drain_result = co_await resp.read_string(); drain_result.has_error())
+            {
+                co_await async_close();
+            }
+
+            // Full URL (cross-domain) create new impl
+            std::string target;
+            if (loc.starts_with("http://") || loc.starts_with("https://"))
+            {
+                auto parsed = url::parse_url(loc);
+                if (!parsed)
+                {
+                    co_return make_error_code(error::invalid_url);
+                }
+                auto& u = *parsed;
+                std::string new_host = u.host;
+                auto new_port = u.effective_port();
+                auto new_ssl = u.is_ssl();
+                auto new_target = u.target(false);
+
+                if (new_host != host_ || new_port != port_ || new_ssl != (scheme_ == url::scheme::tls))
+                {
+                    // CL-02: 跨 origin 重定向时移除 origin-bound 敏感头，避免认证凭据泄露到新主机
+                    // req_msg.base() 是 beast message，借一个 httplib::headers 视图过去
+                    auto req_headers = httplib::headers::impl::borrow(req_msg.base());
+                    redirect::strip_origin_bound_headers(req_headers);
+
+                    req_msg.base().target(new_target);
+
+                    auto new_impl = std::make_shared<impl>(strand_.get_inner_executor(),
+                                                           new_host,
+                                                           new_port,
+                                                           new_ssl ? url::scheme::tls : url::scheme::plain);
+                    new_impl->copy_settings_from(*this);
+                    new_impl->max_redirects_.store(max_redirects - r - 1);
+
+                    // 跨 origin 递归时预算同样要传递；剩余为 0 时再遇到重定向要报错，
+                    // 不能让新 impl 把 0 解释成“用户主动不跟随”而返回 3xx。
+                    co_return co_await new_impl->async_send_request_lazy_with_redirect(
+                        req, max_redirects - r - 1, true);
+                }
+
+                // 同 host/port/ssl 的完整 URL，仅取 path 作为新 target
+                target = new_target;
+            }
+            else
+            {
+                // 相对 Location：按 RFC 3986 针对当前 target 解析，兼容
+                // "final"、"../a/b"、"?q=1" 等形式。
+                target = url::resolve(req_msg.base().target(), loc);
+            }
+
+            // s 来自 resp.result()，是 httplib::status
+            if (s == status::see_other
+                || ((s == status::moved_permanently || s == status::found)
+                    // req_msg.base() 是 beast message，这里保留 beast 枚举
+                    && req_msg.base().method() != http::verb::head))
+            {
+                req_msg.base().method(http::verb::get);
+                req.reset();
+                req_msg.base().erase(http::field::content_type);
+                req_msg.base().erase(http::field::content_length);
+                req_msg.content_length(0);
+            }
+
+            req_msg.base().target(std::move(target));
+
+            continue;
         }
 
         co_return make_error_code(error::too_many_redirects);
