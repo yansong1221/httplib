@@ -77,6 +77,7 @@ namespace httplib::client
 
         /// \brief 从 URL 创建客户端。
         /// \param url HTTP(S) URL（如 \c https://api.example.com:8443/base ），解析出 host、port、ssl。
+        /// \throws boost::system::system_error `client::error::invalid_url`（URL 无法解析）。
         explicit http_client(net::io_context& ex, std::string_view url);
         explicit http_client(net::any_io_executor const& ex, std::string_view url);
 

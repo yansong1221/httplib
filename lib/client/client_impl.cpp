@@ -24,6 +24,7 @@
 #include <boost/beast/http/string_body.hpp>
 #include <boost/beast/http/write.hpp>
 #include <boost/beast/version.hpp>
+#include <boost/system/system_error.hpp>
 #include <fmt/format.h>
 #include <limits>
 #include <optional>
@@ -506,7 +507,8 @@ namespace httplib::client
         auto r = url::parse_url(url);
         if (!r)
         {
-            throw std::invalid_argument(std::format("invalid url: {}", url));
+            throw boost::system::system_error(make_error_code(error::invalid_url),
+                                              std::format("invalid url: {}", url));
         }
 
         auto const& u = *r;

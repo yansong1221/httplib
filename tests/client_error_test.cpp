@@ -4,6 +4,7 @@
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/system/error_code.hpp>
+#include <boost/system/system_error.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <cstddef>
 #include <iterator>
@@ -89,6 +90,26 @@ TEST_CASE("client error: pool acquire with a bad URL maps to invalid_url", "[cli
             p.stop();
             co_return;
         });
+}
+
+TEST_CASE("client error: URL constructor maps parse failure to invalid_url", "[client][error]")
+{
+    net::io_context ioc;
+
+    try
+    {
+        httplib::client::http_client c(ioc, "not a url at all");
+        FAIL("expected boost::system::system_error");
+    }
+    catch (boost::system::system_error const& e)
+    {
+        CHECK(e.code() == httplib::client::make_error_code(httplib::client::error::invalid_url));
+    }
+
+    httplib::client::http_client c(ioc, "http://127.0.0.1:8080");
+    CHECK(c.host() == "127.0.0.1");
+    CHECK(c.port() == 8080);
+    CHECK(c.scheme() == httplib::url::scheme::plain);
 }
 
 TEST_CASE("client error: released handle reports invalid_handle, not a pool-capacity error",
