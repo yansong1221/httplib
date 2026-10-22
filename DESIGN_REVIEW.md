@@ -528,17 +528,26 @@ lease 改为持不透明 ticket 而非再字符串匹配，miss 时至少打 deb
 
 | # | 场景 | 现状（证据） |
 |---|---|---|
-| 3.1 | URL 解析失败 | client 构造抛 `std::invalid_argument`（`lib/client/client_impl.cpp:475-486`）；pool 返回 `error::invalid_url`（`client_pool.cpp:841-847`，注释还写明「统一映射」，client 没遵循） |
+| 3.1 ✅ | URL 解析失败 | client 构造抛 `std::invalid_argument`（`lib/client/client_impl.cpp:475-486`）；pool 返回 `error::invalid_url`（`client_pool.cpp:841-847`，注释还写明「统一映射」，client 没遵循） |
 | 3.2 | 取 request body（服务端） | `as_*` 抛 `bad_variant_access`（request.cpp:155-177）/ `read_*` 抛 system_error（:185-233）/ `read_body()` 返回 ec / 内部 `take_materialized` 特意用 result（body_reader.hpp:241-251）—— 同一个概念四条路径四种表达 |
 | 3.3 | `as_json()` 返回 `const&` 的稳定性 | body_state 可被 `read_body()` 重物化或 `read_string()` take 走（`take` 是移出语义，body_reader.hpp:250），await 点挂起期间引用即失效，无 API 保证 |
 | 3.4 | `close()` 返回类型 | `client.hpp:138` `future<void>`（吞错） / `ws_client.hpp:179-187` `future<ec>` / `is_alive()` `future<bool>` |
 | 3.5 | db pool 生命周期错误 | 借 generic `errc::operation_canceled`/`connection_aborted`（`connection_pool_impl.cpp:24-25,423`），与 `db::error` 枚举（error.hpp:15-32）两套 category；调用方要先判 category 再分流 |
-| 3.6 | proxy CONNECT 拒绝 | Beast 原生 `http::error::bad_status` 直接漏出公共 API（`proxy_client_impl.cpp:103-108`） |
-| 3.7 | downloader 重试策略 | `too_many_redirects`（结论性永久错误）被当可重试错误退避重试满 `max_retries`（`downloader_impl.cpp:505-514`）；预算耗尽兜底码是语义错位的 `errc::timed_out`（:510-543,700） |
-| 3.8 | 重定向预算耗尽 | `http_client` 拿回最后的 3xx 响应且 client_impl.cpp:280 兜底码**永不可达**；downloader 得到 `error::too_many_redirects`（:315-317）—— 两个实现行为分叉 |
+| 3.6 ✅ | proxy CONNECT 拒绝 | Beast 原生 `http::error::bad_status` 直接漏出公共 API（`proxy_client_impl.cpp:103-108`） |
+| 3.7 ✅ | downloader 重试策略 | `too_many_redirects`（结论性永久错误）被当可重试错误退避重试满 `max_retries`（`downloader_impl.cpp:505-514`）；预算耗尽兜底码是语义错位的 `errc::timed_out`（:510-543,700） |
+| 3.8 ✅ | 重定向预算耗尽 | `http_client` 拿回最后的 3xx 响应且 client_impl.cpp:280 兜底码**永不可达**；downloader 得到 `error::too_many_redirects`（:315-317）—— 两个实现行为分叉 |
 | 3.9 | JWT claim getter | 构造号称不抛（jwt.hpp:120-123），`get_issuer()` 等缺 claim 时抛 `out_of_range`（旧 jwt.cpp:302-341） |
 | 3.10 | 非 SSL 构建 JWT | 签名实现深处抛裸 `std::runtime_error`（jwt.cpp:173-210），不经模块 `error` 枚举 |
 
+> **✅ 3.1 / 3.6 / 3.7 / 3.8 已修复（2026-10）**：
+> - 3.1：`http_client(url)` 构造失败统一返回 `client::error::invalid_url`，不再抛 `std::invalid_argument`。
+> - 3.6：proxy CONNECT 非 2xx 返回 `client::error::http_status`，具体状态由新增的
+>   `proxy_client::http_status()` 保留；不再漏 Beast `http::error::bad_status`。
+> - 3.7：`download_single` 不再重试 `too_many_redirects` / 取消等结论性错误，并移除
+>   `errc::timed_out` 兜底，直接返回真实错误。
+> - 3.8：`http_client` 重定向预算耗尽返回 `client::error::too_many_redirects`；
+>   跨 origin 递归时剩余预算继续传递，不再把 0 误解释为「用户主动不跟随」。
+>
 > **✅ 3.10 已随 jwt→jwt-cpp 重写消除（2026-10）**：jwt-cpp 恒依赖 OpenSSL，OpenSSL 与
 > `jwt-cpp::jwt-cpp` 成为库的无条件依赖（`lib/CMakeLists.txt`），HS* 在任何构建配置下均可用，
 > 非 SSL 抛异常路径整条删除；`httplib_test_jwt` 相应解除 `HTTPLIB_ENABLED_SSL` 门控。
@@ -636,16 +645,24 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 | 5.3 | 405/404 响应不经过任何全局中间件 | `session.cpp:305-313`（未命中直接 `set_error_content`）；限流/CORS/审计对「最常被攻击的 404」不生效 | 全局 before/after 由 session 在派发前显式调用 |
 | 5.4 | accept 循环任何非 EMFILE 错误永久退环，无自愈无上报 | `server_impl.cpp:216-232`（其余错误 `break`） | ECONNABORTED/EINTR 类 continue；异常退出上报 ec |
 | 5.5 | SSE/NDJSON 用「空载荷/空 value」当 EOF 哨兵，与合法数据同形 | `sse_reader_impl.hpp:31-36`（EOF := `sse_event{}`）、`ndjson_reader_impl.hpp:88-91`（EOF := null，而 RFC 7464 keep-alive 就是 null 行） | 返回 `result<std::optional<T>>` 或加 `is_eof` 字段 |
-| 5.6 | `Location: //host/path` 协议相对重定向被当相对路径发给原主机 | `client_impl.cpp:216-251`、`http_header_util.hpp:246-261`（两处独立实现，均只判 `http://`/`https://` 前缀） | 抽出共用 `classify_location()` 处理 `//` 分支 |
+| 5.6 ✅ | `Location: //host/path` 协议相对重定向被当相对路径发给原主机 | `client_impl.cpp:216-251`、`http_header_util.hpp:246-261`（两处独立实现，均只判 `http://`/`https://` 前缀） | 抽出共用 `classify_location()` 处理 `//` 分支 |
 | 5.7 | 重定向 drain 把 body 整体读进内存（OOM 面） | `client_impl.cpp:209-213`（`read_string()`）、`downloader_impl.cpp:304-311,557-563`（`read_body()`） | 提供 `response::drain()`（空 sink） |
 | 5.8 | disk_cache 只用 64 位 FNV 哈希做 key，冲突即静默返回错误内容 | `disk_cache_impl.cpp:44-56,629-693,786-797`（put 冲突 `remove_all` 别的 entry；get 无 key 比对） | entry 落盘完整 key，命中后比对，不匹配按 miss 处理 |
-| 5.9 | pool `stats()` future 式重载的 `string_view` 参数可能悬空 | `client_pool.cpp:890-902`（co_spawn 延迟执行，临时 string 已亡）；对照 `downloader_impl.cpp:75-84` 的正确写法已存在 | 参数先拷贝 std::string |
+| 5.9 ✅ | pool `stats()` future 式重载的 `string_view` 参数可能悬空 | `client_pool.cpp:890-902`（co_spawn 延迟执行，临时 string 已亡）；对照 `downloader_impl.cpp:75-84` 的正确写法已存在 | 参数先拷贝 std::string |
 | 5.10 | `max_size == 0`（禁新路由）与 `max_total == 0`（不限）语义冲突未文档化 | `client_pool.cpp:374-377` vs `client_pool.hpp:19-25` | 文档写明或统一 0=不限 |
 | 5.11 | ws/proxy `async_connect` 已连接时静默忽略新 target（ws 侧还用 ping 探测、未文档化） | `ws_client_impl.cpp:33-41`、`proxy_client_impl.cpp:41-45` | 显式检查已连接状态 + 文档化 or 返回专用错误 | 
 | 5.12 | before 返回 false 且未写响应时落回「默认 404 页」（响应默认状态是 not_found） | `response_impl.hpp:48`、`session.cpp:312` | 调试日志提示「before 短路但响应未写」 |
 | 5.13 | url_decode 静默吞非法编码、url_encode 空格输出 `+`（form 约定用于 path 场景） | `url.cpp:39-55`、`:65-89` | 加 strict 变体（ec/result）；拆 `form_urlencode` 与 RFC3986 编码 |
 | 5.14 | 正则段缺 `:` 名时 param_name 退化成整个 pattern 堆进 params | `router_impl.cpp:229-247` | 注册期报错 |
 | 5.15 ✅ | `on_released` 字符串配对 miss 时静默 | 见 §2.12；ticket 路径 + miss debug 日志已落地 | 已随 §2.12 修复 |
+
+> **✅ 5.6 已修复（2026-10）**：`client` 与 `downloader` 共用
+> `redirect::classify_location()`；`Location: //host/path` 先继承当前 scheme 再按绝对 URL
+> 解析，authority 变化时仍走跨 origin 的敏感头剥离。
+>
+> **✅ 5.9 已修复（2026-10）**：`stats()` 在 `co_spawn` 前把 host/URL 复制成拥有的
+> `std::string`，由闭包持有到协程结束；`stats(url)` 的规范化也放在持有副本的协程里。
+> 回归用例在池执行器未运行时改写输入，确认查询不再读取调用方缓冲区。
 
 ---
 
@@ -660,7 +677,7 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 | 6.5 ✅ | `stream_writer` 空 statements: `create_stream_writer` 裸指针 vs `create_sse_writer` unique_ptr（同 §2.8） | `response.cpp:179-199`；已统一为 shared_ptr（低层）/ unique_ptr（高层），内部持 `shared_ptr<stream_writer>` |
 | 6.6 | websocket open handler 抛异常时不关连接、close_handler 不触发；正常路径 close 必回调 —— 生命周期不对称 | `websocket_conn_impl.cpp:238-246`（catch 后 `co_return`，跳过 :274-281） |
 | 6.7 | websocket 读循环无 idle/timeout 定时器（HTTP 路径全程 `expires_after`，WS 没有），半开连接永久占会话表 | `websocket_conn_impl.cpp:248-262` |
-| 6.8 | downloader `download_single` 对永久错误也退避重试；预算耗尽兜底码 `errc::timed_out` 语义错位 | `downloader_impl.cpp:505-514,700`（详见 §3.7） |
+| 6.8 ✅ | downloader `download_single` 对永久错误也退避重试；预算耗尽兜底码 `errc::timed_out` 语义错位 | `downloader_impl.cpp:505-514,700`（详见 §3.7） |
 | 6.9 | `fnv1a_64`/`fnv1a_hex` 两处重复实现；base64 三处重复 | `disk_cache_impl.cpp:44-56` vs `http_header_util.hpp:18-28`；auth.cpp:12-40 |
 | 6.10 | ODBC 手工 `#define` SQL Server 按私结构并按推测布局用 `SQL_C_BINARY` 解引用 —— 驱动内布局变更是静默错位 | `odbc_backend.cpp:13-46,707,735` |
 | 6.11 | db 三后端 bind/read 样板同构三写（sqlite 文本 4 分支重复、odbc CHAR/BINARY probe-read 双拼、mysql if/else+static_assert 兜底）—— 新类型需三处同步 | `sqlite_backend.cpp:97-124`、`odbc_backend.cpp:409-520`、`mysql_backend.cpp:77` |
@@ -674,6 +691,9 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 | 6.19 | `parse_url` 丢弃 userinfo，URL 身份信息静默消失（host 白名单/缓存键场景有歧义风险） | `url.cpp:152-160` |
 | 6.20 | 枚举名表三处人工镜像（enums.hpp / enum_conv.hpp 460+ 行 / test 名单），违约静默降级 unknown | `lib/enum_conv.hpp:39-497` 及头部注释自述 |
 | 6.21 | 可选功能宏曾以 `target_compile_definitions` PUBLIC 注入下游：开关选项同时改变符号有无、ABI 与下游构建要求三件事，下游必须自己记得加同名 `-D` 才能编译；漏带即头文件与库 ABI 静默分叉 | 曾见 `lib/CMakeLists.txt` 各 feature 分支 |
+
+> **✅ 6.8 已随 §3.7 修复（2026-10）**：`download_single` 不再重试 `too_many_redirects` /
+> 取消等结论性错误，并移除 `errc::timed_out` 兜底，直接返回真实错误。
 
 > **✅ 已修正（2026-10）**：统一为「**常在接口 + 运行期失效**」：
 > 公共头（含 `jwt*` / `middleware/jwt_auth.hpp`）
@@ -731,7 +751,7 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 
 | 类别 | 内容 |
 |---|---|
-| §三 全部 | 全库统一错误模型（先定契约再机械改写） |
+| §三 部分 ✅ | §3.1 / §3.6 / §3.7 / §3.8 / §3.10 已完成；§3.2 / §3.3 / §3.4 / §3.5 / §3.9 待处理 |
 | §2.7 | const 收口为只读视图 |
 | §2.8 / §6.5 ✅ | writer 所有权统一（shared_ptr + weak response） |
 | §5.5 | EOF 哨兵歧义 |

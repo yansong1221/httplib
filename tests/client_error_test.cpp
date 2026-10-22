@@ -33,7 +33,7 @@ namespace
         httplib::client::error::protocol_violation, httplib::client::error::invalid_url,
         httplib::client::error::truncated_body,     httplib::client::error::cache_unavailable,
         httplib::client::error::acquire_timeout,    httplib::client::error::invalid_handle,
-        httplib::client::error::not_initialized,
+        httplib::client::error::not_initialized,    httplib::client::error::already_in_use,
     };
 } // namespace
 
