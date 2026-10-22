@@ -178,6 +178,15 @@ namespace httplib::server::detail
             resp.set_error_content(status::bad_gateway);
             co_return false;
         }
+
+        // Acquire the ticket before parsing succeeds so a bad upstream URL still
+        // releases the selected backend (and re-arms a half-open probe).
+        if (provider_ && !result.value.raw_url.empty())
+        {
+            lease_ = std::make_unique<upstream_lease>(provider_, result.value.raw_url);
+            lease_->begin();
+        }
+
         logger_->debug("[proxy] {} {} -> {}", req.method_string(), req.target(), result.value.raw_url);
         if (result.rc == upstream_resolve_rc::bad_url)
         {
@@ -272,14 +281,18 @@ namespace httplib::server::detail
         client_ = co_await pool_->async_acquire(upstream_.host, upstream_.port, upstream_.ssl ? url::scheme::tls : url::scheme::plain);
         if (!client_)
         {
+            // Pool capacity/acquire timeout is local; do not mark the backend unhealthy.
             logger_->trace("[proxy] acquire client failed for {}:{}", upstream_.host, upstream_.port);
             resp.set_error_content(status::service_unavailable);
             co_return false;
         }
 
-        // Start the in-flight accounting for the chosen backend; the lease releases
-        // it when this context (and its pooled connection) is torn down.
-        lease_.emplace(provider_, upstream_.raw_url);
+        // Legacy providers are accounted at the old point: after the upstream
+        // connection handle was acquired. Ticket providers already hold a ticket.
+        if (lease_)
+        {
+            lease_->start_legacy();
+        }
 
         writer_ = client_->create_lazy_request();
 
@@ -292,6 +305,10 @@ namespace httplib::server::detail
         if (ec)
         {
             logger_->trace("[proxy] write_header to {}:{} failed: {}", upstream_.host, upstream_.port, ec.message());
+            if (lease_)
+            {
+                lease_->failure(ec);
+            }
             resp.set_error_content(upstream_error_to_status(ec));
             co_return false;
         }
@@ -316,6 +333,10 @@ namespace httplib::server::detail
             if (ec)
             {
                 logger_->trace("[proxy] write_body to {}:{} failed: {}", upstream_.host, upstream_.port, ec.message());
+                if (lease_)
+                {
+                    lease_->failure(ec);
+                }
                 resp.set_error_content(upstream_error_to_status(ec));
                 co_return false;
             }
@@ -334,10 +355,21 @@ namespace httplib::server::detail
                            upstream_.host,
                            upstream_.port,
                            up_result.error().message());
+            if (lease_)
+            {
+                lease_->failure(up_result.error());
+            }
             resp.set_error_content(upstream_error_to_status(up_result.error()));
             co_return false;
         }
         upstream_response_ = std::move(up_result.value());
+
+        // The upstream answered at the HTTP layer; body-level failures below can
+        // still demote it via report_failure().
+        if (lease_)
+        {
+            lease_->success();
+        }
 
         auto const& headers = upstream_response_.headers();
         auto const result = upstream_response_.result();
@@ -398,6 +430,10 @@ namespace httplib::server::detail
             if (ec)
             {
                 logger_->trace("[proxy] read response body failed: {}", ec.message());
+                if (lease_)
+                {
+                    lease_->failure(ec);
+                }
                 co_return;
             }
             auto more = !upstream_response_.is_body_done();

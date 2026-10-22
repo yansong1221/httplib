@@ -67,6 +67,12 @@ tag；以下变更相对仓库初始状态累积。
 - **流式读取**：NDJSON reader 不再丢末条记录；压缩 SSE / NDJSON 尾部不再被截断；HEAD 保留
   `Content-Length`；零长缓冲读空 body 不再空转。
 - **下载器**：修复多段续传、Range 回退与进度计数。
+- **上游健康与租约**：反代/WS 的上游传输失败现在会标脏对应 backend；`upstream_group` 采用
+  `healthy / unhealthy / half_open` 三态，失败冷却 5s 后由下一个真实请求做单飞半开探测，
+  成功恢复、失败或取消重新计时。provider 新增 ticket 生命周期
+  （`acquire_ticket` / `release_ticket` / `report_success` / `report_failure`），
+  `upstream_group` 按 ticket 配对，不再依赖 URL 字符串精确匹配；旧
+  `on_acquired` / `on_released` 作为默认路径保留。
 
 ### 变更
 
@@ -76,6 +82,10 @@ tag；以下变更相对仓库初始状态累积。
   body 类型，提供 `as_string()` / `as_json()` / `as_form_data()` / `as_query_params()`
   类型化访问器。
 - **枚举转换**改为 X-macro 名字表；`fields()` 改为生成器，header 改为 PIMPL 借用视图。
+- **`upstream_provider` 扩展**：新增带默认实现的 `acquire_ticket()` /
+  `release_ticket()` / `report_success()` / `report_failure()`；默认返回 0 时继续使用
+  legacy `on_acquired()` / `on_released()`，现有自定义 provider 源兼容。新增虚函数会改变
+  vtable，二进制接口需重新编译。
 - **反向代理 location 文档**：明确 `set_reverse_proxy` / `set_ws_forward` 的 location
   是路由模式；`"/api"` 只匹配精确路径，子树用 `"/api/*"`，且只支持静态前缀。
 - **削减公共头的 Boost 传递依赖**；`ticker` 改用 PIMPL。

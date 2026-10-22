@@ -7,13 +7,13 @@
 #include "proxy_util.hpp"
 #include "request_impl.hpp"
 #include "response_impl.hpp"
+#include "upstream_lease.hpp"
 #include <array>
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/buffer.hpp>
 #include <boost/system/error_code.hpp>
 #include <cstdint>
 #include <memory>
-#include <optional>
 #include <string>
 #include "beast_alias.hpp"
 
@@ -66,36 +66,9 @@ namespace httplib::server::detail
         std::shared_ptr<proxy_interceptor> interceptor_;
         parsed_upstream upstream_;
 
-        /// \brief RAII accounting lease: notifies the provider when the acquired
-        /// upstream connection enters/leaves service for this request.
-        struct provider_lease
-        {
-            std::shared_ptr<upstream_provider> provider;
-            std::string url;
-
-            provider_lease(std::shared_ptr<upstream_provider> p, std::string u)
-                : provider(std::move(p))
-                , url(std::move(u))
-            {
-                if (provider)
-                {
-                    provider->on_acquired(url);
-                }
-            }
-            ~provider_lease()
-            {
-                if (provider)
-                {
-                    provider->on_released(url);
-                }
-            }
-            provider_lease(provider_lease const&) = delete;
-            provider_lease& operator=(provider_lease const&) = delete;
-        };
-
         httplib::headers upstream_headers_ {};
         client::http_client_pool::client_handle client_;
-        std::optional<provider_lease> lease_;
+        std::unique_ptr<upstream_lease> lease_;
         std::shared_ptr<client::lazy_request> writer_;
         client::response upstream_response_;
         std::array<char, 8192> relay_buf_ {};

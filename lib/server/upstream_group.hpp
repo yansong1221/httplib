@@ -2,10 +2,12 @@
 #include "httplib/server/proxy_strategy.hpp"
 #include "httplib/util/string_hash.hpp"
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <spdlog/spdlog.h>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -13,11 +15,20 @@
 namespace httplib::server
 {
 
+    /// \brief Runtime health state of a backend (internal only).
+    enum class backend_health : std::uint8_t
+    {
+        healthy,
+        unhealthy,
+        half_open
+    };
+
     /// An upstream backend with runtime health/load state (internal only).
     struct group_backend : upstream_backend
     {
         std::atomic<size_t> active { 0 };
-        std::atomic<bool> healthy { true };
+        std::atomic<backend_health> health { backend_health::healthy };
+        std::atomic<std::int64_t> retry_at_ms { 0 };
 
         group_backend() = default;
         explicit group_backend(upstream_backend const& cfg);
@@ -38,8 +49,11 @@ namespace httplib::server
         , public std::enable_shared_from_this<upstream_group>
     {
       public:
-        explicit upstream_group(std::vector<group_backend> backends,
-                                upstream_locator locator = upstream_locator::round_robin);
+        explicit upstream_group(
+            std::vector<group_backend> backends,
+            upstream_locator locator = upstream_locator::round_robin,
+            std::shared_ptr<spdlog::logger> logger = nullptr,
+            std::chrono::milliseconds unhealthy_cooldown = std::chrono::seconds(5));
 
         size_t size() const;
 
@@ -48,10 +62,22 @@ namespace httplib::server
 
         net::awaitable<std::string> url(request&) override;
 
-        /// \brief Track an in-flight request against the backend that yielded \p url.
+        /// \brief Ticket-based accounting: returns backend index + 1, or 0 on a miss.
+        std::uint64_t acquire_ticket(std::string const& url) override;
+
+        /// \brief Release a ticket previously returned by acquire_ticket().
+        void release_ticket(std::uint64_t ticket) noexcept override;
+
+        /// \brief Mark the ticketed backend healthy.
+        void report_success(std::uint64_t ticket) noexcept override;
+
+        /// \brief Mark the ticketed backend unhealthy and arm the next probe.
+        void report_failure(std::uint64_t ticket, boost::system::error_code const& ec) noexcept override;
+
+        /// \brief Legacy hook: track an in-flight request against the backend that yielded \p url.
         void on_acquired(std::string const& url) override;
 
-        /// \brief Release the in-flight request for the backend that yielded \p url.
+        /// \brief Legacy hook: release the in-flight request for the backend that yielded \p url.
         void on_released(std::string const& url) override;
 
         /// Pick the next backend per the locator and return its URL (synchronous).
@@ -68,6 +94,8 @@ namespace httplib::server
         std::vector<group_backend> backends_;
         upstream_locator locator_;
         std::atomic<size_t> rr_index_ { 0 };
+        std::shared_ptr<spdlog::logger> logger_;
+        std::chrono::milliseconds unhealthy_cooldown_;
 
         /// backend url -> index; built once in the constructor and read-only after,
         /// so concurrent lookups need no lock.
@@ -84,6 +112,9 @@ namespace httplib::server
 
         /// Least active connections.
         group_backend& least_conn();
+
+        /// Reserve a due unhealthy backend as the single half-open probe.
+        group_backend* try_acquire_probe();
 
         group_backend& do_resolve();
     };

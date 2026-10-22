@@ -3,6 +3,7 @@
 #include "httplib/server/server.hpp"
 #include "httplib/server/websocket_conn.hpp"
 #include "proxy_util.hpp"
+#include "upstream_lease.hpp"
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
 #include <boost/beast/http/fields.hpp>
@@ -30,22 +31,20 @@ namespace httplib::server::detail
     {
         std::shared_ptr<client::ws_client> upstream;
         std::shared_ptr<ws_interceptor> interceptor;
-        std::shared_ptr<upstream_provider> provider;
-        std::string url;
+        std::shared_ptr<upstream_lease> lease;
     };
 
     using ws_forward_state_ptr = std::shared_ptr<ws_forward_state>;
 
     /// \brief Release the upstream in-flight accounting for a forwarded session.
-    /// \details Safe to call more than once; the provider handle is cleared after
-    /// the first release.
+    /// \details Safe to call more than once; the lease is cleared after the first
+    /// release, and upstream_lease's destructor performs the actual provider call.
     inline void
     release_upstream_accounting(ws_forward_state_ptr const& state)
     {
-        if (state && state->provider)
+        if (state && state->lease)
         {
-            state->provider->on_released(state->url);
-            state->provider.reset();
+            state->lease.reset();
         }
     }
 
@@ -89,5 +88,6 @@ namespace httplib::server::detail
         std::shared_ptr<ws_interceptor> interceptor_;
         parsed_upstream upstream_;
         httplib::headers upstream_headers_ {};
+        std::shared_ptr<upstream_lease> lease_;
     };
 } // namespace httplib::server::detail

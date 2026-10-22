@@ -76,19 +76,26 @@ namespace httplib::server::detail
         if (ec)
         {
             get_logger()->trace("[ws-forward] upstream connect failed: {}", ec.message());
+            if (lease_)
+            {
+                lease_->failure(ec);
+            }
             conn->close(ec.message());
             co_return;
+        }
+
+        // Ticket providers already hold a ticket from prepare_upstream(); legacy
+        // providers are accounted at the old point, after a successful handshake.
+        if (lease_)
+        {
+            lease_->start_legacy();
+            lease_->success();
         }
 
         auto state = std::make_shared<ws_forward_state>();
         state->upstream = std::move(upstream);
         state->interceptor = std::move(interceptor_);
-        state->provider = provider_;
-        state->url = upstream_.raw_url;
-        if (provider_)
-        {
-            provider_->on_acquired(upstream_.raw_url);
-        }
+        state->lease = std::move(lease_);
         req.data().store<ws_forward_state_ptr>(std::move(state));
     }
 
@@ -106,6 +113,15 @@ namespace httplib::server::detail
             conn.close("resolver failed");
             co_return false;
         }
+
+        // Acquire the ticket before the handshake so a connect failure marks the
+        // selected backend, and a bad URL still releases/re-arms it.
+        if (provider_ && !result.value.raw_url.empty())
+        {
+            lease_ = std::make_shared<upstream_lease>(provider_, result.value.raw_url);
+            lease_->begin();
+        }
+
         if (result.rc == upstream_resolve_rc::bad_url)
         {
             get_logger()->warn("[ws-forward] invalid upstream url: {}", result.value.raw_url);
@@ -170,6 +186,10 @@ namespace httplib::server::detail
         co_await state->upstream->async_send(msg, ec);
         if (ec)
         {
+            if (state->lease)
+            {
+                state->lease->failure(ec);
+            }
             conn->close();
         }
     }

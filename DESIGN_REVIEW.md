@@ -511,6 +511,15 @@ allows 收集并入匹配过程；c) 注册时把尾斜杠归一（或 301 重�
 **建议**：失败路径回调 provider 钩子（`on_probe_failed` 类）并自动标脏 + 半开恢复；
 lease 改为持不透明 ticket 而非再字符串匹配，miss 时至少打 debug 日志。
 
+> **✅ 已修复（2026-10）**：`upstream_provider` 增加带默认实现的
+> `acquire_ticket()` / `release_ticket()` / `report_success()` / `report_failure()`；
+> 默认 ticket 0 继续走 legacy `on_acquired()`/`on_released()`，`upstream_group` 返回
+> backend index + 1 的 ticket。反代和 WS 在 resolve 后立即取 ticket，连接/握手失败因此也能
+> 标脏对应后端；release 按 ticket，不再做 URL 精确匹配。`upstream_group` 后端状态改为
+> `healthy / unhealthy / half_open` 三态，失败后冷却 5s，到期由下一个真实请求做单飞半开探测；
+> 探测成功恢复，失败或取消重新计时。URL miss、非法 ticket 均打 debug 日志；重复 backend URL
+> 在构造期拒绝。测试覆盖 ticket 配对、失败标脏、半开恢复、取消探测和反代成功/失败回报。
+
 ---
 
 ## 三、错误模型不统一（最大面积的设计债）
@@ -636,7 +645,7 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 | 5.12 | before 返回 false 且未写响应时落回「默认 404 页」（响应默认状态是 not_found） | `response_impl.hpp:48`、`session.cpp:312` | 调试日志提示「before 短路但响应未写」 |
 | 5.13 | url_decode 静默吞非法编码、url_encode 空格输出 `+`（form 约定用于 path 场景） | `url.cpp:39-55`、`:65-89` | 加 strict 变体（ec/result）；拆 `form_urlencode` 与 RFC3986 编码 |
 | 5.14 | 正则段缺 `:` 名时 param_name 退化成整个 pattern 堆进 params | `router_impl.cpp:229-247` | 注册期报错 |
-| 5.15 | `on_released` 字符串配对 miss 时静默 | 见 §2.12 | 见 §2.12 |
+| 5.15 ✅ | `on_released` 字符串配对 miss 时静默 | 见 §2.12；ticket 路径 + miss debug 日志已落地 | 已随 §2.12 修复 |
 
 ---
 
@@ -716,7 +725,7 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 | §2.10 ✅（文档） | reverse_proxy / ws_forward location 的 `/*` 契约已在头文件与 README 明确 |
 | §2.11a ✅ | `%2F` 逐段解码；`path()` raw + `decoded_segments()` / `decoded_path()` |
 | §2.11b/c | 路由优先级/回溯/allows 双遍历；尾斜杠与 trim |
-| §2.12 | 上游健康机制死代码 + ticket 配对 |
+| §2.12 ✅ | 上游健康机制已接入：失败标脏 + 被动半开探测；ticket 替代字符串配对 |
 
 ### P2（契约整理）
 

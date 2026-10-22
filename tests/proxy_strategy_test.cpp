@@ -5,8 +5,12 @@
 #include "httplib/server/response.hpp"
 #include "server/request_impl.hpp"
 #include "server/upstream_group.hpp"
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
 #include <map>
+#include <stdexcept>
+#include <thread>
 
 using namespace httplib;
 using namespace httplib::server;
@@ -253,6 +257,81 @@ TEST_CASE("upstream_group: on_acquired/on_released track in-flight load")
     CHECK(group->resolve_url() == "http://a:80");
 }
 
+TEST_CASE("upstream_group: ticket accounting survives url variants")
+{
+    auto group = std::make_shared<upstream_group>(
+        make_backends({ upstream_backend { "http://a:80" }, upstream_backend { "http://b:80" } }),
+        upstream_locator::least_connections);
+
+    auto ticket = group->acquire_ticket("http://a:80");
+    REQUIRE(ticket != 0);
+    CHECK(group->at(0).active.load() == 1);
+
+    // release_ticket() must not re-resolve the URL; it identifies the backend by ticket.
+    group->release_ticket(ticket);
+    CHECK(group->at(0).active.load() == 0);
+
+    CHECK(group->acquire_ticket("http://unknown:80") == 0);
+    CHECK(group->at(0).active.load() == 0);
+}
+
+TEST_CASE("upstream_group: failure marks unhealthy and a half-open probe recovers it")
+{
+    auto group = std::make_shared<upstream_group>(
+        make_backends({ upstream_backend { "http://a:80" }, upstream_backend { "http://b:80" } }),
+        upstream_locator::round_robin,
+        nullptr,
+        std::chrono::milliseconds(20));
+
+    auto ticket = group->acquire_ticket("http://a:80");
+    REQUIRE(ticket != 0);
+    group->report_failure(ticket, boost::system::errc::make_error_code(boost::system::errc::connection_refused));
+    group->release_ticket(ticket);
+
+    REQUIRE(group->healthy_backends().size() == 1);
+    CHECK(group->resolve_url() == "http://b:80");
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+
+    // The next request is the single half-open probe.
+    auto probe_url = group->resolve_url();
+    CHECK(probe_url == "http://a:80");
+    auto probe_ticket = group->acquire_ticket(probe_url);
+    REQUIRE(probe_ticket != 0);
+    group->report_success(probe_ticket);
+    group->release_ticket(probe_ticket);
+
+    CHECK(group->healthy_backends().size() == 2);
+}
+
+TEST_CASE("upstream_group: cancelled probe re-arms the cooldown")
+{
+    auto group = std::make_shared<upstream_group>(
+        make_backends({ upstream_backend { "http://a:80" }, upstream_backend { "http://b:80" } }),
+        upstream_locator::round_robin,
+        nullptr,
+        std::chrono::milliseconds(20));
+
+    group->mark_unhealthy(0);
+    CHECK(group->resolve_url() == "http://b:80");
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(40));
+    auto probe_url = group->resolve_url();
+    CHECK(probe_url == "http://a:80");
+    auto probe_ticket = group->acquire_ticket(probe_url);
+    REQUIRE(probe_ticket != 0);
+
+    // No success/failure: the probe is treated as cancelled and re-arms the cooldown.
+    group->release_ticket(probe_ticket);
+    CHECK(group->resolve_url() == "http://b:80");
+}
+
+TEST_CASE("upstream_group: duplicate backend urls are rejected")
+{
+    auto duplicates = make_backends({ upstream_backend { "http://a:80" }, upstream_backend { "http://a:80" } });
+    CHECK_THROWS_AS(std::make_shared<upstream_group>(duplicates), std::invalid_argument);
+}
+
 // ===========================================================================
 // Error cases
 // ===========================================================================
@@ -459,6 +538,194 @@ TEST_CASE("proxy[url-provider]: per-request single upstream URL", "[proxy][url-p
             proxy.stop();
             upstream1.stop();
             upstream2.stop();
+        },
+        [&](std::exception_ptr e) { err = e; });
+    pool.join();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
+TEST_CASE("proxy[ticket]: lifecycle provider gets success and release by ticket", "[proxy][ticket]")
+{
+    struct recording_provider final : server::upstream_provider
+    {
+        explicit recording_provider(std::string url) : url_(std::move(url)) {}
+
+        net::awaitable<std::string>
+        url(server::request&) override
+        {
+            co_return url_;
+        }
+
+        std::uint64_t
+        acquire_ticket(std::string const&) override
+        {
+            acquired.fetch_add(1);
+            return 1;
+        }
+
+        void
+        release_ticket(std::uint64_t ticket) noexcept override
+        {
+            if (ticket != 1)
+            {
+                wrong_ticket.fetch_add(1);
+            }
+            released.fetch_add(1);
+        }
+
+        void
+        report_success(std::uint64_t ticket) noexcept override
+        {
+            if (ticket != 1)
+            {
+                wrong_ticket.fetch_add(1);
+            }
+            succeeded.fetch_add(1);
+        }
+
+        void
+        report_failure(std::uint64_t, boost::system::error_code const&) noexcept override
+        {
+            failed.fetch_add(1);
+        }
+
+        std::string url_;
+        std::atomic<int> acquired { 0 };
+        std::atomic<int> released { 0 };
+        std::atomic<int> succeeded { 0 };
+        std::atomic<int> failed { 0 };
+        std::atomic<int> wrong_ticket { 0 };
+    };
+
+    net::thread_pool pool { 4 };
+    std::exception_ptr err;
+    net::co_spawn(
+        pool.get_executor(),
+        [&]() -> net::awaitable<void>
+        {
+            server::http_server upstream(pool.get_executor());
+            upstream.router().template set_http_handler<httplib::method::get>(
+                "/who",
+                [](server::request&, server::response& resp)
+                { resp.set_string_content(std::string("ok"), "text/plain"); });
+
+            auto ep = upstream.listen("127.0.0.1", 0).local_endpoint();
+            auto provider = std::make_shared<recording_provider>(
+                std::format("http://{}:{}", ep.address().to_string(), ep.port()));
+
+            server::http_server proxy(pool.get_executor());
+            proxy.set_reverse_proxy("/api/*", provider);
+            proxy.listen("127.0.0.1", 0);
+            auto pep = proxy.local_endpoint();
+
+            upstream.run();
+            proxy.run();
+
+            client::http_client c(pool.get_executor(), "127.0.0.1", pep.port());
+            c.set_timeout(std::chrono::seconds(10));
+
+            auto resp = UNWRAP(co_await c.async_get("/api/who"));
+            REQUIRE(resp.result() == httplib::status::ok);
+            CHECK(as_string(resp) == "ok");
+            CHECK(provider->acquired.load() >= 1);
+            CHECK(provider->succeeded.load() >= 1);
+
+            for (int i = 0; i < 100 && provider->released.load() == 0; ++i)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            CHECK(provider->released.load() >= 1);
+            CHECK(provider->failed.load() == 0);
+            CHECK(provider->wrong_ticket.load() == 0);
+
+            c.close();
+            proxy.stop();
+            upstream.stop();
+        },
+        [&](std::exception_ptr e) { err = e; });
+    pool.join();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
+}
+
+TEST_CASE("proxy[ticket]: upstream transport failure is reported", "[proxy][ticket]")
+{
+    struct failing_provider final : server::upstream_provider
+    {
+        net::awaitable<std::string>
+        url(server::request&) override
+        {
+            co_return std::string("http://127.0.0.1:1");
+        }
+
+        std::uint64_t
+        acquire_ticket(std::string const&) override
+        {
+            acquired.fetch_add(1);
+            return 1;
+        }
+
+        void
+        release_ticket(std::uint64_t) noexcept override
+        {
+            released.fetch_add(1);
+        }
+
+        void
+        report_success(std::uint64_t) noexcept override
+        {
+            succeeded.fetch_add(1);
+        }
+
+        void
+        report_failure(std::uint64_t, boost::system::error_code const&) noexcept override
+        {
+            failed.fetch_add(1);
+        }
+
+        std::atomic<int> acquired { 0 };
+        std::atomic<int> released { 0 };
+        std::atomic<int> succeeded { 0 };
+        std::atomic<int> failed { 0 };
+    };
+
+    net::thread_pool pool { 4 };
+    std::exception_ptr err;
+    net::co_spawn(
+        pool.get_executor(),
+        [&]() -> net::awaitable<void>
+        {
+            auto provider = std::make_shared<failing_provider>();
+
+            server::http_server proxy(pool.get_executor());
+            proxy.set_reverse_proxy("/api/*", provider);
+            proxy.listen("127.0.0.1", 0);
+            auto pep = proxy.local_endpoint();
+
+            proxy.run();
+
+            client::http_client c(pool.get_executor(), "127.0.0.1", pep.port());
+            c.set_timeout(std::chrono::seconds(10));
+
+            auto resp = UNWRAP(co_await c.async_get("/api/who"));
+            CHECK(resp.result() == httplib::status::bad_gateway);
+            CHECK(provider->acquired.load() >= 1);
+            CHECK(provider->failed.load() >= 1);
+            CHECK(provider->succeeded.load() == 0);
+
+            for (int i = 0; i < 100 && provider->released.load() == 0; ++i)
+            {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            CHECK(provider->released.load() >= 1);
+
+            c.close();
+            proxy.stop();
         },
         [&](std::exception_ptr e) { err = e; });
     pool.join();

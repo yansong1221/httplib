@@ -12,7 +12,8 @@ namespace httplib::server
     group_backend::group_backend(group_backend const& other)
         : upstream_backend(other)
         , active(other.active.load())
-        , healthy(other.healthy.load())
+        , health(other.health.load())
+        , retry_at_ms(other.retry_at_ms.load())
     {
     }
 
@@ -23,7 +24,8 @@ namespace httplib::server
         {
             upstream_backend::operator=(other);
             active.store(other.active.load());
-            healthy.store(other.healthy.load());
+            health.store(other.health.load());
+            retry_at_ms.store(other.retry_at_ms.load());
         }
         return *this;
     }
@@ -31,7 +33,8 @@ namespace httplib::server
     group_backend::group_backend(group_backend&& other) noexcept
         : upstream_backend(std::move(other))
         , active(other.active.load())
-        , healthy(other.healthy.load())
+        , health(other.health.load())
+        , retry_at_ms(other.retry_at_ms.load())
     {
     }
 
@@ -42,18 +45,44 @@ namespace httplib::server
         {
             upstream_backend::operator=(std::move(other));
             active.store(other.active.load());
-            healthy.store(other.healthy.load());
+            health.store(other.health.load());
+            retry_at_ms.store(other.retry_at_ms.load());
         }
         return *this;
     }
 
-    upstream_group::upstream_group(std::vector<group_backend> backends, upstream_locator locator)
+    namespace
+    {
+        std::int64_t
+        now_ms()
+        {
+            return std::chrono::duration_cast<std::chrono::milliseconds>(
+                       std::chrono::steady_clock::now().time_since_epoch())
+                .count();
+        }
+
+        bool
+        is_healthy(group_backend const& b)
+        {
+            return b.health.load(std::memory_order_acquire) == backend_health::healthy;
+        }
+    } // namespace
+
+    upstream_group::upstream_group(std::vector<group_backend> backends,
+                                   upstream_locator locator,
+                                   std::shared_ptr<spdlog::logger> logger,
+                                   std::chrono::milliseconds unhealthy_cooldown)
         : backends_(std::move(backends))
         , locator_(locator)
+        , logger_(std::move(logger))
+        , unhealthy_cooldown_(unhealthy_cooldown)
     {
         for (size_t i = 0; i < backends_.size(); ++i)
         {
-            url_index_[backends_[i].url] = i;
+            if (!url_index_.emplace(backends_[i].url, i).second)
+            {
+                throw std::invalid_argument("upstream_group: duplicate upstream url: " + backends_[i].url);
+            }
         }
     }
 
@@ -61,19 +90,119 @@ namespace httplib::server
     upstream_group::on_acquired(std::string const& url)
     {
         auto it = url_index_.find(url);
-        if (it != url_index_.end())
+        if (it == url_index_.end())
         {
-            backends_[it->second].active.fetch_add(1, std::memory_order_relaxed);
+            if (logger_)
+            {
+                logger_->debug("upstream_group: on_acquired miss for {}", url);
+            }
+            return;
         }
+        backends_[it->second].active.fetch_add(1, std::memory_order_relaxed);
     }
 
     void
     upstream_group::on_released(std::string const& url)
     {
         auto it = url_index_.find(url);
-        if (it != url_index_.end())
+        if (it == url_index_.end())
         {
-            backends_[it->second].active.fetch_sub(1, std::memory_order_relaxed);
+            if (logger_)
+            {
+                logger_->debug("upstream_group: on_released miss for {}", url);
+            }
+            return;
+        }
+        backends_[it->second].active.fetch_sub(1, std::memory_order_relaxed);
+    }
+
+    std::uint64_t
+    upstream_group::acquire_ticket(std::string const& url)
+    {
+        auto it = url_index_.find(url);
+        if (it == url_index_.end())
+        {
+            if (logger_)
+            {
+                logger_->debug("upstream_group: acquire_ticket miss for {}", url);
+            }
+            return 0;
+        }
+
+        auto& backend = backends_[it->second];
+        backend.active.fetch_add(1, std::memory_order_relaxed);
+        return static_cast<std::uint64_t>(it->second) + 1;
+    }
+
+    void
+    upstream_group::release_ticket(std::uint64_t ticket) noexcept
+    {
+        if (ticket == 0 || ticket > backends_.size())
+        {
+            if (logger_)
+            {
+                logger_->debug("upstream_group: release_ticket invalid ticket {}", ticket);
+            }
+            return;
+        }
+
+        auto& backend = backends_[ticket - 1];
+        backend.active.fetch_sub(1, std::memory_order_relaxed);
+
+        // A release without a success/failure result means the probe request was
+        // cancelled or torn down before it could decide. Re-arm the cooldown instead
+        // of leaving the backend stuck in half_open. Store retry_at before flipping
+        // the state so a concurrent probe selection cannot observe a stale deadline.
+        if (backend.health.load(std::memory_order_acquire) == backend_health::half_open)
+        {
+            backend.retry_at_ms.store(now_ms() + unhealthy_cooldown_.count(), std::memory_order_release);
+            auto expected = backend_health::half_open;
+            if (backend.health.compare_exchange_strong(
+                    expected, backend_health::unhealthy, std::memory_order_acq_rel, std::memory_order_acquire))
+            {
+                if (logger_)
+                {
+                    logger_->debug("upstream_group: probe cancelled for {}", backend.url);
+                }
+            }
+        }
+    }
+
+    void
+    upstream_group::report_success(std::uint64_t ticket) noexcept
+    {
+        if (ticket == 0 || ticket > backends_.size())
+        {
+            if (logger_)
+            {
+                logger_->debug("upstream_group: report_success invalid ticket {}", ticket);
+            }
+            return;
+        }
+
+        auto& backend = backends_[ticket - 1];
+        backend.retry_at_ms.store(0, std::memory_order_release);
+        backend.health.store(backend_health::healthy, std::memory_order_release);
+    }
+
+    void
+    upstream_group::report_failure(std::uint64_t ticket, boost::system::error_code const& ec) noexcept
+    {
+        if (ticket == 0 || ticket > backends_.size())
+        {
+            if (logger_)
+            {
+                logger_->debug("upstream_group: report_failure invalid ticket {}", ticket);
+            }
+            return;
+        }
+
+        auto& backend = backends_[ticket - 1];
+        backend.retry_at_ms.store(now_ms() + unhealthy_cooldown_.count(), std::memory_order_release);
+        backend.health.store(backend_health::unhealthy, std::memory_order_release);
+        if (logger_)
+        {
+            logger_->debug("upstream_group: backend {} unhealthy: {}", backend.url, ec.message());
         }
     }
 
@@ -95,9 +224,46 @@ namespace httplib::server
         return backends_[i];
     }
 
+    group_backend*
+    upstream_group::try_acquire_probe()
+    {
+        auto now = now_ms();
+        for (auto& b : backends_)
+        {
+            if (b.health.load(std::memory_order_acquire) != backend_health::unhealthy)
+            {
+                continue;
+            }
+            if (now < b.retry_at_ms.load(std::memory_order_relaxed))
+            {
+                continue;
+            }
+
+            auto expected = backend_health::unhealthy;
+            if (b.health.compare_exchange_strong(
+                    expected, backend_health::half_open, std::memory_order_acq_rel, std::memory_order_acquire))
+            {
+                if (logger_)
+                {
+                    logger_->debug("upstream_group: probing {}", b.url);
+                }
+                return &b;
+            }
+        }
+        return nullptr;
+    }
+
     group_backend&
     upstream_group::do_resolve()
     {
+        // Passive half-open recovery: let at most one real request probe a due
+        // backend, even when other healthy backends are available. Without this,
+        // an unhealthy backend with no traffic would never recover.
+        if (auto* probe = try_acquire_probe())
+        {
+            return *probe;
+        }
+
         switch (locator_)
         {
             case upstream_locator::weighted_round_robin:
@@ -129,7 +295,7 @@ namespace httplib::server
         std::vector<group_backend*> result;
         for (auto& b : backends_)
         {
-            if (b.healthy.load(std::memory_order_acquire))
+            if (is_healthy(b))
             {
                 result.push_back(&b);
             }
@@ -142,7 +308,8 @@ namespace httplib::server
     {
         if (idx < backends_.size())
         {
-            backends_[idx].healthy.store(false, std::memory_order_release);
+            backends_[idx].retry_at_ms.store(now_ms() + unhealthy_cooldown_.count(), std::memory_order_release);
+            backends_[idx].health.store(backend_health::unhealthy, std::memory_order_release);
         }
     }
 
@@ -151,7 +318,8 @@ namespace httplib::server
     {
         if (idx < backends_.size())
         {
-            backends_[idx].healthy.store(true, std::memory_order_release);
+            backends_[idx].retry_at_ms.store(0, std::memory_order_release);
+            backends_[idx].health.store(backend_health::healthy, std::memory_order_release);
         }
     }
 
@@ -166,7 +334,7 @@ namespace httplib::server
         for (size_t i = 0; i < n; ++i)
         {
             auto idx = rr_index_.fetch_add(1, std::memory_order_relaxed) % n;
-            if (backends_[idx].healthy.load(std::memory_order_acquire))
+            if (is_healthy(backends_[idx]))
             {
                 return backends_[idx];
             }
@@ -194,7 +362,7 @@ namespace httplib::server
         std::ptrdiff_t selected = -1;
         for (size_t i = 0; i < n; ++i)
         {
-            bool healthy = backends_[i].healthy.load(std::memory_order_acquire);
+            bool healthy = is_healthy(backends_[i]);
             std::ptrdiff_t w = healthy ? static_cast<std::ptrdiff_t>(backends_[i].weight) : 0;
             total_weight += w;
             if (!healthy)
@@ -228,7 +396,7 @@ namespace httplib::server
         group_backend* best = nullptr;
         for (auto& b : backends_)
         {
-            if (!b.healthy.load(std::memory_order_acquire))
+            if (!is_healthy(b))
             {
                 continue;
             }

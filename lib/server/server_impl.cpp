@@ -392,7 +392,7 @@ namespace httplib::server
                                          upstream_locator locator,
                                          http_server::proxy_interceptor_factory factory)
     {
-        auto group = std::make_shared<upstream_group>(make_backends(backends), locator);
+        auto group = std::make_shared<upstream_group>(make_backends(backends), locator, get_logger());
         set_reverse_proxy(location, group, std::move(factory));
     }
 
@@ -441,7 +441,7 @@ namespace httplib::server
                                       upstream_locator locator,
                                       http_server::ws_interceptor_factory factory)
     {
-        auto group = std::make_shared<upstream_group>(make_backends(backends), locator);
+        auto group = std::make_shared<upstream_group>(make_backends(backends), locator, get_logger());
         set_ws_forward(location, group, std::move(factory));
     }
 
