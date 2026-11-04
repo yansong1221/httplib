@@ -4,6 +4,7 @@
 #include "httplib/util/misc.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 using namespace std::string_view_literals;
@@ -36,6 +37,33 @@ TEST_CASE("query_params: at_bool returns boolean", "[body-utils]")
     REQUIRE_FALSE(qp.at<bool>("off"));
     REQUIRE(qp.at<bool>("yes"));
     REQUIRE_FALSE(qp.at<bool>("no"));
+}
+
+TEST_CASE("query_params: at with default value", "[body-utils]")
+{
+    httplib::query_params qp;
+    REQUIRE(qp.decode("count=42&flag=true&name=alice"));
+
+    // 缺 key 时返回 fallback；显式指定 T 时返回类型必须就是 T
+    REQUIRE(qp.at("missing", "fallback") == "fallback");
+    REQUIRE(qp.at<std::string>("missing", "fallback") == "fallback");
+    static_assert(std::is_same_v<decltype(qp.at("missing", "fallback")), std::string>);
+    static_assert(std::is_same_v<decltype(qp.at<std::string>("missing", "fallback")), std::string>);
+    REQUIRE(qp.at<int64_t>("missing", -1) == -1);
+    REQUIRE(qp.at<bool>("missing", true));
+
+    // 非字符串类型必须显式指定 T
+    REQUIRE(qp.at<int>("missing", 8080) == 8080);
+    static_assert(std::is_same_v<decltype(qp.at<int>("missing", 8080)), int>);
+    static_assert(std::is_same_v<decltype(qp.at("missing", std::string("x"))), std::string>);
+
+    // key 存在时优先返回实际值
+    REQUIRE(qp.at("name", "fallback") == "alice");
+    REQUIRE(qp.at<int64_t>("count", -1) == 42);
+    REQUIRE(qp.at<bool>("flag", false));
+
+    // fallback 只覆盖缺 key，值无法转换仍抛异常
+    REQUIRE_THROWS(qp.at<int64_t>("name", -1));
 }
 
 TEST_CASE("query_params: all returns multiple values", "[body-utils]")
