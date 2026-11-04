@@ -66,6 +66,39 @@ TEST_CASE("query_params: at with default value", "[body-utils]")
     REQUIRE_THROWS(qp.at<int64_t>("name", -1));
 }
 
+TEST_CASE("query_params: try_at reports error codes", "[body-utils]")
+{
+    httplib::query_params qp;
+    REQUIRE(qp.decode("count=42&flag=true&name=alice&bad=oops"));
+
+    auto name = qp.try_at("name");
+    REQUIRE(name.has_value());
+    REQUIRE(*name == "alice");
+
+    auto count = qp.try_at<int64_t>("count");
+    REQUIRE(count.has_value());
+    REQUIRE(*count == 42);
+
+    auto flag = qp.try_at<bool>("flag");
+    REQUIRE(flag.has_value());
+    REQUIRE(*flag);
+
+    auto missing = qp.try_at("missing");
+    REQUIRE_FALSE(missing.has_value());
+    REQUIRE(missing.error() == httplib::make_error_code(httplib::error::not_found));
+
+    auto invalid = qp.try_at<int64_t>("bad");
+    REQUIRE_FALSE(invalid.has_value());
+    REQUIRE(invalid.error() == httplib::make_error_code(httplib::error::invalid_value));
+
+    auto bad_bool = qp.try_at<bool>("name");
+    REQUIRE_FALSE(bad_bool.has_value());
+    REQUIRE(bad_bool.error() == httplib::make_error_code(httplib::error::invalid_value));
+
+    boost::system::error_code ec = httplib::error::not_found;
+    REQUIRE(ec == httplib::make_error_code(httplib::error::not_found));
+}
+
 TEST_CASE("query_params: all returns multiple values", "[body-utils]")
 {
     httplib::query_params qp;
@@ -117,7 +150,15 @@ TEST_CASE("query_params: at_number throws on invalid input", "[body-utils]")
     httplib::query_params qp;
     REQUIRE(qp.decode("val=not-a-number"));
 
-    REQUIRE_THROWS(qp.at<int64_t>("val"));
+    try
+    {
+        (void)qp.at<int64_t>("val");
+        FAIL("expected boost::system::system_error");
+    }
+    catch (boost::system::system_error const& e)
+    {
+        REQUIRE(e.code() == httplib::make_error_code(httplib::error::invalid_value));
+    }
 }
 
 TEST_CASE("form_data: field has_data and is_file", "[body-utils]")

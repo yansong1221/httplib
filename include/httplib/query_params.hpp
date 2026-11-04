@@ -1,12 +1,17 @@
 #pragma once
 #include "httplib/config.hpp"
+#include "httplib/error.hpp"
 #include "httplib/util/misc.hpp"
+#include <boost/system/result.hpp>
+#include <boost/system/system_error.hpp>
 #include <charconv>
 #include <concepts>
 #include <map>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace httplib
@@ -21,7 +26,8 @@ namespace httplib
         /// \tparam T 返回类型，默认 \c std::string_view 。
         /// \param key 键。
         /// \return 转换后的第一个值。
-        /// \throws std::runtime_error key 不存在，或值无法转换为 \c T 时。
+        /// \throws std::runtime_error key 不存在时。
+        /// \throws boost::system::system_error 值无法转换为 \c T 时（携带 \c invalid_value ）。
         /// \note 返回的 \c std::string_view 指向内部存储，对象被修改后失效。
         template <typename T = std::string_view>
             requires std::integral<T> || std::floating_point<T> || std::same_as<T, bool> || std::same_as<T, std::string>
@@ -29,7 +35,7 @@ namespace httplib
         T
         at(std::string const& key) const
         {
-            return convert<T>(at_raw(key));
+            return value_or_throw(convert<T>(at_raw(key)));
         }
 
         /// \brief 同 at(key) ，但 key 不存在时返回 \p fallback 而不抛异常。
@@ -37,7 +43,7 @@ namespace httplib
         /// \param key 键。
         /// \param fallback key 不存在时的返回值。
         /// \return key 存在时的转换值，否则返回 \p fallback 。
-        /// \throws std::runtime_error key 存在但值无法转换为 \c T 时。
+        /// \throws boost::system::system_error key 存在但值无法转换为 \c T 时（携带 \c invalid_value ）。
         /// \note 非字符串类型必须显式指定 \c T （如 \c at<int64_t>("k", 0) ）。
         template <typename T = std::string>
             requires std::integral<T> || std::floating_point<T> || std::same_as<T, bool> || std::same_as<T, std::string>
@@ -49,6 +55,26 @@ namespace httplib
             {
                 return fallback;
             }
+            return value_or_throw(convert<T>(iter->second));
+        }
+
+        /// \brief 取 key 对应的第一个值，失败时返回错误码而不抛异常。
+        /// \tparam T 返回类型，默认 \c std::string_view 。
+        /// \param key 键。
+        /// \return 成功时返回转换后的值；失败时返回 \ref httplib::error 中的
+        ///         \c not_found 或 \c invalid_value 。
+        /// \note 返回的 \c std::string_view 指向内部存储，对象被修改后失效。
+        template <typename T = std::string_view>
+            requires std::integral<T> || std::floating_point<T> || std::same_as<T, bool> || std::same_as<T, std::string>
+                     || std::same_as<T, std::string_view>
+        boost::system::result<T>
+        try_at(std::string const& key) const
+        {
+            auto iter = params_.find(key);
+            if (iter == params_.end())
+            {
+                return make_error_code(error::not_found);
+            }
             return convert<T>(iter->second);
         }
 
@@ -56,7 +82,7 @@ namespace httplib
         /// \tparam T 返回类型，默认 \c std::string_view 。
         /// \param key 键。
         /// \return 转换后的值列表；key 不存在时为空列表。
-        /// \throws std::runtime_error 任一值无法转换为 \c T 时。
+        /// \throws boost::system::system_error 任一值无法转换为 \c T 时（携带 \c invalid_value ）。
         /// \note 返回的视图指向内部存储，对象被修改后失效。
         template <typename T = std::string_view>
             requires std::integral<T> || std::floating_point<T> || std::same_as<T, bool> || std::same_as<T, std::string>
@@ -67,7 +93,7 @@ namespace httplib
             std::vector<T> result {};
             for (auto const& sv : all_raw(key))
             {
-                result.push_back(convert<T>(sv));
+                result.push_back(value_or_throw(convert<T>(sv)));
             }
             return result;
         }
@@ -133,12 +159,25 @@ namespace httplib
         /// \brief 取 key 的全部原始值，按插入顺序。
         std::vector<std::string_view> all_raw(std::string const& key) const;
 
+        /// \brief 取 result 中的值，失败时抛出带错误码的异常。
+        /// \throws boost::system::system_error result 持有错误时。
+        template <typename T>
+        static T
+        value_or_throw(boost::system::result<T> result)
+        {
+            if (!result)
+            {
+                throw boost::system::system_error(result.error());
+            }
+            return *std::move(result);
+        }
+
         /// \brief 把原始字符串转换为 \c T 。
-        /// \throws std::runtime_error 转换失败时。
+        /// \return 成功时返回值；失败时返回 \c error::invalid_value 。
         template <typename T>
             requires std::integral<T> || std::floating_point<T> || std::same_as<T, bool> || std::same_as<T, std::string>
                      || std::same_as<T, std::string_view>
-        static T
+        static boost::system::result<T>
         convert(std::string_view sv)
         {
             if constexpr (std::same_as<T, std::string_view>)
@@ -159,11 +198,17 @@ namespace httplib
                 {
                     return false;
                 }
-                throw std::runtime_error("query_param: invalid bool: " + std::string(sv));
+                return make_error_code(error::invalid_value);
             }
             else
             {
-                return util::from_chars_strict<T>(sv);
+                T val {};
+                auto [p, ec] = std::from_chars(sv.data(), sv.data() + sv.size(), val);
+                if (ec != std::errc {} || p != sv.data() + sv.size())
+                {
+                    return make_error_code(error::invalid_value);
+                }
+                return val;
             }
         }
 
