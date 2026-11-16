@@ -1817,13 +1817,13 @@ TEST_CASE("Downloader: negative max_retries still makes one attempt", "[download
     std::atomic<int> hits { 0 };
 
     dl_test_scaffold ts;
-    ts.router().set_http_handler<httplib::method::get>(
-        "/500",
-        [&](httplib::server::request&, httplib::server::response& resp)
-        {
-            hits.fetch_add(1);
-            resp.set_empty_content(httplib::status::internal_server_error);
-        });
+    ts.router().set_http_handler<httplib::method::get>("/500",
+                                                       [&](httplib::server::request&, httplib::server::response& resp)
+                                                       {
+                                                           hits.fetch_add(1);
+                                                           resp.set_empty_content(
+                                                               httplib::status::internal_server_error);
+                                                       });
     ts.start();
 
     httplib::client::downloader dl(ts.ioc_, ts.pool);

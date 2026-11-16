@@ -1,4 +1,5 @@
 #include "body/multipart_parser.hpp"
+#include "beast_alias.hpp"
 #include "html/html.h"
 #include "httplib/util/misc.hpp"
 #include <algorithm>
@@ -8,7 +9,6 @@
 #include <cstddef>
 #include <random>
 #include <utility>
-#include "beast_alias.hpp"
 
 namespace httplib::body
 {

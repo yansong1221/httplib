@@ -1,10 +1,10 @@
 #include "httplib/server/middleware/rate_limit.hpp"
+#include "beast_alias.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include "httplib/util/string_hash.hpp"
 #include <mutex>
 #include <unordered_map>
-#include "beast_alias.hpp"
 
 namespace httplib::server::middleware
 {

@@ -16,7 +16,7 @@ namespace httplib::server::middleware
         ///
         /// verifier（算法白名单 + iss / aud 检查）在配置期构建完成，
         /// verify() 为 const 可跨并发请求复用；`with_*` 仅限 run() 之前调用
-        ///（配置期，与 router 注册同约定）。
+        /// （配置期，与 router 注册同约定）。
         explicit jwt_auth_middleware(jwt::algorithm const& alg);
         jwt_auth_middleware(jwt_auth_middleware const& other);
         jwt_auth_middleware& operator=(jwt_auth_middleware const& other);

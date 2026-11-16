@@ -1,5 +1,5 @@
-#include "httplib/config.hpp"
 #include "httplib/db/session.hpp"
+#include "httplib/config.hpp"
 #include "httplib/db/error.hpp"
 #include "httplib/db/exception.hpp"
 #include "httplib/util/string_hash.hpp"

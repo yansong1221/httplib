@@ -1,5 +1,6 @@
 #pragma once
 
+#include "beast_alias.hpp"
 #include "body/source.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/util/async_mutex.hpp"
@@ -20,7 +21,6 @@
 #include <future>
 #include <limits>
 #include <spdlog/spdlog.h>
-#include "beast_alias.hpp"
 
 namespace httplib::client
 {
@@ -85,8 +85,9 @@ namespace httplib::client
         net::awaitable<bool> async_is_alive() const;
 
         net::awaitable<http_client::response_result> async_send_request_lazy_with_redirect(request::impl& req);
-        net::awaitable<http_client::response_result>
-        async_send_request_lazy_with_redirect(request::impl& req, int max_redirects, bool exhausted_is_error);
+        net::awaitable<http_client::response_result> async_send_request_lazy_with_redirect(request::impl& req,
+                                                                                           int max_redirects,
+                                                                                           bool exhausted_is_error);
 
         std::shared_ptr<lazy_request> create_lazy_request();
 

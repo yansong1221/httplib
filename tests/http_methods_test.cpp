@@ -47,9 +47,7 @@ namespace
     }
 
     void
-    set_text(httplib::server::response& resp,
-             std::string_view body,
-             httplib::status st = httplib::status::ok)
+    set_text(httplib::server::response& resp, std::string_view body, httplib::status st = httplib::status::ok)
     {
         resp.set_string_content(body, "text/plain"sv, st);
     }

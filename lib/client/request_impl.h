@@ -1,11 +1,11 @@
 #pragma once
+#include "beast_alias.hpp"
 #include "body/body_writer.hpp"
 #include "client_impl.h"
 #include "httplib/client/request.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/beast/version.hpp>
 #include <string_view>
-#include "beast_alias.hpp"
 
 namespace httplib::client
 {

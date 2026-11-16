@@ -29,9 +29,13 @@ TEST_CASE("JWT: error implicitly converts to boost::system::error_code", "[jwt]"
 
 TEST_CASE("JWT: build and sign with HS256", "[jwt]")
 {
-    auto token
-        = httplib::jwt::create().set_type("access").set_issued_now().set_expires_in(1h).set_subject("user123").sign(
-            httplib::jwt::hs256("my-secret")).value();
+    auto token = httplib::jwt::create()
+                     .set_type("access")
+                     .set_issued_now()
+                     .set_expires_in(1h)
+                     .set_subject("user123")
+                     .sign(httplib::jwt::hs256("my-secret"))
+                     .value();
 
     REQUIRE(!token.empty());
     REQUIRE(std::count(token.begin(), token.end(), '.') == 2);
@@ -65,8 +69,13 @@ TEST_CASE("JWT: verify token", "[jwt]")
 
 TEST_CASE("JWT: verifier with claims", "[jwt]")
 {
-    auto token = httplib::jwt::create().set_issuer("my-app").set_subject("alice").set_id("jti-1").set_issued_now().sign(
-        httplib::jwt::hs256("secret")).value();
+    auto token = httplib::jwt::create()
+                     .set_issuer("my-app")
+                     .set_subject("alice")
+                     .set_id("jti-1")
+                     .set_issued_now()
+                     .sign(httplib::jwt::hs256("secret"))
+                     .value();
 
     auto decoded = httplib::jwt::decode(token).value();
 
@@ -90,7 +99,8 @@ TEST_CASE("JWT: cross-validate with jwt-cpp", "[jwt]")
                      .set_id("abc123")
                      .set_issued_now()
                      .set_expires_in(1h)
-                     .sign(httplib::jwt::hs256("shared-secret")).value();
+                     .sign(httplib::jwt::hs256("shared-secret"))
+                     .value();
 
     // jwt-cpp can decode and verify our token
     auto decoded = ::jwt::decode<traits>(token);
@@ -173,7 +183,8 @@ TEST_CASE("JWT: header claims and time claims", "[jwt]")
                      .set_expires_at(now + 1h)
                      .set_issued_at(now)
                      .set_payload_claim("role", "admin")
-                     .sign(httplib::jwt::hs256("secret")).value();
+                     .sign(httplib::jwt::hs256("secret"))
+                     .value();
 
     auto decoded = httplib::jwt::decode(token).value();
 
@@ -190,7 +201,8 @@ TEST_CASE("JWT: verifier with_audience and with_claim", "[jwt]")
     auto token = httplib::jwt::create()
                      .set_audience("api.example.com")
                      .set_payload_claim("role", "admin")
-                     .sign(httplib::jwt::hs256("secret")).value();
+                     .sign(httplib::jwt::hs256("secret"))
+                     .value();
 
     auto decoded = httplib::jwt::decode(token).value();
 
@@ -211,7 +223,8 @@ TEST_CASE("JWT: verifier with_audience and with_claim", "[jwt]")
 // 具名方法 with_issuer/with_subject/with_audience/with_id 直接委托 jwt-cpp）。
 TEST_CASE("JWT: claim mismatch reported as generic claim_mismatch", "[jwt]")
 {
-    auto token = httplib::jwt::create().set_subject("alice").set_id("jti-x").sign(httplib::jwt::hs256("secret")).value();
+    auto token
+        = httplib::jwt::create().set_subject("alice").set_id("jti-x").sign(httplib::jwt::hs256("secret")).value();
 
     auto decoded = httplib::jwt::decode(token).value();
 
@@ -252,15 +265,14 @@ TEST_CASE("JWT: decoded_jwt constructor does not throw on malformed token", "[jw
 {
     // base64url 字面量：not json at all / {"alg":"HS256"} / {} / {"alg":123} / [1,2,3] / {{{
     // （jwt.cpp 里的 base64url_encode 是内部符号，测试用不了，只能写字面量。）
-    const char* b64_bad_json = "bm90IGpzb24gYXQgYWxs";
-    const char* b64_alg_str = "eyJhbGciOiJIUzI1NiJ9";
-    const char* b64_empty_obj = "e30";
-    const char* b64_alg_num = "eyJhbGciOjEyM30";
-    const char* b64_json_array = "WzEsMiwzXQ";
-    const char* b64_bad_payload = "e3t7";
+    char const* b64_bad_json = "bm90IGpzb24gYXQgYWxs";
+    char const* b64_alg_str = "eyJhbGciOiJIUzI1NiJ9";
+    char const* b64_empty_obj = "e30";
+    char const* b64_alg_num = "eyJhbGciOjEyM30";
+    char const* b64_json_array = "WzEsMiwzXQ";
+    char const* b64_bad_payload = "e3t7";
 
-    auto token = [](std::string_view h, std::string_view p)
-    { return std::string(h) + "." + std::string(p) + ".sig"; };
+    auto token = [](std::string_view h, std::string_view p) { return std::string(h) + "." + std::string(p) + ".sig"; };
 
     SECTION("header is not valid JSON")
     {
@@ -315,11 +327,11 @@ TEST_CASE("JWT: decode still reports invalid_token for malformed tokens", "[jwt]
     auto bad = {
         std::string("no-dots"),
         std::string("only.one"),
-        std::string("bm90IGpzb24gYXQgYWxs.e30.sig"),        // header 非 JSON
-        std::string("eyJhbGciOiJIUzI1NiJ9.e3t7.sig"),       // payload 非 JSON
-        std::string("e30.e30.sig"),                          // 缺 alg
-        std::string("eyJhbGciOjEyM30.e30.sig"),              // alg 非字符串
-        std::string("WzEsMiwzXQ.e30.sig"),                   // header 是数组
+        std::string("bm90IGpzb24gYXQgYWxs.e30.sig"),  // header 非 JSON
+        std::string("eyJhbGciOiJIUzI1NiJ9.e3t7.sig"), // payload 非 JSON
+        std::string("e30.e30.sig"),                   // 缺 alg
+        std::string("eyJhbGciOjEyM30.e30.sig"),       // alg 非字符串
+        std::string("WzEsMiwzXQ.e30.sig"),            // header 是数组
     };
 
     for (auto const& t : bad)
@@ -354,7 +366,8 @@ TEST_CASE("JWT: middleware auth via Bearer token", "[jwt]")
     auto ja = mw::jwt_auth_middleware { httplib::jwt::hs256("secret") };
     ja.with_issuer("my-app");
 
-    auto token = httplib::jwt::create().set_issuer("my-app").set_subject("alice").sign(httplib::jwt::hs256("secret")).value();
+    auto token
+        = httplib::jwt::create().set_issuer("my-app").set_subject("alice").sign(httplib::jwt::hs256("secret")).value();
 
     run(
         [&](auto& server)
@@ -428,8 +441,11 @@ TEST_CASE("JWT: middleware rejects missing Bearer", "[jwt]")
 TEST_CASE("JWT: verifier rejects expired token", "[jwt]")
 {
     auto now = std::chrono::system_clock::now();
-    auto token
-        = httplib::jwt::create().set_expires_at(now - 1h).set_subject("alice").sign(httplib::jwt::hs256("secret")).value();
+    auto token = httplib::jwt::create()
+                     .set_expires_at(now - 1h)
+                     .set_subject("alice")
+                     .sign(httplib::jwt::hs256("secret"))
+                     .value();
 
     auto decoded = httplib::jwt::decode(token).value();
     boost::system::error_code ec;
@@ -440,8 +456,11 @@ TEST_CASE("JWT: verifier rejects expired token", "[jwt]")
 TEST_CASE("JWT: verifier rejects not-yet-valid token", "[jwt]")
 {
     auto now = std::chrono::system_clock::now();
-    auto token
-        = httplib::jwt::create().set_not_before(now + 1h).set_subject("alice").sign(httplib::jwt::hs256("secret")).value();
+    auto token = httplib::jwt::create()
+                     .set_not_before(now + 1h)
+                     .set_subject("alice")
+                     .sign(httplib::jwt::hs256("secret"))
+                     .value();
 
     auto decoded = httplib::jwt::decode(token).value();
     boost::system::error_code ec;
@@ -455,7 +474,8 @@ TEST_CASE("JWT: verifier respects clock skew for expiration", "[jwt]")
     auto token = httplib::jwt::create()
                      .set_expires_at(now - std::chrono::seconds(10))
                      .set_subject("alice")
-                     .sign(httplib::jwt::hs256("secret")).value();
+                     .sign(httplib::jwt::hs256("secret"))
+                     .value();
 
     auto decoded = httplib::jwt::decode(token).value();
     boost::system::error_code ec;
@@ -482,8 +502,12 @@ TEST_CASE("JWT: verifier rejects mismatched algorithm", "[jwt]")
 TEST_CASE("JWT: valid token passes all time checks", "[jwt]")
 {
     auto now = std::chrono::system_clock::now();
-    auto token = httplib::jwt::create().set_not_before(now - 1h).set_expires_at(now + 1h).set_subject("alice").sign(
-        httplib::jwt::hs256("secret")).value();
+    auto token = httplib::jwt::create()
+                     .set_not_before(now - 1h)
+                     .set_expires_at(now + 1h)
+                     .set_subject("alice")
+                     .sign(httplib::jwt::hs256("secret"))
+                     .value();
 
     auto decoded = httplib::jwt::decode(token).value();
     boost::system::error_code ec;

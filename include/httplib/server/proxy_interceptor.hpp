@@ -1,7 +1,7 @@
 #pragma once
-#include "httplib/headers.hpp"
-#include "httplib/enums.hpp"
 #include "httplib/config.hpp"
+#include "httplib/enums.hpp"
+#include "httplib/headers.hpp"
 #include "httplib/server/server_fwd.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/buffer.hpp>
@@ -24,7 +24,9 @@ namespace httplib::server
             co_return;
         }
         virtual net::awaitable<void>
-        on_upstream_response(request& req, httplib::status upstream_status, httplib::headers const& upstream_resp_headers)
+        on_upstream_response(request& req,
+                             httplib::status upstream_status,
+                             httplib::headers const& upstream_resp_headers)
         {
             co_return;
         }

@@ -124,8 +124,9 @@ namespace test_common
 
         net::co_spawn(
             ioc,
-            [&]() -> net::awaitable<void> {
-                net::ip::tcp::socket sock{ioc};
+            [&]() -> net::awaitable<void>
+            {
+                net::ip::tcp::socket sock { ioc };
                 boost::system::error_code ec;
 
                 sock.connect(ep, ec);
@@ -154,7 +155,8 @@ namespace test_common
                     response.append(buf, n);
                 }
             },
-            [result_ec](std::exception_ptr e) {
+            [result_ec](std::exception_ptr e)
+            {
                 if (e)
                 {
                     std::rethrow_exception(e);
@@ -203,8 +205,8 @@ namespace test_common
         {
             return 0;
         }
-        if (!std::isdigit(static_cast<unsigned char>(response[5])) || response[6] != '.' ||
-            !std::isdigit(static_cast<unsigned char>(response[7])))
+        if (!std::isdigit(static_cast<unsigned char>(response[5])) || response[6] != '.'
+            || !std::isdigit(static_cast<unsigned char>(response[7])))
         {
             return 0;
         }
@@ -215,7 +217,7 @@ namespace test_common
     void
     run(Setup&& setup, Test&& test)
     {
-        net::thread_pool pool{ 1 };
+        net::thread_pool pool { 1 };
         std::exception_ptr err;
         net::co_spawn(
             pool.get_executor(),
@@ -228,9 +230,7 @@ namespace test_common
                 auto ep = server.local_endpoint();
                 server.run();
 
-                httplib::client::http_client client(pool.get_executor(),
-                                                     ep.address().to_string(),
-                                                     ep.port());
+                httplib::client::http_client client(pool.get_executor(), ep.address().to_string(), ep.port());
                 client.set_timeout(std::chrono::seconds(5));
 
                 co_await test(client);
@@ -238,34 +238,29 @@ namespace test_common
                 client.close();
                 server.stop();
             },
-            [&](std::exception_ptr e)
-            {
-                err = e;
-            });
+            [&](std::exception_ptr e) { err = e; });
         pool.join();
         if (err)
+        {
             std::rethrow_exception(err);
+        }
     }
 
     template <typename Test>
     void
     run_error(Test&& test)
     {
-        net::thread_pool pool{ 1 };
+        net::thread_pool pool { 1 };
         std::exception_ptr err;
         net::co_spawn(
             pool.get_executor(),
-            [&]() -> net::awaitable<void>
-            {
-                co_await test(pool);
-            },
-            [&](std::exception_ptr e)
-            {
-                err = e;
-            });
+            [&]() -> net::awaitable<void> { co_await test(pool); },
+            [&](std::exception_ptr e) { err = e; });
         pool.join();
         if (err)
+        {
             std::rethrow_exception(err);
+        }
     }
 
     struct test_scaffold
@@ -354,7 +349,10 @@ namespace test_common
         {
             auto c = std::make_unique<httplib::client::http_client>(
                 workers_.get_executor(),
-                std::format("{}://{}:{}", ssl_ ? "https" : "http", ssl_ ? "localhost" : endpoint.address().to_string(), endpoint.port()));
+                std::format("{}://{}:{}",
+                            ssl_ ? "https" : "http",
+                            ssl_ ? "localhost" : endpoint.address().to_string(),
+                            endpoint.port()));
             c->set_timeout(std::chrono::seconds(5));
             return c;
         }

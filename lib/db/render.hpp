@@ -239,14 +239,16 @@ namespace httplib::db::detail
             auto it = named.find(name);
             if (it == named.end())
             {
-                throw db_exception(make_error_code(error::invalid_parameters), "db: unbound named parameter ':" + name + "'");
+                throw db_exception(make_error_code(error::invalid_parameters),
+                                   "db: unbound named parameter ':" + name + "'");
             }
             return it->second;
         }
         if (pos.empty())
         {
             // 没有位置绑定但 SQL 存在占位符 → 未绑定（与命名未绑定语义一致）。
-            throw db_exception(make_error_code(error::invalid_parameters), "db: unbound named parameter ':" + name + "'");
+            throw db_exception(make_error_code(error::invalid_parameters),
+                               "db: unbound named parameter ':" + name + "'");
         }
         if (pos_idx >= pos.size())
         {
@@ -344,7 +346,8 @@ namespace httplib::db::detail
         binder_index idx = build_binder_index(binders);
         if (idx.has_named && idx.has_pos)
         {
-            throw db_exception(make_error_code(error::invalid_parameters), "db: cannot mix positional and named parameters");
+            throw db_exception(make_error_code(error::invalid_parameters),
+                               "db: cannot mix positional and named parameters");
         }
 
         std::string out;

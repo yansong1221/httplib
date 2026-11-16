@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include "beast_alias.hpp"
 #include "body/body_reader.hpp"
 #include "body/sink.hpp"
 #include "client_impl.h"
@@ -13,7 +14,6 @@
 #include <memory>
 #include <optional>
 #include <variant>
-#include "beast_alias.hpp"
 
 namespace httplib::client
 {

@@ -1,4 +1,5 @@
 #pragma once
+#include "beast_alias.hpp"
 #include "httplib/body_type.hpp"
 #include "httplib/config.hpp"
 #include "httplib/form_data.hpp"
@@ -8,7 +9,6 @@
 #include <type_traits>
 #include <utility>
 #include <variant>
-#include "beast_alias.hpp"
 
 namespace httplib::body
 {

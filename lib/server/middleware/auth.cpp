@@ -1,7 +1,7 @@
 #include "httplib/server/middleware/auth.hpp"
+#include "beast_alias.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
-#include "beast_alias.hpp"
 
 namespace httplib::server::middleware
 {

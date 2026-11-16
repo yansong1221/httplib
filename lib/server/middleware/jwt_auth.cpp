@@ -1,11 +1,11 @@
 ﻿#include "httplib/config.hpp"
 #ifdef HTTPLIB_ENABLED_JWT
+#include "beast_alias.hpp"
 #include "httplib/server/middleware/jwt_auth.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include <spdlog/spdlog.h>
 #include <string>
-#include "beast_alias.hpp"
 
 namespace httplib::server::middleware
 {
@@ -141,17 +141,13 @@ namespace httplib::server::middleware
         (void)alg;
         unavailable();
     }
-    jwt_auth_middleware::jwt_auth_middleware(jwt_auth_middleware const&) : impl_(nullptr)
-    {
-        unavailable();
-    }
+    jwt_auth_middleware::jwt_auth_middleware(jwt_auth_middleware const&) : impl_(nullptr) { unavailable(); }
     jwt_auth_middleware&
     jwt_auth_middleware::operator=(jwt_auth_middleware const&)
     {
         unavailable();
     }
-    jwt_auth_middleware::jwt_auth_middleware(jwt_auth_middleware&& other) noexcept
-        : impl_(std::move(other.impl_))
+    jwt_auth_middleware::jwt_auth_middleware(jwt_auth_middleware&& other) noexcept : impl_(std::move(other.impl_))
     {
         unavailable_noexcept();
     }

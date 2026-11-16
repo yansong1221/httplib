@@ -639,7 +639,8 @@ TEST_CASE("Chunked: multi-verb via buffer_body", "[chunked]")
         },
         [](auto& client) -> net::awaitable<void>
         {
-            auto post_result = co_await send_chunked(client, httplib::method::post, "/chunked/read-multi", { "from-post" });
+            auto post_result
+                = co_await send_chunked(client, httplib::method::post, "/chunked/read-multi", { "from-post" });
             REQUIRE(post_result == "POST:from-post");
 
             auto patch_result

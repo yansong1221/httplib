@@ -35,7 +35,7 @@ namespace httplib::jwt
 {
     /// 全局 ::jwt 被 httplib::jwt 遮蔽，实现内一律经 jwtpp 别名访问。
     namespace jwtpp = ::jwt;
-}
+} // namespace httplib::jwt
 
 namespace httplib::jwt::detail
 {
@@ -85,7 +85,7 @@ namespace httplib::jwt::detail
         verify(std::string const& data, std::string const& signature, std::error_code& ec) const
         {
             // 与 jwt-cpp hmac::verify 相同：重算签名后做常量时间全字节比较
-            //（不因首个差异位置提前返回）。
+            // （不因首个差异位置提前返回）。
             boost::system::error_code bec;
             auto const expected = alg->sign(data, bec);
             if (!bec)
@@ -93,7 +93,10 @@ namespace httplib::jwt::detail
                 bool matched = expected.size() == signature.size();
                 for (size_t i = 0; i < (std::min)(expected.size(), signature.size()); i++)
                 {
-                    if (expected[i] != signature[i]) matched = false;
+                    if (expected[i] != signature[i])
+                    {
+                        matched = false;
+                    }
                 }
                 if (matched)
                 {

@@ -18,8 +18,8 @@
 /// 与本库类型，不泄漏 jwt-cpp 类型（与 Beast 同规）。
 
 #include "httplib/config.hpp"
-#include "httplib/jwt/error.hpp"
 #include "httplib/jwt/algorithm.hpp"
-#include "httplib/jwt/decoded_jwt.hpp"
 #include "httplib/jwt/builder.hpp"
+#include "httplib/jwt/decoded_jwt.hpp"
+#include "httplib/jwt/error.hpp"
 #include "httplib/jwt/verifier.hpp"

@@ -15,9 +15,7 @@ namespace
     using test_common::setup_logger;
 
     void
-    set_text(httplib::server::response& resp,
-             std::string_view body,
-             httplib::status st = httplib::status::ok)
+    set_text(httplib::server::response& resp, std::string_view body, httplib::status st = httplib::status::ok)
     {
         resp.set_string_content(body, "text/plain"sv, st);
     }
@@ -220,9 +218,8 @@ TEST_CASE("Router: percent-encoded slash does not separate segments", "[router]"
             server.router().template set_http_handler<httplib::method::get>(
                 "/space/a b",
                 [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "space"); });
-            server.router().set_http_not_found_handler(
-                [](httplib::server::request&, httplib::server::response& resp)
-                { set_text(resp, "not-found", httplib::status::not_found); });
+            server.router().set_http_not_found_handler([](httplib::server::request&, httplib::server::response& resp)
+                                                       { set_text(resp, "not-found", httplib::status::not_found); });
         },
         [](auto& client) -> net::awaitable<void>
         {
@@ -469,8 +466,11 @@ struct test_handler
 TEST_CASE("Router: member function handler", "[router]")
 {
     test_handler th { "member" };
-    run([&](auto& server)
-        { server.router().template set_http_handler<httplib::method::get>("/member/:name", &test_handler::handle, th); },
+    run(
+        [&](auto& server)
+        {
+            server.router().template set_http_handler<httplib::method::get>("/member/:name", &test_handler::handle, th);
+        },
         [](auto& client) -> net::awaitable<void>
         {
             auto resp = UNWRAP(co_await client.async_get("/member/test"));
@@ -528,10 +528,10 @@ TEST_CASE("Router: regex param error in pre_routing", "[router]")
 {
     net::thread_pool pool { 1 };
     httplib::server::http_server server(pool.get_executor());
-    REQUIRE_THROWS_AS(
-        server.router().set_http_handler<httplib::method::get>("/bad/{id:[}",
-                                                          [](httplib::server::request&, httplib::server::response&) {}),
-        std::regex_error);
+    REQUIRE_THROWS_AS(server.router().set_http_handler<httplib::method::get>(
+                          "/bad/{id:[}",
+                          [](httplib::server::request&, httplib::server::response&) {}),
+                      std::regex_error);
     pool.join();
 }
 
@@ -739,22 +739,18 @@ TEST_CASE("Router: dynamic route priority is class-ordered", "[router]")
             // 同类节点仍按注册顺序（见 same class routes keep registration order）。
             server.router().template set_http_handler<httplib::method::get>(
                 "/order-param-first/:id",
-                [](httplib::server::request&, httplib::server::response& resp)
-                { set_text(resp, "param-first"); });
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "param-first"); });
             server.router().template set_http_handler<httplib::method::get>(
                 "/order-param-first/{id:^\\d+$}",
-                [](httplib::server::request&, httplib::server::response& resp)
-                { set_text(resp, "regex-second"); });
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "regex-second"); });
 
             // regex 先注册、param 后注册：同样由 regex 类优先。
             server.router().template set_http_handler<httplib::method::get>(
                 "/order-regex-first/{id:^\\d+$}",
-                [](httplib::server::request&, httplib::server::response& resp)
-                { set_text(resp, "regex-first"); });
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "regex-first"); });
             server.router().template set_http_handler<httplib::method::get>(
                 "/order-regex-first/:id",
-                [](httplib::server::request&, httplib::server::response& resp)
-                { set_text(resp, "param-second"); });
+                [](httplib::server::request&, httplib::server::response& resp) { set_text(resp, "param-second"); });
         },
         [](auto& client) -> net::awaitable<void>
         {

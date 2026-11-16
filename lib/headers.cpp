@@ -121,10 +121,7 @@ namespace httplib
         }
     }
 
-    headers::headers(headers&& other) noexcept : owned_(std::move(other.owned_)), p_(other.p_)
-    {
-        other.p_ = nullptr;
-    }
+    headers::headers(headers&& other) noexcept : owned_(std::move(other.owned_)), p_(other.p_) { other.p_ = nullptr; }
 
     headers&
     headers::operator=(headers const& other)

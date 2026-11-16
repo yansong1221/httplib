@@ -1,5 +1,7 @@
 #include "httplib/client/request.hpp"
+#include "beast_alias.hpp"
 #include "compress/compressor.hpp"
+#include "enum_conv.hpp"
 #include "headers_impl.hpp"
 #include "request_impl.h"
 #include "util/mime_types.hpp"
@@ -8,8 +10,6 @@
 #include <boost/json/value.hpp>
 #include <fmt/format.h>
 #include <fstream>
-#include "beast_alias.hpp"
-#include "enum_conv.hpp"
 
 namespace httplib::client
 {

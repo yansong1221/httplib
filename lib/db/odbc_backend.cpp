@@ -1,8 +1,8 @@
 #include "httplib/config.hpp"
 #ifdef HTTPLIB_ENABLED_DATABASE_ODBC
-#include "odbc_backend.hpp"
 #include "httplib/db/error.hpp"
 #include "httplib/db/exception.hpp"
+#include "odbc_backend.hpp"
 #include "registry.hpp"
 #include <sql.h>
 #include <sqlext.h>

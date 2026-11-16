@@ -479,10 +479,7 @@ namespace httplib::server
                                             request&& req,
                                             std::shared_ptr<http_server::impl> server_impl,
                                             router_impl::ws_handler_entry entry)
-        : conn_(std::make_shared<websocket_conn_impl>(server_impl,
-                                                      std::move(stream),
-                                                      std::move(req),
-                                                      std::move(entry)))
+        : conn_(std::make_shared<websocket_conn_impl>(server_impl, std::move(stream), std::move(req), std::move(entry)))
     {
     }
 

@@ -1,4 +1,5 @@
 #pragma once
+#include "beast_alias.hpp"
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/lazy_request.hpp"
 #include "httplib/client/response.hpp"
@@ -15,7 +16,6 @@
 #include <cstdint>
 #include <memory>
 #include <string>
-#include "beast_alias.hpp"
 
 namespace httplib::server::detail
 {

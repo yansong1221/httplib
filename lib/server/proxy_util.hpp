@@ -1,8 +1,8 @@
 #pragma once
 #include "httplib/server/request.hpp"
 #include "httplib/server/server.hpp"
-#include "httplib/util/misc.hpp"
 #include "httplib/url/url.hpp"
+#include "httplib/util/misc.hpp"
 #include <boost/asio/awaitable.hpp>
 #include <cstdint>
 #include <memory>
@@ -140,8 +140,13 @@ namespace httplib::server::detail
         v.port = u.effective_port();
         v.prefix_path = u.path;
         v.target_path = make_upstream_path(req.target(), prefix, v.prefix_path);
-        v.url = websocket ? url::make_url_value(v.host, v.port, v.ssl ? url::scheme::tls : url::scheme::plain, v.target_path, v.scheme)
-                          : url::make_url_value(v.host, v.port, v.ssl ? url::scheme::tls : url::scheme::plain, v.target_path);
+        v.url = websocket
+                    ? url::make_url_value(v.host,
+                                          v.port,
+                                          v.ssl ? url::scheme::tls : url::scheme::plain,
+                                          v.target_path,
+                                          v.scheme)
+                    : url::make_url_value(v.host, v.port, v.ssl ? url::scheme::tls : url::scheme::plain, v.target_path);
 
         co_return out;
     }

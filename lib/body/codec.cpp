@@ -1,8 +1,8 @@
 #include "body/codec.hpp"
+#include "beast_alias.hpp"
+#include <algorithm>
 #include <boost/beast/http/error.hpp>
 #include <cstring>
-#include <algorithm>
-#include "beast_alias.hpp"
 
 namespace httplib::body
 {
@@ -30,9 +30,7 @@ namespace httplib::body
     // ---- stream_decoder ----
 
     void
-    stream_decoder::reset(std::string_view encoding,
-                          std::uint64_t limit,
-                          boost::system::error_code& ec)
+    stream_decoder::reset(std::string_view encoding, std::uint64_t limit, boost::system::error_code& ec)
     {
         ec = {};
         out_.clear();

@@ -9,9 +9,9 @@
 
 // VFALCO We include this because anyone who uses ssl will
 //        very likely need to check for ssl::error::stream_truncated
+#include "beast_alias.hpp"
 #include <boost/asio/ssl/error.hpp>
 #include <boost/asio/ssl/stream.hpp>
-#include "beast_alias.hpp"
 
 namespace httplib
 {

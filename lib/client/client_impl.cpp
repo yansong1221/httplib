@@ -300,8 +300,9 @@ namespace httplib::client
 
                     // 跨 origin 递归时预算同样要传递；剩余为 0 时再遇到重定向要报错，
                     // 不能让新 impl 把 0 解释成“用户主动不跟随”而返回 3xx。
-                    co_return co_await new_impl->async_send_request_lazy_with_redirect(
-                        req, max_redirects - r - 1, true);
+                    co_return co_await new_impl->async_send_request_lazy_with_redirect(req,
+                                                                                       max_redirects - r - 1,
+                                                                                       true);
                 }
 
                 // 同 host/port/ssl 的完整 URL，仅取 path 作为新 target
@@ -549,8 +550,7 @@ namespace httplib::client
         auto r = url::parse_url(url);
         if (!r)
         {
-            throw boost::system::system_error(make_error_code(error::invalid_url),
-                                              std::format("invalid url: {}", url));
+            throw boost::system::system_error(make_error_code(error::invalid_url), std::format("invalid url: {}", url));
         }
 
         auto const& u = *r;

@@ -512,8 +512,7 @@ namespace httplib::client
                 // Cancellation and redirect-budget exhaustion are conclusive:
                 // retrying would replay the whole redirect chain for an answer
                 // that cannot change.
-                if (ec == boost::asio::error::operation_aborted
-                    || ec == make_error_code(error::too_many_redirects)
+                if (ec == boost::asio::error::operation_aborted || ec == make_error_code(error::too_many_redirects)
                     || attempt >= cfg.max_retries)
                 {
                     co_return ec;

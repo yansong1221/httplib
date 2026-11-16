@@ -270,7 +270,9 @@ namespace httplib::enum_conv
     // ---- 方法 ----
 
     /// method -> http::verb
-#define HTTPLIB_FWD(N) case method::N: return http::verb::N;
+#define HTTPLIB_FWD(N) \
+    case method::N:    \
+        return http::verb::N;
     constexpr http::verb
     to_verb(method v) noexcept
     {
@@ -283,7 +285,9 @@ namespace httplib::enum_conv
 #undef HTTPLIB_FWD
 
     /// http::verb -> method
-#define HTTPLIB_REV(N) case http::verb::N: return method::N;
+#define HTTPLIB_REV(N)  \
+    case http::verb::N: \
+        return method::N;
     constexpr method
     to_method(http::verb v) noexcept
     {
@@ -298,7 +302,9 @@ namespace httplib::enum_conv
     // ---- 状态码 ----
 
     /// status -> http::status
-#define HTTPLIB_FWD(N) case status::N: return http::status::N;
+#define HTTPLIB_FWD(N) \
+    case status::N:    \
+        return http::status::N;
     constexpr http::status
     to_status(status v) noexcept
     {
@@ -311,7 +317,9 @@ namespace httplib::enum_conv
 #undef HTTPLIB_FWD
 
     /// http::status -> status
-#define HTTPLIB_REV(N) case http::status::N: return status::N;
+#define HTTPLIB_REV(N)    \
+    case http::status::N: \
+        return status::N;
     constexpr status
     to_status(http::status v) noexcept
     {
@@ -331,7 +339,9 @@ namespace httplib::enum_conv
     {
         switch (v)
         {
-#define HTTPLIB_FIELD_CASE(N, S) case field::N: return S;
+#define HTTPLIB_FIELD_CASE(N, S) \
+    case field::N:               \
+        return S;
             HTTPLIB_FIELD_TABLE(HTTPLIB_FIELD_CASE)
 #undef HTTPLIB_FIELD_CASE
         }
@@ -344,8 +354,7 @@ namespace httplib::enum_conv
         inline bool
         field_name_equals(std::string_view a, std::string_view b) noexcept
         {
-            return beast::iequals(beast::string_view(a.data(), a.size()),
-                                  beast::string_view(b.data(), b.size()));
+            return beast::iequals(beast::string_view(a.data(), a.size()), beast::string_view(b.data(), b.size()));
         }
     } // namespace detail
 
@@ -358,10 +367,10 @@ namespace httplib::enum_conv
             return field::unknown;
         }
 
-#define HTTPLIB_FIELD_MATCH(N, S) \
+#define HTTPLIB_FIELD_MATCH(N, S)           \
     if (detail::field_name_equals(name, S)) \
-    { \
-        return field::N; \
+    {                                       \
+        return field::N;                    \
     }
         HTTPLIB_FIELD_TABLE(HTTPLIB_FIELD_MATCH)
 #undef HTTPLIB_FIELD_MATCH

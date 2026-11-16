@@ -354,16 +354,15 @@ TEST_CASE("body_reader: typed read after streaming returns error instead of thro
 
             // 再要求物化：必须返回错误，且不得抛异常。read_body() 自身也不能再"假成功"。
             auto drain_ec = co_await reader.read_body();
-            REQUIRE(drain_ec == boost::system::errc::make_error_code(
-                                    boost::system::errc::bad_file_descriptor));
+            REQUIRE(drain_ec == boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor));
 
             auto result = co_await reader.read_json();
             has_value = result.has_value();
             has_error = result.has_error();
             if (has_error)
             {
-                REQUIRE(result.error() == boost::system::errc::make_error_code(
-                                              boost::system::errc::bad_file_descriptor));
+                REQUIRE(result.error()
+                        == boost::system::errc::make_error_code(boost::system::errc::bad_file_descriptor));
             }
         },
         net::use_future);
@@ -405,8 +404,8 @@ TEST_CASE("body_reader: typed read after mismatched materialize returns error", 
             has_error = result.has_error();
             if (has_error)
             {
-                REQUIRE(result.error() ==
-                        boost::system::errc::make_error_code(boost::system::errc::operation_not_supported));
+                REQUIRE(result.error()
+                        == boost::system::errc::make_error_code(boost::system::errc::operation_not_supported));
             }
         },
         net::use_future);
@@ -460,11 +459,7 @@ TEST_CASE("body_reader: is_body_done() is race-free while a read is in flight", 
         net::use_future);
 
     // 驱动 io_context 的线程独立于测试线程：is_body_done() 必须在读协程持锁期间被调用。
-    std::thread th(
-        [&]
-        {
-            ioc.run();
-        });
+    std::thread th([&] { ioc.run(); });
 
     reached_future.wait();
 

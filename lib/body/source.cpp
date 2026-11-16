@@ -1,8 +1,8 @@
 #include "body/source.hpp"
+#include "beast_alias.hpp"
 #include <boost/beast/core/detail/clamp.hpp>
 #include <boost/beast/http/error.hpp>
 #include <fmt/format.h>
-#include "beast_alias.hpp"
 
 namespace httplib::body
 {
@@ -110,7 +110,10 @@ namespace httplib::body
 
     // ---- file_source ----
 
-    file_source::file_source(std::ifstream file, html::http_ranges ranges, std::string content_type, std::string boundary)
+    file_source::file_source(std::ifstream file,
+                             html::http_ranges ranges,
+                             std::string content_type,
+                             std::string boundary)
         : file_(std::move(file))
         , ranges_(std::move(ranges))
         , content_type_(std::move(content_type))

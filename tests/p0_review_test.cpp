@@ -83,14 +83,15 @@ namespace
         char buf[8192];
         p0_raw_result out;
 
-        watchdog.async_wait([&](boost::system::error_code ec)
-                            {
-                                if (!ec)
-                                {
-                                    boost::system::error_code close_ec;
-                                    sock.close(close_ec);
-                                }
-                            });
+        watchdog.async_wait(
+            [&](boost::system::error_code ec)
+            {
+                if (!ec)
+                {
+                    boost::system::error_code close_ec;
+                    sock.close(close_ec);
+                }
+            });
 
         co_await sock.async_connect(ep, net::use_awaitable);
         co_await net::async_write(sock, net::buffer(payload), net::use_awaitable);
@@ -140,8 +141,7 @@ namespace
 //   期望：普通 HTTP 语义生效（RFC 6455 §4.2 要求不可升级时回 4xx）。
 // ===========================================================================
 
-TEST_CASE("P0-3: WS upgrade to a route without handler must get a 4xx HTTP response",
-          "[p0][ws]")
+TEST_CASE("P0-3: WS upgrade to a route without handler must get a 4xx HTTP response", "[p0][ws]")
 {
     run_with_ep(
         [](auto& server)
@@ -150,14 +150,13 @@ TEST_CASE("P0-3: WS upgrade to a route without handler must get a 4xx HTTP respo
             server.router().set_ws_handler(
                 "/ws",
                 [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; },
-                [](httplib::server::websocket_conn::weak_ptr,
-                   httplib::websocket_message) -> net::awaitable<void> { co_return; },
+                [](httplib::server::websocket_conn::weak_ptr, httplib::websocket_message) -> net::awaitable<void>
+                { co_return; },
                 [](httplib::server::websocket_conn::weak_ptr) -> net::awaitable<void> { co_return; });
         },
         [](auto ep) -> net::awaitable<void>
         {
-            auto result
-                = co_await p0_raw_exchange(ep, p0_ws_handshake("/no-such-ws"), std::chrono::seconds { 2 });
+            auto result = co_await p0_raw_exchange(ep, p0_ws_handshake("/no-such-ws"), std::chrono::seconds { 2 });
 
             // 对端至少要回一个 4xx 状态行的 HTTP 响应（修复前为零字节关闭）。
 
@@ -227,8 +226,8 @@ TEST_CASE("P0-4: failed mid-stream response must not be followed by another resp
             auto next_status = sec.find("HTTP/1.", search_from);
             auto term = sec.find(terminator, search_from);
 
-            bool desync = next_status != std::string_view::npos && (term == std::string_view::npos ||
-                                                                    next_status < term);
+            bool desync
+                = next_status != std::string_view::npos && (term == std::string_view::npos || next_status < term);
             // 合法形态二选一：第一个响应后连接被关闭（EOF 且没有第二个状态行），
             // 或 body 完整终结（在出现第二个状态行之前有 0\r\n\r\n）。
             REQUIRE(!desync);
@@ -246,8 +245,7 @@ TEST_CASE("P0-4: failed mid-stream response must not be followed by another resp
 //      单 allow_origin 时的响应是正确的（该路径当前逻辑正常）→ 证明断言可靠。
 // ===========================================================================
 
-TEST_CASE("P0-5: cors_middleware should reflect a whitelisted Origin from a multi-origin list",
-          "[p0][cors]")
+TEST_CASE("P0-5: cors_middleware should reflect a whitelisted Origin from a multi-origin list", "[p0][cors]")
 {
     mw::cors_middleware cors;
     cors.allow_origins({ "https://a.com", "https://b.com" });
@@ -278,8 +276,7 @@ TEST_CASE("P0-5: cors_middleware should reflect a whitelisted Origin from a mult
         });
 }
 
-TEST_CASE("P0-5: cors_middleware must not emit '*' alongside credentials",
-          "[p0][cors]")
+TEST_CASE("P0-5: cors_middleware must not emit '*' alongside credentials", "[p0][cors]")
 {
     // control：未配置 credentials，* 是合法的
     mw::cors_middleware anonymous;

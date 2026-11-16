@@ -1,4 +1,6 @@
 #include "httplib/client/response.hpp"
+#include "beast_alias.hpp"
+#include "enum_conv.hpp"
 #include "headers_impl.hpp"
 #include "httplib/client/error.hpp"
 #include "ndjson_reader_impl.hpp"
@@ -11,8 +13,6 @@
 #include <stdexcept>
 #include <utility>
 #include <variant>
-#include "beast_alias.hpp"
-#include "enum_conv.hpp"
 
 namespace httplib::client
 {
@@ -50,13 +50,13 @@ namespace httplib::client
     std::string_view
     response::operator[](httplib::field name) const
     {
-        return impl_ ? std::string_view(impl_->get()[enum_conv::field_name(name)]) : std::string_view{};
+        return impl_ ? std::string_view(impl_->get()[enum_conv::field_name(name)]) : std::string_view {};
     }
 
     std::string_view
     response::operator[](std::string_view name) const
     {
-        return impl_ ? std::string_view(impl_->get()[name]) : std::string_view{};
+        return impl_ ? std::string_view(impl_->get()[name]) : std::string_view {};
     }
 
     std::string_view
@@ -108,13 +108,13 @@ namespace httplib::client
     {
         // shared_ptr 的 const 不传递到被指对象，impl_ 可变，视图直接借用消息的字段集合。
         // 空响应没有可借用的集合，返回自有空集合。
-        return impl_ ? httplib::headers::impl::borrow(impl_->get()) : httplib::headers{};
+        return impl_ ? httplib::headers::impl::borrow(impl_->get()) : httplib::headers {};
     }
 
     httplib::headers
     response::headers()
     {
-        return impl_ ? httplib::headers::impl::borrow(impl_->get()) : httplib::headers{};
+        return impl_ ? httplib::headers::impl::borrow(impl_->get()) : httplib::headers {};
     }
 
     httplib::headers

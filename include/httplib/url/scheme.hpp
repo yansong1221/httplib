@@ -22,8 +22,10 @@ namespace httplib::url
     {
         switch (s)
         {
-            case scheme::plain: return "http";
-            case scheme::tls: return "https";
+            case scheme::plain:
+                return "http";
+            case scheme::tls:
+                return "https";
         }
         return "http";
     }
@@ -35,8 +37,10 @@ namespace httplib::url
     {
         switch (s)
         {
-            case scheme::plain: return 80;
-            case scheme::tls: return 443;
+            case scheme::plain:
+                return 80;
+            case scheme::tls:
+                return 443;
         }
         return 80;
     }

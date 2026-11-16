@@ -1,4 +1,5 @@
 #pragma once
+#include "beast_alias.hpp"
 #include "httplib/config.hpp"
 #include "httplib/server/server.hpp"
 #include "httplib/server/websocket_conn.hpp"
@@ -11,7 +12,6 @@
 #include <spdlog/spdlog.h>
 #include <string>
 #include <string_view>
-#include "beast_alias.hpp"
 
 namespace httplib::client
 {
@@ -66,7 +66,7 @@ namespace httplib::server::detail
         net::awaitable<void> run(websocket_conn::weak_ptr wp);
 
         /// Downstream -> upstream relay (registered as the route message handler).
-        static net::awaitable<void> send_to_upstream(websocket_conn::weak_ptr wp, const websocket_message& msg);
+        static net::awaitable<void> send_to_upstream(websocket_conn::weak_ptr wp, websocket_message const& msg);
 
         /// Upstream teardown on client disconnect (registered as the route close handler).
         static net::awaitable<void> close_upstream(websocket_conn::weak_ptr wp);
@@ -77,12 +77,13 @@ namespace httplib::server::detail
         /// Create the interceptor, resolve + parse the upstream URL, build the
         /// rewritten path and upstream headers. Closes the connection on failure.
         net::awaitable<bool> prepare_upstream(websocket_conn& conn);
-      std::shared_ptr<spdlog::logger> get_logger() const;
+        std::shared_ptr<spdlog::logger> get_logger() const;
+
       private:
         std::string prefix_;
         std::shared_ptr<upstream_provider> provider_;
         http_server::ws_interceptor_factory factory_;
-       std::shared_ptr<http_server::impl> ser_;
+        std::shared_ptr<http_server::impl> ser_;
 
         // ---- per-connection state (set by prepare_upstream) ----
         std::shared_ptr<ws_interceptor> interceptor_;

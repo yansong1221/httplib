@@ -49,11 +49,10 @@ namespace httplib::server
         , public std::enable_shared_from_this<upstream_group>
     {
       public:
-        explicit upstream_group(
-            std::vector<group_backend> backends,
-            upstream_locator locator = upstream_locator::round_robin,
-            std::shared_ptr<spdlog::logger> logger = nullptr,
-            std::chrono::milliseconds unhealthy_cooldown = std::chrono::seconds(5));
+        explicit upstream_group(std::vector<group_backend> backends,
+                                upstream_locator locator = upstream_locator::round_robin,
+                                std::shared_ptr<spdlog::logger> logger = nullptr,
+                                std::chrono::milliseconds unhealthy_cooldown = std::chrono::seconds(5));
 
         size_t size() const;
 

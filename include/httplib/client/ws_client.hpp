@@ -1,7 +1,7 @@
 #pragma once
+#include "httplib/config.hpp"
 #include "httplib/headers.hpp"
 #include "httplib/url/scheme.hpp"
-#include "httplib/config.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/websocket_message.hpp"
 #include <boost/asio/any_io_executor.hpp>
@@ -44,7 +44,10 @@ namespace httplib::client
          * @param port 目标端口。
          * @param s 连接方案，@ref url::scheme::plain 或 @ref url::scheme::tls。
          */
-        explicit ws_client(net::io_context& ex, std::string_view host, uint16_t port, url::scheme s = url::scheme::plain);
+        explicit ws_client(net::io_context& ex,
+                           std::string_view host,
+                           uint16_t port,
+                           url::scheme s = url::scheme::plain);
         /**
          * @brief 构造一个绑定到 I/O 执行器的 WebSocket 客户端。
          *

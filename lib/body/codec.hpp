@@ -1,4 +1,5 @@
 #pragma once
+#include "beast_alias.hpp"
 #include "compress/compressor.hpp"
 #include "httplib/config.hpp"
 #include <boost/asio/buffer.hpp>
@@ -7,7 +8,6 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
-#include "beast_alias.hpp"
 
 namespace httplib::body
 {
@@ -114,7 +114,9 @@ namespace httplib::body
     };
 
     /// 一次性解压，`encoding` 为 identity/未知时原样返回。
-    boost::system::result<std::string> decode(std::string_view bytes, std::string_view encoding, std::uint64_t limit = 0);
+    boost::system::result<std::string> decode(std::string_view bytes,
+                                              std::string_view encoding,
+                                              std::uint64_t limit = 0);
 
     /// 一次性压缩，`encoding` 为 identity/未知时原样返回。
     boost::system::result<std::string> encode(std::string_view bytes, std::string_view encoding);

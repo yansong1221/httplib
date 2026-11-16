@@ -164,10 +164,7 @@ TEST_CASE("Response: stream writer reports operation_aborted after response dest
         [&]() -> net::awaitable<void>
         {
             boost::system::error_code ec;
-            co_await writer->write_header(httplib::status::ok,
-                                          {},
-                                          httplib::server::stream_writer::mode::chunked,
-                                          ec);
+            co_await writer->write_header(httplib::status::ok, {}, httplib::server::stream_writer::mode::chunked, ec);
             CHECK(ec == net::error::operation_aborted);
 
             boost::system::error_code body_ec;

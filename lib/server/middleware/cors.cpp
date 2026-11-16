@@ -1,9 +1,9 @@
 #include "httplib/server/middleware/cors.hpp"
+#include "beast_alias.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
 #include <algorithm>
 #include <fmt/format.h>
-#include "beast_alias.hpp"
 
 namespace httplib::server::middleware
 {

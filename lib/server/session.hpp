@@ -1,12 +1,13 @@
 #pragma once
+#include "beast_alias.hpp"
 #include "httplib/config.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/server.hpp"
 #include "httplib/server/server_fwd.hpp"
 #include "httplib/util/use_awaitable.hpp"
+#include "router_impl.h"
 #include "stream/http_stream.hpp"
 #include "stream/websocket_stream.hpp"
-#include "router_impl.h"
 #include <atomic>
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
@@ -18,7 +19,6 @@
 #include <boost/beast/http/write.hpp>
 #include <cstdint>
 #include <memory>
-#include "beast_alias.hpp"
 
 namespace httplib::server
 {

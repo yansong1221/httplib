@@ -34,7 +34,8 @@ namespace httplib::client
         /// 查询类返回空值（@c status::unknown / 空头集合 / @c body_type::none），
         /// 读取类返回 @c error::not_initialized，@c as_* 与流式 reader 工厂抛
         /// @c boost::system::system_error。
-        bool valid() const noexcept
+        bool
+        valid() const noexcept
         {
             return impl_ != nullptr;
         }

@@ -2,7 +2,7 @@
 /// \brief 三个 PIMPL 类的 impl 定义（仅实现侧可见；公共头只保留 class impl）。
 ///
 /// 集中定义，供 decoded_jwt / builder / verifier 的实现文件互相取用
-///（verifier 校验借道 decoded_jwt::impl::inner）。
+/// （verifier 校验借道 decoded_jwt::impl::inner）。
 /// 依赖 jwt-cpp，只被 `HTTPLIB_ENABLED_JWT` 打开的实现段包含。
 
 #include "engine.hpp"
@@ -12,9 +12,9 @@
 
 namespace httplib::jwt
 {
-    using detail::jtraits;
-    using detail::jdecoded;
     using detail::jbuilder;
+    using detail::jdecoded;
+    using detail::jtraits;
     using detail::jverifier;
 
     class decoded_jwt::impl

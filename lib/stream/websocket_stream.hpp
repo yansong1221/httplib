@@ -3,10 +3,10 @@
 #ifdef HTTPLIB_ENABLED_SSL
 #include "ssl_stream.hpp"
 #endif
+#include "beast_alias.hpp"
 #include "http_stream.hpp"
 #include <boost/asio/steady_timer.hpp>
 #include <boost/beast/websocket/stream.hpp>
-#include "beast_alias.hpp"
 
 namespace httplib
 {

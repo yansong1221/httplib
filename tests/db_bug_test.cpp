@@ -2,13 +2,13 @@
 // db 模块缺陷复现测试：
 // 每个用例按"正确行为"断言，当前实现下应当失败（FAIL），用于在修复前验证缺陷存在；
 // 修复一个缺陷后对应用例应转绿。运行：httplib_tests.exe "[db][bug]"
+#include "feature_flags.hpp"
 #include "httplib/db/binder.hpp"
 #include "httplib/db/config.hpp"
 #include "httplib/db/exception.hpp"
 #include "httplib/db/session.hpp"
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/io_context.hpp>
-#include "feature_flags.hpp"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <chrono>

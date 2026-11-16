@@ -59,7 +59,7 @@ namespace httplib::jwt
     verifier::with_audience(std::string_view aud)
     {
         // jwt-cpp 的字符串重载：token 的 aud（字符串或字符串数组）必须包含 aud
-        //（is_subset_claim 语义）。
+        // （is_subset_claim 语义）。
         impl_->engine.with_audience(jtraits::string_type { aud });
         return *this;
     }
@@ -78,7 +78,8 @@ namespace httplib::jwt
         // claim 缺失 / 形态异常 / 谓词不过统一置 claim_mismatch（std 类别，
         // 由 verify() 结束时翻回 boost 侧）。
         auto k = jtraits::string_type { key };
-        impl_->engine.with_claim(k,
+        impl_->engine.with_claim(
+            k,
             [k, fn = std::move(fn)](jwtpp::verify_ops::verify_context<jtraits> const& ctx, std::error_code& ec)
             {
                 try
@@ -139,8 +140,8 @@ namespace httplib::jwt
             ec = boost::system::error_code { jec.value(), detail::jwt_boost_category() };
             return;
         }
-        if (cat == jwtpp::error::signature_verification_error_category() ||
-            cat == jwtpp::error::signature_generation_error_category())
+        if (cat == jwtpp::error::signature_verification_error_category()
+            || cat == jwtpp::error::signature_generation_error_category())
         {
             ec = make_error_code(error::signature_verification);
             return;
@@ -159,8 +160,8 @@ namespace httplib::jwt
                     try
                     {
                         auto const now = std::chrono::system_clock::now();
-                        if ((inner->has_not_before() && now < inner->get_not_before() - impl_->skew) ||
-                            (inner->has_issued_at() && now < inner->get_issued_at() - impl_->skew))
+                        if ((inner->has_not_before() && now < inner->get_not_before() - impl_->skew)
+                            || (inner->has_issued_at() && now < inner->get_issued_at() - impl_->skew))
                         {
                             ec = make_error_code(error::not_yet_valid);
                         }
@@ -218,10 +219,7 @@ namespace httplib::jwt
     {
         unavailable();
     }
-    verifier::verifier(verifier&& other) noexcept : impl_(std::move(other.impl_))
-    {
-        unavailable_noexcept();
-    }
+    verifier::verifier(verifier&& other) noexcept : impl_(std::move(other.impl_)) { unavailable_noexcept(); }
     verifier&
     verifier::operator=(verifier&&) noexcept
     {

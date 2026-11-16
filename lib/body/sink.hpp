@@ -1,4 +1,5 @@
 #pragma once
+#include "beast_alias.hpp"
 #include "body/body_state.hpp"
 #include "body/multipart_parser.hpp"
 #include "httplib/config.hpp"
@@ -17,7 +18,6 @@
 #include <string>
 #include <string_view>
 #include <utility>
-#include "beast_alias.hpp"
 
 namespace httplib::body
 {

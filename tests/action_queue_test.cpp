@@ -31,11 +31,13 @@ TEST_CASE("ActionQueue: push and execute", "[action_queue]")
         {
             for (int i = 0; i < 3; ++i)
             {
-                ok = ok && !aq.push([&]() -> httplib::net::awaitable<void>
-                                   {
-                                       ++count;
-                                       co_return;
-                                   });
+                ok = ok
+                     && !aq.push(
+                         [&]() -> httplib::net::awaitable<void>
+                         {
+                             ++count;
+                             co_return;
+                         });
             }
             co_await aq.async_shutdown();
             done = true;
@@ -54,16 +56,18 @@ TEST_CASE("ActionQueue: sync shutdown drains queued handlers", "[action_queue]")
     httplib::util::action_queue aq(ioc.get_executor());
 
     int count = 0;
-    REQUIRE(!aq.push([&]() -> httplib::net::awaitable<void>
-                     {
-                         ++count;
-                         co_return;
-                     }));
-    REQUIRE(!aq.push([&]() -> httplib::net::awaitable<void>
-                     {
-                         ++count;
-                         co_return;
-                     }));
+    REQUIRE(!aq.push(
+        [&]() -> httplib::net::awaitable<void>
+        {
+            ++count;
+            co_return;
+        }));
+    REQUIRE(!aq.push(
+        [&]() -> httplib::net::awaitable<void>
+        {
+            ++count;
+            co_return;
+        }));
 
     auto fut = aq.shutdown();
     ioc.run();
@@ -83,11 +87,12 @@ TEST_CASE("ActionQueue: push is rejected after shutdown", "[action_queue]")
         [&]() -> httplib::net::awaitable<void>
         {
             co_await aq.async_shutdown();
-            push_ec = aq.push([&]() -> httplib::net::awaitable<void>
-                              {
-                                  ++count;
-                                  co_return;
-                              });
+            push_ec = aq.push(
+                [&]() -> httplib::net::awaitable<void>
+                {
+                    ++count;
+                    co_return;
+                });
         },
         boost::asio::detached);
 
@@ -111,16 +116,18 @@ TEST_CASE("ActionQueue: clear drops pending items", "[action_queue]")
         [&]() -> httplib::net::awaitable<void>
         {
             // Park the drain in-flight so handlers queued afterwards stay pending.
-            ok = ok && !aq.push([&]() -> httplib::net::awaitable<void>
-                               {
-                                   h1_started = true;
-                                   while (!h1_release)
-                                   {
-                                       boost::asio::steady_timer t(co_await boost::asio::this_coro::executor);
-                                       t.expires_after(std::chrono::milliseconds(1));
-                                       co_await t.async_wait(boost::asio::use_awaitable);
-                                   }
-                               });
+            ok = ok
+                 && !aq.push(
+                     [&]() -> httplib::net::awaitable<void>
+                     {
+                         h1_started = true;
+                         while (!h1_release)
+                         {
+                             boost::asio::steady_timer t(co_await boost::asio::this_coro::executor);
+                             t.expires_after(std::chrono::milliseconds(1));
+                             co_await t.async_wait(boost::asio::use_awaitable);
+                         }
+                     });
             while (!h1_started)
             {
                 boost::asio::steady_timer t(co_await boost::asio::this_coro::executor);
@@ -128,16 +135,20 @@ TEST_CASE("ActionQueue: clear drops pending items", "[action_queue]")
                 co_await t.async_wait(boost::asio::use_awaitable);
             }
 
-            ok = ok && !aq.push([&]() -> httplib::net::awaitable<void>
-                               {
-                                   ++count;
-                                   co_return;
-                               });
-            ok = ok && !aq.push([&]() -> httplib::net::awaitable<void>
-                               {
-                                   ++count;
-                                   co_return;
-                               });
+            ok = ok
+                 && !aq.push(
+                     [&]() -> httplib::net::awaitable<void>
+                     {
+                         ++count;
+                         co_return;
+                     });
+            ok = ok
+                 && !aq.push(
+                     [&]() -> httplib::net::awaitable<void>
+                     {
+                         ++count;
+                         co_return;
+                     });
 
             aq.clear();
             pending_after_clear = aq.pending();
@@ -198,11 +209,13 @@ TEST_CASE("ActionQueue: order is preserved", "[action_queue]")
         {
             for (int i = 0; i < 10; ++i)
             {
-                ok = ok && !aq.push([&order, i]() -> httplib::net::awaitable<void>
-                                   {
-                                       order.push_back(i);
-                                       co_return;
-                                   });
+                ok = ok
+                     && !aq.push(
+                         [&order, i]() -> httplib::net::awaitable<void>
+                         {
+                             order.push_back(i);
+                             co_return;
+                         });
             }
             co_await aq.async_shutdown();
         },
@@ -231,16 +244,17 @@ TEST_CASE("ActionQueue: push is rejected when the queue is full", "[action_queue
         [&]() -> httplib::net::awaitable<void>
         {
             // Park the drain in-flight so subsequent pushes stay pending.
-            aq.push([&]() -> httplib::net::awaitable<void>
+            aq.push(
+                [&]() -> httplib::net::awaitable<void>
+                {
+                    parked = true;
+                    while (!release)
                     {
-                        parked = true;
-                        while (!release)
-                        {
-                            boost::asio::steady_timer t(co_await boost::asio::this_coro::executor);
-                            t.expires_after(std::chrono::milliseconds(1));
-                            co_await t.async_wait(boost::asio::use_awaitable);
-                        }
-                    });
+                        boost::asio::steady_timer t(co_await boost::asio::this_coro::executor);
+                        t.expires_after(std::chrono::milliseconds(1));
+                        co_await t.async_wait(boost::asio::use_awaitable);
+                    }
+                });
             while (!parked)
             {
                 boost::asio::steady_timer t(co_await boost::asio::this_coro::executor);
@@ -248,21 +262,24 @@ TEST_CASE("ActionQueue: push is rejected when the queue is full", "[action_queue
                 co_await t.async_wait(boost::asio::use_awaitable);
             }
 
-            ec[0] = aq.push([&]() -> httplib::net::awaitable<void>
-                            {
-                                ++count;
-                                co_return;
-                            });
-            ec[1] = aq.push([&]() -> httplib::net::awaitable<void>
-                            {
-                                ++count;
-                                co_return;
-                            });
-            ec[2] = aq.push([&]() -> httplib::net::awaitable<void>
-                            {
-                                ++count;
-                                co_return;
-                            });
+            ec[0] = aq.push(
+                [&]() -> httplib::net::awaitable<void>
+                {
+                    ++count;
+                    co_return;
+                });
+            ec[1] = aq.push(
+                [&]() -> httplib::net::awaitable<void>
+                {
+                    ++count;
+                    co_return;
+                });
+            ec[2] = aq.push(
+                [&]() -> httplib::net::awaitable<void>
+                {
+                    ++count;
+                    co_return;
+                });
 
             release = true;
             co_await aq.async_shutdown();
@@ -283,24 +300,28 @@ TEST_CASE("ActionQueue: cancel before drain drops queued handlers", "[action_que
     httplib::util::action_queue aq(ioc.get_executor());
 
     int count = 0;
-    REQUIRE_FALSE(aq.push([&]() -> httplib::net::awaitable<void>
-                          {
-                              ++count;
-                              co_return;
-                          }));
-    REQUIRE_FALSE(aq.push([&]() -> httplib::net::awaitable<void>
-                          {
-                              ++count;
-                              co_return;
-                          }));
+    REQUIRE_FALSE(aq.push(
+        [&]() -> httplib::net::awaitable<void>
+        {
+            ++count;
+            co_return;
+        }));
+    REQUIRE_FALSE(aq.push(
+        [&]() -> httplib::net::awaitable<void>
+        {
+            ++count;
+            co_return;
+        }));
     aq.cancel();
 
     REQUIRE(aq.pending() == 0);
-    REQUIRE(aq.push([&]() -> httplib::net::awaitable<void>
-                    {
-                        ++count;
-                        co_return;
-                    }) == boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
+    REQUIRE(aq.push(
+                [&]() -> httplib::net::awaitable<void>
+                {
+                    ++count;
+                    co_return;
+                })
+            == boost::system::errc::make_error_code(boost::system::errc::operation_canceled));
 
     auto fut = aq.shutdown();
     ioc.run();
@@ -323,17 +344,18 @@ TEST_CASE("ActionQueue: cancel aborts the running handler and drops pending", "[
         ioc,
         [&]() -> httplib::net::awaitable<void>
         {
-            REQUIRE_FALSE(aq.push([&]() -> httplib::net::awaitable<void>
-                                   {
-                                       parked = true;
-                                       // Park on a long-running operation so cancel()
-                                       // always interrupts an outstanding await, not the
-                                       // gap between two awaits (where cancellation
-                                       // surfaces as an exception instead of an ec).
-                                       boost::asio::steady_timer t(co_await boost::asio::this_coro::executor);
-                                       t.expires_after(std::chrono::hours(1));
-                                       co_await t.async_wait(httplib::util::net_awaitable[handler_ec]);
-                                   }));
+            REQUIRE_FALSE(aq.push(
+                [&]() -> httplib::net::awaitable<void>
+                {
+                    parked = true;
+                    // Park on a long-running operation so cancel()
+                    // always interrupts an outstanding await, not the
+                    // gap between two awaits (where cancellation
+                    // surfaces as an exception instead of an ec).
+                    boost::asio::steady_timer t(co_await boost::asio::this_coro::executor);
+                    t.expires_after(std::chrono::hours(1));
+                    co_await t.async_wait(httplib::util::net_awaitable[handler_ec]);
+                }));
             while (!parked)
             {
                 boost::asio::steady_timer t(co_await boost::asio::this_coro::executor);
@@ -341,23 +363,26 @@ TEST_CASE("ActionQueue: cancel aborts the running handler and drops pending", "[
                 co_await t.async_wait(httplib::util::net_awaitable[handler_ec]);
             }
 
-            REQUIRE_FALSE(aq.push([&]() -> httplib::net::awaitable<void>
-                                   {
-                                       ++count;
-                                       co_return;
-                                   }));
-            REQUIRE_FALSE(aq.push([&]() -> httplib::net::awaitable<void>
-                                   {
-                                       ++count;
-                                       co_return;
-                                   }));
+            REQUIRE_FALSE(aq.push(
+                [&]() -> httplib::net::awaitable<void>
+                {
+                    ++count;
+                    co_return;
+                }));
+            REQUIRE_FALSE(aq.push(
+                [&]() -> httplib::net::awaitable<void>
+                {
+                    ++count;
+                    co_return;
+                }));
 
             aq.cancel();
-            push_ec = aq.push([&]() -> httplib::net::awaitable<void>
-                               {
-                                   ++count;
-                                   co_return;
-                               });
+            push_ec = aq.push(
+                [&]() -> httplib::net::awaitable<void>
+                {
+                    ++count;
+                    co_return;
+                });
             pending_after = aq.pending();
             co_await aq.async_shutdown();
         },
@@ -396,26 +421,26 @@ TEST_CASE("ActionQueue: handler exceptions are reported and do not stop the work
 
     std::exception_ptr reported;
     int completed = 0;
-    httplib::util::action_queue aq(
-        ioc.get_executor(),
-        std::numeric_limits<std::size_t>::max(),
-        [&reported](std::exception_ptr ep) { reported = ep; });
+    httplib::util::action_queue aq(ioc.get_executor(),
+                                   std::numeric_limits<std::size_t>::max(),
+                                   [&reported](std::exception_ptr ep) { reported = ep; });
 
     boost::asio::co_spawn(
         ioc,
         [&]() -> httplib::net::awaitable<void>
         {
-            REQUIRE(!aq.push([]() -> httplib::net::awaitable<void>
-                             {
-                                 co_await boost::asio::post(co_await boost::asio::this_coro::executor,
-                                                            boost::asio::use_awaitable);
-                                 throw std::runtime_error("boom");
-                             }));
-            REQUIRE(!aq.push([&]() -> httplib::net::awaitable<void>
-                             {
-                                 ++completed;
-                                 co_return;
-                             }));
+            REQUIRE(!aq.push(
+                []() -> httplib::net::awaitable<void>
+                {
+                    co_await boost::asio::post(co_await boost::asio::this_coro::executor, boost::asio::use_awaitable);
+                    throw std::runtime_error("boom");
+                }));
+            REQUIRE(!aq.push(
+                [&]() -> httplib::net::awaitable<void>
+                {
+                    ++completed;
+                    co_return;
+                }));
             co_await aq.async_shutdown();
         },
         boost::asio::detached);
@@ -453,18 +478,17 @@ TEST_CASE("ActionQueue: concurrent producers are serialised", "[action_queue]")
             {
                 for (int i = 0; i < per_producer; ++i)
                 {
-                    while (aq.push([&]() -> httplib::net::awaitable<void>
-                                   {
-                                       int const now = ++concurrent;
-                                       int prev = max_concurrent.load();
-                                       while (now > prev && !max_concurrent.compare_exchange_weak(prev, now))
-                                       {
-                                       }
-                                       std::this_thread::yield();
-                                       --concurrent;
-                                       ++completed;
-                                       co_return;
-                                   }))
+                    while (aq.push(
+                        [&]() -> httplib::net::awaitable<void>
+                        {
+                            int const now = ++concurrent;
+                            int prev = max_concurrent.load();
+                            while (now > prev && !max_concurrent.compare_exchange_weak(prev, now)) {}
+                            std::this_thread::yield();
+                            --concurrent;
+                            ++completed;
+                            co_return;
+                        }))
                     {
                         std::this_thread::yield();
                     }

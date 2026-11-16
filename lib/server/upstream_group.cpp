@@ -157,8 +157,10 @@ namespace httplib::server
         {
             backend.retry_at_ms.store(now_ms() + unhealthy_cooldown_.count(), std::memory_order_release);
             auto expected = backend_health::half_open;
-            if (backend.health.compare_exchange_strong(
-                    expected, backend_health::unhealthy, std::memory_order_acq_rel, std::memory_order_acquire))
+            if (backend.health.compare_exchange_strong(expected,
+                                                       backend_health::unhealthy,
+                                                       std::memory_order_acq_rel,
+                                                       std::memory_order_acquire))
             {
                 if (logger_)
                 {
@@ -240,8 +242,10 @@ namespace httplib::server
             }
 
             auto expected = backend_health::unhealthy;
-            if (b.health.compare_exchange_strong(
-                    expected, backend_health::half_open, std::memory_order_acq_rel, std::memory_order_acquire))
+            if (b.health.compare_exchange_strong(expected,
+                                                 backend_health::half_open,
+                                                 std::memory_order_acq_rel,
+                                                 std::memory_order_acquire))
             {
                 if (logger_)
                 {

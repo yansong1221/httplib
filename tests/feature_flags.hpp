@@ -43,42 +43,47 @@
 
 #include <catch2/catch_test_macros.hpp>
 
-#define SKIP_WITHOUT_SSL()                          \
-    do {                                            \
-        if (!HTTPLIB_TEST_SSL)                      \
-        {                                           \
-            SKIP("requires HTTPLIB_ENABLED_SSL");   \
-        }                                           \
+#define SKIP_WITHOUT_SSL()                        \
+    do                                            \
+    {                                             \
+        if (!HTTPLIB_TEST_SSL)                    \
+        {                                         \
+            SKIP("requires HTTPLIB_ENABLED_SSL"); \
+        }                                         \
     } while (false)
 
-#define SKIP_WITHOUT_COMPRESS()                          \
-    do {                                                 \
-        if (!HTTPLIB_TEST_COMPRESS)                      \
-        {                                                \
-            SKIP("requires HTTPLIB_ENABLED_COMPRESS");   \
-        }                                                \
+#define SKIP_WITHOUT_COMPRESS()                        \
+    do                                                 \
+    {                                                  \
+        if (!HTTPLIB_TEST_COMPRESS)                    \
+        {                                              \
+            SKIP("requires HTTPLIB_ENABLED_COMPRESS"); \
+        }                                              \
     } while (false)
 
-#define SKIP_WITHOUT_DATABASE_MYSQL()                          \
-    do {                                                       \
-        if (!HTTPLIB_TEST_DATABASE_MYSQL)                      \
-        {                                                      \
-            SKIP("requires HTTPLIB_ENABLED_DATABASE_MYSQL");   \
-        }                                                      \
+#define SKIP_WITHOUT_DATABASE_MYSQL()                        \
+    do                                                       \
+    {                                                        \
+        if (!HTTPLIB_TEST_DATABASE_MYSQL)                    \
+        {                                                    \
+            SKIP("requires HTTPLIB_ENABLED_DATABASE_MYSQL"); \
+        }                                                    \
     } while (false)
 
-#define SKIP_WITHOUT_DATABASE_SQLITE()                          \
-    do {                                                        \
-        if (!HTTPLIB_TEST_DATABASE_SQLITE)                      \
-        {                                                       \
-            SKIP("requires HTTPLIB_ENABLED_DATABASE_SQLITE");   \
-        }                                                       \
-    } while (false)
-
-#define SKIP_WITHOUT_DATABASE_ODBC()                          \
-    do {                                                      \
-        if (!HTTPLIB_TEST_DATABASE_ODBC)                      \
+#define SKIP_WITHOUT_DATABASE_SQLITE()                        \
+    do                                                        \
+    {                                                         \
+        if (!HTTPLIB_TEST_DATABASE_SQLITE)                    \
         {                                                     \
-            SKIP("requires HTTPLIB_ENABLED_DATABASE_ODBC");   \
+            SKIP("requires HTTPLIB_ENABLED_DATABASE_SQLITE"); \
         }                                                     \
+    } while (false)
+
+#define SKIP_WITHOUT_DATABASE_ODBC()                        \
+    do                                                      \
+    {                                                       \
+        if (!HTTPLIB_TEST_DATABASE_ODBC)                    \
+        {                                                   \
+            SKIP("requires HTTPLIB_ENABLED_DATABASE_ODBC"); \
+        }                                                   \
     } while (false)

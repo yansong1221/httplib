@@ -2,7 +2,7 @@
 #include "httplib/jwt.hpp" // 公共 API 恒在：失效桩段也按同一签名定义
 #ifdef HTTPLIB_ENABLED_JWT
 /// \brief algorithm —— HS 家族：HMAC 直接委托 jwt-cpp，签名返回原始字节
-///（与 jwt-cpp 的 builder / verifier 协议一致，无编码往返）。
+/// （与 jwt-cpp 的 builder / verifier 协议一致，无编码往返）。
 ///
 /// jwt-cpp 的 HMAC 引擎在 std::error_code 世界里回报失败，在此翻回公共
 /// boost 契约（签名失败族）；std::bad_alloc 一律照常抛出。

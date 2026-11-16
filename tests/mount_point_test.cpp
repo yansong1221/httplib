@@ -114,7 +114,8 @@ TEST_CASE("Static mount: bare mount point redirects to trailing slash", "[mount]
             // demo 里的全局 OPTIONS 兜底会让未命中的路径变成 405。这里保留同样的注册，
             // 确保裸挂载点真正命中静态处理器，而不是被兜底路由判定为方法不允许。
             server.router().set_http_handler<httplib::method::options>(
-                "/*", [](httplib::server::request&, httplib::server::response&) {});
+                "/*",
+                [](httplib::server::request&, httplib::server::response&) {});
             server.router().set_static_mount_point("/static", tmp.path());
         },
         [](auto& client) -> net::awaitable<void>

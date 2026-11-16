@@ -25,8 +25,7 @@
 // P0-1：未配置算法的 verifier 必须 fail-closed
 // ===========================================================================
 
-TEST_CASE("P0-1: verifier without allow_algorithm() must reject a forged token (fail-closed)",
-          "[p0][jwt][regression]")
+TEST_CASE("P0-1: verifier without allow_algorithm() must reject a forged token (fail-closed)", "[p0][jwt][regression]")
 {
     // control：配置了算法（但密钥不匹配）的 verifier 会拒绝伪造 token。
     //          证明：（a）伪造 token 确实是"假签名"；（b）校验断言本身可靠。
@@ -36,7 +35,8 @@ TEST_CASE("P0-1: verifier without allow_algorithm() must reject a forged token (
                             .set_issuer("my-app")
                             .set_subject("victim")
                             .set_expires_in(std::chrono::hours { 1 })
-                            .sign(good_secret).value();
+                            .sign(good_secret)
+                            .value();
     auto victim_decoded = httplib::jwt::decode(victim_token).value();
 
     // 攻击者用**自己的密钥**签同样的 claims —— 签名校验理应失败。
@@ -44,7 +44,8 @@ TEST_CASE("P0-1: verifier without allow_algorithm() must reject a forged token (
                               .set_issuer("my-app")
                               .set_subject("victim")
                               .set_expires_in(std::chrono::hours { 1 })
-                              .sign(httplib::jwt::hs256("attacker-key")).value();
+                              .sign(httplib::jwt::hs256("attacker-key"))
+                              .value();
     auto attacker_decoded = httplib::jwt::decode(attacker_token).value();
 
     INFO("control：配置 secret 的 verifier 拒绝攻击者签名 —— 断言/脚手架可靠");
@@ -66,8 +67,7 @@ TEST_CASE("P0-1: verifier without allow_algorithm() must reject a forged token (
 // P0-2：builder::sign() 不应吞掉此前设置的 header claims（kid/cty/自定义）
 // ===========================================================================
 
-TEST_CASE("P0-2: set_key_id/set_content_type/set_header_claim must survive sign()",
-          "[p0][jwt][regression]")
+TEST_CASE("P0-2: set_key_id/set_content_type/set_header_claim must survive sign()", "[p0][jwt][regression]")
 {
     // control：set_type 走独立的 type_ 成员，sign() 里单独回填 —— 当前即正常。
     auto control_token = httplib::jwt::create()
@@ -75,7 +75,8 @@ TEST_CASE("P0-2: set_key_id/set_content_type/set_header_claim must survive sign(
                              .set_key_id("k1")
                              .set_content_type("at+jwt")
                              .set_header_claim("x-header-tag", boost::json::value("v1"))
-                             .sign(httplib::jwt::hs256("secret")).value();
+                             .sign(httplib::jwt::hs256("secret"))
+                             .value();
     auto control_hdr = httplib::jwt::decode(control_token).value().get_header();
     REQUIRE(control_hdr.is_object());
     auto const& typ = control_hdr.get_object();
@@ -92,7 +93,8 @@ TEST_CASE("P0-2: set_key_id/set_content_type/set_header_claim must survive sign(
                      .set_key_id("k1")
                      .set_content_type("at+jwt")
                      .set_header_claim("x-header-tag", boost::json::value("v1"))
-                     .sign(httplib::jwt::hs256("secret")).value();
+                     .sign(httplib::jwt::hs256("secret"))
+                     .value();
     auto hdr = httplib::jwt::decode(token).value().get_header();
     REQUIRE(hdr.is_object());
     auto const& obj = hdr.get_object();
@@ -116,14 +118,14 @@ TEST_CASE("P0-2: set_key_id/set_content_type/set_header_claim must survive sign(
 // ---------------------------------------------------------------------------
 // control（正例回归，本文件应保持全绿）：带算法的 verifier 正常路径不受影响
 // ---------------------------------------------------------------------------
-TEST_CASE("control: fully configured verifier still accepts a valid token",
-          "[p0][jwt][control][do-not-fail]")
+TEST_CASE("control: fully configured verifier still accepts a valid token", "[p0][jwt][control][do-not-fail]")
 {
     auto alg = httplib::jwt::hs256("real-secret");
     auto token = httplib::jwt::create() //
                      .set_issuer("my-app")
                      .set_expires_in(std::chrono::hours { 1 })
-                     .sign(alg).value();
+                     .sign(alg)
+                     .value();
     auto decoded = httplib::jwt::decode(token).value();
 
     boost::system::error_code ec;

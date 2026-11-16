@@ -1,10 +1,10 @@
 #pragma once
+#include "beast_alias.hpp"
 #include "httplib/server/sse_writer.hpp"
 #include "httplib/server/stream_writer.hpp"
 #include <memory>
 #include <string>
 #include <utility>
-#include "beast_alias.hpp"
 
 namespace httplib::server
 {

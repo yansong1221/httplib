@@ -6,12 +6,12 @@
 #include "ssl_stream.hpp"
 #include <boost/asio/ssl/host_name_verification.hpp>
 #endif
+#include "beast_alias.hpp"
 #include "boost/asio/use_awaitable.hpp"
 #include "httplib/util/use_awaitable.hpp"
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core/basic_stream.hpp>
 #include <boost/system/result.hpp>
-#include "beast_alias.hpp"
 
 namespace httplib
 {

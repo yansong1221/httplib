@@ -40,28 +40,40 @@ namespace httplib::jwt
     boost::json::value
     decoded_jwt::get_payload() const
     {
-        if (!impl_->inner) return {};
+        if (!impl_->inner)
+        {
+            return {};
+        }
         return boost::json::value { impl_->inner->get_payload_json() };
     }
 
     boost::json::value
     decoded_jwt::get_header() const
     {
-        if (!impl_->inner) return {};
+        if (!impl_->inner)
+        {
+            return {};
+        }
         return boost::json::value { impl_->inner->get_header_json() };
     }
 
     std::string_view
     decoded_jwt::get_token() const
     {
-        if (!impl_->inner) return {};
+        if (!impl_->inner)
+        {
+            return {};
+        }
         return impl_->inner->get_token();
     }
 
     std::string_view
     decoded_jwt::get_signature() const
     {
-        if (!impl_->inner) return {};
+        if (!impl_->inner)
+        {
+            return {};
+        }
         return impl_->inner->get_signature_base64();
     }
 
@@ -236,7 +248,10 @@ namespace httplib::jwt
         bool matched = expected.size() == actual.size();
         for (size_t i = 0; i < (std::min)(expected.size(), actual.size()); i++)
         {
-            if (expected[i] != actual[i]) matched = false;
+            if (expected[i] != actual[i])
+            {
+                matched = false;
+            }
         }
         if (!matched)
         {
@@ -290,10 +305,7 @@ namespace httplib::jwt
     {
         unavailable();
     }
-    decoded_jwt::decoded_jwt(decoded_jwt&& other) noexcept : impl_(std::move(other.impl_))
-    {
-        unavailable_noexcept();
-    }
+    decoded_jwt::decoded_jwt(decoded_jwt&& other) noexcept : impl_(std::move(other.impl_)) { unavailable_noexcept(); }
     decoded_jwt&
     decoded_jwt::operator=(decoded_jwt&&) noexcept
     {

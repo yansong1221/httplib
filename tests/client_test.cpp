@@ -619,7 +619,9 @@ TEST_CASE("client: chunked transfer via sessions", "[client]")
                     auto cw = resp.create_stream_writer();
                     httplib::headers headers;
                     headers.set(httplib::field::content_type, "text/plain");
-                    co_await cw->write_header(httplib::status::ok, headers, httplib::server::stream_writer::mode::chunked);
+                    co_await cw->write_header(httplib::status::ok,
+                                              headers,
+                                              httplib::server::stream_writer::mode::chunked);
                     for (int i = 0; i < 5; ++i)
                     {
                         co_await cw->write_body(net::buffer(std::string("Chunk") + std::to_string(i)), i < 4);
@@ -629,7 +631,10 @@ TEST_CASE("client: chunked transfer via sessions", "[client]")
         [](auto& client) -> net::awaitable<void>
         {
             auto writer = client.create_lazy_request();
-            co_await writer->write_header(httplib::method::get, "/chunked", {}, httplib::client::lazy_request::mode::relay);
+            co_await writer->write_header(httplib::method::get,
+                                          "/chunked",
+                                          {},
+                                          httplib::client::lazy_request::mode::relay);
             co_await writer->write_body(net::buffer("", 0), false);
 
             auto resp = UNWRAP(co_await writer->read_response_lazy());
@@ -713,10 +718,7 @@ TEST_CASE("client: lazy writers are distinct and exclusive", "[client]")
             auto w2 = client.create_lazy_request();
             REQUIRE(w1 != w2);
 
-            co_await w1->write_header(httplib::method::get,
-                                      "/ping",
-                                      {},
-                                      httplib::client::lazy_request::mode::relay);
+            co_await w1->write_header(httplib::method::get, "/ping", {}, httplib::client::lazy_request::mode::relay);
 
             // 另一个 writer 并发使用被拒绝。
             boost::system::error_code ec;
@@ -734,10 +736,7 @@ TEST_CASE("client: lazy writers are distinct and exclusive", "[client]")
             CHECK(client.has_active_session());
 
             // 完成一次交换后重新登记，同一 writer 可继续使用。
-            co_await w1->write_header(httplib::method::get,
-                                      "/ping",
-                                      {},
-                                      httplib::client::lazy_request::mode::relay);
+            co_await w1->write_header(httplib::method::get, "/ping", {}, httplib::client::lazy_request::mode::relay);
             co_await w1->write_body(net::buffer("", 0), false);
             auto resp2 = UNWRAP(co_await w1->read_response());
             REQUIRE(resp2.as_string() == "pong");
@@ -1151,9 +1150,7 @@ TEST_CASE("client: cross-origin redirect budget is shared", "[client]")
             origin.router().template set_http_handler<httplib::method::get>(
                 "/loop",
                 [&](httplib::server::request&, httplib::server::response& resp)
-                {
-                    resp.set_redirect(std::format("http://127.0.0.1:{}/back", target_port), httplib::status::found);
-                });
+                { resp.set_redirect(std::format("http://127.0.0.1:{}/back", target_port), httplib::status::found); });
             origin.listen("127.0.0.1", 0);
             origin_port.store(origin.local_endpoint().port());
             origin.run();
@@ -1543,7 +1540,8 @@ TEST_CASE("client: lazy redirect full URL", "[client]")
                 [](httplib::server::request& req, httplib::server::response& resp)
                 {
                     auto port = req.local_endpoint().port();
-                    resp.set_redirect(std::format("http://127.0.0.1:{}/lazy-target-page", port), httplib::status::found);
+                    resp.set_redirect(std::format("http://127.0.0.1:{}/lazy-target-page", port),
+                                      httplib::status::found);
                 });
             server.router().template set_http_handler<httplib::method::get>(
                 "/lazy-target-page",

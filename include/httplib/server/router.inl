@@ -294,12 +294,9 @@ namespace httplib::server
 
         // 同一个 entry 同时服务裸挂载点与通配路径；aspects 只构造一次，
         // 否则 rvalue aspect 会在第一次注册时被移走，第二次拿到 moved-from 对象。
-        auto handler = make_coro_http_handler(
-            [entry = std::move(entry)](request& req, response& resp) -> void
-            {
-                entry(req, resp);
-            },
-            std::forward<Aspects>(asps)...);
+        auto handler = make_coro_http_handler([entry = std::move(entry)](request& req, response& resp) -> void
+                                              { entry(req, resp); },
+                                              std::forward<Aspects>(asps)...);
 
         auto register_handler = [&](httplib::method m, std::string_view route)
         {

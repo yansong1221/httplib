@@ -1,9 +1,9 @@
 #include "httplib/config.hpp"
 #ifdef HTTPLIB_ENABLED_DATABASE_SQLITE
-#include "sqlite_backend.hpp"
 #include "httplib/db/error.hpp"
 #include "httplib/db/exception.hpp"
 #include "registry.hpp"
+#include "sqlite_backend.hpp"
 #include <boost/algorithm/string/predicate.hpp>
 #include <cctype>
 #include <limits>

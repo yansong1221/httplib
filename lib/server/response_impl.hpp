@@ -1,4 +1,5 @@
 #pragma once
+#include "beast_alias.hpp"
 #include "body/body_writer.hpp"
 #include "body/source.hpp"
 #include "html/html.h"
@@ -14,7 +15,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-#include "beast_alias.hpp"
 
 namespace httplib::server
 {

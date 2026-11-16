@@ -3,10 +3,10 @@
 #include "httplib/client/proxy_client.hpp"
 #include "stream/http_stream.hpp"
 #include "util/logging.hpp"
+#include <atomic>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/beast/core/flat_buffer.hpp>
-#include <atomic>
 #include <future>
 
 namespace httplib::client

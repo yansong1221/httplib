@@ -1,4 +1,5 @@
 #pragma once
+#include "beast_alias.hpp"
 #include "body/body_state.hpp"
 #include "body/codec.hpp"
 #include "body/sink.hpp"
@@ -22,7 +23,6 @@
 #include <optional>
 #include <string>
 #include <utility>
-#include "beast_alias.hpp"
 
 namespace httplib::detail
 {

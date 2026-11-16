@@ -1,10 +1,10 @@
 #include "beast_alias.hpp"
 #include "body/body_state.hpp"
 #include "body/body_writer.hpp"
-#include "feature_flags.hpp"
 #include "body/codec.hpp"
 #include "body/sink.hpp"
 #include "body/source.hpp"
+#include "feature_flags.hpp"
 #include <algorithm>
 #include <boost/asio/buffer.hpp>
 #include <boost/asio/co_spawn.hpp>
@@ -74,8 +74,10 @@ namespace
         return out;
     }
 
-    /// 浼啓鍏ョ锛氫笉浜х敓浠讳綍缃戠粶瀛楄妭锛屽彧璁板綍 body_writer 浜ょ粰搴忓垪鍖栧櫒鐨?body 鐗囨锛?
-    /// 骞跺彲鎸夐渶璁┿€屽啓澶淬€嶅け璐?鈥斺€?鐢ㄤ簬楠岃瘉鍐欏ご澶辫触鏃?source 灏氭湭琚秷璐癸紙閲嶈瘯鍓嶆彁锛夈€?
+    /// 浼啓鍏ョ锛氫笉浜х敓浠讳綍缃戠粶瀛楄妭锛屽彧璁板綍 body_writer
+    /// 浜ょ粰搴忓垪鍖栧櫒鐨?body 鐗囨锛?
+    /// 骞跺彲鎸夐渶璁┿€屽啓澶淬€嶅け璐?鈥斺€?鐢ㄤ簬楠岃瘉鍐欏ご澶辫触鏃?source
+    /// 灏氭湭琚秷璐癸紙閲嶈瘯鍓嶆彁锛夈€?
     class recording_task
     {
       public:
@@ -194,10 +196,8 @@ TEST_CASE("body_writer: header write failure leaves source unconsumed for retry"
     boost::system::error_code ec;
 
     // 绗竴娆″彂閫侊細鍐欏ご鍗冲け璐ワ紙妯℃嫙澶嶇敤姹犱腑鐨勬杩炴帴锛夈€?
-    auto fut = net::co_spawn(
-        ioc,
-        [&]() -> net::awaitable<void> { ec = co_await writer.write_message(); },
-        net::use_future);
+    auto fut
+        = net::co_spawn(ioc, [&]() -> net::awaitable<void> { ec = co_await writer.write_message(); }, net::use_future);
     ioc.run();
     fut.get();
 
@@ -210,10 +210,8 @@ TEST_CASE("body_writer: header write failure leaves source unconsumed for retry"
     task.fail_header_ = false;
     writer.reset_serializer();
 
-    auto fut2 = net::co_spawn(
-        ioc,
-        [&]() -> net::awaitable<void> { ec = co_await writer.write_message(); },
-        net::use_future);
+    auto fut2
+        = net::co_spawn(ioc, [&]() -> net::awaitable<void> { ec = co_await writer.write_message(); }, net::use_future);
     // 涓婁竴杞?run() 鍥犳棤宸ヤ綔鑰岃繑鍥烇紝io_context 澶勪簬 stopped 鎬侊紝蹇呴』 restart 鎵嶈兘鍐嶈窇銆?
     ioc.restart();
     ioc.run();
@@ -229,8 +227,9 @@ TEST_CASE("body_writer: header write failure leaves source unconsumed for retry"
 }
 
 // 鍥炲綊锛氭崲 body 蹇呴』涓㈡帀涓婁竴涓?body 鐣欎笅鐨?Content-Length銆?
-// prepare_payload() 瑙佸埌宸插瓨鍦ㄧ殑 Content-Length 浼氱洿鎺ユ部鐢紝浜庢槸"鏃ч暱搴?+ 鏂?body"浼氭妸瀵圭
-// 鎸傚湪閭ｅ効绛夋案杩滀笉浼氬埌杈剧殑瀛楄妭銆傚绾︼細reset() 鏃犳潯浠朵涪寮?Content-Length锛屼箣鍚?
+// prepare_payload() 瑙佸埌宸插瓨鍦ㄧ殑 Content-Length 浼氱洿鎺ユ部鐢紝浜庢槸"鏃ч暱搴?+
+// 鏂?body"浼氭妸瀵圭 鎸傚湪閭ｅ効绛夋案杩滀笉浼氬埌杈剧殑瀛楄妭銆傚绾︼細reset()
+// 鏃犳潯浠朵涪寮?Content-Length锛屼箣鍚?
 // prepare_payload() 鎸夊綋鍓?body 閲嶇畻锛涜鎸囧畾 Content-Length 璇峰湪 set_* 涔嬪悗鍐嶈銆?
 TEST_CASE("body_writer: reset drops the previous Content-Length", "[body_pipeline]")
 {
@@ -260,27 +259,31 @@ TEST_CASE("body_writer: reset drops the previous Content-Length", "[body_pipelin
         REQUIRE_FALSE(ec);
     };
 
-    // 绗竴杞細闀垮瓧绗︿覆锛坰tring_source 宸茬煡闀垮害锛夛紝Content-Length 鐢?prepare_payload() 绠楀嚭銆?
+    // 绗竴杞細闀垮瓧绗︿覆锛坰tring_source 宸茬煡闀垮害锛夛紝Content-Length
+    // 鐢?prepare_payload() 绠楀嚭銆?
     writer.set_string(std::string(40, 'a'), "text/plain");
     send();
     REQUIRE(task.body().size() == 40);
     REQUIRE(writer.base()[http::field::content_length] == "40");
 
-    // 绗簩杞細鎹㈢煭 body銆傚叧閿柇瑷€锛欳ontent-Length 蹇呴』閲嶇畻锛屼笉鑳芥部鐢?40銆?
+    // 绗簩杞細鎹㈢煭 body銆傚叧閿柇瑷€锛欳ontent-Length
+    // 蹇呴』閲嶇畻锛屼笉鑳芥部鐢?40銆?
     task.reset_record();
     writer.set_string("hi", "text/plain");
     send();
     REQUIRE(task.body() == "hi");
     REQUIRE(writer.base()[http::field::content_length] == "2");
 
-    // 绗笁杞細鎹?body 鏃朵笂涓€杞殑 Content-Length 涓€寰嬩涪寮冿紱绌?body 璧?empty_source锛岄暱搴﹀嵆 0銆?
+    // 绗笁杞細鎹?body 鏃朵笂涓€杞殑 Content-Length 涓€寰嬩涪寮冿紱绌?body
+    // 璧?empty_source锛岄暱搴﹀嵆 0銆?
     task.reset_record();
     writer.set_empty();
     send();
     REQUIRE(writer.base()[http::field::content_length] == "0");
 
-    // 绗洓杞細瑕佹寚瀹?Content-Length 鑰屽張涓嶅彂 body锛圚EAD 鍥炴樉 GET 闀垮害锛夛紝鐢?discard_body()
-    // 璁?source 涓虹┖銆乭eader 鍘熸牱淇濈暀锛岃€屼笉鏄?set_empty()锛堝悗鑰呬細甯﹀嚭闀垮害 0锛夈€?
+    // 绗洓杞細瑕佹寚瀹?Content-Length 鑰屽張涓嶅彂 body锛圚EAD 鍥炴樉 GET
+    // 闀垮害锛夛紝鐢?discard_body() 璁?source 涓虹┖銆乭eader
+    // 鍘熸牱淇濈暀锛岃€屼笉鏄?set_empty()锛堝悗鑰呬細甯﹀嚭闀垮害 0锛夈€?
     task.reset_record();
     writer.discard_body();
     writer.base().set(http::field::content_length, "4");
@@ -482,9 +485,12 @@ TEST_CASE("codec: identity passthrough", "[body_pipeline]")
     REQUIRE(std::string(buf, got) == "raw bytes");
 }
 
-// 鍥炲綊锛歭imit 绾︽潫鐨勬槸瑙ｅ帇"浜у嚭"瀛楄妭锛屽帇缂╁悗鐨勯暱搴︿笉鍐嶄粠闄愰閲屾墸闄ゃ€?
-// 鏃у疄鐜版妸鍘嬬缉闀垮害浠?limit 閲屾墸鎺夊悗锛坙imit_ -= content_length锛夊啀瀵逛骇鍑鸿鏁帮紝绛変簬鎶婂悓涓€浠?
-// 棰濆害绠椾袱娆★細鍘嬬缉鍚庝綋绉ぇ銆佽В鍘嬪悗浠嶅湪闄愰鍐呯殑 body 浼氳璇垽涓?body_limit銆?
+// 鍥炲綊锛歭imit
+// 绾︽潫鐨勬槸瑙ｅ帇"浜у嚭"瀛楄妭锛屽帇缂╁悗鐨勯暱搴︿笉鍐嶄粠闄愰閲屾墸闄ゃ€?
+// 鏃у疄鐜版妸鍘嬬缉闀垮害浠?limit 閲屾墸鎺夊悗锛坙imit_ -=
+// content_length锛夊啀瀵逛骇鍑鸿鏁帮紝绛変簬鎶婂悓涓€浠?
+// 棰濆害绠椾袱娆★細鍘嬬缉鍚庝綋绉ぇ銆佽В鍘嬪悗浠嶅湪闄愰鍐呯殑 body
+// 浼氳璇垽涓?body_limit銆?
 TEST_CASE("codec: produced-bytes limit is not reduced by compressed length", "[body_pipeline]")
 {
     // 鐢ㄨ繎浼间笉鍙帇鐨勬暟鎹紝淇濊瘉鍘嬬缉鍚庝綋绉粛鎺ヨ繎鍘熷澶у皬锛涘惁鍒欏帇缂╅暱搴﹀緢灏忥紝鍖哄垎涓嶅嚭闂銆?

@@ -1,4 +1,5 @@
 #include "ws_client_impl.h"
+#include "beast_alias.hpp"
 #include "httplib/client/error.hpp"
 #include "httplib/url/url.hpp"
 #include "httplib/util/misc.hpp"
@@ -9,7 +10,6 @@
 #include <boost/asio/use_future.hpp>
 #include <chrono>
 #include <spdlog/spdlog.h>
-#include "beast_alias.hpp"
 
 namespace httplib::client
 {
@@ -76,13 +76,13 @@ namespace httplib::client
                 }
                 auto s = std::make_shared<websocket_stream>(std::move(stream));
                 s->set_option(websocket::stream_base::decorator(
-                     [&](websocket::request_type& req)
-                     {
-                         // request_type 是 beast 的 http::request<empty_body>
-                         req.set(http::field::origin, url::make_url_value(host_, port_, scheme_));
-                         req.set(http::field::host, url::make_host_value(host_, port_, scheme_));
-                         req.set(http::field::user_agent,
-                                 std::string(BOOST_BEAST_VERSION_STRING) + "websocket-client-coro");
+                    [&](websocket::request_type& req)
+                    {
+                        // request_type 是 beast 的 http::request<empty_body>
+                        req.set(http::field::origin, url::make_url_value(host_, port_, scheme_));
+                        req.set(http::field::host, url::make_host_value(host_, port_, scheme_));
+                        req.set(http::field::user_agent,
+                                std::string(BOOST_BEAST_VERSION_STRING) + "websocket-client-coro");
                         for (auto const& field : headers.fields())
                         {
                             req.set(field.name_string(), field.value());
@@ -508,7 +508,10 @@ namespace httplib::client
         return nullptr;
     }
 
-    ws_client::ws_client(net::io_context& ex, std::string_view host, uint16_t port, url::scheme s /*= url::scheme::plain*/)
+    ws_client::ws_client(net::io_context& ex,
+                         std::string_view host,
+                         uint16_t port,
+                         url::scheme s /*= url::scheme::plain*/)
         : ws_client(ex.get_executor(), host, port, s)
     {
     }

@@ -1,6 +1,6 @@
-#include "httplib/config.hpp"
 #include "db/backend.hpp"
 #include "db/render.hpp"
+#include "httplib/config.hpp"
 #include "httplib/db/binder.hpp"
 #include "httplib/db/connection_pool.hpp"
 #include "httplib/db/error.hpp"
@@ -89,16 +89,19 @@ namespace
 
     /// 每个枚举值都必须单独列出：漏一个这里就少一条覆盖。
     constexpr db::error kAllErrors[] = {
-        db::error::invalid_parameters, db::error::column_not_found, db::error::type_mismatch,
-        db::error::null_value,         db::error::not_initialized,  db::error::acquire_timeout,
-        db::error::unknown_backend,
+        db::error::invalid_parameters, db::error::column_not_found, db::error::type_mismatch,   db::error::null_value,
+        db::error::not_initialized,    db::error::acquire_timeout,  db::error::unknown_backend,
     };
 
     /// 单列一行的 string 列结果，供列访问 / 类型转换用例复用。
-    db::result one_string_result()
+    db::result
+    one_string_result()
     {
-        return db::result(
-            { db::result::resultset { { { db::field { std::string("hello") } } }, { "v" }, { db::column_type::string } } });
+        return db::result({
+            db::result::resultset { { { db::field { std::string("hello") } } },
+                                   { "v" },
+                                   { db::column_type::string } }
+        });
     }
 } // namespace
 
@@ -155,16 +158,16 @@ TEST_CASE("db error: render parameter mismatch maps to invalid_parameters", "[db
             == db::make_error_code(db::error::invalid_parameters));
 
     // 位置绑定与命名绑定混用 → 禁止。
-    REQUIRE(code_thrown_by([&] { (void)detail::render_query("SELECT :a AS x", { db::bind(1), db::bind("a", 2) }, def); })
-            == db::make_error_code(db::error::invalid_parameters));
+    REQUIRE(
+        code_thrown_by([&] { (void)detail::render_query("SELECT :a AS x", { db::bind(1), db::bind("a", 2) }, def); })
+        == db::make_error_code(db::error::invalid_parameters));
 }
 
 TEST_CASE("db error: unknown column maps to column_not_found", "[db][error]")
 {
     auto r = one_string_result();
 
-    REQUIRE(code_thrown_by([&] { (void)r.column_index("nope"); })
-            == db::make_error_code(db::error::column_not_found));
+    REQUIRE(code_thrown_by([&] { (void)r.column_index("nope"); }) == db::make_error_code(db::error::column_not_found));
 }
 
 TEST_CASE("db error: failed field conversion maps to type_mismatch", "[db][error]")

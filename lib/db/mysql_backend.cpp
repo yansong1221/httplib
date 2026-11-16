@@ -1,8 +1,8 @@
 #include "httplib/config.hpp"
 #ifdef HTTPLIB_ENABLED_DATABASE_MYSQL
-#include "mysql_backend.hpp"
 #include "httplib/db/error.hpp"
 #include "httplib/db/exception.hpp"
+#include "mysql_backend.hpp"
 #include "registry.hpp"
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/use_awaitable.hpp>

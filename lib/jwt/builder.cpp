@@ -4,7 +4,7 @@
 /// \brief builder —— jwtpp::builder<system_clock, jtraits> 的 PIMPL。
 ///
 /// set_* 全部直通 jwt-cpp；sign() 刷新 alg claim，其余 header claim
-///（kid / cty / 自定义）一一保留，换算法重签安全。
+/// （kid / cty / 自定义）一一保留，换算法重签安全。
 
 #include "impl.hpp"
 
@@ -150,10 +150,7 @@ namespace httplib::jwt
     {
         unavailable();
     }
-    builder::builder(builder&& other) noexcept : impl_(std::move(other.impl_))
-    {
-        unavailable_noexcept();
-    }
+    builder::builder(builder&& other) noexcept : impl_(std::move(other.impl_)) { unavailable_noexcept(); }
     builder&
     builder::operator=(builder&&) noexcept
     {

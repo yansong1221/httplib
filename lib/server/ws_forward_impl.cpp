@@ -1,9 +1,9 @@
 #include "ws_forward_impl.h"
+#include "beast_alias.hpp"
 #include "httplib/client/ws_client.hpp"
 #include "httplib/util/misc.hpp"
 #include "proxy_util.hpp"
 #include "server_impl.h"
-#include "beast_alias.hpp"
 
 namespace httplib::server::detail
 {
@@ -39,11 +39,10 @@ namespace httplib::server::detail
             co_await interceptor_->on_upstream_request(req, upstream_headers_, upstream_.url);
         }
 
-        auto upstream
-            = std::make_shared<client::ws_client>(conn->get_executor(),
-                                                  upstream_.host,
-                                                  upstream_.port,
-                                                  upstream_.ssl ? url::scheme::tls : url::scheme::plain);
+        auto upstream = std::make_shared<client::ws_client>(conn->get_executor(),
+                                                            upstream_.host,
+                                                            upstream_.port,
+                                                            upstream_.ssl ? url::scheme::tls : url::scheme::plain);
         upstream->set_logger(get_logger());
 
         boost::system::error_code ec;
@@ -145,14 +144,14 @@ namespace httplib::server::detail
         upstream_headers_.erase(field::connection);
         upstream_headers_.set(field::host,
                               url::make_host_value(upstream_.host,
-                                                    upstream_.port,
-                                                    upstream_.ssl ? url::scheme::tls : url::scheme::plain));
+                                                   upstream_.port,
+                                                   upstream_.ssl ? url::scheme::tls : url::scheme::plain));
 
         co_return true;
     }
 
     net::awaitable<void>
-    ws_forward_context::send_to_upstream(websocket_conn::weak_ptr wp, const websocket_message& msg)
+    ws_forward_context::send_to_upstream(websocket_conn::weak_ptr wp, websocket_message const& msg)
     {
         auto conn = wp.lock();
         if (!conn)

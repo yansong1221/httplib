@@ -23,17 +23,8 @@ namespace
         int* copies = nullptr;
         std::string* log = nullptr;
 
-        counting_aspect(int& c, std::string& l)
-            : copies(&c)
-            , log(&l)
-        {
-        }
-        counting_aspect(counting_aspect const& other)
-            : copies(other.copies)
-            , log(other.log)
-        {
-            ++*copies;
-        }
+        counting_aspect(int& c, std::string& l) : copies(&c), log(&l) {}
+        counting_aspect(counting_aspect const& other) : copies(other.copies), log(other.log) { ++*copies; }
         counting_aspect& operator=(counting_aspect const&) = delete;
 
         bool

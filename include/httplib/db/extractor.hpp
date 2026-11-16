@@ -194,7 +194,8 @@ namespace httplib::db
                      auto val = r.get<T>(c);
                      if (!val)
                      {
-                         throw db_exception(make_error_code(error::null_value), "db: NULL value when extracting into vector");
+                         throw db_exception(make_error_code(error::null_value),
+                                            "db: NULL value when extracting into vector");
                      }
                      v.push_back(std::move(*val));
                  },
@@ -219,7 +220,8 @@ namespace httplib::db
                      auto val = r.get<T>(n);
                      if (!val)
                      {
-                         throw db_exception(make_error_code(error::null_value), "db: NULL value when extracting into vector");
+                         throw db_exception(make_error_code(error::null_value),
+                                            "db: NULL value when extracting into vector");
                      }
                      v.push_back(std::move(*val));
                  },
@@ -244,7 +246,8 @@ namespace httplib::db
                      auto val = r.get<T>(c);
                      if (!val)
                      {
-                         throw db_exception(make_error_code(error::null_value), "db: NULL value when extracting into vector");
+                         throw db_exception(make_error_code(error::null_value),
+                                            "db: NULL value when extracting into vector");
                      }
                      v.push_back(std::move(*val));
                  },

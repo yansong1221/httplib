@@ -58,10 +58,7 @@ namespace httplib::server
         void use(Aspects&&... asps);
 
         template <typename Func, typename... Aspects>
-        void set_http_handler(httplib::method method,
-                              std::string_view key,
-                              Func&& handler,
-                              Aspects&&... asps);
+        void set_http_handler(httplib::method method, std::string_view key, Func&& handler, Aspects&&... asps);
 
         template <httplib::method... method, typename Func, typename... Aspects>
         void

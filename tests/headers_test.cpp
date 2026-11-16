@@ -1,6 +1,6 @@
 #include "httplib/headers.hpp"
-#include <catch2/catch_test_macros.hpp>
 #include <algorithm>
+#include <catch2/catch_test_macros.hpp>
 #include <iterator>
 #include <ranges>
 #include <string>
@@ -54,7 +54,8 @@ namespace
 
 } // namespace
 
-TEST_CASE("headers fields covers an empty collection") {
+TEST_CASE("headers fields covers an empty collection")
+{
     httplib::headers h;
 
     CHECK(h.empty());
@@ -70,7 +71,8 @@ TEST_CASE("headers fields covers an empty collection") {
     CHECK(visits == 0);
 }
 
-TEST_CASE("headers iteration follows wire order") {
+TEST_CASE("headers iteration follows wire order")
+{
     httplib::headers h;
     h.insert(httplib::field::content_type, "text/plain");
     h.insert("X-Custom", "v");
@@ -84,8 +86,7 @@ TEST_CASE("headers iteration follows wire order") {
     h.insert(httplib::field::set_cookie, "a=1");
     h.insert(httplib::field::set_cookie, "b=2");
     CHECK(h.size() == 5);
-    CHECK(values_of(h, httplib::field::set_cookie) ==
-          std::vector<std::string_view>{ "a=1", "b=2" });
+    CHECK(values_of(h, httplib::field::set_cookie) == std::vector<std::string_view> { "a=1", "b=2" });
 
     auto const ns = names(h);
     REQUIRE(ns.size() == 5);
@@ -96,7 +97,8 @@ TEST_CASE("headers iteration follows wire order") {
     CHECK(ns[4] == "Set-Cookie");
 }
 
-TEST_CASE("headers iteration after clear") {
+TEST_CASE("headers iteration after clear")
+{
     httplib::headers h;
     h.insert(httplib::field::host, "example.com");
     REQUIRE(h.size() == 1);
@@ -108,7 +110,8 @@ TEST_CASE("headers iteration after clear") {
     CHECK(std::ranges::distance(h.fields()) == 0);
 }
 
-TEST_CASE("header element exposes name and value") {
+TEST_CASE("header element exposes name and value")
+{
     httplib::headers h;
     h.insert(httplib::field::content_type, "application/json");
 
@@ -132,7 +135,8 @@ TEST_CASE("header element exposes name and value") {
     }
 }
 
-TEST_CASE("fields() returns a single pass input range") {
+TEST_CASE("fields() returns a single pass input range")
+{
     // 生成器只保证 input 语义：可解引用、可 ++、可与哨兵比较，但不能多趟遍历。
     using gen_t = decltype(std::declval<httplib::headers const&>().fields());
     STATIC_CHECK(std::is_same_v<gen_t, std::generator<httplib::header const&>>);
@@ -167,7 +171,8 @@ TEST_CASE("fields() returns a single pass input range") {
     CHECK(first_pass.size() == 3);
 }
 
-TEST_CASE("draining the generator yields every field in wire order") {
+TEST_CASE("draining the generator yields every field in wire order")
+{
     httplib::headers h;
     h.insert(httplib::field::set_cookie, "a=1");
     h.insert(httplib::field::set_cookie, "b=2");
@@ -201,7 +206,8 @@ TEST_CASE("draining the generator yields every field in wire order") {
     CHECK(seen == 3);
 }
 
-TEST_CASE("headers copy is independent, view writes through") {
+TEST_CASE("headers copy is independent, view writes through")
+{
     httplib::headers h;
     h.insert(httplib::field::content_type, "text/plain");
     h.insert(httplib::field::set_cookie, "a=1");

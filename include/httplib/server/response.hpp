@@ -62,9 +62,10 @@ namespace httplib::server
         void set_empty_content(httplib::status status);
         void set_error_content(httplib::status status);
 
-        void set_string_content(std::string_view data,
-                                std::string_view content_type,
-                                httplib::status status = httplib::status::ok)
+        void
+        set_string_content(std::string_view data,
+                           std::string_view content_type,
+                           httplib::status status = httplib::status::ok)
         {
             set_string_content(std::string(data), content_type, status);
         }

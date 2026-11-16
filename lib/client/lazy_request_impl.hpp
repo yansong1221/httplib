@@ -1,7 +1,9 @@
 #pragma once
 
+#include "beast_alias.hpp"
 #include "body/body_writer.hpp"
 #include "client_impl.h"
+#include "enum_conv.hpp"
 #include "httplib/client/error.hpp"
 #include "httplib/client/lazy_request.hpp"
 #include "response_impl.h"
@@ -13,8 +15,6 @@
 #include <boost/beast/version.hpp>
 #include <limits>
 #include <memory>
-#include "beast_alias.hpp"
-#include "enum_conv.hpp"
 
 namespace httplib::client
 {

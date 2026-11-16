@@ -28,8 +28,7 @@ namespace httplib::util
             {
             }
 
-            inline boost::asio::redirect_error_t<
-                std::decay_t<decltype(boost::asio::use_awaitable_t<Executor>())>>
+            inline boost::asio::redirect_error_t<std::decay_t<decltype(boost::asio::use_awaitable_t<Executor>())>>
             operator[](boost::system::error_code& ec) const noexcept
             {
                 return boost::asio::redirect_error(boost::asio::use_awaitable_t<Executor>(), ec);

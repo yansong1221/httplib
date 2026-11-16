@@ -1,4 +1,5 @@
 ﻿#include "websocket_conn_impl.hpp"
+#include "beast_alias.hpp"
 #include "httplib/client/ws_client.hpp"
 #include "request_impl.hpp"
 #include "response_impl.hpp"
@@ -7,7 +8,6 @@
 #include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/use_future.hpp>
 #include <spdlog/spdlog.h>
-#include "beast_alias.hpp"
 
 namespace httplib::server
 {

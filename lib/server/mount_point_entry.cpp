@@ -218,8 +218,7 @@ namespace httplib::server
                 // 目录列表已关闭且没有默认文档时，补完斜杠也只会 403。这里不做
                 // 无意义的重定向；同时无尾斜杠的 URL 本身不指向可服务的文件，
                 // 因此按 not_found 处理，避免用 403 暴露目录存在性。
-                if (!impl_->enabled_directory
-                    && !detail::has_default_document(path, impl_->default_document_name))
+                if (!impl_->enabled_directory && !detail::has_default_document(path, impl_->default_document_name))
                 {
                     res.set_error_content(status::not_found);
                     return;

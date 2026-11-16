@@ -2,8 +2,8 @@
 // 两个错误类别的定义：同一 error 枚举的 boost 侧（公共 make_error_code）
 // 与 std 侧（jwt-cpp 的检查器在 std::error_code 世界里回报错误）。
 
-#include "httplib/jwt.hpp"
 #include "error_detail.hpp"
+#include "httplib/jwt.hpp"
 #include <string>
 
 namespace httplib::jwt::detail
@@ -13,13 +13,20 @@ namespace httplib::jwt::detail
     {
         switch (static_cast<error>(ev))
         {
-            case error::signature_verification: return "signature verification failed";
-            case error::invalid_token: return "token is not a well-formed JWT";
-            case error::expired: return "token has expired";
-            case error::not_yet_valid: return "token is not yet valid (nbf)";
-            case error::algorithm_mismatch: return "token algorithm is not in the allowed list";
-            case error::not_initialized: return "verifier has no allowed algorithm configured";
-            case error::claim_mismatch: return "claim verification failed";
+            case error::signature_verification:
+                return "signature verification failed";
+            case error::invalid_token:
+                return "token is not a well-formed JWT";
+            case error::expired:
+                return "token has expired";
+            case error::not_yet_valid:
+                return "token is not yet valid (nbf)";
+            case error::algorithm_mismatch:
+                return "token algorithm is not in the allowed list";
+            case error::not_initialized:
+                return "verifier has no allowed algorithm configured";
+            case error::claim_mismatch:
+                return "claim verification failed";
         }
         return "unknown jwt error";
     }
@@ -46,7 +53,7 @@ namespace httplib::jwt::detail
     }
 
     // std 侧类别 —— 与 boost 类别对应同一枚举，供 jwt-cpp 的自定义检查器
-    //（std::error_code 世界）内写入本库错误码。verify() 一旦遇到非空 ec 就
+    // （std::error_code 世界）内写入本库错误码。verify() 一旦遇到非空 ec 就
     // 短路且不限定类别，因此本库错误码可以原样穿透 jwt-cpp 引擎。
     struct std_error_category : std::error_category
     {

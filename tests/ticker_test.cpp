@@ -51,8 +51,7 @@ namespace
             }
             if (throw_at_tick > 0 && tick_calls == throw_at_tick)
             {
-                throw boost::system::system_error(
-                    boost::system::errc::make_error_code(boost::system::errc::io_error));
+                throw boost::system::system_error(boost::system::errc::make_error_code(boost::system::errc::io_error));
             }
             co_return !(stop_after_tick > 0 && tick_calls >= stop_after_tick);
         }

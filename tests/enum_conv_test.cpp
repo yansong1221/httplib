@@ -25,17 +25,16 @@ namespace
     // status 的枚举值就是真实 HTTP 状态码，不连续（200 / 404 / 503 ...），无法按范围
     // 穷举，只能显式列出——这份列表同时把 enums.hpp 里的数值钉在标准码上，那些数字
     // 从不直接上线，但填错仍会让日志与错误码失真。enums.hpp 若新增状态码，此表须同步。
-    constexpr unsigned kStatusCodes[] = {
-        0,   100, 101, 102, 103, 200, 201, 202, 203, 204, 205, 206, 207, 208, 226, 300, 301, 302, 303, 304,
-        305, 307, 308, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415,
-        416, 417, 418, 421, 422, 423, 424, 425, 426, 428, 429, 431, 451, 500, 501, 502, 503, 504, 505,
-        506, 507, 508, 510, 511
-    };
+    constexpr unsigned kStatusCodes[]
+        = { 0,   100, 101, 102, 103, 200, 201, 202, 203, 204, 205, 206, 207, 208, 226, 300, 301, 302, 303, 304, 305,
+            307, 308, 400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414, 415, 416, 417, 418,
+            421, 422, 423, 424, 425, 426, 428, 429, 431, 451, 500, 501, 502, 503, 504, 505, 506, 507, 508, 510, 511 };
 
     // 逐值检查一个方向的全覆盖 + 往返一致。fwd / rev 用 lambda 传入而非函数指针：
     // to_status 是重载集，模板无法从重载集推导。
     template <typename Mine, typename Theirs, typename Fwd, typename Rev>
-    void check_pair(unsigned count, Fwd fwd, Rev rev)
+    void
+    check_pair(unsigned count, Fwd fwd, Rev rev)
     {
         for (unsigned i = 0; i < count; ++i)
         {
@@ -57,7 +56,8 @@ namespace
 TEST_CASE("enum_conv: method 与 http::verb 双向全覆盖")
 {
     check_pair<httplib::method, http::verb>(
-        kMethodCount, [](httplib::method v) { return enum_conv::to_verb(v); },
+        kMethodCount,
+        [](httplib::method v) { return enum_conv::to_verb(v); },
         [](http::verb v) { return enum_conv::to_method(v); });
 }
 

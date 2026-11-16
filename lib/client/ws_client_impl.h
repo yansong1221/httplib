@@ -1,4 +1,5 @@
 #pragma once
+#include "beast_alias.hpp"
 #include "httplib/client/ws_client.hpp"
 #include "httplib/util/async_mutex.hpp"
 #include "stream/websocket_stream.hpp"
@@ -8,7 +9,6 @@
 #include <boost/system/result.hpp>
 #include <chrono>
 #include <future>
-#include "beast_alias.hpp"
 
 namespace httplib::client
 {

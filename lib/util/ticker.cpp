@@ -1,11 +1,11 @@
 #include "httplib/util/ticker.hpp"
 #include "httplib/util/sleep.hpp"
+#include <atomic>
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/steady_timer.hpp>
-#include <atomic>
 #include <cstdint>
 #include <exception>
 #include <mutex>
@@ -61,12 +61,14 @@ namespace httplib::util
 
             net::co_spawn(
                 impl_->executor_,
-                [this, cs, generation, self = shared_from_this()]() -> net::awaitable<void> {
+                [this, cs, generation, self = shared_from_this()]() -> net::awaitable<void>
+                {
                     // 协程帧持有 self：run loop 期间派生类始终存活，
                     // on_start / on_tick / on_stop 也因此在派生类上解析。
                     co_await co_run();
 
-                    if (impl_->run_id_.load(std::memory_order_acquire) == generation) {
+                    if (impl_->run_id_.load(std::memory_order_acquire) == generation)
+                    {
                         impl_->is_running_.store(false, std::memory_order_release);
                     }
                 },
@@ -126,7 +128,8 @@ namespace httplib::util
         auto cs = co_await net::this_coro::cancellation_state;
 
         // 错误处理自身抛异常时不能掀翻 run loop。
-        auto report_error = [this](std::exception_ptr ep) noexcept {
+        auto report_error = [this](std::exception_ptr ep) noexcept
+        {
             try
             {
                 on_error(std::move(ep));

@@ -1,4 +1,5 @@
 #pragma once
+#include "beast_alias.hpp"
 #include "html/http_ranges.hpp"
 #include "httplib/config.hpp"
 #include "httplib/form_data.hpp"
@@ -16,7 +17,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-#include "beast_alias.hpp"
 
 namespace httplib::body
 {

@@ -1,12 +1,12 @@
 #include "httplib/client/client_pool.hpp"
 #include "httplib/client/client.hpp"
 #include "httplib/client/error.hpp"
+#include "httplib/url/url.hpp"
 #include "httplib/util/async_event.hpp"
 #include "httplib/util/misc.hpp"
 #include "httplib/util/string_hash.hpp"
 #include "httplib/util/ticker.hpp"
 #include "util/logging.hpp"
-#include "httplib/url/url.hpp"
 #include <atomic>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
@@ -544,11 +544,7 @@ namespace httplib::client
         }
 
         net::awaitable<acquire_step>
-        acquire_or_create(std::string const& url,
-                          std::string_view host,
-                          uint16_t port,
-                          url::scheme s,
-                          bool serving)
+        acquire_or_create(std::string const& url, std::string_view host, uint16_t port, url::scheme s, bool serving)
         {
             // 未被唤醒的新请求不得越过已有等待者取连接/建连。
             if (!serving && has_live_waiter(url))
@@ -688,10 +684,7 @@ namespace httplib::client
 
     // ---- client_handle ----
 
-    http_client_pool::client_handle::client_handle()
-        : client_handle(make_error_code(error::invalid_handle))
-    {
-    }
+    http_client_pool::client_handle::client_handle() : client_handle(make_error_code(error::invalid_handle)) {}
 
     http_client_pool::client_handle::client_handle(std::weak_ptr<impl> pool, std::unique_ptr<http_client> conn)
         : pool_(std::move(pool))

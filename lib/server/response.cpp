@@ -1,6 +1,8 @@
 #include "httplib/server/response.hpp"
-#include "html/html.h"
+#include "beast_alias.hpp"
+#include "enum_conv.hpp"
 #include "headers_impl.hpp"
+#include "html/html.h"
 #include "ndjson_writer_impl.hpp"
 #include "response_impl.hpp"
 #include "sse_writer_impl.hpp"
@@ -8,8 +10,6 @@
 #include "util/mime_types.hpp"
 #include <boost/beast/version.hpp>
 #include <fmt/format.h>
-#include "beast_alias.hpp"
-#include "enum_conv.hpp"
 
 namespace httplib::server
 {

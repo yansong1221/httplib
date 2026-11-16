@@ -70,11 +70,13 @@ TEST_CASE("client_pool: stop lifecycle", "[client_pool]")
         [](net::io_context& ioc) -> net::awaitable<void>
         {
             httplib::client::http_client_pool p(ioc.get_executor(), { .max_size = 4 });
-            auto h = co_await p.async_acquire("127.0.0.1", 80, httplib::url::scheme::plain, std::chrono::milliseconds(50));
+            auto h
+                = co_await p.async_acquire("127.0.0.1", 80, httplib::url::scheme::plain, std::chrono::milliseconds(50));
             REQUIRE(h);
             REQUIRE_FALSE(h.has_error());
             p.stop();
-            auto h2 = co_await p.async_acquire("127.0.0.1", 80, httplib::url::scheme::plain, std::chrono::milliseconds(50));
+            auto h2
+                = co_await p.async_acquire("127.0.0.1", 80, httplib::url::scheme::plain, std::chrono::milliseconds(50));
             REQUIRE(h2.has_error());
         });
 }
@@ -90,7 +92,8 @@ TEST_CASE("client_pool: max_size enforced", "[client_pool]")
             REQUIRE(h1);
             REQUIRE_FALSE(h1.has_error());
 
-            auto h2 = co_await p.async_acquire("127.0.0.1", 80, httplib::url::scheme::plain, std::chrono::milliseconds(50));
+            auto h2
+                = co_await p.async_acquire("127.0.0.1", 80, httplib::url::scheme::plain, std::chrono::milliseconds(50));
             REQUIRE(h2.has_error());
 
             p.stop();
@@ -108,7 +111,10 @@ TEST_CASE("client_pool: per-host isolation", "[client_pool]")
             REQUIRE(h_a);
             REQUIRE_FALSE(h_a.has_error());
 
-            auto h_b = co_await p.async_acquire("192.168.0.1", 9999, httplib::url::scheme::plain, std::chrono::milliseconds(50));
+            auto h_b = co_await p.async_acquire("192.168.0.1",
+                                                9999,
+                                                httplib::url::scheme::plain,
+                                                std::chrono::milliseconds(50));
             REQUIRE(h_b);
             REQUIRE_FALSE(h_b.has_error());
 
@@ -199,7 +205,10 @@ TEST_CASE("client_pool: idle timeout evicts connection", "[client_pool]")
                                                   .idle_check_interval = std::chrono::milliseconds(100) });
 
             {
-                auto h = co_await p.async_acquire("127.0.0.1", 80, httplib::url::scheme::plain, std::chrono::milliseconds(50));
+                auto h = co_await p.async_acquire("127.0.0.1",
+                                                  80,
+                                                  httplib::url::scheme::plain,
+                                                  std::chrono::milliseconds(50));
             }
 
             auto s0 = (co_await p.async_stats("127.0.0.1", 80, httplib::url::scheme::plain));
@@ -243,7 +252,10 @@ TEST_CASE("client_pool: acquire timeout", "[client_pool]")
             REQUIRE(h1);
 
             auto t0 = std::chrono::steady_clock::now();
-            auto h2 = co_await p.async_acquire("127.0.0.1", 80, httplib::url::scheme::plain, std::chrono::milliseconds(100));
+            auto h2 = co_await p.async_acquire("127.0.0.1",
+                                               80,
+                                               httplib::url::scheme::plain,
+                                               std::chrono::milliseconds(100));
             auto elapsed = std::chrono::steady_clock::now() - t0;
             REQUIRE(h2.has_error());
             REQUIRE(elapsed >= std::chrono::milliseconds(50));
@@ -265,7 +277,10 @@ TEST_CASE("client_pool: wait_timeout zero fails fast", "[client_pool]")
             // Pool is at capacity: wait_timeout == 0 must return acquire_timeout
             // immediately instead of waiting.
             auto t0 = std::chrono::steady_clock::now();
-            auto h2 = co_await p.async_acquire("127.0.0.1", 80, httplib::url::scheme::plain, std::chrono::steady_clock::duration::zero());
+            auto h2 = co_await p.async_acquire("127.0.0.1",
+                                               80,
+                                               httplib::url::scheme::plain,
+                                               std::chrono::steady_clock::duration::zero());
             auto elapsed = std::chrono::steady_clock::now() - t0;
 
             REQUIRE(h2.has_error());
@@ -299,7 +314,12 @@ TEST_CASE("client_pool: waiter wakes up on release", "[client_pool]")
             net::co_spawn(
                 ioc,
                 [&]() -> net::awaitable<void>
-                { h2 = co_await p.async_acquire("127.0.0.1", 80, httplib::url::scheme::plain, std::chrono::seconds(5)); },
+                {
+                    h2 = co_await p.async_acquire("127.0.0.1",
+                                                  80,
+                                                  httplib::url::scheme::plain,
+                                                  std::chrono::seconds(5));
+                },
                 [](std::exception_ptr) {});
 
             net::steady_timer timer(ioc.get_executor());
@@ -353,7 +373,12 @@ TEST_CASE("client_pool: waiter only wakes for matching host", "[client_pool]")
             net::co_spawn(
                 ioc,
                 [&]() -> net::awaitable<void>
-                { h_b_wait = co_await p.async_acquire("192.168.0.1", 9999, httplib::url::scheme::plain, std::chrono::milliseconds(200)); },
+                {
+                    h_b_wait = co_await p.async_acquire("192.168.0.1",
+                                                        9999,
+                                                        httplib::url::scheme::plain,
+                                                        std::chrono::milliseconds(200));
+                },
                 [](std::exception_ptr) {});
 
             net::steady_timer timer(ioc.get_executor());
@@ -472,9 +497,7 @@ TEST_CASE("client_pool: stats copies its inputs before deferring", "[client_pool
     net::co_spawn(
         ioc,
         [&]() -> net::awaitable<void>
-        {
-            held = co_await p.async_acquire("127.0.0.1", 80, httplib::url::scheme::plain);
-        },
+        { held = co_await p.async_acquire("127.0.0.1", 80, httplib::url::scheme::plain); },
         net::detached);
 
     // Acquire without running the pool's long-lived ticker loop.
@@ -495,10 +518,9 @@ TEST_CASE("client_pool: stats copies its inputs before deferring", "[client_pool
     host.assign("10.0.0.1");
     url.assign("http://10.0.0.1:9999");
 
-    for (int i = 0; i < 1000 && (by_host.wait_for(std::chrono::milliseconds(0))
-                                     != std::future_status::ready
-                                 || by_url.wait_for(std::chrono::milliseconds(0))
-                                        != std::future_status::ready);
+    for (int i = 0; i < 1000
+                    && (by_host.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready
+                        || by_url.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready);
          ++i)
     {
         ioc.poll();
@@ -552,7 +574,8 @@ TEST_CASE("client_pool: max_total caps total across hosts", "[client_pool]")
             REQUIRE(ha);
             REQUIRE(hb);
 
-            auto hc = co_await p.async_acquire("10.0.0.1", 80, httplib::url::scheme::plain, std::chrono::milliseconds(50));
+            auto hc
+                = co_await p.async_acquire("10.0.0.1", 80, httplib::url::scheme::plain, std::chrono::milliseconds(50));
             REQUIRE(hc.has_error());
 
             p.stop();
@@ -584,7 +607,10 @@ TEST_CASE("client_pool: concurrent acquire/release under multithreaded executor"
                     {
                         for (int j = 0; j < kIterations; ++j)
                         {
-                            auto h = co_await p.async_acquire("127.0.0.1", 80, httplib::url::scheme::plain, std::chrono::seconds(5));
+                            auto h = co_await p.async_acquire("127.0.0.1",
+                                                              80,
+                                                              httplib::url::scheme::plain,
+                                                              std::chrono::seconds(5));
                             if (h)
                             {
                                 ++acquired;
@@ -767,7 +793,9 @@ TEST_CASE("client_pool: reader survives handle destruction", "[client_pool]")
                     auto cw = resp.create_stream_writer();
                     httplib::headers headers;
                     headers.set(httplib::field::content_type, "text/plain");
-                    co_await cw->write_header(httplib::status::ok, headers, httplib::server::stream_writer::mode::chunked);
+                    co_await cw->write_header(httplib::status::ok,
+                                              headers,
+                                              httplib::server::stream_writer::mode::chunked);
                     co_await cw->write_body(net::buffer("ABC"), false);
                 });
         },
@@ -846,7 +874,7 @@ TEST_CASE("client_pool: live lazy writer keeps the connection out of the pool", 
 
                 h.release(); // writer 仍存活
                 CHECK(p.active_count() == 0);
-                CHECK(p.idle_count() == 0); // 不回池
+                CHECK(p.idle_count() == 0);  // 不回池
                 CHECK(p.total_count() == 0); // 连接已从池丢弃，由 writer 持有
             } // writer 析构后 impl/socket 才回收
 
@@ -959,7 +987,10 @@ TEST_CASE("client_pool: idle eviction wakes a waiting acquire", "[client_pool]")
                 {
                     try
                     {
-                        auto h = co_await p.async_acquire(host, port, httplib::url::scheme::plain, std::chrono::seconds(2));
+                        auto h = co_await p.async_acquire(host,
+                                                          port,
+                                                          httplib::url::scheme::plain,
+                                                          std::chrono::seconds(2));
                         if (h)
                         {
                             auto r = co_await h->async_get("/ok");

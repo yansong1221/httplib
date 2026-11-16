@@ -1,11 +1,11 @@
 #pragma once
+#include "beast_alias.hpp"
 #include "httplib/server/ndjson_writer.hpp"
 #include "httplib/server/stream_writer.hpp"
 #include <boost/json/serialize.hpp>
 #include <memory>
 #include <string>
 #include <utility>
-#include "beast_alias.hpp"
 
 namespace httplib::server
 {
