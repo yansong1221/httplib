@@ -23,9 +23,9 @@
 #include <spdlog/spdlog.h>
 
 #ifdef HTTPLIB_ENABLED_SSL
+#include "beast_alias.hpp"
 #include <openssl/err.h>
 #include <openssl/ssl.h>
-#include "beast_alias.hpp"
 #endif
 
 namespace httplib::server
@@ -35,11 +35,25 @@ namespace httplib::server
         static bool
         is_transient_accept_error(boost::system::error_code const& ec)
         {
-            return ec == boost::system::errc::connection_aborted
-                || ec == boost::system::errc::connection_reset
-                || ec == boost::system::errc::interrupted
-                || ec == boost::system::errc::operation_would_block
-                || ec == boost::system::errc::resource_unavailable_try_again;
+            return ec == boost::system::errc::connection_aborted || ec == boost::system::errc::connection_reset
+                   || ec == boost::system::errc::interrupted || ec == boost::system::errc::operation_would_block
+                   || ec == boost::system::errc::resource_unavailable_try_again;
+        }
+
+        /// 反向代理内部连接池参数。
+        ///
+        /// 上游交换的时长由“数据是否还在流动”决定，而不是总耗时：默认的
+        /// `timeout_policy::overall` 从建连起固定计时，到期即取消在途操作，流式 body
+        /// （SSE、分块大文件、慢上传）必然在中途被截断。`step` 只要求相邻两次读/写之间
+        /// 的停顿不超过 `timeout`，语义等价于 nginx 的 proxy_read_timeout /
+        /// proxy_send_timeout：只要上游还在出数据就继续转发，真正卡死才断开。
+        static client::pool_params
+        make_proxy_pool_params()
+        {
+            client::pool_params params;
+            params.timeout_policy = client::http_client::timeout_policy::step;
+            params.timeout = std::chrono::seconds(60);
+            return params;
         }
 
         static std::string
@@ -422,7 +436,8 @@ namespace httplib::server
                                          std::shared_ptr<upstream_provider> provider,
                                          http_server::proxy_interceptor_factory factory)
     {
-        auto proxy_pool = std::make_shared<client::http_client_pool>(strand_.get_inner_executor());
+        auto proxy_pool = std::make_shared<client::http_client_pool>(strand_.get_inner_executor(),
+                                                                     detail::make_proxy_pool_params());
 
         std::string prefix = detail::strip_proxy_prefix(location);
 

@@ -1,13 +1,13 @@
 #include "reverse_proxy_impl.h"
+#include "beast_alias.hpp"
+#include "httplib/url/url.hpp"
 #include "httplib/util/misc.hpp"
 #include "proxy_util.hpp"
-#include "httplib/url/url.hpp"
 #include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 #include <boost/algorithm/string/trim.hpp>
 #include <spdlog/spdlog.h>
 #include <string_view>
-#include "beast_alias.hpp"
 
 namespace httplib::server::detail
 {
@@ -228,7 +228,7 @@ namespace httplib::server::detail
         upstream_headers.set("X-Forwarded-Proto", req.is_ssl() ? "https" : "http");
         upstream_headers.set("X-Forwarded-Host", req["Host"]);
 
-// Rewrite Referer to upstream
+        // Rewrite Referer to upstream
         if (auto ref = req[field::referer]; !ref.empty())
         {
             auto r = url::parse_url(ref);
@@ -251,9 +251,9 @@ namespace httplib::server::detail
 
                 auto new_ref = std::format("{}://{}{}",
                                            upstream_.scheme,
- url::make_host_value(upstream_.host,
-                                                                   upstream_.port,
-                                                                   upstream_.ssl ? url::scheme::tls : url::scheme::plain),
+                                           url::make_host_value(upstream_.host,
+                                                                upstream_.port,
+                                                                upstream_.ssl ? url::scheme::tls : url::scheme::plain),
                                            ref_path);
                 if (!u.query.empty())
                 {
@@ -278,7 +278,9 @@ namespace httplib::server::detail
             co_await interceptor_->on_upstream_request(req, upstream_headers_, upstream_.url);
         }
 
-        client_ = co_await pool_->async_acquire(upstream_.host, upstream_.port, upstream_.ssl ? url::scheme::tls : url::scheme::plain);
+        client_ = co_await pool_->async_acquire(upstream_.host,
+                                                upstream_.port,
+                                                upstream_.ssl ? url::scheme::tls : url::scheme::plain);
         if (!client_)
         {
             // Pool capacity/acquire timeout is local; do not mark the backend unhealthy.
@@ -399,8 +401,9 @@ namespace httplib::server::detail
         if (result >= status::moved_permanently && result <= status::permanent_redirect
             && result != status::not_modified)
         {
-            auto upstream_base
-                = url::make_url_value(upstream_.host, upstream_.port, upstream_.ssl ? url::scheme::tls : url::scheme::plain);
+            auto upstream_base = url::make_url_value(upstream_.host,
+                                                     upstream_.port,
+                                                     upstream_.ssl ? url::scheme::tls : url::scheme::plain);
             std::string location(response_hdrs[field::location]);
             if (location.starts_with(upstream_base))
             {
@@ -434,6 +437,11 @@ namespace httplib::server::detail
                 {
                     lease_->failure(ec);
                 }
+                // 上游 body 中途失败：下游已收到响应头（多半还有 body 前缀），chunked
+                // 终止块 / Content-Length 都无法补齐。必须把下游连接标脏，由 session 在
+                // handler 返回后关闭；否则复用它会让客户端把下一条响应当成这条 body 的
+                // 延续，造成跨连接协议错乱。
+                get_impl(resp).keep_alive(false);
                 co_return;
             }
             auto more = !upstream_response_.is_body_done();
@@ -447,6 +455,7 @@ namespace httplib::server::detail
             if (ec)
             {
                 logger_->trace("[proxy] write response body failed: {}", ec.message());
+                // 下游写失败时 body_writer 已置 keep_alive(false)，无需重复标脏。
                 co_return;
             }
         }

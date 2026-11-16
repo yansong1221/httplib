@@ -6,15 +6,22 @@
 #include "httplib/server/proxy_strategy.hpp"
 #include "httplib/server/request.hpp"
 #include "httplib/server/response.hpp"
+#include "httplib/server/stream_writer.hpp"
 #include <algorithm>
+#include <boost/asio/as_tuple.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
+#include <boost/asio/experimental/awaitable_operators.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/write.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <variant>
 
 namespace net = httplib::net;
 
@@ -76,6 +83,72 @@ namespace
         if (err)
         {
             std::rethrow_exception(err);
+        }
+    }
+
+    /// 上游按固定节奏写 `count` 个 1 字节 chunk（模拟 SSE / 分块下载），最后正常收尾。
+    net::awaitable<void>
+    stream_chunks(server::response& resp, int count, std::chrono::milliseconds gap)
+    {
+        auto cw = resp.create_stream_writer();
+        httplib::headers h;
+        h.set(httplib::field::content_type, "text/event-stream");
+        co_await cw->write_header(httplib::status::ok, h, server::stream_writer::mode::chunked);
+
+        net::steady_timer timer(co_await net::this_coro::executor);
+        for (int i = 0; i < count; ++i)
+        {
+            timer.expires_after(gap);
+            co_await timer.async_wait(net::use_awaitable);
+            co_await cw->write_body(net::buffer("x", 1), true);
+        }
+        co_await cw->write_body(net::buffer("", 0), false);
+    }
+
+    /// 逐块读完响应体，返回收到的原始字节数；失败原因经 \p ec 带回。
+    net::awaitable<std::size_t>
+    read_all(client::response& resp, boost::system::error_code& ec)
+    {
+        std::array<char, 4096> buf {};
+        std::size_t total = 0;
+        for (;;)
+        {
+            auto n = co_await resp.read_some_raw(net::buffer(buf), ec);
+            if (ec || n == 0)
+            {
+                break;
+            }
+            total += n;
+        }
+        co_return total;
+    }
+
+    /// 裸 socket 读到对端关闭为止，返回收到的字节。超时（\p limit 内未见 EOF）时
+    /// \p closed 保持 false —— 用来区分「对端已关闭连接」与「连接仍挂着等下一请求」。
+    net::awaitable<std::string>
+    read_until_closed(net::ip::tcp::socket& sock, bool& closed, std::chrono::milliseconds limit)
+    {
+        using namespace net::experimental::awaitable_operators;
+        std::string received;
+        std::array<char, 4096> buf {};
+        net::steady_timer timer(co_await net::this_coro::executor);
+        closed = false;
+        for (;;)
+        {
+            timer.expires_after(limit);
+            auto res = co_await (sock.async_read_some(net::buffer(buf), net::as_tuple(net::use_awaitable))
+                                 || timer.async_wait(net::as_tuple(net::use_awaitable)));
+            if (res.index() != 0)
+            {
+                co_return received; // 超时：对端仍保持连接
+            }
+            auto&& [ec, n] = std::get<0>(res);
+            if (ec)
+            {
+                closed = true;
+                co_return received;
+            }
+            received.append(buf.data(), n);
         }
     }
 
@@ -1250,12 +1323,9 @@ TEST_CASE("CONNECT: proxy rejection maps to client error", "[proxy]")
     net::io_context ioc;
 
     server::http_server proxy(ioc.get_executor());
-    proxy.router().set_connect_handler(
-        "*",
-        [](server::request&, server::response& resp)
-        {
-            resp.set_empty_content(status::proxy_authentication_required);
-        });
+    proxy.router().set_connect_handler("*",
+                                       [](server::request&, server::response& resp)
+                                       { resp.set_empty_content(status::proxy_authentication_required); });
     proxy.listen("127.0.0.1", 0);
     auto const proxy_ep = proxy.local_endpoint();
     proxy.run();
@@ -1779,4 +1849,122 @@ TEST_CASE("proxy: Set-Cookie Domain rewritten to public hostname", "[proxy]")
 
     REQUIRE(received.find("Set-Cookie: sid=abc;Domain=api.example.com;Path=/api") != std::string::npos);
     REQUIRE(received.find("upstream.internal") == std::string::npos);
+}
+
+// ---------------------------------------------------------------------------
+// Streaming relay
+// ---------------------------------------------------------------------------
+TEST_CASE("proxy: relays streamed response body without truncation", "[proxy][stream]")
+{
+    run_proxy(
+        [](auto& upstream)
+        {
+            upstream.router().template set_http_handler<httplib::method::get>(
+                "/stream",
+                [](server::request&, server::response& resp) -> net::awaitable<void>
+                { co_await stream_chunks(resp, 5, std::chrono::milliseconds(100)); });
+        },
+        [](auto&, auto& proxy_client) -> net::awaitable<void>
+        {
+            client::request req(httplib::method::get, "/api/stream");
+            auto resp = UNWRAP(co_await proxy_client.async_send_request(req, client::http_client::body_mode::lazy));
+            REQUIRE(resp.result() == httplib::status::ok);
+
+            boost::system::error_code ec;
+            auto total = co_await read_all(resp, ec);
+            INFO("read error: " << ec.message() << ", bytes=" << total);
+            REQUIRE_FALSE(ec);
+            REQUIRE(total == 5);
+        });
+}
+
+// 隐藏用例（`[.` 前缀 = 默认不跑）：需要 65s 才能越过反代连接池 60s 的空闲窗口，
+// 专门锁住「上游交换按空闲计时而非总时长」这一语义 —— timeout_policy::overall 会在
+// 建连后 60s 处掐断任意在途流，step 则一直转发到上游正常收尾。
+// 手动运行：httplib_test_proxy.exe "[.slow]"
+TEST_CASE("proxy: stream outliving the idle window is not cut", "[.slow][proxy][stream]")
+{
+    run_proxy(
+        [](auto& upstream)
+        {
+            upstream.router().template set_http_handler<httplib::method::get>(
+                "/stream",
+                [](server::request&, server::response& resp) -> net::awaitable<void>
+                { co_await stream_chunks(resp, 65, std::chrono::seconds(1)); });
+        },
+        [](auto&, auto& proxy_client) -> net::awaitable<void>
+        {
+            // 测试客户端自己也不能用 10s 的整体超时。
+            proxy_client.set_timeout(std::chrono::minutes(5));
+
+            client::request req(httplib::method::get, "/api/stream");
+            auto resp = UNWRAP(co_await proxy_client.async_send_request(req, client::http_client::body_mode::lazy));
+            REQUIRE(resp.result() == httplib::status::ok);
+
+            boost::system::error_code ec;
+            auto total = co_await read_all(resp, ec);
+            INFO("read error: " << ec.message() << ", bytes=" << total);
+            REQUIRE_FALSE(ec);
+            REQUIRE(total == 65);
+        });
+}
+
+// 上游在 body 中途死亡（没写 chunked 终止块就断开）时，反代必须把下游连接标脏关闭：
+// 半截 chunked body 与 Content-Length 都不可能补齐，复用该连接会让客户端把下一条
+// 响应当成这条 body 的延续。用裸 socket 判定「已关闭」与「仍挂着等下一请求」。
+TEST_CASE("proxy: truncated upstream body closes the downstream connection", "[proxy][stream][truncate]")
+{
+    net::thread_pool pool { 2 };
+    std::exception_ptr err;
+    net::co_spawn(
+        pool.get_executor(),
+        [&]() -> net::awaitable<void>
+        {
+            server::http_server upstream(pool.get_executor());
+            server::http_server proxy(pool.get_executor());
+
+            upstream.router().template set_http_handler<httplib::method::get>(
+                "/truncated",
+                [](server::request&, server::response& resp) -> net::awaitable<void>
+                {
+                    auto cw = resp.create_stream_writer();
+                    co_await cw->write_header(httplib::status::ok,
+                                              httplib::headers {},
+                                              server::stream_writer::mode::chunked);
+                    co_await cw->write_body(net::buffer("partial", 7), true);
+                    // 上游 handler 崩溃：既不写终止块，也不返回正常响应。
+                    throw std::runtime_error("upstream died mid-body");
+                });
+
+            upstream.listen("127.0.0.1", 0);
+            proxy.listen("127.0.0.1", 0);
+            auto u_ep = upstream.local_endpoint();
+            proxy.set_reverse_proxy("/api/*", std::format("http://{}:{}", u_ep.address().to_string(), u_ep.port()));
+            upstream.run();
+            proxy.run();
+
+            net::ip::tcp::socket sock(co_await net::this_coro::executor);
+            co_await sock.async_connect({ net::ip::make_address("127.0.0.1"), proxy.local_endpoint().port() },
+                                        net::use_awaitable);
+            auto request = std::string("GET /api/truncated HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n");
+            co_await net::async_write(sock, net::buffer(request), net::use_awaitable);
+
+            bool closed = false;
+            auto received = co_await read_until_closed(sock, closed, std::chrono::seconds(3));
+            INFO("received: " << received);
+            REQUIRE(received.find("Transfer-Encoding: chunked") != std::string::npos);
+            REQUIRE(received.find("partial") != std::string::npos);
+            // 关键断言：连接必须被对端关闭。未标脏时 session 会复用它等下一条请求，
+            // 残留的半截 chunked body 就会污染后续响应。
+            REQUIRE(closed);
+
+            upstream.stop();
+            proxy.stop();
+        },
+        [&](std::exception_ptr e) { err = e; });
+    pool.join();
+    if (err)
+    {
+        std::rethrow_exception(err);
+    }
 }

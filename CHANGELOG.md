@@ -73,6 +73,16 @@ tag；以下变更相对仓库初始状态累积。
   （`acquire_ticket` / `release_ticket` / `report_success` / `report_failure`），
   `upstream_group` 按 ticket 配对，不再依赖 URL 字符串精确匹配；旧
   `on_acquired` / `on_released` 作为默认路径保留。
+- **反向代理流式转发被整体超时掐断**：反代内部上游连接池此前沿用默认的
+  `timeout_policy::overall`（30s，从建连起固定计时），流式响应（SSE、分块大文件）与慢
+  上传在交换满 30s 时被中途取消，客户端表现为 body 未传完即断连。现改为按空闲计时
+  （`step`，60s）：只要求相邻两次读/写之间的停顿不超过 60s，等价 nginx 的
+  `proxy_read_timeout` / `proxy_send_timeout`，只要上游还在出数据就持续转发。
+- **反向代理上游中途失败后复用下游连接**：响应头（以及可能的 body 前缀）已发出、上游
+  读 body 却失败时，反代此前直接 `return` 并保持 keep-alive，半截 chunked body /
+  短于 `Content-Length` 的连接会被继续复用，客户端把下一条响应当成本响应 body 的延续。
+  现在该路径显式置 `keep_alive(false)`，由 session 关闭下游连接（上游连接由 response
+  析构时的未读完校验关闭）。
 
 ### 变更
 

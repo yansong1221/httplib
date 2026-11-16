@@ -620,6 +620,8 @@ from the literal prefix.
 
 `server::proxy_interceptor` hooks: `on_upstream_request`, `on_upstream_request_body`, `on_upstream_response`, `on_upstream_response_body`. Global middleware applies to proxy routes as well.
 
+Upstream exchanges are bounded by an **idle** timeout, not a total one: as long as the upstream keeps producing (or accepting) bytes, the relay continues — streaming responses (SSE, chunked downloads) and slow uploads are not cut off. A pause longer than 60 seconds between two reads/writes tears the exchange down (the equivalent of nginx's `proxy_read_timeout` / `proxy_send_timeout`).
+
 ## Server Configuration
 
 ```cpp

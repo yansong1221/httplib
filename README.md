@@ -642,6 +642,8 @@ svr.set_reverse_proxy("/api/*",
 
 `server::proxy_interceptor` 钩子：`on_upstream_request`、`on_upstream_request_body`、`on_upstream_response`、`on_upstream_response_body`。全局中间件同样作用于代理路由。
 
+上游交换按**空闲**超时而不是总时长收敛：只要上游还在产出（或接收）字节，中继就会继续转发，流式响应（SSE、分块下载）与慢上传因此不会被中途掐断；两次读/写之间停顿超过 60 秒才断开，语义等价 nginx 的 `proxy_read_timeout` / `proxy_send_timeout`。
+
 ## 服务端配置
 
 ```cpp

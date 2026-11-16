@@ -128,14 +128,21 @@ if (!entry) { co_return; }          // TCP 关闭，无响应
 > 里 `keep_alive(false)` 标脏关闭（既有路径），`async_write` 经闩锁跳过，500 不会再
 > 叠加进悬空 chunked body。
 > 回归测试：`tests/p0_review_test.cpp` P0-4。
+>
+> **✅ 已修复（2026-11，反向代理上游读失败路径）**：`relay_response` 中上游 body 读
+> 失败时此前只 `return`，下游已发出的部分 body 无法补齐却仍保持 keep-alive。现在该
+> 路径显式 `get_impl(resp).keep_alive(false)`，session 在 handler 返回后关闭连接；
+> 上游连接本身由 `client::response::impl` 析构时的「body 未读完 ⇒ close」关闭。
+> 回归测试：`tests/proxy_test.cpp`「proxy: truncated upstream body closes the
+> downstream connection」（裸 socket 断言对端在 3s 内发 FIN，不靠时序猜测）。
 
 **证据链**：
 
 | 位置 | 现象 |
 |---|---|
-| `lib/server/reverse_proxy_impl.cpp:394-403` | 上游读失败仅 `logger_->trace(); co_return;` |
+| `lib/server/reverse_proxy_impl.cpp:394-403` | 上游读失败仅 `logger_->trace(); co_return;`（2026-11 已补 `keep_alive(false)`） |
 | `lib/server/session.cpp:425-429` | `async_write` 返回时仅查 `keep_alive()` |
-| `lib/server/response_impl.hpp:52` / `lib/body/body_writer.hpp:503-507` | `keep_alive` 只在构造置 true、仅写入失败才置 false；**上游读失败路径不会** |
+| `lib/server/response_impl.hpp:52` / `lib/body/body_writer.hpp:503-507` | `keep_alive` 只在构造置 true、仅写入失败才置 false；**上游读失败路径不会**（反代路径已显式补） |
 | `lib/server/session.cpp:360-368` | header 已发送后 handler 再抛异常，catch 里 `set_error_content(500)` 写进的是永远发不出去的消息，且连接未标脏 |
 
 **为什么不合理**：chunked / Content-Length 响应体没写完就复用连接读下一条请求，
@@ -145,6 +152,7 @@ SSE/NDJSON、用户 stream_writer 所有流式路径共同缺口。
 **建议**：body_writer/session 增加 `mark_broken()`：`begin_stream` 后任何中途提前退出
 （错误、协程异常、上游失败） ⇒ `keep_alive(false)`；session 在 `async_write` 后补
 「流式响应未自然收尾 ⇒ 强关连接」检查（如 `writer().streaming() && !writer().done()`）。
+反代路径已按此显式标脏；SSE/NDJSON 与用户 `stream_writer` 的通用 `mark_broken()` 仍待补。
 
 ### 1.5 cors_middleware 多 origin 配置静默失效【中】
 
@@ -752,7 +760,7 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
 | §1.1 ✅ | JWT verifier 默认不验签 | `if (!alg_) ec = not_initialized; return;` |
 | §1.2 ✅ | `sign()` 丢 header claims | `header_.emplace(algorithm, ...)` 而非整体赋值 |
 | §1.3 ✅ | WS 升级 404 不回响应 | 未命中走 HTTP 404 |
-| §1.4 ✅ | 流式响应失败不标脏连接（协议 desync） | header 上线闩锁 + 上线后拒绝改写 |
+| §1.4 ✅ | 流式响应失败不标脏连接（协议 desync） | header 上线闩锁 + 上线后拒绝改写；反代上游读失败显式标脏下游 |
 | §1.5 ✅ | CORS 多 origin 静默失效 | 回显请求 Origin + 白名单 + Vary |
 | §1.6 ✅ | session id MT19937 | boost UUID 随机生成器（id 整体不透明化） |
 
@@ -803,4 +811,4 @@ header::header(header const& other) : impl_(std::make_unique<impl>(*other.impl_)
    （§三）—— 一次决策解掉十几个分散问题，收益最大；
 2. **修 §1.1 / §1.2 两处 JWT fail-open**—— 改动量小、无 API 破坏、价值最高；
 3. **给流式响应补 `mark_broken()` / keep-alive 标脏（§1.4）** —— 这是唯一会跨连接
-   产生协议错乱的问题。
+   产生协议错乱的问题。反代路径已修，SSE/NDJSON、用户 `stream_writer` 仍需通用机制。
